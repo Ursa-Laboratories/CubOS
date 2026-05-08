@@ -29,7 +29,10 @@ from gantry.loader import load_gantry_from_yaml
 from gantry.origin import validate_deck_origin_minima
 from gantry.gantry import Gantry
 from protocol_engine.loader import load_protocol_from_yaml
-from validation.bounds import validate_deck_positions, validate_gantry_positions
+from validation.bounds import (
+    collect_protocol_motion_targets,
+    validate_protocol_motion_bounds,
+)
 from validation.protocol_semantics import validate_protocol_semantics
 
 SEPARATOR = "-" * 60
@@ -180,33 +183,28 @@ def run_validation(
         out(f"    [{step.index}] {step.command_name}({', '.join(f'{k}={v!r}' for k, v in step.args.items())})")
     out()
 
-    # 5. Deck bounds validation
-    out("Validating deck positions...")
-    deck_violations = validate_deck_positions(gantry_config, deck)
-    if deck_violations:
-        out(f"  FAIL — {len(deck_violations)} violation(s):")
-        for v in deck_violations:
-            out(f"  - {v.labware_key}.{v.position_id}: "
-                f"deck ({v.x}, {v.y}, {v.z}) violates {v.bound_name}={v.bound_value}")
+    # 5. Protocol motion bounds validation
+    out("Validating protocol motion bounds...")
+    motion_targets = collect_protocol_motion_targets(gantry_config, protocol, deck)
+    motion_violations = validate_protocol_motion_bounds(
+        gantry_config, protocol, deck, board,
+    )
+    if motion_violations:
+        out(f"  FAIL — {len(motion_violations)} violation(s):")
+        for v in motion_violations:
+            prefix = (
+                f"{v.instrument_name} -> "
+                if v.coordinate_type == "gantry" and v.instrument_name
+                else ""
+            )
+            out(f"  - {prefix}{v.labware_key}.{v.position_id}: "
+                f"{v.coordinate_type} ({v.x}, {v.y}, {v.z}) "
+                f"violates {v.bound_name}={v.bound_value}")
     else:
-        total_positions = sum(len(deck[k].iter_motion_targets()) for k in deck)
-        out(f"  OK ({total_positions} positions checked)")
+        out(f"  OK ({len(motion_targets)} protocol target(s) checked)")
     out()
 
-    # 6. Gantry bounds validation
-    out("Validating gantry positions...")
-    gantry_violations = validate_gantry_positions(gantry_config, deck, board)
-    if gantry_violations:
-        out(f"  FAIL — {len(gantry_violations)} violation(s):")
-        for v in gantry_violations:
-            out(f"  - {v.instrument_name} -> {v.labware_key}.{v.position_id}: "
-                f"gantry ({v.x}, {v.y}, {v.z}) violates {v.bound_name}={v.bound_value}")
-    else:
-        total_positions = sum(len(deck[k].iter_motion_targets()) for k in deck)
-        out(f"  OK ({total_positions} positions x {len(board.instruments)} instrument(s) checked)")
-    out()
-
-    # 7. Protocol semantic validation
+    # 6. Protocol semantic validation
     out("Validating protocol semantics...")
     semantic_violations = validate_protocol_semantics(
         protocol, board, deck, gantry_config,
@@ -220,15 +218,14 @@ def run_validation(
     out()
 
     # Final result
-    all_violations = deck_violations + gantry_violations
     out(SEPARATOR)
-    if all_violations or semantic_violations:
-        total = len(all_violations) + len(semantic_violations)
+    if motion_violations or semantic_violations:
+        total = len(motion_violations) + len(semantic_violations)
         out(f"RESULT: FAIL — {total} violation(s) found")
         out(SEPARATOR)
         return ValidationResult(output="\n".join(lines), passed=False)
 
-    out("RESULT: PASS — all positions within gantry bounds")
+    out("RESULT: PASS — protocol motion targets within gantry bounds")
     out("Protocol is ready to run.")
     out(SEPARATOR)
     return ValidationResult(output="\n".join(lines), passed=True)

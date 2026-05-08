@@ -90,6 +90,3 @@ class Wall(Labware):
 
     def iter_positions(self) -> dict[str, Coordinate3D]:
         return {"min": self.corner_1, "max": self.corner_2}
-
-    def iter_motion_targets(self) -> dict[str, Coordinate3D]:
-        return {}
