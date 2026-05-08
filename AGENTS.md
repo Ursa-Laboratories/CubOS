@@ -1,137 +1,124 @@
 # CubOS Agent Guide
 
-CubOS controls real lab hardware: a GRBL CNC gantry plus mounted instruments. Prefer repo source over model memory, but keep retrieval focused.
+CubOS controls real lab hardware: a GRBL CNC gantry plus mounted instruments. **This file is the source of truth for agent retrieval.** Prefer repo source over model memory; keep retrieval focused.
 
 ## Fast Start
 
 1. Read this file and `CLAUDE.md`.
-2. Use `docs/agent-index.md` as the routing map for the subsystem you are touching.
-3. Read only the source/docs needed for the task unless changing shared interfaces, coordinate semantics, hardware motion, YAML schemas, or protocol setup.
+2. Jump to the **Subsystem Index** below for the area you are touching.
+3. Read only the source/docs needed for the task unless you are changing shared interfaces, coordinate semantics, hardware motion, YAML schemas, or protocol setup.
 
 ## Hardware Safety
 
-Any code/config change can affect real motion, instruments, samples, or connected controllers.
+Any code/config change can affect real motion, instruments, samples, or controllers.
 
 Always tell the user:
-
 - Hardware touched or potentially affected.
 - Offline validation performed.
 - Required physical validation still pending.
 
-For hardware-facing changes, use this handoff order by default:
-
+Hardware-facing handoff order:
 1. Run focused offline/unit validation for the edited behavior.
 2. Stop and give the user the exact hardware test procedure before cleanup or broad test sweeps.
-3. After the user confirms the hardware result or asks to continue, clean up temporary files/checkpoints and run broader relevant tests.
+3. After the user confirms or asks to continue, clean up temporary files/checkpoints and run broader relevant tests.
 
-Prefer dry-runs and validation scripts before commands that can move gantries, start protocols, or actuate instruments.
+Prefer dry-runs and validation scripts before commands that move gantries, start protocols, or actuate instruments.
 
 ## Coordinate Convention
 
-At the repo/user level, use the CubOS deck frame:
-
+CubOS deck frame:
 - Origin: front-left-bottom (FLB)
 - `+X`: operator-right
 - `+Y`: back/away
-- `+Z`: up
-- `-Z`: down
+- `+Z`: up; `-Z`: down
 
-Do not pre-flip signs in high-level code. GRBL `$3` axis direction and `$23` homing direction must make controller WPos match this CubOS deck frame. `$H` should home to the normalized back-right-top (BRT) corner.
+Do not pre-flip signs in high-level code. GRBL `$3` axis direction and `$23` homing direction must make controller WPos match this frame. `$H` homes to back-right-top (BRT). High-level gantry code applies no hidden Z sign flip; working-volume bounds are deck-frame values.
 
-Current high-level gantry code no longer applies a hidden Z sign flip. Working-volume bounds are deck-frame values.
+Retrieval rule: do not infer sign flips from older code or model memory. Confirm convention in source and tests.
 
 ### Heights: absolute vs. labware-relative
 
 Two kinds of Z fields coexist:
+- **Absolute deck-frame Z** (`gantry.cnc.safe_z`, working-volume bounds, `move`'s `travel_z`, named positions, literal `[x, y, z]` targets). `safe_z` is the travel ceiling: every resolved approach/action Z must be ≤ `safe_z`. Defaults to `working_volume.z_max` when omitted.
+- **Labware-relative offsets** (`measurement_height`, `safe_approach_height` on `scan`/`measure`). Positive = above the labware's `height_mm` surface; negative = below. Resolved at command time as `well.z + relative_offset`.
 
-- **Absolute deck-frame Z** (`gantry.cnc.safe_z`, gantry working-volume
-  bounds, `move` command's `travel_z`, named positions, literal `[x, y, z]`
-  targets). `safe_z` is the travel ceiling: every resolved approach/action
-  Z must be ≤ `safe_z`. Defaults to `working_volume.z_max` when omitted.
-- **Labware-relative offsets** (`measurement_height`,
-  `safe_approach_height` on `scan`/`measure`). Positive = above the
-  labware's `height_mm` surface; negative = below. Resolved at command
-  time as `well.z + relative_offset`, where `well.z` is the calibrated
-  deck-frame surface Z.
+These offsets live on the protocol command, never on instruments. `scan` requires both `measurement_height` and `safe_approach_height`; `measure` requires `measurement_height`. Pipette commands engage at the labware reference Z (`measurement_height = 0` implicitly). ASMI `indentation_limit` is a sign-agnostic descent magnitude.
 
-These offsets live on the protocol command, never on instruments. `scan`
-requires both `measurement_height` and `safe_approach_height`; `measure`
-requires `measurement_height`. Pipette commands engage at the labware
-reference Z (`measurement_height = 0` implicitly). ASMI
-`indentation_limit` is a sign-agnostic magnitude (descent distance below
-the action plane).
+## Subsystem Index
 
-## Where to Look
+### Gantry / motion / coordinates / homing
+Read before changing motion, coordinates, bounds, homing, or scan/protocol movement.
+- `src/gantry/gantry.py`, `gantry_config.py`, `origin.py` — frame, working volume, deck-origin calibration.
+- `src/gantry/machine_geometry.py` — built-in fixed-structure AABBs per gantry family (e.g. `cub_xl` right-rail guard). Not user-authored YAML; consumed by setup validation.
+- `src/gantry/coordinate_translator.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `offline.py`.
+- `src/board/board.py`, `src/board/loader.py` — instrument offsets and labware movement.
+- `src/validation/bounds.py`, `src/validation/protocol_semantics.py` — offline safety checks (incl. fixed-structure rail collision).
+- Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
 
-Use `docs/agent-index.md` for exact files/tests. Common entrypoints:
+Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`). For `cub_xl`, setup validation rejects protocols whose instrument point or known travel segment would hit the fixed right X-max rail.
+Bounds validation checks labware motion targets, not every physical geometry anchor. Holder bases and walls can be geometry-only; nested wells, slots, tip disposals, and other protocol-addressable targets must remain reachable.
 
-- Gantry/motion/origin: `src/gantry/`, `setup/calibrate_gantry.py`
-- Board/instrument offsets: `src/board/`
-- Deck/labware YAML: `src/deck/`, `configs/deck/`
-- Protocol YAML/setup/commands: `src/protocol_engine/`, `configs/protocol/`, `setup/validate_setup.py`
-- Bounds/safety validation: `src/validation/`
-- Instruments: `src/instruments/<instrument>/`
-- Persistence: `data/data_store.py`, `src/protocol_engine/measurements.py`
+### Deck YAML / labware / calibration
+- `src/deck/yaml_schema.py` — strict Pydantic schema.
+- `src/deck/loader.py` — load-name expansion, calibration, derived wells, nested labware.
+- `src/deck/labware/`, `src/deck/labware/definitions/`.
+- `configs/deck/`.
+- Tests: `tests/test_deck_loader.py`, `tests/test_holder_labware.py`, `tests/test_panda_deck_yaml.py`.
 
-Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`) so setup
-validation can apply built-in machine-family safety checks. For `cub_xl`, setup
-validation rejects protocols whose instrument point or known travel segment
-would hit the fixed right X-max rail. The rail geometry is not user-authored
-YAML and remains separate from deck labware and `working_volume`.
+After schema/config changes: focused tests, then `setup/validate_setup.py` for affected real triples.
+
+### Protocol engine / setup validation
+- `src/protocol_engine/yaml_schema.py`, `loader.py`, `setup.py`.
+- `src/protocol_engine/commands/` — command behavior.
+- `setup/validate_setup.py` — end-to-end offline validation.
+- `configs/protocol/`.
+- Tests: `tests/protocol_engine/`.
+
+```bash
+python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
+```
+
+### Instruments
+- `src/instruments/<instrument>/driver.py`, `mock.py`, `models.py`, `exceptions.py`.
+- `src/instruments/registry.yaml`, `src/instruments/yaml_schema.py`.
+- `src/protocol_engine/measurements.py`, `data/data_store.py` — persisted measurements.
+- Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
 
 ## Calibration Scripts
 
-- `setup/calibrate_gantry.py`: only supported user-facing calibration script. It requires an input gantry YAML and chooses single- or multi-instrument calibration from instrument count. With no `--output-gantry`, it prompts before overwriting the input file; with `--output-gantry`, it writes the explicit output path without an extra overwrite prompt.
-- `setup/calibration/single_instrument_calibration.py`: internal one-instrument flow implementation.
-- `setup/calibration/multi_instrument_calibration.py`: internal multi-instrument flow implementation.
-  - Multi-instrument flow prompts the operator to explicitly choose the reference and lowest instruments by number; blank input is not accepted.
-  - Starts guided jogging from the homed BRT pose; it does not make an automatic center move.
-  - Sets XY with `G10 L20 P1 X0 Y0` only, then later sets Z to the calibration block height with `G10 L20 P1 Z<block_height>` using the lowest instrument.
-  - Per-instrument calibration uses inverse `Board.move()` math against the same physical block point:
-    - `offset_x = reference_gantry_x - gantry_x`
-    - `offset_y = reference_gantry_y - gantry_y`
-    - `depth = gantry_z - lowest_gantry_z`
+- `setup/calibrate_gantry.py` — only supported user-facing calibration entrypoint. Loads input gantry YAML, dispatches single- or multi-instrument flow by instrument count. Without `--output-gantry`, prompts before overwriting input; with it, writes the explicit path without extra prompt.
+- `setup/calibration/single_instrument_calibration.py` — internal one-instrument flow.
+- `setup/calibration/multi_instrument_calibration.py` — internal multi-instrument flow.
+- Detailed operator steps and offset math live in `docs/calibration.md`.
+
+## Setup Scripts
+
+- `setup/validate_setup.py` — offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
+- `setup/run_protocol.py` — load, validate, connect hardware, run protocol end-to-end. Connects gantry (clearing expected GRBL alarm, restoring state) and instruments before first step; disconnects in `finally`.
+- `setup/hello_world.py` — interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y ±1mm), Z (down 1mm), X (up 1mm), Q (quit).
+- `setup/keyboard_input.py` — single-keypress reader (Unix `tty`/`termios`).
 
 ## Debugging Mode
 
-If the user explicitly says they are debugging, or if their intent is clearly active debugging, prioritize fast diagnosis over the normal TDD loop. Do not add or run unit tests during the live debugging cycle unless the user asks for them or the bug is already fixed and ready to lock down. Temporary instrumentation is acceptable, but tag it clearly and remove it before finalizing.
+If the user is actively debugging, prioritize fast diagnosis over the TDD loop. Do not add or run unit tests during the debugging cycle unless asked or until the bug is fixed. Temporary instrumentation is OK if tagged and removed before finalizing.
 
-## Progress / Checkpoints
+## Progress Notes
 
-Create a temporary checkpoint under `progress/` for large refactors, hardware-facing motion changes, long tasks, or tasks likely to be handed off. Keep it current with scope, changed files, validation, hardware impact, open risks, and next steps.
+See `progress/README.md`. Default: no progress file. Create only for hardware-facing motion changes, refactors >5 files, or explicit handoffs. Delete on PR merge.
 
-For small localized edits, do not create progress files unless useful.
+## Verification Gates
 
-When the task is complete, either delete the temporary checkpoint after promoting durable notes into docs/PRs, or explicitly state why it remains.
+Smallest meaningful gate first, then broaden:
 
-## Documentation Updates
+```bash
+python -m pytest tests/test_deck_loader.py tests/test_holder_labware.py -q
+python -m pytest tests/protocol_engine -q
+python -m pytest -q
+python setup/validate_setup.py configs/gantry/cub_xl_asmi.yaml configs/deck/asmi_deck.yaml configs/protocol/asmi_indentation.yaml
+```
 
-- **`calibrate_gantry.py`**: Preferred user-facing calibration entrypoint. Loads an input gantry YAML, preflights hardware risk and instrument count, then dispatches one-instrument configs to `setup/calibration/single_instrument_calibration.py` or multi-instrument configs to `setup/calibration/multi_instrument_calibration.py`.
-    - **Guided usage**: `python setup/calibrate_gantry.py configs/gantry/<gantry>.yaml` to overwrite after confirmation, or add `--output-gantry configs/gantry/<calibrated>.yaml` to write a calibrated copy.
-    - **Single instrument**: jog the tool to the calibration block at the front-left origin point; X/Y/Z are assigned at the same physical pose, with Z set to the block height.
-    - **Multi instrument**: pick the left-most/reference instrument and lowest instrument by number, use a calibration block, then record each instrument's `offset_x`, `offset_y`, and `depth` from the shared block point.
-    - **Safety**: this changes G54 WPos and may program GRBL soft limits; validate offline first and calibrate slowly with clear E-stop access.
-- **`hello_world.py`**: Interactive deck-origin jog test. Loads an explicit gantry YAML, homes without rewriting WPos, then lets you jog in the CubOS deck frame.
-    - **Usage**: `python3 setup/hello_world.py --gantry configs/gantry/cub_xl_asmi.yaml`
-    - **Controls**: Arrow keys (X/Y ±1mm), Z key (Z down 1mm), X key (Z up 1mm), Q (quit)
-    - **Dependencies**: `src/gantry` (Gantry class), `setup/keyboard_input.py`
-- **`validate_setup.py`**: Validate a protocol setup by loading the gantry, deck, and protocol configs and checking that all deck and gantry positions are within the gantry's working volume.
-    - **Usage**: `python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>`
-    - **Output**: Step-by-step loading status, labware/instrument summaries, bounds validation results, and a final PASS/FAIL verdict.
-    - **Dependencies**: `src/gantry`, `src/deck`, `src/board`, `src/protocol_engine`, `src/validation`
-- **`run_protocol.py`**: Load, validate, connect to hardware, and run a protocol end-to-end. Runs offline validation first, then connects to the gantry and executes the protocol.
-    - **Usage**: `python setup/run_protocol.py <gantry.yaml> <deck.yaml> <protocol.yaml>`
-    - **Startup behavior**:
-        - Connects to the gantry, clears the expected GRBL alarm state if present, and restores controller state.
-        - Connects all configured instruments before the first protocol step.
-        - Disconnects instruments and gantry in `finally`, even on protocol failure.
-    - **Dependencies**: `src/gantry`, `src/deck`, `src/board`, `src/protocol_engine`, `src/validation`
-- **`keyboard_input.py`**: Helper module that reads single keypresses (including arrow keys) without requiring Enter. Uses `tty`/`termios` (Unix only).
+Report exact commands and observed results in the PR body.
 
-- Coordinate, motion, calibration, safety, or validation semantics.
-- Public CLI arguments or workflows.
-- YAML schemas/config invariants.
-- Protocol command behavior or setup flow.
-- Cross-repo interfaces.
+## When to Update This File
 
-Do not expand this file into a full module map; put detailed retrieval pointers in `docs/agent-index.md`.
+Update `AGENTS.md` only when agent retrieval, hardware-safety workflow, or source-of-truth pointers change. Update `README.md` / docs only when public CLI/workflow, YAML schema/config, coordinate/motion/calibration semantics, protocol behavior, or cross-repo interfaces change.
