@@ -11,9 +11,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
-    # Needed by tests/instruments/test_registry_packaging.py, which shells
-    # out to setuptools.build_meta. Python 3.12+ no longer bundles setuptools.
-    "setuptools",
 ]
 potentiostat = [
     "SquidstatPyLibrary",
