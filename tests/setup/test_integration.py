@@ -160,10 +160,16 @@ labware:
     capacity_ul: 1000.0
     working_volume_ul: 800.0
 """
+        bad_protocol = """\
+protocol:
+  - move:
+      instrument: pipette
+      position: far_vial
+"""
         paths = [
             _write_temp_yaml(GANTRY_YAML),
             _write_temp_yaml(bad_deck),
-            _write_temp_yaml(PROTOCOL_YAML),
+            _write_temp_yaml(bad_protocol),
         ]
         try:
             with pytest.raises(SetupValidationError) as exc_info:
@@ -191,10 +197,16 @@ labware:
     capacity_ul: 1000.0
     working_volume_ul: 800.0
 """
+        edge_protocol = """\
+protocol:
+  - move:
+      instrument: pipette
+      position: edge_vial
+"""
         paths = [
             _write_temp_yaml(GANTRY_YAML),
             _write_temp_yaml(edge_deck),
-            _write_temp_yaml(PROTOCOL_YAML),
+            _write_temp_yaml(edge_protocol),
         ]
         try:
             with pytest.raises(SetupValidationError) as exc_info:
