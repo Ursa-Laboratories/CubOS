@@ -20,9 +20,11 @@ labware:
     rows: 8
     columns: 12
     calibration:
-      a1: { x: -49.7, y: -236.8, z: -50.0 }
-      a2: { x: -58.7, y: -236.8, z: -50.0 }
-    x_offset: -9.0
+      # A1 → A2 is the column-step direction. Here A2.x < A1.x, so
+      # columns advance toward -X. Y stays constant between A1 and A2.
+      a1: { x: 347.0, y: 42.0, z: 30.0 }
+      a2: { x: 338.0, y: 42.0, z: 30.0 }
+    x_offset: 9.0   # pitch magnitude only; sign comes from A1→A2 delta
     y_offset: 9.0
 ```
 
@@ -38,8 +40,11 @@ Common labware — standard SBS microplates, Ursa-specific 3D-printed
 fixtures, standard tip racks — is pre-described under
 `src/deck/labware/definitions/`. A deck YAML can pull in a definition by
 name via `load_name:` and override only the fields that are deck-specific
-(typically `calibration`, `location`, or the sign of `x_offset` /
-`y_offset` to match the deck's orientation).
+(typically `calibration` or `location` for the physical placement; pitch
+fields like `x_offset` / `y_offset` rarely need overriding because they
+match the standard SBS spacing and are validated as positive magnitudes).
+Direction is not configured separately — column- and row-advance
+directions are derived from the A1→A2 delta in `calibration`.
 
 ```yaml
 labware:
@@ -48,9 +53,9 @@ labware:
     name: asmi_96_well
     model_name: asmi_96_well
     calibration:
-      a1: { x: -49.7, y: -236.8, z: -50.0 }
-      a2: { x: -58.7, y: -236.8, z: -50.0 }
-    x_offset: -9.0   # ASMI deck walks columns in -x
+      # A2 is one column step from A1; A2.x < A1.x means columns advance in -X.
+      a1: { x: 347.0, y: 42.0, z: 30.0 }
+      a2: { x: 338.0, y: 42.0, z: 30.0 }
 ```
 
 The loader:
