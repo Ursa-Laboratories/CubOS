@@ -63,20 +63,22 @@ class TestEngageAtLabware:
 
     def test_descends_to_well_z_plus_offset(self):
         ctx, _ = _mock_ctx_with_well(well_z=14.10)
-        action_z = engage_at_labware(
+        well_z, action_z = engage_at_labware(
             ctx, "sensor", "plate.A1",
             measurement_height=2.0, command_label="measure",
         )
+        assert well_z == pytest.approx(14.10)
         assert action_z == pytest.approx(16.10)
         ctx.board.move_to_labware.assert_called_once()
         ctx.board.move.assert_called_once_with("sensor", (10.0, 20.0, 16.10))
 
     def test_negative_offset_descends_below_surface(self):
         ctx, _ = _mock_ctx_with_well(well_z=14.10)
-        action_z = engage_at_labware(
+        well_z, action_z = engage_at_labware(
             ctx, "sensor", "plate.A1",
             measurement_height=-1.0, command_label="measure",
         )
+        assert well_z == pytest.approx(14.10)
         assert action_z == pytest.approx(13.10)
 
     @pytest.mark.parametrize("bad", ["", "1.0", float("nan"), True])

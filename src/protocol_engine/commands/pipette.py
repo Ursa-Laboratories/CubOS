@@ -37,10 +37,11 @@ def _engage(context: ProtocolContext, position: str, *, command_label: str) -> f
     tip top, etc.) — i.e. ``measurement_height=0``. Per-command Z offsets
     aren't surfaced here yet; raise an issue if you need them."""
     try:
-        return engage_at_labware(
+        _, action_z = engage_at_labware(
             context, "pipette", position,
             measurement_height=0.0, command_label=command_label,
         )
+        return action_z
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
 

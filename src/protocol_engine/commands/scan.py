@@ -101,10 +101,7 @@ def scan(
     callable_method = getattr(instr, method)
 
     try:
-        normalized = normalize_scan_arguments(
-            indentation_limit_height=indentation_limit_height,
-            method_kwargs=method_kwargs,
-        )
+        normalized = normalize_scan_arguments(method_kwargs=method_kwargs)
         _assert_finite_number(
             measurement_height, field_name="measurement_height",
             source="scan",
@@ -116,30 +113,28 @@ def scan(
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
 
-    # ``ref_z`` is the plate-surface deck-frame Z, carried on each well's
+    # ``well_z`` is the plate-surface deck-frame Z, carried on each well's
     # calibrated coordinate (uniform across wells of a single plate).
-    ref_z = plate_obj.get_well_center("A1").z
+    well_z = plate_obj.get_well_center("A1").z
 
-    action_z = ref_z + measurement_height
-    approach_z = ref_z + interwell_scan_height
-    target_z: float | None = (
-        ref_z + indentation_limit_height
-        if indentation_limit_height is not None
-        else None
-    )
+    action_z = well_z + measurement_height
+    approach_z = well_z + interwell_scan_height
 
-    if approach_z < action_z:
+    if interwell_scan_height < measurement_height:
         raise ProtocolExecutionError(
-            f"scan: interwell_scan_height ({interwell_scan_height}) resolves "
-            f"below measurement_height ({measurement_height}) for plate "
+            f"scan: interwell_scan_height ({interwell_scan_height}) is below "
+            f"measurement_height ({measurement_height}) for plate "
             f"'{plate}'. Approach must be at or above the action plane."
         )
-    if target_z is not None and target_z > action_z:
+    if (
+        indentation_limit_height is not None
+        and indentation_limit_height > measurement_height
+    ):
         raise ProtocolExecutionError(
             f"scan: indentation_limit_height ({indentation_limit_height}) "
-            f"resolves above measurement_height ({measurement_height}) for "
-            f"plate '{plate}'. The deepest descent plane must be at or below "
-            "the action plane in +Z-up."
+            f"is above measurement_height ({measurement_height}) for plate "
+            f"'{plate}'. The deepest descent plane must be at or below the "
+            "action plane in +Z-up."
         )
 
     results: Dict[str, Any] = {}
@@ -165,7 +160,9 @@ def scan(
         # as `measure`, instead of scan reimplementing them inline.
         kwargs = inject_runtime_args(
             callable_method, normalized.method_kwargs, context,
-            measurement_z=action_z, target_z=target_z,
+            well_z=well_z,
+            measurement_height=measurement_height,
+            indentation_limit_height=indentation_limit_height,
         )
         result = callable_method(**kwargs)
         results[well_id] = result

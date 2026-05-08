@@ -39,14 +39,16 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
 
     def fake_indentation(
         *,
-        measurement_z=None,
-        target_z=None,
+        measurement_height=None,
+        indentation_limit_height=None,
+        well_z=None,
         gantry=None,
         **kwargs,
     ):
         indentation_calls.append({
-            "measurement_z": measurement_z,
-            "target_z": target_z,
+            "measurement_height": measurement_height,
+            "indentation_limit_height": indentation_limit_height,
+            "well_z": well_z,
             "gantry": gantry,
             **kwargs,
         })
@@ -79,12 +81,11 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
     interwell_scan_height = scan_step.args["interwell_scan_height"]
     measurement_height = scan_step.args["measurement_height"]
     indentation_limit_height = scan_step.args["indentation_limit_height"]
-    # Heights are labware-relative; ref Z is the well's calibrated Z, not
-    # the plate's outer ``height`` (which is the physical dimension).
+    # Heights are labware-relative; the well's calibrated Z is the
+    # surface reference, not the plate's outer ``height`` (a dimension).
     surface_z = plate_obj.get_well_center("A1").z
     approach_abs = surface_z + interwell_scan_height
     action_abs = surface_z + measurement_height
-    target_abs = surface_z + indentation_limit_height
 
     # First well: move_to_labware travels XY at safe_z, then descends to
     # approach plane, then to action plane.
@@ -109,8 +110,9 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
     )
     assert moves[-1].kwargs == {"travel_z": approach_abs}
 
-    assert indentation_calls[0]["measurement_z"] == action_abs
-    assert indentation_calls[0]["target_z"] == target_abs
+    assert indentation_calls[0]["measurement_height"] == measurement_height
+    assert indentation_calls[0]["indentation_limit_height"] == indentation_limit_height
+    assert indentation_calls[0]["well_z"] == surface_z
     assert indentation_calls[0]["gantry"] is mock_gantry
 
 

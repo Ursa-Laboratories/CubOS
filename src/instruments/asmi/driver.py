@@ -226,32 +226,36 @@ class ASMI(BaseInstrument):
 
     @staticmethod
     def _validate_indentation_parameters(
-        measurement_z: float,
-        target_z: float,
+        measurement_height: float,
+        indentation_limit_height: float,
         step_size: float,
     ) -> None:
         """Validate indentation parameters.
 
-        ``measurement_z`` and ``target_z`` are absolute deck-frame Z
-        values (+Z up). ``target_z`` must be at or below ``measurement_z``;
-        equality is legal (a zero-descent indentation collects baseline
-        force samples and returns) and matches the inclusive ``≤`` spec
-        used by the engine and validator.
+        ``measurement_height`` and ``indentation_limit_height`` are
+        labware-relative offsets (mm above the well surface; +above,
+        -below). ``indentation_limit_height`` must be at or below
+        ``measurement_height``; equality is legal (a zero-descent
+        indentation collects baseline force samples and returns) and
+        matches the inclusive ``≤`` spec used by the engine and
+        validator.
         """
         if step_size <= 0:
             raise ValueError(f"step_size must be positive, got {step_size}")
-        if target_z > measurement_z:
+        if indentation_limit_height > measurement_height:
             raise ValueError(
-                f"target_z ({target_z}) must be at or below measurement_z "
-                f"({measurement_z}) — indentation descends in -Z."
+                f"indentation_limit_height ({indentation_limit_height}) "
+                f"must be at or below measurement_height "
+                f"({measurement_height}) — indentation descends in -Z."
             )
 
     def indentation(
         self,
         gantry,
         *,
-        measurement_z: float,
-        target_z: float,
+        measurement_height: float,
+        indentation_limit_height: float,
+        well_z: float,
         step_size: float | None = None,
         force_limit: float | None = None,
         baseline_samples: int | None = None,
@@ -259,43 +263,49 @@ class ASMI(BaseInstrument):
     ) -> dict:
         """Perform step-by-step indentation at the current XY position.
 
-        Coordinate convention (deck-origin, +Z up): ``measurement_z`` is
-        the absolute deck-frame Z to start the indent; ``target_z`` is
-        the absolute deck-frame Z at the deepest point of the descent.
-        Each "down" step DECREASES z by ``step_size``.
+        Coordinate convention (deck-origin, +Z up). All three Z-related
+        parameters mirror the protocol-layer YAML convention:
 
-        These parameters use the ``_z`` suffix because they hold *absolute*
-        deck-frame Z values (per the project convention `_z = absolute`,
-        `_height = labware-relative offset`). The protocol-layer command
-        accepts the labware-relative ``measurement_height`` and
-        ``indentation_limit_height`` from YAML and the engine resolves
-        them to absolute Z values before dispatch:
-        ``measurement_z = well.z + measurement_height`` and
-        ``target_z = well.z + indentation_limit_height``.
+        * ``measurement_height`` and ``indentation_limit_height`` are
+          *labware-relative* offsets (mm above the well surface; +above,
+          -below) — the same values the user supplies on the YAML scan
+          command.
+        * ``well_z`` is the absolute deck-frame Z of the well surface,
+          injected by the engine from the calibration anchor. The
+          driver computes ``action_z = well_z + measurement_height`` and
+          ``target_z = well_z + indentation_limit_height``.
+
+        Each "down" step DECREASES z by ``step_size``.
 
         The scan command positions the gantry at the well before calling
         this method. Indentation then:
-        1. Lowers to measurement_z (descend to start of indent)
-        2. Takes baseline force readings
-        3. Steps z toward target_z (z decreases), reading force at each step
-        4. Stops on force_limit or target_z, whichever fires first
+        1. Lowers to ``well_z + measurement_height`` (descend to start of indent).
+        2. Takes baseline force readings.
+        3. Steps z toward ``well_z + indentation_limit_height``, reading force
+           at each step.
+        4. Stops on ``force_limit`` or ``indentation_limit_height``, whichever
+           fires first.
 
         Args:
-            gantry:              Gantry instance for Z movement.
-            measurement_z:       Absolute deck-frame Z to descend to before
-                                 starting (the action plane).
-            target_z:            Absolute deck-frame Z at the deepest point
-                                 of the descent. Must be ≤ ``measurement_z``;
-                                 equality is legal (zero-descent indentation
-                                 collects baseline samples and returns).
-            step_size:           Z increment per step in mm (positive).
-            force_limit:         Stop when corrected force exceeds this in N.
-            baseline_samples:    Number of baseline force readings.
+            gantry:                   Gantry instance for Z movement.
+            measurement_height:       Labware-relative offset for the action
+                                      plane (mm above the well surface; +above,
+                                      -below).
+            indentation_limit_height: Labware-relative offset for the deepest
+                                      descent plane. Must be ≤ ``measurement_height``;
+                                      equality is legal (zero-descent indentation
+                                      collects baseline samples and returns).
+            well_z:                   Absolute deck-frame Z of the well surface
+                                      (engine-injected from the calibration anchor).
+            step_size:                Z increment per step in mm (positive).
+            force_limit:              Stop when corrected force exceeds this in N.
+            baseline_samples:         Number of baseline force readings.
             measure_with_return:
-                                 If True, after descent step Z back up to
-                                 ``measurement_z`` and record each upward
-                                 sample. Every sample is tagged with
-                                 ``direction`` ("down" on descent, "up" on return).
+                                      If True, after descent step Z back up to
+                                      the action plane and record each upward
+                                      sample. Every sample is tagged with
+                                      ``direction`` ("down" on descent, "up" on
+                                      return).
 
         Returns:
             Dict with keys: measurements, baseline_avg, baseline_std,
@@ -306,21 +316,26 @@ class ASMI(BaseInstrument):
         _force_limit = force_limit if force_limit is not None else self._force_limit
         _baseline_samples = baseline_samples if baseline_samples is not None else self._baseline_samples
 
-        self._validate_indentation_parameters(measurement_z, target_z, _step_size)
+        self._validate_indentation_parameters(
+            measurement_height, indentation_limit_height, _step_size,
+        )
+
+        action_z = well_z + measurement_height
+        target_z = well_z + indentation_limit_height
 
         if self._offline:
             return self._offline_indentation(
                 gantry,
                 target_z,
                 _step_size,
-                measurement_z,
+                action_z,
                 measure_with_return=measure_with_return,
             )
 
         coords = gantry.get_coordinates()
         cur_x, cur_y = coords["x"], coords["y"]
 
-        self._move_z(gantry, cur_x, cur_y, measurement_z)
+        self._move_z(gantry, cur_x, cur_y, action_z)
 
         baseline_avg, baseline_std = self.get_baseline_force(
             samples=_baseline_samples
@@ -331,7 +346,7 @@ class ASMI(BaseInstrument):
 
         measurements = []
         force_exceeded = False
-        max_steps = _step_count_bound(measurement_z, target_z, _step_size)
+        max_steps = _step_count_bound(action_z, target_z, _step_size)
 
         # Descent: deck-origin +Z-up, so each step DECREASES z toward the deck.
         for _ in range(max_steps):
@@ -378,14 +393,14 @@ class ASMI(BaseInstrument):
                 "Starting return sweep (%d descent samples collected)",
                 len(measurements),
             )
-            return_cap = _step_count_bound(measurement_z, target_z, _step_size)
-            # Return: walk z back up to measurement_z by INCREASING z each step.
+            return_cap = _step_count_bound(action_z, target_z, _step_size)
+            # Return: walk z back up to action_z by INCREASING z each step.
             for _ in range(return_cap):
                 coords = gantry.get_coordinates()
                 current_z = coords["z"]
-                if current_z >= measurement_z:
+                if current_z >= action_z:
                     break
-                next_z = min(current_z + _step_size, measurement_z)
+                next_z = min(current_z + _step_size, action_z)
                 self._move_z(gantry, cur_x, cur_y, next_z)
                 coords = gantry.get_coordinates()
                 # Break if the gantry did not retract — prevents infinite loop
@@ -407,8 +422,8 @@ class ASMI(BaseInstrument):
                 })
             else:
                 self.logger.warning(
-                    "Return sweep hit iteration cap %d before reaching measurement_z %.3f",
-                    return_cap, measurement_z,
+                    "Return sweep hit iteration cap %d before reaching action_z %.3f",
+                    return_cap, action_z,
                 )
 
         return {
@@ -425,26 +440,28 @@ class ASMI(BaseInstrument):
         gantry,
         target_z,
         step_size,
-        measurement_z,
+        action_z,
         measure_with_return: bool = False,
     ) -> dict:
         """Fast offline indentation — no idle-wait, synthetic data.
 
         Deck-origin +Z-up convention: descent DECREASES z toward
-        target_z (which is lower than measurement_z); the optional return
-        sweep walks z back UP to measurement_z.
+        ``target_z`` (which is at or below ``action_z``); the optional
+        return sweep walks z back UP to ``action_z``. Both parameters are
+        absolute deck-frame Z, resolved by the public ``indentation()``
+        method from the labware-relative offsets it receives.
         """
         coords = gantry.get_coordinates()
         cur_x, cur_y = coords["x"], coords["y"]
-        gantry.move_to(cur_x, cur_y, measurement_z)
+        gantry.move_to(cur_x, cur_y, action_z)
 
         # Integer step counting avoids float accumulation drift at loop boundaries.
         n_down = _step_count_bound(
-            measurement_z, target_z, step_size,
+            action_z, target_z, step_size,
         ) - _STEP_COUNT_SAFETY_MARGIN
         measurements = []
         for i in range(1, n_down + 1):
-            z = max(measurement_z - i * step_size, target_z)
+            z = max(action_z - i * step_size, target_z)
             gantry.move_to(cur_x, cur_y, z)
             measurements.append({
                 "timestamp": time.time(),
@@ -457,10 +474,10 @@ class ASMI(BaseInstrument):
                 break
 
         if measure_with_return:
-            z_bottom = measurements[-1]["z_mm"] if measurements else measurement_z
-            n_up = _step_count_bound(measurement_z, z_bottom, step_size) - _STEP_COUNT_SAFETY_MARGIN
+            z_bottom = measurements[-1]["z_mm"] if measurements else action_z
+            n_up = _step_count_bound(action_z, z_bottom, step_size) - _STEP_COUNT_SAFETY_MARGIN
             for i in range(1, n_up + 1):
-                z = min(z_bottom + i * step_size, measurement_z)
+                z = min(z_bottom + i * step_size, action_z)
                 gantry.move_to(cur_x, cur_y, z)
                 measurements.append({
                     "timestamp": time.time(),
@@ -469,7 +486,7 @@ class ASMI(BaseInstrument):
                     "corrected_force_n": 0.0,
                     "direction": "up",
                 })
-                if z >= measurement_z:
+                if z >= action_z:
                     break
 
         return {

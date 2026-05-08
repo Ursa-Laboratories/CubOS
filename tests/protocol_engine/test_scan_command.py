@@ -97,14 +97,17 @@ class _FakeSensor(BaseInstrument):
 
     def indentation(
         self,
-        measurement_z: float | None = None,
-        target_z: float | None = None,
+        *,
+        measurement_height: float,
+        indentation_limit_height: float,
+        well_z: float,
         gantry=None,
     ) -> dict:
         self.call_count += 1
         return {
-            "measurement_z": measurement_z,
-            "target_z": target_z,
+            "measurement_height": measurement_height,
+            "indentation_limit_height": indentation_limit_height,
+            "well_z": well_z,
             "gantry": gantry,
         }
 
@@ -279,10 +282,12 @@ class TestScanCommand:
         with pytest.raises(ProtocolExecutionError, match="Approach must be at or above"):
             scan(ctx, **_scan_args(measurement_height=5.0, interwell_scan_height=2.0))
 
-    def test_absolute_z_values_passed_to_method_when_supported(self):
-        """When the method signature has ``measurement_z``/``target_z``,
-        the engine resolves both relative offsets to absolute deck-frame
-        Z values and forwards them."""
+    def test_relative_offsets_and_well_z_passed_to_method_when_supported(self):
+        """When the method signature has ``measurement_height`` /
+        ``indentation_limit_height`` / ``well_z``, the engine forwards
+        the user's relative offsets verbatim and injects ``well_z`` from
+        the plate's calibrated well coordinate. The instrument resolves
+        absolute Z values internally."""
         from protocol_engine.commands.scan import scan
 
         ctx = _mock_context()
@@ -296,8 +301,9 @@ class TestScanCommand:
         )
 
         for r in results.values():
-            assert r["measurement_z"] == HEIGHT_MM + 2.0
-            assert r["target_z"] == HEIGHT_MM + (-5.0)
+            assert r["measurement_height"] == 2.0
+            assert r["indentation_limit_height"] == -5.0
+            assert r["well_z"] == HEIGHT_MM
 
     def test_legacy_z_limit_rejected_at_runtime(self):
         from protocol_engine.commands.scan import scan

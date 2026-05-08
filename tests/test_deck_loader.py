@@ -225,6 +225,64 @@ labware:
         Path(path).unlink(missing_ok=True)
 
 
+# ----- Calibration anchor as the single source of truth for surface Z -----
+
+
+def test_well_plate_missing_calibration_z_raises():
+    """The legacy ``height`` z-hint shorthand was removed when the
+    dimensional ``height`` field took over the name. A well plate that
+    omits ``calibration.a1.z`` must raise a clear error pointing at the
+    calibration anchor."""
+    yaml = """
+labware:
+  plate_1:
+    type: well_plate
+    name: small
+    model_name: small
+    rows: 2
+    columns: 2
+    length: 20.0
+    width: 20.0
+    height: 10.0
+    calibration:
+      a1: { x: 0.0, y: 0.0 }
+      a2: { x: 10.0, y: 0.0 }
+    x_offset: 9.0
+    y_offset: 9.0
+"""
+    path = _write_yaml = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+    path.write(yaml); path.close()
+    try:
+        with pytest.raises(ValueError, match="calibration anchor"):
+            load_deck_from_yaml(path.name)
+    finally:
+        Path(path.name).unlink(missing_ok=True)
+
+
+def test_vial_missing_location_z_raises():
+    yaml = """
+labware:
+  vial_1:
+    type: vial
+    name: standard_vial_rack
+    model_name: standard_1_5ml_vial
+    height: 66.75
+    diameter: 28.0
+    location:
+      x: 30.0
+      y: 40.0
+    capacity_ul: 1500.0
+    working_volume_ul: 1200.0
+"""
+    path = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+    path.write(yaml); path.close()
+    try:
+        with pytest.raises(ValueError, match="calibration anchor"):
+            load_deck_from_yaml(path.name)
+    finally:
+        Path(path.name).unlink(missing_ok=True)
+
+
 # ----- Two-point calibration orientations -----
 
 def test_calibration_horizontal_increasing_columns():

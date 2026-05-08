@@ -46,7 +46,7 @@ def measure(
         )
 
     try:
-        action_z = engage_at_labware(
+        well_z, action_z = engage_at_labware(
             context, instrument, position,
             measurement_height=measurement_height,
             command_label="measure",
@@ -59,11 +59,14 @@ def measure(
         instrument, method, method_kwargs, position, action_z,
     )
 
-    # Inject gantry + the resolved absolute action Z into closed-loop
-    # methods (e.g. ASMI.indentation) that drive the gantry themselves.
+    # Forward the labware-surface reference Z plus the user's labware-relative
+    # offset so closed-loop instrument methods can resolve their own action /
+    # target Z values. Open-loop methods that don't declare these parameters
+    # receive only the YAML-supplied ``method_kwargs``.
     callable_method = getattr(instr, method)
     kwargs = inject_runtime_args(
         callable_method, method_kwargs, context,
-        measurement_z=action_z,
+        well_z=well_z,
+        measurement_height=measurement_height,
     )
     return callable_method(**kwargs)

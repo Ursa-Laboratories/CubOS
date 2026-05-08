@@ -96,11 +96,12 @@ def _resolve_user_z(
 ) -> float:
     """Resolve a deck-frame Z from the calibration/location anchor.
 
-    The deck YAML's calibration anchor (`a1.z` or `location.z`) is the
-    single source of truth for the labware-surface deck-frame Z. The
-    legacy ``height`` z-hint shorthand was removed when the dimensional
-    field was renamed from ``height`` to ``height`` — the z-hint and
-    the dimension can no longer share the same field name.
+    The deck YAML's calibration anchor (``calibration.a1.z`` or
+    ``location.z``) is the single source of truth for the
+    labware-surface deck-frame Z. The legacy ``height`` z-hint shorthand
+    was removed when the dimensional field was renamed from
+    ``height_mm`` to ``height`` — the z-hint and the dimension can no
+    longer share the same field name.
     """
     if explicit_z is None:
         if default_z is not None:

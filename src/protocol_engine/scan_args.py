@@ -63,7 +63,6 @@ _LEGACY_KWARG_HINTS = {
 
 def normalize_scan_arguments(
     *,
-    indentation_limit_height: float | None = None,
     method_kwargs: Mapping[str, Any] | None = None,
 ) -> NormalizedScanArguments:
     """Validate and normalize the scan command's ``method_kwargs``.

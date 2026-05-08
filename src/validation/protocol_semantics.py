@@ -470,7 +470,6 @@ def _validate_scan_command(
 
     try:
         normalized = normalize_scan_arguments(
-            indentation_limit_height=args.get("indentation_limit_height"),
             method_kwargs=args.get("method_kwargs"),
         )
     except ValueError as exc:
