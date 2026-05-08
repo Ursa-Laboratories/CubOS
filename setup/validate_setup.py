@@ -189,10 +189,7 @@ def run_validation(
             out(f"  - {v.labware_key}.{v.position_id}: "
                 f"deck ({v.x}, {v.y}, {v.z}) violates {v.bound_name}={v.bound_value}")
     else:
-        total_positions = sum(
-            len(deck[k].wells) if isinstance(deck[k], WellPlate) else 1
-            for k in deck
-        )
+        total_positions = sum(len(deck[k].iter_motion_targets()) for k in deck)
         out(f"  OK ({total_positions} positions checked)")
     out()
 
@@ -205,10 +202,7 @@ def run_validation(
             out(f"  - {v.instrument_name} -> {v.labware_key}.{v.position_id}: "
                 f"gantry ({v.x}, {v.y}, {v.z}) violates {v.bound_name}={v.bound_value}")
     else:
-        total_positions = sum(
-            len(deck[k].wells) if isinstance(deck[k], WellPlate) else 1
-            for k in deck
-        )
+        total_positions = sum(len(deck[k].iter_motion_targets()) for k in deck)
         out(f"  OK ({total_positions} positions x {len(board.instruments)} instrument(s) checked)")
     out()
 

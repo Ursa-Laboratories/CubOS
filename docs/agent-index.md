@@ -21,6 +21,11 @@ Read these before changing gantry motion, coordinates, bounds, homing, scan move
 
 Retrieval rule: do not infer sign flips from older code or model memory. Confirm current deck-frame convention in source and tests.
 
+Bounds rule: working-volume validation is over labware motion targets, not
+all geometry anchors. Holder bases and walls can be physical geometry only;
+nested wells, slots, tip disposals, and other protocol-addressable targets are
+what must be reachable.
+
 ## Deck YAML, labware, and calibration
 
 Read these before changing deck configs, labware schemas, well position math, or validation messages:

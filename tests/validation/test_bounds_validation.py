@@ -7,8 +7,11 @@ from unittest.mock import MagicMock
 from board.board import Board
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
+from deck.labware.tip_disposal import TipDisposal
 from deck.labware.vial import Vial
+from deck.labware.wall import Wall
 from deck.labware.well_plate import WellPlate
+from deck.labware.well_plate_holder import WellPlateHolder
 from instruments.base_instrument import BaseInstrument
 from gantry.gantry_config import GantryConfig, GantryType, HomingStrategy, WorkingVolume
 from validation.bounds import validate_deck_positions, validate_gantry_positions
@@ -215,6 +218,61 @@ class TestValidateDeckPositions:
         assert violations[0].coordinate_type == "deck"
         assert violations[0].instrument_name is None
 
+    def test_holder_anchor_below_z_min_is_not_a_motion_target(self):
+        gantry = _make_gantry(z_min=80.0, z_max=101.5, total_z_height=101.5)
+        plate = _make_plate(a1_x=15.0, a1_y=17.0, a1_z=89.5)
+        holder = WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"plate": plate},
+        )
+        deck = _make_deck(plate_holder=holder)
+
+        assert validate_deck_positions(gantry, deck) == []
+
+    def test_nested_holder_plate_motion_target_below_z_min_still_fails(self):
+        gantry = _make_gantry(z_min=80.0, z_max=101.5, total_z_height=101.5)
+        plate = _make_plate(a1_x=15.0, a1_y=17.0, a1_z=79.9)
+        holder = WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"plate": plate},
+        )
+        deck = _make_deck(plate_holder=holder)
+
+        violations = validate_deck_positions(gantry, deck)
+
+        assert violations
+        assert all(v.position_id == "plate" or v.position_id.startswith("plate.")
+                   for v in violations)
+        assert all(v.axis == "z" for v in violations)
+
+    def test_wall_geometry_is_not_a_motion_target(self):
+        gantry = _make_gantry(z_min=80.0, z_max=101.5, total_z_height=101.5)
+        wall = Wall(
+            name="front_stop",
+            corner_1=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            corner_2=Coordinate3D(x=10.0, y=10.0, z=10.0),
+        )
+        deck = _make_deck(front_stop=wall)
+
+        assert validate_deck_positions(gantry, deck) == []
+
+    def test_tip_disposal_location_remains_a_motion_target(self):
+        gantry = _make_gantry(z_min=80.0, z_max=101.5, total_z_height=101.5)
+        disposal = TipDisposal(
+            name="waste",
+            location=Coordinate3D(x=20.0, y=20.0, z=79.9),
+        )
+        deck = _make_deck(waste=disposal)
+
+        violations = validate_deck_positions(gantry, deck)
+
+        assert len(violations) == 1
+        assert violations[0].labware_key == "waste"
+        assert violations[0].position_id == "location"
+        assert violations[0].axis == "z"
+
 
 # ── Gantry position validation ──────────────────────────────────────────
 
@@ -338,3 +396,16 @@ class TestValidateGantryPositions:
         # At least one well should violate x_min.
         assert len(violations) > 0
         assert all(v.instrument_name == "big_offset" for v in violations)
+
+    def test_holder_anchor_below_z_min_is_not_a_gantry_motion_target(self):
+        gantry = _make_gantry(z_min=80.0, z_max=101.5, total_z_height=101.5)
+        plate = _make_plate(a1_x=15.0, a1_y=17.0, a1_z=89.5)
+        holder = WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"plate": plate},
+        )
+        deck = _make_deck(plate_holder=holder)
+        board = _make_board(("uv_curing", _make_instrument()))
+
+        assert validate_gantry_positions(gantry, deck, board) == []

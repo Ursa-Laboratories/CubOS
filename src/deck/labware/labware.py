@@ -76,7 +76,17 @@ class Labware(BaseModel):
         """
         Return every named deck position exposed by this labware.
 
-        This is used by generic validators that need to reason about all
-        addressable points without hard-coding concrete labware types.
+        These positions include both motion targets and fixture/geometry
+        anchors, depending on the labware type.
         """
         raise NotImplementedError("Subclasses of Labware must implement iter_positions().")
+
+    def iter_motion_targets(self) -> dict[str, Coordinate3D]:
+        """
+        Return positions that may be commanded as gantry TCP targets.
+
+        Most simple labware exposes the same positions for introspection and
+        motion. Physical fixtures can override this to exclude geometry-only
+        anchors that the gantry should never try to reach.
+        """
+        return self.iter_positions()

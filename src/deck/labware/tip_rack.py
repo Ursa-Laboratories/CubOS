@@ -152,6 +152,11 @@ class TipRack(HolderLabware):
         positions.update({slot_id: slot.location for slot_id, slot in self.slots.items()})
         return positions
 
+    def iter_motion_targets(self) -> dict[str, Coordinate3D]:
+        targets = dict(self.tips)
+        targets.update({slot_id: slot.location for slot_id, slot in self.slots.items()})
+        return targets
+
     def mark_tip_used(self, tip_id: str) -> None:
         """Mark a tip as consumed (``tip_present[tip_id] = False``)."""
         if tip_id not in self.tips:

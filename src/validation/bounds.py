@@ -34,11 +34,11 @@ def _check_point(
 def _get_all_positions(
     deck: Deck,
 ) -> List[Tuple[str, str, float, float, float]]:
-    """Extract every (labware_key, position_id, x, y, z) from the deck."""
+    """Extract every motion target as (labware_key, position_id, x, y, z)."""
     positions: List[Tuple[str, str, float, float, float]] = []
     for key in deck:
         labware = deck[key]
-        for position_id, coord in labware.iter_positions().items():
+        for position_id, coord in labware.iter_motion_targets().items():
             positions.append((key, position_id, coord.x, coord.y, coord.z))
     return positions
 
@@ -46,7 +46,7 @@ def _get_all_positions(
 def validate_deck_positions(
     gantry: GantryConfig, deck: Deck,
 ) -> List[BoundsViolation]:
-    """Check every labware position is within the gantry working volume.
+    """Check every labware motion target is within the gantry working volume.
 
     Coordinates are validated in user-facing positive space.
     Returns a list of violations (empty if all pass).
@@ -71,7 +71,7 @@ def validate_deck_positions(
 def validate_gantry_positions(
     gantry: GantryConfig, deck: Deck, board: Board,
 ) -> List[BoundsViolation]:
-    """For each (instrument, deck_position), compute gantry position and check bounds.
+    """For each instrument and deck motion target, compute gantry bounds.
 
     Gantry formula (from board.py Board.move), all in user-facing coordinates:
         gantry_x = position_x - instrument.offset_x

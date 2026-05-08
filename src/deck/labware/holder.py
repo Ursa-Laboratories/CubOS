@@ -164,3 +164,15 @@ class HolderLabware(Labware):
                     continue
                 positions[f"{child_name}.{position_id}"] = coord
         return positions
+
+    def iter_motion_targets(self) -> dict[str, Coordinate3D]:
+        targets = {slot_id: slot.location for slot_id, slot in self.slots.items()}
+        for child_name, child in self.contained_labware.items():
+            child_targets = child.iter_motion_targets()
+            if "location" in child_targets:
+                targets[child_name] = child.get_initial_position()
+            for position_id, coord in child_targets.items():
+                if position_id == "location":
+                    continue
+                targets[f"{child_name}.{position_id}"] = coord
+        return targets
