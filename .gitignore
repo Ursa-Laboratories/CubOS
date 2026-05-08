@@ -173,6 +173,7 @@ src/gantry/gantry_driver/_configuration.json
 .omx/
 PANDA-BEAR/
 .claude/
+.codex
 .codex/
 !.codex/agents/
 !.codex/agents/**
