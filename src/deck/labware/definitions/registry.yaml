@@ -27,6 +27,11 @@ labware:
     class_name: WellPlateHolder
     config: ursa_wellplate_holder_conductive/WellplateHolder.yaml
 
+  sharc_80mm_sbs_wellplate_holder:
+    module: deck.labware.well_plate_holder
+    class_name: WellPlateHolder
+    config: sharc_80mm_sbs_wellplate_holder/WellplateHolder.yaml
+
   sbs_96_wellplate:
     module: deck.labware.well_plate
     class_name: WellPlate

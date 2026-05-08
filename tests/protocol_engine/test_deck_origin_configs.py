@@ -176,6 +176,23 @@ def test_filmetrics_deck_origin_config_validates_setup():
     )
 
 
+def test_sharc_motion_scan_config_does_not_call_uv_cure():
+    protocol, context = setup_protocol(
+        CONFIGS / "gantry/cub_sharc.yaml",
+        CONFIGS / "deck/sharc_uv_deck.yaml",
+        CONFIGS / "protocol/sharc_uv_motion_scan.yaml",
+    )
+    uv = context.board.instruments["uv_curing"]
+    uv.cure = MagicMock(side_effect=AssertionError("cure should not be called"))
+    uv.health_check = MagicMock(return_value=True)
+
+    result = protocol.run(context)
+
+    assert len(result[0]) == 96
+    assert uv.health_check.call_count == 96
+    uv.cure.assert_not_called()
+
+
 def test_sterling_candidate_validates_with_park_protocol():
     _, context = setup_protocol(
         CONFIGS / "gantry/cub_xl_sterling.yaml",

@@ -79,7 +79,12 @@ The `move` command accepts:
 
 - a named position from the top-level `positions` mapping
 - raw `[x, y, z]` coordinates
-- a deck target string such as `plate_1.A1` or `vial_1`
+- a deck target string such as `plate_1.A1`, `plate_holder.plate.A1`, or
+  `vial_1`
+
+The `scan` command's `plate` argument accepts a top-level well plate key or a
+nested holder path such as `plate_holder.plate`. The resolved object must be a
+`WellPlate`.
 
 The `measure` command requires `instrument`, `position`, and
 `measurement_height`. It travels XY at the gantry's absolute `safe_z`,

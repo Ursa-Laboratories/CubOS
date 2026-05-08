@@ -37,6 +37,24 @@ class Deck:
             return self._get_labware(labware_key).get_location(location_id)
         return self._get_labware(target).get_initial_position()
 
+    def resolve_labware(self, target: str) -> Labware:
+        """Resolve a top-level or nested labware path to a Labware object.
+
+        Formats:
+            'plate_1'            -> top-level plate_1 object
+            'plate_holder.plate' -> contained plate object
+        """
+        parts = target.split(".")
+        labware = self._get_labware(parts[0])
+
+        for child_name in parts[1:]:
+            children = getattr(labware, "contained_labware", {})
+            try:
+                labware = children[child_name]
+            except KeyError as exc:
+                raise KeyError(f"No nested labware '{target}' on deck.") from exc
+        return labware
+
     def _get_labware(self, key: str) -> Labware:
         try:
             return self._labware[key]

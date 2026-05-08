@@ -1,0 +1,36 @@
+# SHARC UV deck layout in the CubOS deck-origin frame.
+#
+# Holder location.z is the measured holder bottom/base at deck Z0. The nested
+# plate surface/rim resolves to Z=89.5 via the holder definition:
+# 75.15 mm support plane + 14.35 mm SBS plate height.
+# A1/A2 are measured deck-frame well centers. Columns advance in +Y; rows
+# advance in +X.
+
+labware:
+  plate_holder:
+    load_name: sharc_80mm_sbs_wellplate_holder
+    name: sharc_uv_plate_holder
+    location:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+    well_plate:
+      name: sharc_uv_plate
+      model_name: sharc_sbs_96_wellplate
+      rows: 8
+      columns: 12
+      length: 127.76
+      width: 85.47
+      height: 14.35
+      well_depth: 10.67
+      calibration:
+        a1:
+          x: 15.0
+          y: 17.0
+        a2:
+          x: 15.0
+          y: 26.0
+      x_offset: 9.0
+      y_offset: 9.0
+      capacity_ul: 200.0
+      working_volume_ul: 150.0

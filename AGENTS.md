@@ -74,6 +74,10 @@ After schema/config changes: focused tests, then `setup/validate_setup.py` for a
 - `configs/protocol/`.
 - Tests: `tests/protocol_engine/`.
 
+`scan.plate` may target either a top-level `WellPlate` key or a nested holder
+path such as `plate_holder.plate`, as long as that path resolves to a
+`WellPlate`.
+
 ```bash
 python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
 ```

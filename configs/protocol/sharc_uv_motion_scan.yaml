@@ -1,0 +1,14 @@
+# SHARC UV motion-only scan.
+#
+# Exercises the same nested-plate scan path as sharc_uv_curing_scan.yaml but
+# uses uv_curing.health_check instead of cure. With configs/gantry/cub_sharc.yaml
+# keeping uv_curing offline, this moves the gantry over all 96 wells without
+# sending OmniCure cure commands or opening UV exposure.
+
+protocol:
+  - scan:
+      plate: plate_holder.plate
+      instrument: uv_curing
+      method: health_check
+      measurement_height: 1.0
+      interwell_scan_height: 5.0
