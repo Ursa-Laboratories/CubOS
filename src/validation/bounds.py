@@ -285,12 +285,12 @@ def _append_scan_targets(
     instrument = step_args.get("instrument")
     plate = step_args.get("plate")
     measurement_height = step_args.get("measurement_height")
-    safe_approach_height = step_args.get("safe_approach_height")
+    interwell_scan_height = step_args.get("interwell_scan_height")
     if (
         not isinstance(instrument, str)
         or not isinstance(plate, str)
         or not _is_finite_number(measurement_height)
-        or not _is_finite_number(safe_approach_height)
+        or not _is_finite_number(interwell_scan_height)
     ):
         return
 
@@ -304,7 +304,7 @@ def _append_scan_targets(
         return
 
     action_z = ref_z + float(measurement_height)
-    approach_z = ref_z + float(safe_approach_height)
+    approach_z = ref_z + float(interwell_scan_height)
     sorted_wells = sorted(
         plate_obj.wells.items(), key=lambda item: _row_major_key(item[0]),
     )

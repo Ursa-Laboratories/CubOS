@@ -413,7 +413,7 @@ class TestValidateProtocolMotionBounds:
             plate="plate",
             method="measure",
             measurement_height=0.0,
-            safe_approach_height=1.0,
+            interwell_scan_height=1.0,
         )
 
         violations = validate_protocol_motion_bounds(gantry, protocol, deck, board)
@@ -467,7 +467,7 @@ class TestValidateProtocolMotionBounds:
             plate="plate",
             method="measure",
             measurement_height=0.0,
-            safe_approach_height=1.0,
+            interwell_scan_height=1.0,
         )
 
         targets = collect_protocol_motion_targets(gantry, protocol, deck)
