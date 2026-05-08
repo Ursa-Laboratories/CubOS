@@ -26,5 +26,5 @@ labware:
         x: 338
         y: 42.0
         z: 30.0
-    x_offset_mm: 9.0
-    y_offset_mm: 9.0
+    x_offset: 9.0
+    y_offset: 9.0

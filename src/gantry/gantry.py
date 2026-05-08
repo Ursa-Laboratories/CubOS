@@ -46,19 +46,19 @@ class Gantry:
         self._expected_grbl_settings_source: str | None = None
 
     @property
-    def total_z_height(self) -> Optional[float]:
-        """Return configured total Z height in user space, if available."""
+    def total_z_range(self) -> Optional[float]:
+        """Return configured total Z range in user space, if available."""
         if isinstance(self.config, dict):
             cnc = self.config.get("cnc", {})
-            if isinstance(cnc, dict) and "total_z_height" in cnc:
-                return float(cnc["total_z_height"])
+            if isinstance(cnc, dict) and "total_z_range" in cnc:
+                return float(cnc["total_z_range"])
             working_volume = self.config.get("working_volume", {})
             if isinstance(working_volume, dict) and "z_max" in working_volume:
                 return float(working_volume["z_max"])
             return None
 
-        if hasattr(self.config, "total_z_height"):
-            return float(getattr(self.config, "total_z_height"))
+        if hasattr(self.config, "total_z_range"):
+            return float(getattr(self.config, "total_z_range"))
         return None
 
     def connect(self) -> None:

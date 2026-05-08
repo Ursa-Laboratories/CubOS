@@ -1,10 +1,11 @@
 """Scan argument normalization.
 
-The scan command's required heights (``measurement_height`` and
-``safe_approach_height``) are first-class function parameters and are
-validated by the command itself, not here. This module only handles
-``method_kwargs`` reconciliation: rejecting legacy field names and
-threading ``indentation_limit`` through when present.
+The scan command's required heights (``measurement_height``,
+``interwell_scan_height``) and the optional ``indentation_limit_height``
+are first-class function parameters and are validated by the command
+itself, not here. This module only handles ``method_kwargs``
+reconciliation: rejecting legacy field names and re-stating which
+top-level fields carry the same meaning.
 """
 
 from __future__ import annotations
@@ -27,55 +28,53 @@ _LEGACY_KWARG_HINTS = {
     ),
     "interwell_travel_height": (
         "`interwell_travel_height` is no longer supported. Use "
-        "`safe_approach_height` (labware-relative offset)."
+        "`interwell_scan_height` (labware-relative offset)."
+    ),
+    "safe_approach_height": (
+        "`safe_approach_height` was renamed to `interwell_scan_height` "
+        "(labware-relative offset above the well surface for between-wells "
+        "XY travel)."
     ),
     "z_limit": (
-        "`z_limit` is no longer supported. Use `indentation_limit`."
+        "`z_limit` is no longer supported. Use `indentation_limit_height`."
+    ),
+    "indentation_limit": (
+        "`indentation_limit` was renamed to `indentation_limit_height` "
+        "and its meaning changed: it is now a *signed* labware-relative "
+        "offset (mm above the well surface; negative = below), not a "
+        "sign-agnostic descent magnitude. To indent 5 mm into a well, use "
+        "`indentation_limit_height: -5.0`."
     ),
     "measurement_height": (
         "`measurement_height` does not belong in `method_kwargs` — the "
         "engine resolves it from the top-level `measurement_height` field "
         "and would silently overwrite this value. Move it to the top level."
     ),
-    "safe_approach_height": (
-        "`safe_approach_height` does not belong in `method_kwargs`. Move "
+    "interwell_scan_height": (
+        "`interwell_scan_height` does not belong in `method_kwargs`. Move "
         "it to the top level of the scan command."
+    ),
+    "indentation_limit_height": (
+        "`indentation_limit_height` does not belong in `method_kwargs`. "
+        "Move it to the top level of the scan command."
     ),
 }
 
 
 def normalize_scan_arguments(
     *,
-    indentation_limit: float | None = None,
     method_kwargs: Mapping[str, Any] | None = None,
 ) -> NormalizedScanArguments:
     """Validate and normalize the scan command's ``method_kwargs``.
 
     Raises:
-        ValueError: When legacy fields are present or top-level
-            ``indentation_limit`` conflicts with ``method_kwargs``.
+        ValueError: When legacy or first-class fields appear inside
+            ``method_kwargs``.
     """
     kwargs = dict(method_kwargs or {})
 
     for legacy_key, message in _LEGACY_KWARG_HINTS.items():
         if legacy_key in kwargs:
             raise ValueError(message)
-
-    method_indentation_limit = kwargs.pop("indentation_limit", None)
-    if indentation_limit is not None and method_indentation_limit is not None:
-        if indentation_limit != method_indentation_limit:
-            raise ValueError(
-                "Conflicting scan arguments: top-level `indentation_limit`="
-                f"{indentation_limit!r} and "
-                f"`method_kwargs.indentation_limit`={method_indentation_limit!r}. "
-                "Use only the top-level field."
-            )
-    resolved_limit = (
-        indentation_limit
-        if indentation_limit is not None
-        else method_indentation_limit
-    )
-    if resolved_limit is not None:
-        kwargs["indentation_limit"] = resolved_limit
 
     return NormalizedScanArguments(method_kwargs=kwargs)

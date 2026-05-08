@@ -19,7 +19,7 @@ Gantry YAML defines:
 - serial port
 - gantry type (`cub` or `cub_xl`)
 - CNC homing strategy
-- total Z reference height
+- total Z reference range
 - Y-axis motion mode
 - working volume
 - optional absolute `safe_z` plane (inter-labware travel)
@@ -33,7 +33,7 @@ serial_port: /dev/cu.usbserial-140
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 87.0
+  total_z_range: 87.0
   y_axis_motion: head
   # Absolute deck-frame Z used for inter-labware travel and the entry
   # approach to the first well of a scan. Defaults to working_volume.z_max.
@@ -105,8 +105,8 @@ labware:
         x: 338.0
         y: 42.0
         z: 30.0
-    x_offset_mm: -9.0
-    y_offset_mm: 9.0
+    x_offset: -9.0
+    y_offset: 9.0
 ```
 
 Use this file when:
@@ -122,7 +122,7 @@ Offsets are relative to the gantry/router reference point.
 
 Instrument blocks carry only physical mounting state (offsets, depth,
 hardware-specific config). Labware-relative motion heights
-(`measurement_height`, `safe_approach_height`) are first-class arguments
+(`measurement_height`, `interwell_scan_height`) are first-class arguments
 to the protocol commands that consume them — see the Protocol Config
 section. Inter-labware and first-well-entry travel use the gantry-level
 `safe_z`, not any instrument field.
@@ -169,7 +169,7 @@ Protocol heights are labware-relative (mm above the calibrated
 well/labware surface Z) and first-class command arguments:
 
 - `measurement_height` — action plane. Required on `measure` and `scan`.
-- `safe_approach_height` — between-wells XY-travel plane. Required on
+- `interwell_scan_height` — between-wells XY-travel plane. Required on
   `scan`. Must be at or above `measurement_height` (in +Z-up).
 
 Pipette commands engage at the labware reference Z (`measurement_height = 0`).

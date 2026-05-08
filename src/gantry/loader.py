@@ -87,7 +87,7 @@ def load_gantry_from_yaml(path: str | Path) -> GantryConfig:
         serial_port=schema.serial_port,
         gantry_type=GantryType(schema.gantry_type),
         homing_strategy=HomingStrategy(schema.cnc.homing_strategy),
-        total_z_height=schema.cnc.total_z_height,
+        total_z_range=schema.cnc.total_z_range,
         safe_z=schema.safe_z,
         working_volume=WorkingVolume(
             x_min=schema.working_volume.x_min,

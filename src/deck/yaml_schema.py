@@ -32,21 +32,20 @@ class WellPlateYamlEntry(BaseModel):
     rows: int = Field(..., gt=0)
     columns: int = Field(..., gt=0)
     # Geometry — optional metadata, not used for well position computation.
-    length_mm: Optional[float] = None
-    width_mm: Optional[float] = None
-    height_mm: Optional[float] = None
+    length: Optional[float] = Field(default=None, gt=0)
+    width: Optional[float] = Field(default=None, gt=0)
+    height: Optional[float] = Field(default=None, gt=0)
     # Inside well depth from rim (calibration anchor) to inside floor where
-    # the sample sits. Distinct from `height_mm` (outer plate height): outer
+    # the sample sits. Distinct from `height` (outer plate height): outer
     # and inside depth differ by a few millimeters depending on well-bottom
     # geometry and skirt thickness. External analysis consumers compute the
     # sample-floor Z as the deck-frame rim Z minus this depth.
-    well_depth_mm: Optional[float] = Field(default=None, gt=0)
-    height: Optional[float] = Field(default=None, gt=0)
+    well_depth: Optional[float] = Field(default=None, gt=0)
     # Backward compatibility: top-level A1 is accepted but deprecated.
     a1: Optional[_YamlPoint3D] = None
     calibration: _YamlCalibrationPoints
-    x_offset_mm: float = Field(..., gt=0)
-    y_offset_mm: float = Field(..., gt=0)
+    x_offset: float = Field(..., gt=0)
+    y_offset: float = Field(..., gt=0)
     # Volume — optional metadata.
     capacity_ul: Optional[float] = None
     working_volume_ul: Optional[float] = None
@@ -77,11 +76,11 @@ class WellPlateYamlEntry(BaseModel):
         if (self.capacity_ul is not None and self.working_volume_ul is not None
                 and self.working_volume_ul > self.capacity_ul):
             raise ValueError("working_volume_ul must be <= capacity_ul.")
-        if (self.well_depth_mm is not None and self.height_mm is not None
-                and self.well_depth_mm > self.height_mm):
+        if (self.well_depth is not None and self.height is not None
+                and self.well_depth > self.height):
             raise ValueError(
-                f"well_depth_mm ({self.well_depth_mm}) must be <= height_mm "
-                f"({self.height_mm}) — inside floor cannot sit below the plate "
+                f"well_depth ({self.well_depth}) must be <= height "
+                f"({self.height}) — inside floor cannot sit below the plate "
                 f"underside."
             )
         return self
@@ -95,9 +94,8 @@ class VialYamlEntry(BaseModel):
     type: Literal["vial"] = "vial"
     name: str
     model_name: str = ""
-    height_mm: float
-    diameter_mm: float
-    height: Optional[float] = Field(default=None, gt=0)
+    height: float
+    diameter: float
     location: _YamlPoint3D
     capacity_ul: float
     working_volume_ul: float
@@ -118,8 +116,8 @@ class NestedVialYamlEntry(BaseModel):
 
     name: Optional[str] = None
     model_name: str = ""
-    height_mm: float
-    diameter_mm: float
+    height: float
+    diameter: float
     location: _YamlPoint3D
     capacity_ul: float
     working_volume_ul: float
@@ -144,13 +142,13 @@ class NestedWellPlateYamlEntry(BaseModel):
     model_name: str = ""
     rows: int = Field(..., gt=0)
     columns: int = Field(..., gt=0)
-    length_mm: Optional[float] = None
-    width_mm: Optional[float] = None
-    height_mm: Optional[float] = None
-    well_depth_mm: Optional[float] = Field(default=None, gt=0)
+    length: Optional[float] = Field(default=None, gt=0)
+    width: Optional[float] = Field(default=None, gt=0)
+    height: Optional[float] = Field(default=None, gt=0)
+    well_depth: Optional[float] = Field(default=None, gt=0)
     calibration: _YamlCalibrationPoints
-    x_offset_mm: float = Field(..., gt=0)
-    y_offset_mm: float = Field(..., gt=0)
+    x_offset: float = Field(..., gt=0)
+    y_offset: float = Field(..., gt=0)
     capacity_ul: Optional[float] = None
     working_volume_ul: Optional[float] = None
 
@@ -185,11 +183,11 @@ class NestedWellPlateYamlEntry(BaseModel):
             and self.working_volume_ul > self.capacity_ul
         ):
             raise ValueError("working_volume_ul must be <= capacity_ul.")
-        if (self.well_depth_mm is not None and self.height_mm is not None
-                and self.well_depth_mm > self.height_mm):
+        if (self.well_depth is not None and self.height is not None
+                and self.well_depth > self.height):
             raise ValueError(
-                f"well_depth_mm ({self.well_depth_mm}) must be <= height_mm "
-                f"({self.height_mm}) — inside floor cannot sit below the plate "
+                f"well_depth ({self.well_depth}) must be <= height "
+                f"({self.height}) — inside floor cannot sit below the plate "
                 f"underside."
             )
         return self
@@ -218,15 +216,14 @@ class _BaseHolderYamlEntry(BaseModel):
 
     name: str
     model_name: str
-    height: Optional[float] = Field(default=None, gt=0)
     location: _YamlPoint3D
     slots: Dict[str, _YamlHolderSlot] = Field(default_factory=dict)
     # Holder geometry — fall through to the Python class defaults if unset.
-    length_mm: Optional[float] = Field(default=None, gt=0)
-    width_mm: Optional[float] = Field(default=None, gt=0)
-    height_mm: Optional[float] = Field(default=None, gt=0)
-    labware_support_height_mm: Optional[float] = Field(default=None, gt=0)
-    labware_seat_height_from_bottom_mm: Optional[float] = Field(default=None, gt=0)
+    length: Optional[float] = Field(default=None, gt=0)
+    width: Optional[float] = Field(default=None, gt=0)
+    height: Optional[float] = Field(default=None, gt=0)
+    labware_support_height: Optional[float] = Field(default=None, gt=0)
+    labware_seat_height_from_bottom: Optional[float] = Field(default=None, gt=0)
 
 
 class TipRackYamlEntry(_BaseHolderYamlEntry):
@@ -241,11 +238,11 @@ class TipRackYamlEntry(_BaseHolderYamlEntry):
     model_name: str = "tip_rack"
     rows: int = Field(..., gt=0, le=26)
     columns: int = Field(..., gt=0)
-    z_pickup: float = Field(..., gt=0)
-    z_drop: Optional[float] = Field(default=None, gt=0)
+    pickup_z: float = Field(..., gt=0)
+    drop_z: Optional[float] = Field(default=None, gt=0)
     calibration: _YamlCalibrationPoints
-    x_offset_mm: float = Field(..., gt=0)
-    y_offset_mm: float = Field(..., gt=0)
+    x_offset: float = Field(..., gt=0)
+    y_offset: float = Field(..., gt=0)
     tip_present: Dict[str, bool] = Field(default_factory=dict)
     # Derived from the A1 tip if omitted.
     location: Optional[_YamlPoint3D] = None  # type: ignore[assignment]

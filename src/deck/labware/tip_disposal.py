@@ -7,6 +7,6 @@ class TipDisposal(HolderLabware):
     """Bounding-box model for the used-tip disposal fixture."""
 
     model_name: str = "tip_disposal"
-    length_mm: float = 198.0
-    width_mm: float = 62.0
-    height_mm: float = 30.0
+    length: float = 198.0
+    width: float = 62.0
+    height: float = 30.0

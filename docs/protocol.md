@@ -23,15 +23,15 @@ protocol:
   - home:
 
   # Scan all wells: travel at gantry safe_z to the first well, descend to
-  # safe_approach_height above each plate surface, then to measurement_height.
+  # interwell_scan_height above each plate surface, then to measurement_height.
   - scan:
       plate: plate
       instrument: asmi
       method: indentation
-      # Labware-relative offsets above plate.height_mm (negative = below).
-      measurement_height: -1.0    # 1 mm into the well surface
-      safe_approach_height: 8.0   # 8 mm above the plate for between-wells travel
-      indentation_limit: 5.0      # magnitude: descend 5 mm below action plane
+      # Labware-relative offsets above the well surface (negative = below).
+      measurement_height: -1.0       # 1 mm into the well surface
+      interwell_scan_height: 8.0     # 8 mm above the well for between-wells travel
+      indentation_limit_height: -5.0 # 5 mm into the well at deepest descent
       method_kwargs:
         step_size: 0.01
         force_limit: 10.0
@@ -95,10 +95,13 @@ command arguments:
 
 - `measurement_height` — required on `measure` and `scan`. Action plane
   offset.
-- `safe_approach_height` — required on `scan`. Between-wells XY-travel
+- `interwell_scan_height` — required on `scan`. Between-wells XY-travel
   offset; must be at or above `measurement_height` in +Z-up.
-- `indentation_limit` (ASMI scan) — sign-agnostic *magnitude*: the
-  descent distance below the action plane. Legacy `z_limit` is rejected.
+- `indentation_limit_height` (ASMI scan) — signed labware-relative offset
+  (mm above the well surface; negative = below). The deepest absolute Z
+  reached during descent is `well.z + indentation_limit_height`. Must be
+  at or below `measurement_height`. Legacy `indentation_limit` (sign-agnostic
+  magnitude) and `z_limit` are rejected.
 
 Pipette commands (aspirate/dispense/etc.) engage at the labware reference
 Z (well bottom, tip top) — i.e. `measurement_height = 0` implicitly.

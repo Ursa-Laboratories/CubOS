@@ -966,9 +966,9 @@ class Mill:
                 current_coordinates, target_coordinates
             )
         else:
-            travel_z_offset = travel_z + offsets.z
+            gantry_travel_z = travel_z + offsets.z
             commands = self._generate_transit_commands(
-                current_coordinates, target_coordinates, travel_z_offset
+                current_coordinates, target_coordinates, gantry_travel_z
             )
         for cmd in commands:
             self.execute_command(cmd)

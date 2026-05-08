@@ -11,7 +11,7 @@ Three YAML files define a runnable experiment:
 
 Defines the controller serial port, `gantry_type`, homing strategy, working
 volume, optional absolute `safe_z` plane (used for inter-labware travel),
-optional GRBL expectations, `cnc.total_z_height`, and the instruments mounted
+optional GRBL expectations, `cnc.total_z_range`, and the instruments mounted
 on that machine.
 
 Coordinate convention:
@@ -27,7 +27,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 87.0
+  total_z_range: 87.0
   # Absolute deck-frame Z used for inter-labware travel and the entry
   # approach to the first well of a scan. Defaults to working_volume.z_max.
   safe_z: 85.0
@@ -78,13 +78,13 @@ labware:
     calibration:
       a1: { x: 347.0, y: 42.0, z: 30.0 }
       a2: { x: 338.0, y: 42.0, z: 30.0 }
-    x_offset_mm: -9.0
-    y_offset_mm: 9.0
+    x_offset: -9.0
+    y_offset: 9.0
 ```
 
 Instrument blocks carry only physical mounting state (offsets, depth,
 hardware-specific config). Labware-relative motion heights
-(`measurement_height`, `safe_approach_height`) live on the protocol
+(`measurement_height`, `interwell_scan_height`) live on the protocol
 command — see the Protocol section below. Inter-labware travel uses the
 gantry-level `safe_z`, not any instrument field.
 
@@ -121,7 +121,7 @@ Protocol motion notes:
   finish at the target position.
 - Scan and measure take labware-relative heights as first-class command
   arguments: `scan` requires both `measurement_height` (action plane)
-  and `safe_approach_height` (between-wells XY-travel plane, must be at
+  and `interwell_scan_height` (between-wells XY-travel plane, must be at
   or above the action plane); `measure` requires `measurement_height`.
   Both are mm above the well/labware calibrated surface Z (negative = below). Pipette
   commands engage at the labware reference Z (well bottom, tip top)
@@ -134,9 +134,9 @@ Protocol motion notes:
 ASMI-specific note:
 
 - `ASMI.indentation()` begins at the resolved action plane
-  (`well.z + measurement_height`) and descends by
-  `indentation_limit` mm. `indentation_limit` is sign-agnostic: only its
-  magnitude matters.
+  (`well.z + measurement_height`) and descends to the absolute Z
+  `well.z + indentation_limit_height`. The deepest plane is signed and
+  must be at or below `measurement_height`.
 
 ## Setup and Execution
 

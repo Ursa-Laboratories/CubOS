@@ -28,7 +28,7 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
     )
     deck = load_deck_from_yaml(
         CONFIGS / "deck/asmi_deck.yaml",
-        total_z_height=gantry_config.total_z_height,
+        total_z_range=gantry_config.total_z_range,
     )
     mock_gantry = MagicMock()
     mock_gantry.get_coordinates.return_value = {"x": 0.0, "y": 0.0, "z": 85.0}
@@ -40,13 +40,15 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
     def fake_indentation(
         *,
         measurement_height=None,
-        indentation_limit=None,
+        indentation_limit_height=None,
+        well_z=None,
         gantry=None,
         **kwargs,
     ):
         indentation_calls.append({
             "measurement_height": measurement_height,
-            "indentation_limit": indentation_limit,
+            "indentation_limit_height": indentation_limit_height,
+            "well_z": well_z,
             "gantry": gantry,
             **kwargs,
         })
@@ -76,13 +78,13 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
     plate_obj = deck["plate"]
     instr = board.instruments["asmi"]
     safe_z = gantry_config.resolved_safe_z
-    safe_approach_height = scan_step.args["safe_approach_height"]
+    interwell_scan_height = scan_step.args["interwell_scan_height"]
     measurement_height = scan_step.args["measurement_height"]
-    indentation_limit = scan_step.args["indentation_limit"]
-    # Heights are labware-relative; ref Z is the well's calibrated Z, not
-    # the plate's outer ``height_mm`` (which is the physical dimension).
+    indentation_limit_height = scan_step.args["indentation_limit_height"]
+    # Heights are labware-relative; the well's calibrated Z is the
+    # surface reference, not the plate's outer ``height`` (a dimension).
     surface_z = plate_obj.get_well_center("A1").z
-    approach_abs = surface_z + safe_approach_height
+    approach_abs = surface_z + interwell_scan_height
     action_abs = surface_z + measurement_height
 
     # First well: move_to_labware travels XY at safe_z, then descends to
@@ -108,8 +110,9 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
     )
     assert moves[-1].kwargs == {"travel_z": approach_abs}
 
-    assert indentation_calls[0]["measurement_height"] == action_abs
-    assert indentation_calls[0]["indentation_limit"] == indentation_limit
+    assert indentation_calls[0]["measurement_height"] == measurement_height
+    assert indentation_calls[0]["indentation_limit_height"] == indentation_limit_height
+    assert indentation_calls[0]["well_z"] == surface_z
     assert indentation_calls[0]["gantry"] is mock_gantry
 
 
@@ -119,7 +122,7 @@ def test_panda_deck_origin_layout_and_placeholders_parse():
     )
     deck = load_deck_from_yaml(
         CONFIGS / "deck/panda_deck.yaml",
-        total_z_height=gantry_config.total_z_height,
+        total_z_range=gantry_config.total_z_range,
     )
     plate = deck.resolve("well_plate_holder.plate.A1")
     plate_a2 = deck.resolve("well_plate_holder.plate.A2")
@@ -144,7 +147,7 @@ def test_filmetrics_deck_origin_config_validates_setup():
     protocol_path = CONFIGS / "protocol/filmetrics_scan.yaml"
 
     gantry_config = load_gantry_from_yaml(gantry_path)
-    deck = load_deck_from_yaml(deck_path, total_z_height=gantry_config.total_z_height)
+    deck = load_deck_from_yaml(deck_path, total_z_range=gantry_config.total_z_range)
     board = load_board_from_gantry_config(
         gantry_config, MagicMock(), mock_mode=True,
     )
@@ -159,10 +162,10 @@ def test_filmetrics_deck_origin_config_validates_setup():
     scan_step = next(step for step in protocol.steps if step.command_name == "scan")
     assert scan_step.args["measurement_height"] == pytest.approx(10.0)
     # The well's deck-frame Z (the calibration anchor's z) is the surface
-    # reference. The plate's ``height_mm`` is the physical outer dimension
+    # reference. The plate's ``height`` is the physical outer dimension
     # (from the SBS96 definition).
     assert a1.z == pytest.approx(70.0)
-    assert plate.height_mm == pytest.approx(14.35)
+    assert plate.height == pytest.approx(14.35)
     assert validate_protocol_semantics(protocol, board, deck, gantry_config) == []
 
     setup_protocol(

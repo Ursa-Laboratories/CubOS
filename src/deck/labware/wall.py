@@ -36,9 +36,9 @@ class Wall(Labware):
         if self.corner_1.z >= self.corner_2.z:
             raise ValueError("corner_1.z must be < corner_2.z")
         self.geometry = BoundingBoxGeometry(
-            length_mm=self.length_mm,
-            width_mm=self.width_mm,
-            height_mm=self.height_mm,
+            length=self.length,
+            width=self.width,
+            height=self.height,
         )
         return self
 
@@ -67,15 +67,15 @@ class Wall(Labware):
         return self.corner_2.z
 
     @property
-    def length_mm(self) -> float:
+    def length(self) -> float:
         return self.corner_2.x - self.corner_1.x
 
     @property
-    def width_mm(self) -> float:
+    def width(self) -> float:
         return self.corner_2.y - self.corner_1.y
 
     @property
-    def height_mm(self) -> float:
+    def height(self) -> float:
         return self.corner_2.z - self.corner_1.z
 
     def get_location(self, location_id: str | None = None) -> Coordinate3D:

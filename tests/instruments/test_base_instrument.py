@@ -86,7 +86,7 @@ def test_default_offset_depth():
     assert instr.offset_y == 0.0
     assert instr.depth == 0.0
     assert not hasattr(instr, "measurement_height")
-    assert not hasattr(instr, "safe_approach_height")
+    assert not hasattr(instr, "interwell_scan_height")
 
 
 def test_custom_offset_and_depth():

@@ -1,10 +1,10 @@
 # ASMI indentation protocol for the CubOS deck-origin frame.
 #
-# +Z is up. Heights on `scan` (`measurement_height`, `safe_approach_height`)
-# are *labware-relative* offsets above the plate's deck-frame surface Z
-# (`labware.height_mm`). Inter-labware travel uses the gantry's `safe_z`.
-# Run only after staged jog-direction, homing, WPos calibration, and
-# clearance checks pass.
+# +Z is up. Heights on `scan` (`measurement_height`, `interwell_scan_height`,
+# `indentation_limit_height`) are *labware-relative* offsets above the
+# well's calibrated deck-frame surface Z. Inter-labware travel uses the
+# gantry's `safe_z`. Run only after staged jog-direction, homing, WPos
+# calibration, and clearance checks pass.
 
 positions:
   # High park pose near the back-right/home side, intentionally below the
@@ -18,10 +18,10 @@ protocol:
       plate: plate
       instrument: asmi
       method: indentation
-      # Labware-relative offsets above plate.height_mm (mm; negative = below).
-      measurement_height: -1.0    # 1 mm into the well surface for seating
-      safe_approach_height: 8.0   # 8 mm above the plate surface
-      indentation_limit: 5.0      # magnitude (mm of descent below action plane)
+      # Labware-relative offsets above the well surface (mm; negative = below).
+      measurement_height: -1.0       # 1 mm into the well for seating
+      interwell_scan_height: 8.0     # 8 mm above the well surface
+      indentation_limit_height: -5.0 # 5 mm into the well at deepest descent
       method_kwargs:
         step_size: 0.1
         force_limit: 10.0

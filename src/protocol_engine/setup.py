@@ -72,7 +72,7 @@ def setup_protocol(
     validate_deck_origin_minima(gantry_config)
     deck: Deck = load_deck_from_yaml_safe(
         deck_path,
-        total_z_height=gantry_config.total_z_height,
+        total_z_range=gantry_config.total_z_range,
     )
 
     if gantry is None:

@@ -38,17 +38,17 @@ labware:
     calibration:
       a1: { x: -17.88, y: -42.23, z: -20.0 }
       a2: { x: -17.88, y: -51.23, z: -20.0 }
-    x_offset_mm: 9.0    # positive spacing magnitude; A1/A2 determine direction
-    y_offset_mm: 9.0
+    x_offset: 9.0    # positive spacing magnitude; A1/A2 determine direction
+    y_offset: 9.0
 ```
 
 Vendor-specific variants (e.g. Corning 360 µL round-bottom, deep-well
 2 mL, skirt height differences) should override the relevant fields
-(`height_mm`, `well_depth_mm`, `capacity_ul`, `working_volume_ul`) in
-the deck YAML. The pair `(height_mm, well_depth_mm)` is intentionally
-separate: `height_mm` is the outer dimension (rim → underside),
-`well_depth_mm` is the inside (rim → sample floor). Analysis pipelines
-use `a1.z - well_depth_mm` to compute sample thickness.
+(`height`, `well_depth`, `capacity_ul`, `working_volume_ul`) in
+the deck YAML. The pair `(height, well_depth)` is intentionally
+separate: `height` is the outer dimension (rim → underside),
+`well_depth` is the inside (rim → sample floor). Analysis pipelines
+use `a1.z - well_depth` to compute sample thickness.
 
 ## Compatibility
 

@@ -12,9 +12,9 @@ def _make_plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_96",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=2,
         wells={
@@ -32,8 +32,8 @@ def _make_vial() -> Vial:
     return Vial(
         name="vial_1",
         model_name="standard_1_5ml",
-        height_mm=66.75,
-        diameter_mm=28.0,
+        height=66.75,
+        diameter=28.0,
         location=Coordinate3D(x=30.0, y=40.0, z=20.0),
         capacity_ul=1500.0,
         working_volume_ul=1200.0,

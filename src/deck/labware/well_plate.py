@@ -19,9 +19,9 @@ class WellPlate(Labware):
     name: str = Field(..., description="Unique well plate name.")
     model_name: str = Field("", description="Well plate model identifier.")
     # Geometry — optional metadata, not used for well position computation.
-    length_mm: Optional[float] = Field(None, description="Overall plate length in millimeters.")
-    width_mm: Optional[float] = Field(None, description="Overall plate width in millimeters.")
-    height_mm: Optional[float] = Field(
+    length: Optional[float] = Field(None, description="Overall plate length in millimeters.")
+    width: Optional[float] = Field(None, description="Overall plate width in millimeters.")
+    height: Optional[float] = Field(
         None,
         description=(
             "Outer plate height in millimeters — calibration rim to underside "
@@ -29,11 +29,11 @@ class WellPlate(Labware):
             "Z coordinate."
         ),
     )
-    well_depth_mm: Optional[float] = Field(
+    well_depth: Optional[float] = Field(
         None,
         description=(
             "Inside well depth in millimeters from the calibration rim to the "
-            "inside floor where the sample sits. Distinct from `height_mm` "
+            "inside floor where the sample sits. Distinct from `height` "
             "(outer plate height): outer and inside depth differ by a few "
             "millimeters depending on well-bottom geometry and skirt thickness. "
             "External analysis consumers use it to compute the sample-floor Z "
@@ -79,18 +79,18 @@ class WellPlate(Labware):
         # bottom-wall thickness. Catches the realistic miscalibration bug
         # (e.g. swapped values) that gt=0 alone wouldn't.
         if (
-            self.well_depth_mm is not None
-            and self.height_mm is not None
-            and self.well_depth_mm > self.height_mm
+            self.well_depth is not None
+            and self.height is not None
+            and self.well_depth > self.height
         ):
             raise ValueError(
-                f"well_depth_mm ({self.well_depth_mm}) must be <= height_mm "
-                f"({self.height_mm}) — inside floor cannot sit below the plate "
+                f"well_depth ({self.well_depth}) must be <= height "
+                f"({self.height}) — inside floor cannot sit below the plate "
                 f"underside."
             )
         return self
 
-    @field_validator("length_mm", "width_mm", "well_depth_mm")
+    @field_validator("length", "width", "well_depth")
     def _validate_positive_dimension(cls, value: Optional[float], info):  # type: ignore[override]
         if value is not None and value <= 0:
             raise ValueError(f"{info.field_name} must be positive.")
@@ -115,14 +115,14 @@ class WellPlate(Labware):
             raise ValueError(
                 f"WellPlate wells count must equal rows*columns ({expected_well_count}), got {len(self.wells)}."
             )
-        # ``height_mm`` is the plate's physical outer dimension (rim →
+        # ``height`` is the plate's physical outer dimension (rim →
         # underside). The deck-frame Z of the plate surface is carried
         # on each well's coordinate (set by calibration). The geometry
         # below carries only XY footprint metadata; bounding-box height
         # would conflate the dimension with the surface Z.
         self.geometry = BoundingBoxGeometry(
-            length_mm=self.length_mm,
-            width_mm=self.width_mm,
+            length=self.length,
+            width=self.width,
         )
         return self
 
@@ -156,8 +156,8 @@ def generate_wells_from_offsets(
     row_labels: List[str],
     column_indices: List[int],
     a1_center: Coordinate3D,
-    x_offset_mm: float,
-    y_offset_mm: float,
+    x_offset: float,
+    y_offset: float,
     rounding_decimals: int = 3,
 ) -> Dict[str, Coordinate3D]:
     """
@@ -174,8 +174,8 @@ def generate_wells_from_offsets(
         for col_idx, col_num in enumerate(column_indices):
             well_id = f"{row_label}{col_num}"
 
-            x = a1_center.x + x_offset_mm * col_idx
-            y = a1_center.y + y_offset_mm * row_idx
+            x = a1_center.x + x_offset * col_idx
+            y = a1_center.y + y_offset * row_idx
             z = a1_center.z
 
             wells[well_id] = Coordinate3D(

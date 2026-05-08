@@ -2,12 +2,12 @@
 
 CubOS uses a +Z-up deck frame and labware-relative action heights.
 
-* ``measurement_height`` and ``safe_approach_height`` are *labware-relative*
+* ``measurement_height`` and ``interwell_scan_height`` are *labware-relative*
   offsets above (positive) or below (negative) the labware's surface
   reference Z (the deck-frame Z carried by the resolved well/labware
   coordinate). Both are first-class arguments to the protocol commands
   that use them (``measure`` and ``scan`` for ``measurement_height``,
-  ``scan`` for ``safe_approach_height``). Instruments do not carry them.
+  ``scan`` for ``interwell_scan_height``). Instruments do not carry them.
 * Inter-labware travel uses the gantry's absolute ``safe_z``, exposed on
   ``Board.safe_z``.
 
@@ -53,7 +53,7 @@ def engage_at_labware(
     *,
     measurement_height: float,
     command_label: str,
-) -> float:
+) -> tuple[float, float]:
     """Travel above *position* at ``safe_z``, descend to the action plane.
 
     ``measurement_height`` is a labware-relative offset (mm above the
@@ -62,7 +62,12 @@ def engage_at_labware(
     tip racks, the vial-rim Z for vials). The gantry descends to
     ``coord.z + measurement_height``.
 
-    Returns the resolved absolute action Z.
+    Returns a ``(well_z, action_z)`` pair where ``well_z`` is the labware
+    surface reference (the resolved coordinate's Z) and ``action_z`` is
+    that reference plus ``measurement_height``. Callers forward the
+    well-surface Z to closed-loop instrument methods that compute their
+    own descent geometry from a labware-relative ``measurement_height`` /
+    ``indentation_limit_height``.
 
     Raises:
         ValueError: missing instrument, position, or labware on the deck;
@@ -87,8 +92,8 @@ def engage_at_labware(
             f"{command_label}: cannot resolve position {position!r} on the "
             f"deck: {exc}"
         ) from exc
-    x, y, ref_z = unpack_xyz(coord)
-    action_z = ref_z + measurement_height
+    x, y, well_z = unpack_xyz(coord)
+    action_z = well_z + measurement_height
     context.board.move_to_labware(instrument, coord)
     context.board.move(instrument, (x, y, action_z))
-    return action_z
+    return well_z, action_z

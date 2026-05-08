@@ -41,7 +41,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 87.0
+  total_z_range: 87.0
   y_axis_motion: head
   # Absolute deck-frame Z used for inter-labware travel and the entry
   # approach to the first well of a scan. Defaults to working_volume.z_max.
@@ -88,10 +88,12 @@ rail is valid only when the instrument point is above the built-in rail height.
 
 `homing_strategy` must be `standard`, which runs GRBL `$H`.
 
-`total_z_height` is required and must be greater than zero. It describes the
-configured vertical envelope. Deck labware can use a `height` field instead of
-explicit Z coordinates; under the deck-origin convention that `height` is used
-directly as the deck-frame Z value.
+`total_z_range` is required and must be greater than zero. It describes the
+configured vertical envelope. Deck labware deck-frame Z values come from
+calibration anchors only — `calibration.a1.z` (plates / holders / tip racks)
+or `location.z` (vials / holders). The labware `height` field is the
+*physical outer dimension* (rim → underside) and is not a Z shorthand;
+omitting an anchor `z` raises a load-time error.
 
 `y_axis_motion` is optional and defaults to `head`. Use `head` when the gantry
 head moves along Y, and `bed` when the machine bed moves along Y.
@@ -146,17 +148,19 @@ protocol commands that consume them:
 
 - `measurement_height` — required on `measure` and `scan`. It is the
   action plane offset.
-- `safe_approach_height` — required on `scan`. It is the between-wells
+- `interwell_scan_height` — required on `scan`. It is the between-wells
   XY-travel offset and must be at or above `measurement_height`.
 
 Pipette commands (aspirate/dispense/etc.) engage at the labware reference
 Z (well bottom, tip top) — i.e. `measurement_height = 0` implicitly.
 - `park_position` is an explicit rest pose (absolute coords, not relative).
-- ASMI `indentation_limit` is a sign-agnostic *magnitude* — the descent
-  distance below the action plane.
+- ASMI `indentation_limit_height` is a *signed* labware-relative offset
+  (mm above the well surface; negative = below). It must be at or below
+  `measurement_height` (descent goes down).
 
 Legacy names `entry_travel_z`, `entry_travel_height`,
-`interwell_travel_height`, and ASMI `z_limit` are rejected before motion.
+`interwell_travel_height`, `safe_approach_height`, `indentation_limit`,
+and ASMI `z_limit` are rejected before motion.
 
 ## Controller Bring-Up
 

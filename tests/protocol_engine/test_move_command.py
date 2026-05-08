@@ -43,7 +43,7 @@ class TestMoveCommandRouting:
 
     def test_deck_target_uses_move_to_labware(self):
         """Deck target strings route through move_to_labware so
-        safe_approach_height is applied (consistent with measure/aspirate)."""
+        interwell_scan_height is applied (consistent with measure/aspirate)."""
         from protocol_engine.commands.move import move
 
         coord = Coordinate3D(x=10.0, y=20.0, z=75.0)

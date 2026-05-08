@@ -2,15 +2,15 @@
 
 The protocol model:
 
-* ``measurement_height`` and ``safe_approach_height`` are *labware-relative*
-  offsets (mm above the labware's ``height_mm`` surface; negative = below)
+* ``measurement_height`` and ``interwell_scan_height`` are *labware-relative*
+  offsets (mm above the well's calibrated surface Z; negative = below)
   and are first-class arguments to the protocol commands that use them.
 * ``measurement_height`` is required on ``measure`` and ``scan``.
-* ``safe_approach_height`` is required on ``scan``.
+* ``interwell_scan_height`` is required on ``scan``.
 * Instruments do not declare these heights.
 * ``gantry.safe_z`` is the absolute deck-frame Z used for inter-labware
   travel and the entry approach for the first well of a scan. Resolved
-  approach planes must satisfy ``height_mm + safe_approach_height <= safe_z``.
+  approach planes must satisfy ``well.z + interwell_scan_height <= safe_z``.
 """
 
 from __future__ import annotations
@@ -470,14 +470,13 @@ def _validate_scan_command(
 
     try:
         normalized = normalize_scan_arguments(
-            indentation_limit=args.get("indentation_limit"),
             method_kwargs=args.get("method_kwargs"),
         )
     except ValueError as exc:
         return [_violation(step_index, "scan", str(exc))]
 
     relative_action = args.get("measurement_height")
-    relative_approach = args.get("safe_approach_height")
+    relative_approach = args.get("interwell_scan_height")
     if relative_action is None:
         violations.append(_violation(
             step_index,
@@ -490,7 +489,7 @@ def _validate_scan_command(
         violations.append(_violation(
             step_index,
             "scan",
-            "`safe_approach_height` is required on `scan` (labware-relative "
+            "`interwell_scan_height` is required on `scan` (labware-relative "
             "offset for between-wells XY travel).",
         ))
         return violations
@@ -520,7 +519,7 @@ def _validate_scan_command(
                 step_index, "scan", "measurement_height", relative_action,
             ),
             _finite_field_violation(
-                step_index, "scan", "safe_approach_height", relative_approach,
+                step_index, "scan", "interwell_scan_height", relative_approach,
             ),
         ) if v is not None
     ]
@@ -532,7 +531,7 @@ def _validate_scan_command(
         violations.append(_violation(
             step_index,
             "scan",
-            f"safe_approach_height ({relative_approach}) is below "
+            f"interwell_scan_height ({relative_approach}) is below "
             f"measurement_height ({relative_action}). In +Z-up, the "
             "approach must be at or above the action plane.",
         ))
@@ -547,7 +546,7 @@ def _validate_scan_command(
             "scan",
             f"resolved approach Z ({approach_abs:.3f} = "
             f"{ref_z}+{relative_approach}) is above the gantry's safe_z "
-            f"({safe_z}). Lower `safe_approach_height` or raise `safe_z`.",
+            f"({safe_z}). Lower `interwell_scan_height` or raise `safe_z`.",
         ))
 
     sorted_wells = sorted(
@@ -587,8 +586,23 @@ def _validate_scan_command(
         ref_z=ref_z,
         relative_action=relative_action,
         normalized=normalized,
+        board=board,
         gantry=gantry,
     ))
+    indentation_limit_height = args.get("indentation_limit_height")
+    if (
+        indentation_limit_height is not None
+        and isinstance(indentation_limit_height, (int, float))
+        and not isinstance(indentation_limit_height, bool)
+        and math.isfinite(float(indentation_limit_height))
+        and indentation_limit_height > relative_action
+    ):
+        violations.append(_violation(
+            step_index, "scan",
+            f"indentation_limit_height ({indentation_limit_height}) is above "
+            f"measurement_height ({relative_action}). The deepest descent "
+            "plane must be at or below the action plane in +Z-up.",
+        ))
     return violations
 
 
@@ -800,21 +814,33 @@ def _validate_asmi_indentation(
     ref_z: float,
     relative_action: float,
     normalized: NormalizedScanArguments,
+    board: Board,
     gantry: GantryConfig | None,
 ) -> list[ProtocolSemanticViolation]:
     """Bounds-check ASMI indentation against the working volume.
 
-    ``indentation_limit`` is treated as a magnitude (sign-agnostic): the
+    ``indentation_limit_height`` is a *signed* labware-relative offset
+    (mm above the well's calibrated surface Z; negative = below). The
     deepest absolute Z reached during the descent is
-    ``ref_z + relative_action - |indentation_limit|``.
+    ``ref_z + indentation_limit_height``.
     """
+    # Match by *type* (not by the user-chosen instrument key) so a force
+    # sensor named e.g. ``force_sensor`` or ``asmi_main`` still goes
+    # through the depth-bound check. The deepest-Z bound is the only thing
+    # protecting against driving the gantry through the deck.
+    from instruments.asmi.driver import ASMI
+
     violations: list[ProtocolSemanticViolation] = []
-    if args.get("instrument") != "asmi" or args.get("method") != "indentation":
+    instrument = args.get("instrument")
+    if (
+        instrument not in board.instruments
+        or not isinstance(board.instruments[instrument], ASMI)
+        or args.get("method") != "indentation"
+    ):
         return violations
 
-    kwargs = normalized.method_kwargs
-    indentation_limit = kwargs.get("indentation_limit")
-    step_size = kwargs.get("step_size")
+    indentation_limit_height = args.get("indentation_limit_height")
+    step_size = normalized.method_kwargs.get("step_size")
 
     if step_size is not None and step_size <= 0:
         violations.append(_violation(
@@ -823,16 +849,23 @@ def _validate_asmi_indentation(
             f"ASMI step_size must be positive, got {step_size}.",
         ))
 
-    if indentation_limit is None or gantry is None:
+    if indentation_limit_height is None or gantry is None:
         return violations
-    deepest_abs = ref_z + relative_action - abs(indentation_limit)
+    finite_violation = _finite_field_violation(
+        step_index, "scan", "indentation_limit_height", indentation_limit_height,
+    )
+    if finite_violation is not None:
+        violations.append(finite_violation)
+        return violations
+    deepest_abs = ref_z + indentation_limit_height
     if deepest_abs < gantry.working_volume.z_min:
         violations.append(_violation(
             step_index,
             "scan",
             f"ASMI indentation deepest absolute Z ({deepest_abs:.3f}) is "
             f"below working_volume.z_min ({gantry.working_volume.z_min}). "
-            "Reduce indentation_limit, raise the labware, or adjust z_min.",
+            "Raise `indentation_limit_height`, raise the labware, or adjust "
+            "z_min.",
         ))
     return violations
 

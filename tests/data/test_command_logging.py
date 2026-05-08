@@ -24,9 +24,9 @@ def _make_2x2_plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_96",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=2,
         wells={
@@ -44,8 +44,8 @@ def _make_vial(name: str = "vial_1") -> Vial:
     return Vial(
         name=name,
         model_name="test_vial",
-        height_mm=50.0,
-        diameter_mm=20.0,
+        height=50.0,
+        diameter=20.0,
         location=Coordinate3D(x=50.0, y=0.0, z=0.0),
         capacity_ul=5000.0,
         working_volume_ul=4000.0,
@@ -126,7 +126,7 @@ class TestScanCommandLogging:
         store, cid = _make_store_with_labware(plate=plate)
         ctx = _mock_context(plate=plate, store=store, campaign_id=cid)
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, safe_approach_height=10.0)
+        scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
 
         uvvis_count = store._conn.execute(
             "SELECT COUNT(*) FROM uvvis_measurements"
@@ -141,7 +141,7 @@ class TestScanCommandLogging:
         store.record_dispense(cid, "plate_1", "A1", "vial_1", 50.0)
         ctx = _mock_context(plate=plate, store=store, campaign_id=cid)
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, safe_approach_height=10.0)
+        scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
 
         row = store._conn.execute(
             "SELECT contents FROM experiments WHERE well_id = 'A1'"
@@ -153,14 +153,14 @@ class TestScanCommandLogging:
         from protocol_engine.commands.scan import scan
 
         ctx = _mock_context()
-        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, safe_approach_height=10.0)
+        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
         assert len(result) == 4
 
     def test_returns_any_type(self):
         from protocol_engine.commands.scan import scan
 
         ctx = _mock_context()
-        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, safe_approach_height=10.0)
+        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
         assert all(isinstance(v, UVVisSpectrum) for v in result.values())
 
 

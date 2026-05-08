@@ -10,11 +10,11 @@ class VialHolder(HolderLabware):
     """Holder for a linear array of vial slots."""
 
     model_name: str = "9VialHolder20mL_TightFit"
-    length_mm: float = 36.2
-    width_mm: float = 300.2
-    height_mm: float = 35.1
-    labware_support_height_mm: float = 35.1
-    labware_seat_height_from_bottom_mm: float = 18.0
+    length: float = 36.2
+    width: float = 300.2
+    height: float = 35.1
+    labware_support_height: float = 35.1
+    labware_seat_height_from_bottom: float = 18.0
     slot_count: int = Field(default=9, description="Maximum number of supported vial slots.")
 
     @field_validator("slot_count")
