@@ -851,6 +851,12 @@ def _validate_asmi_indentation(
 
     if indentation_limit_height is None or gantry is None:
         return violations
+    finite_violation = _finite_field_violation(
+        step_index, "scan", "indentation_limit_height", indentation_limit_height,
+    )
+    if finite_violation is not None:
+        violations.append(finite_violation)
+        return violations
     deepest_abs = ref_z + indentation_limit_height
     if deepest_abs < gantry.working_volume.z_min:
         violations.append(_violation(

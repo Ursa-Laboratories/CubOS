@@ -150,6 +150,67 @@ def test_asmi_indentation_below_z_min_violates():
     assert any("indentation deepest" in v.message for v in violations)
 
 
+def test_asmi_indentation_depth_uses_well_z_not_plate_height():
+    """The deepest absolute Z is ``well.z + indentation_limit_height`` —
+    pin the formula in a fixture where ``well.z`` and ``plate.height``
+    differ. A regression that read the plate's outer ``height`` instead
+    of the calibrated well Z would compute a wrong (and possibly
+    safe-looking) deepest-Z bound."""
+    plate = WellPlate(
+        name="plate",
+        model_name="test_plate",
+        length=127.71,
+        width=85.43,
+        height=14.10,                              # outer plate dimension
+        rows=1,
+        columns=1,
+        # Holder-mounted plate: surface Z is 70.0, NOT plate.height.
+        wells={"A1": Coordinate3D(x=0.0, y=0.0, z=70.0)},
+        capacity_ul=200.0,
+        working_volume_ul=150.0,
+    )
+    board = Board(
+        gantry=MagicMock(),
+        instruments={"asmi": _instrument("asmi")},
+    )
+    deck = Deck({"plate": plate})
+    gantry = _gantry_config(z_max=100.0)
+
+    # measurement_height=-1.0 + indentation_limit_height=-69.5 → deepest =
+    # well.z (70) + (-69.5) = 0.5  → above z_min=0, OK.
+    # The legacy magnitude formula would give 14.10 - 1 - 69.5 = -56.4 — a
+    # spurious violation.
+    ok_protocol = _protocol(_scan_args(
+        measurement_height=-1.0, indentation_limit_height=-69.5,
+    ))
+    assert validate_protocol_semantics(ok_protocol, board, deck, gantry) == []
+
+    # Push deepest below z_min using well.z=70 reference: -71 → 70-71 = -1.
+    bad_protocol = _protocol(_scan_args(
+        measurement_height=-1.0, indentation_limit_height=-71.0,
+    ))
+    violations = validate_protocol_semantics(bad_protocol, board, deck, gantry)
+    assert any("indentation deepest" in v.message for v in violations)
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), True, "1.0"])
+def test_asmi_indentation_non_finite_indentation_limit_height_violates(bad_value):
+    """A non-finite ``indentation_limit_height`` must produce a per-field
+    violation rather than silently bypassing the depth bound. NaN
+    comparisons are False, so without an explicit finite gate the
+    ``deepest_abs < z_min`` check would silently no-op."""
+    board, deck = _board_and_deck()
+    gantry = _gantry_config(z_max=100.0)
+    protocol = _protocol(_scan_args(indentation_limit_height=bad_value))
+
+    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+
+    assert any(
+        "indentation_limit_height must be a finite number" in v.message
+        for v in violations
+    ), violations
+
+
 def test_asmi_indentation_depth_bound_matches_by_instrument_type_not_name():
     """A user-named ASMI (e.g. 'force_sensor') still triggers the
     depth-bound check — the validator matches on the driver type, not

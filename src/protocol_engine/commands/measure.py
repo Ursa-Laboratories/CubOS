@@ -6,6 +6,7 @@ from typing import Any, Dict, TYPE_CHECKING
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
+from ..scan_args import normalize_scan_arguments
 from ._dispatch import inject_runtime_args
 from ._movement import engage_at_labware
 
@@ -45,6 +46,16 @@ def measure(
             f"Instrument '{instrument}' has no method '{method}'."
         )
 
+    # Reuse scan's legacy / first-class kwarg rejection so a user porting
+    # an old config that put ``indentation_limit`` / ``z_limit`` /
+    # ``safe_approach_height`` / ``measurement_height`` inside
+    # ``method_kwargs`` gets the same rename hint here as on ``scan``,
+    # rather than a generic Python TypeError or a silent overwrite.
+    try:
+        normalized = normalize_scan_arguments(method_kwargs=method_kwargs)
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
+
     try:
         well_z, action_z = engage_at_labware(
             context, instrument, position,
@@ -65,7 +76,7 @@ def measure(
     # receive only the YAML-supplied ``method_kwargs``.
     callable_method = getattr(instr, method)
     kwargs = inject_runtime_args(
-        callable_method, method_kwargs, context,
+        callable_method, normalized.method_kwargs, context,
         well_z=well_z,
         measurement_height=measurement_height,
     )
