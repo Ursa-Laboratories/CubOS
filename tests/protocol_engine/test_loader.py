@@ -44,7 +44,7 @@ protocol:
       instrument: uvvis
       method: measure
       measurement_height: 0.0
-      safe_approach_height: 10.0
+      interwell_scan_height: 10.0
 """
 
 
@@ -120,7 +120,7 @@ def test_scan_accepts_new_height_names():
             "instrument": "uvvis",
             "method": "measure",
             "measurement_height": 0.0,
-            "safe_approach_height": 10.0,
+            "interwell_scan_height": 10.0,
         }
     finally:
         Path(path).unlink(missing_ok=True)
@@ -136,7 +136,7 @@ protocol:
       plate: plate_1
       instrument: uvvis
       method: measure
-      safe_approach_height: 10.0
+      interwell_scan_height: 10.0
 """
     path = _write_yaml(yaml)
     try:
@@ -146,7 +146,7 @@ protocol:
         Path(path).unlink(missing_ok=True)
 
 
-def test_scan_rejects_yaml_missing_safe_approach_height():
+def test_scan_rejects_yaml_missing_interwell_scan_height():
     yaml = """
 protocol:
   - scan:
@@ -157,7 +157,7 @@ protocol:
 """
     path = _write_yaml(yaml)
     try:
-        with pytest.raises(Exception, match="safe_approach_height"):
+        with pytest.raises(Exception, match="interwell_scan_height"):
             load_protocol_from_yaml(path)
     finally:
         Path(path).unlink(missing_ok=True)
@@ -178,7 +178,10 @@ protocol:
         Path(path).unlink(missing_ok=True)
 
 
-def test_scan_rejects_legacy_travel_names():
+def test_scan_top_level_safe_approach_height_routes_rename_hint():
+    """Top-level legacy scan fields are caught by Pydantic's generic
+    `extra_forbidden` error. The loader's exception formatter intercepts
+    and substitutes a rename hint pointing at the new field name."""
     yaml = """
 protocol:
   - scan:
@@ -187,12 +190,91 @@ protocol:
       method: measure
       measurement_height: 0.0
       safe_approach_height: 10.0
-      entry_travel_z: 10.0
 """
     path = _write_yaml(yaml)
     try:
-        with pytest.raises(Exception):
-            load_protocol_from_yaml(path)
+        with pytest.raises(Exception, match="interwell_scan_height"):
+            load_protocol_from_yaml_safe(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_scan_top_level_indentation_limit_routes_semantic_shift_hint():
+    """`indentation_limit` was both renamed AND semantically flipped from a
+    sign-agnostic magnitude to a signed labware-relative offset. Surface
+    the meaning change so a user porting `indentation_limit: 5.0` doesn't
+    accidentally write `indentation_limit_height: 5.0` (which would put
+    the deepest plane *above* the well surface)."""
+    yaml = """
+protocol:
+  - scan:
+      plate: plate_1
+      instrument: uvvis
+      method: measure
+      measurement_height: 0.0
+      interwell_scan_height: 10.0
+      indentation_limit: 5.0
+"""
+    path = _write_yaml(yaml)
+    try:
+        with pytest.raises(Exception, match="signed"):
+            load_protocol_from_yaml_safe(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_scan_top_level_entry_travel_height_routes_rename_hint():
+    yaml = """
+protocol:
+  - scan:
+      plate: plate_1
+      instrument: uvvis
+      method: measure
+      measurement_height: 0.0
+      interwell_scan_height: 10.0
+      entry_travel_height: 10.0
+"""
+    path = _write_yaml(yaml)
+    try:
+        with pytest.raises(Exception, match="safe_z"):
+            load_protocol_from_yaml_safe(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_scan_top_level_interwell_travel_height_routes_rename_hint():
+    yaml = """
+protocol:
+  - scan:
+      plate: plate_1
+      instrument: uvvis
+      method: measure
+      measurement_height: 0.0
+      interwell_travel_height: 10.0
+"""
+    path = _write_yaml(yaml)
+    try:
+        with pytest.raises(Exception, match="interwell_scan_height"):
+            load_protocol_from_yaml_safe(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_scan_top_level_z_limit_routes_rename_hint():
+    yaml = """
+protocol:
+  - scan:
+      plate: plate_1
+      instrument: uvvis
+      method: measure
+      measurement_height: 0.0
+      interwell_scan_height: 10.0
+      z_limit: 5.0
+"""
+    path = _write_yaml(yaml)
+    try:
+        with pytest.raises(Exception, match="indentation_limit_height"):
+            load_protocol_from_yaml_safe(path)
     finally:
         Path(path).unlink(missing_ok=True)
 

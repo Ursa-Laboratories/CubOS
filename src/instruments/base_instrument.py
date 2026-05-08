@@ -26,7 +26,7 @@ class BaseInstrument(ABC):
 
     * ``measurement_height`` (action plane, labware-relative offset) is a
       first-class argument to ``measure`` and ``scan``.
-    * ``safe_approach_height`` (between-wells XY-travel offset) is a
+    * ``interwell_scan_height`` (between-wells XY-travel offset) is a
       first-class argument to ``scan``.
 
     Inter-labware travel and the entry approach for the first well of a

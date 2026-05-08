@@ -67,7 +67,7 @@ class GantryConfig:
     serial_port: str
     gantry_type: GantryType
     homing_strategy: HomingStrategy
-    total_z_height: float
+    total_z_range: float
     working_volume: WorkingVolume
     y_axis_motion: YAxisMotion = YAxisMotion.HEAD
     safe_z: Optional[float] = None
@@ -81,9 +81,9 @@ class GantryConfig:
             raise ValueError(
                 f"Unsupported gantry_type {self.gantry_type!r}."
             ) from exc
-        if self.total_z_height <= 0:
+        if self.total_z_range <= 0:
             raise ValueError(
-                f"total_z_height ({self.total_z_height}) must be > 0"
+                f"total_z_range ({self.total_z_range}) must be > 0"
             )
         if self.safe_z is not None:
             if not (

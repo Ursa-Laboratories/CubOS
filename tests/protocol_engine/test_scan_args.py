@@ -29,21 +29,32 @@ class TestNormalizeScanArguments:
                 method_kwargs={"interwell_travel_height": 20.0},
             )
 
-    def test_indentation_limit_passes_through_to_method_kwargs(self):
-        normalized = normalize_scan_arguments(indentation_limit=5.0)
-        assert normalized.method_kwargs == {"indentation_limit": 5.0}
-
-    def test_indentation_limit_conflict_rejected(self):
-        with pytest.raises(ValueError, match="indentation_limit"):
+    def test_indentation_limit_height_in_method_kwargs_rejected(self):
+        """`indentation_limit_height` is a top-level scan field. Inside
+        `method_kwargs` the engine wouldn't see it, so reject early."""
+        with pytest.raises(ValueError, match="indentation_limit_height"):
             normalize_scan_arguments(
-                indentation_limit=5.0,
-                method_kwargs={"indentation_limit": 4.0},
+                method_kwargs={"indentation_limit_height": -5.0},
+            )
+
+    def test_legacy_indentation_limit_kwarg_rejected_with_rename_hint(self):
+        """Old `indentation_limit` magnitude was renamed to
+        `indentation_limit_height` (signed, relative)."""
+        with pytest.raises(ValueError, match="indentation_limit_height"):
+            normalize_scan_arguments(
+                method_kwargs={"indentation_limit": 5.0},
             )
 
     def test_z_limit_kwarg_rejected(self):
         with pytest.raises(ValueError, match="z_limit"):
             normalize_scan_arguments(
                 method_kwargs={"z_limit": 5.0},
+            )
+
+    def test_legacy_safe_approach_height_kwarg_rejected_with_rename_hint(self):
+        with pytest.raises(ValueError, match="interwell_scan_height"):
+            normalize_scan_arguments(
+                method_kwargs={"safe_approach_height": 10.0},
             )
 
     def test_measurement_height_in_method_kwargs_rejected(self):
@@ -55,8 +66,8 @@ class TestNormalizeScanArguments:
                 method_kwargs={"measurement_height": 5.0},
             )
 
-    def test_safe_approach_height_in_method_kwargs_rejected(self):
-        with pytest.raises(ValueError, match="safe_approach_height"):
+    def test_interwell_scan_height_in_method_kwargs_rejected(self):
+        with pytest.raises(ValueError, match="interwell_scan_height"):
             normalize_scan_arguments(
-                method_kwargs={"safe_approach_height": 5.0},
+                method_kwargs={"interwell_scan_height": 5.0},
             )

@@ -208,7 +208,7 @@ class TestLoadBoardFromGantryConfig:
             gantry_type: cub_xl
             cnc:
               homing_strategy: standard
-              total_z_height: 90.0
+              total_z_range: 90.0
             working_volume:
               x_min: 0.0
               x_max: 300.0
@@ -241,7 +241,7 @@ class TestLoadBoardFromGantryConfig:
             gantry_type: cub_xl
             cnc:
               homing_strategy: standard
-              total_z_height: 90.0
+              total_z_range: 90.0
             working_volume:
               x_min: 0.0
               x_max: 300.0
@@ -263,7 +263,7 @@ class TestLoadBoardFromGantryConfig:
             gantry_type: cub_xl
             cnc:
               homing_strategy: standard
-              total_z_height: 90.0
+              total_z_range: 90.0
             working_volume:
               x_min: 0.0
               x_max: 300.0

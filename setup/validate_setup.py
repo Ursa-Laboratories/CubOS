@@ -120,7 +120,7 @@ def run_validation(
     try:
         deck = load_deck_from_yaml(
             deck_path,
-            total_z_height=gantry_config.total_z_height,
+            total_z_range=gantry_config.total_z_range,
         )
     except Exception as exc:
         out(f"  ERROR: {exc}")

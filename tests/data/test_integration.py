@@ -24,9 +24,9 @@ def _make_plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_96",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=2,
         wells={
@@ -44,8 +44,8 @@ def _make_vial() -> Vial:
     return Vial(
         name="reagent_vial",
         model_name="test_vial",
-        height_mm=50.0,
-        diameter_mm=20.0,
+        height=50.0,
+        diameter=20.0,
         location=Coordinate3D(x=50.0, y=0.0, z=0.0),
         capacity_ul=5000.0,
         working_volume_ul=4000.0,
@@ -122,7 +122,7 @@ class TestFullProtocolWithDataStore:
         assert len(contents_b1) == 1
 
         # Step 2: Scan entire plate
-        results = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, safe_approach_height=10.0)
+        results = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
         assert len(results) == 4
 
         # Verify DB rows
@@ -185,7 +185,7 @@ class TestFullProtocolWithoutDataStore:
         )
 
         transfer(ctx, source="reagent_vial", destination="plate_1.A1", volume_ul=50.0)
-        results = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, safe_approach_height=10.0)
+        results = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
 
         assert len(results) == 4
         assert all(isinstance(v, UVVisSpectrum) for v in results.values())

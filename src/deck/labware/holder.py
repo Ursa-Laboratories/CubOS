@@ -57,17 +57,17 @@ class HolderLabware(Labware):
     name: str = Field(..., description="Unique holder name.")
     model_name: str = Field(..., description="Holder model identifier.")
     location: Coordinate3D = Field(..., description="Absolute XYZ reference point for this holder.")
-    length_mm: float = Field(..., description="Bounding-box X dimension in millimeters.")
-    width_mm: float = Field(..., description="Bounding-box Y dimension in millimeters.")
-    height_mm: float = Field(..., description="Bounding-box Z dimension in millimeters.")
-    labware_support_height_mm: float | None = Field(
+    length: float = Field(..., description="Bounding-box X dimension in millimeters.")
+    width: float = Field(..., description="Bounding-box Y dimension in millimeters.")
+    height: float = Field(..., description="Bounding-box Z dimension in millimeters.")
+    labware_support_height: float | None = Field(
         default=None,
         description=(
             "Total height of the holder sub-geometry that physically supports the nested labware. "
-            "This may differ from the overall collision-envelope height_mm for multi-part fixtures."
+            "This may differ from the overall collision-envelope height for multi-part fixtures."
         ),
     )
-    labware_seat_height_from_bottom_mm: float | None = Field(
+    labware_seat_height_from_bottom: float | None = Field(
         default=None,
         description="Vertical distance from the holder bottom to the seated labware support surface.",
     )
@@ -85,11 +85,11 @@ class HolderLabware(Labware):
         return Labware.validate_name(value)
 
     @field_validator(
-        "length_mm",
-        "width_mm",
-        "height_mm",
-        "labware_support_height_mm",
-        "labware_seat_height_from_bottom_mm",
+        "length",
+        "width",
+        "height",
+        "labware_support_height",
+        "labware_seat_height_from_bottom",
     )
     def _validate_positive_dimension(cls, value: float, info):  # type: ignore[override]
         if value is not None and value <= 0:
@@ -112,20 +112,20 @@ class HolderLabware(Labware):
 
     @model_validator(mode="after")
     def _validate_labware_support_geometry(self) -> "HolderLabware":
-        if self.labware_support_height_mm is not None and self.labware_support_height_mm > self.height_mm:
-            raise ValueError("labware_support_height_mm must be <= height_mm.")
+        if self.labware_support_height is not None and self.labware_support_height > self.height:
+            raise ValueError("labware_support_height must be <= height.")
         if (
-            self.labware_support_height_mm is not None
-            and self.labware_seat_height_from_bottom_mm is not None
-            and self.labware_seat_height_from_bottom_mm > self.labware_support_height_mm
+            self.labware_support_height is not None
+            and self.labware_seat_height_from_bottom is not None
+            and self.labware_seat_height_from_bottom > self.labware_support_height
         ):
             raise ValueError(
-                "labware_seat_height_from_bottom_mm must be <= labware_support_height_mm."
+                "labware_seat_height_from_bottom must be <= labware_support_height."
             )
         self.geometry = BoundingBoxGeometry(
-            length_mm=self.length_mm,
-            width_mm=self.width_mm,
-            height_mm=self.height_mm,
+            length=self.length,
+            width=self.width,
+            height=self.height,
         )
         return self
 

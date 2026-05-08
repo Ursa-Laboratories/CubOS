@@ -6,9 +6,9 @@
 type: vial_holder
 name: vial_holder_9x20ml
 model_name: 9VialHolder20mL_TightFit
-length_mm: 36.2
-width_mm: 300.2
-height_mm: 35.1
-labware_support_height_mm: 35.1
-labware_seat_height_from_bottom_mm: 18.0
+length: 36.2
+width: 300.2
+height: 35.1
+labware_support_height: 35.1
+labware_seat_height_from_bottom: 18.0
 slot_count: 9

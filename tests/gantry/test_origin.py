@@ -27,7 +27,7 @@ def _deck_origin_config(
         serial_port="/dev/null",
         gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_height=z_max,
+        total_z_range=z_max,
         working_volume=WorkingVolume(
             x_min=x_min,
             x_max=x_max,

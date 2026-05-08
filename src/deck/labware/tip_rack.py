@@ -16,13 +16,13 @@ class TipRack(HolderLabware):
     fields capture the per-tip layout:
 
     * ``rows`` / ``columns`` — rack layout (used only for validation).
-    * ``z_pickup`` / ``z_drop`` — default pickup and discard Z.
+    * ``pickup_z`` / ``drop_z`` — default pickup and discard Z.
     * ``tips`` — mapping from tip ID (``"A1"``, ``"A2"``...) to absolute XYZ.
     * ``tip_present`` — per-tip boolean flag; ``True`` = loaded, ``False`` =
       empty/consumed. Auto-initializes to all-True from the ``tips`` keys
       when left empty.
 
-    ``location`` and ``length_mm`` / ``width_mm`` / ``height_mm`` are derived
+    ``location`` and ``length`` / ``width`` / ``height`` are derived
     from the ``tips`` dict if they are not explicitly provided, so callers
     can construct a rack with tips alone and still get a valid
     :class:`HolderLabware`.
@@ -33,8 +33,8 @@ class TipRack(HolderLabware):
     model_name: str = "tip_rack"
     rows: int = Field(..., gt=0, le=26, description="Number of rack rows.")
     columns: int = Field(..., gt=0, description="Number of rack columns.")
-    z_pickup: float = Field(..., gt=0, description="Default pickup Z for each tip.")
-    z_drop: float | None = Field(
+    pickup_z: float = Field(..., gt=0, description="Default pickup Z for each tip.")
+    drop_z: float | None = Field(
         default=None, gt=0, description="Optional discard/park Z for tips."
     )
     tips: Dict[str, Coordinate3D] = Field(
@@ -79,23 +79,23 @@ class TipRack(HolderLabware):
         if data.get("location") is None and "A1" in tips_raw:
             a1_x, a1_y, a1_z = _xyz(tips_raw["A1"])
             if a1_x is not None and a1_y is not None:
-                z = a1_z if a1_z is not None else data.get("z_pickup", 0.0)
+                z = a1_z if a1_z is not None else data.get("pickup_z", 0.0)
                 data["location"] = Coordinate3D(x=a1_x, y=a1_y, z=z)
 
         # Auto-fill bounding box from tip spread; clamp to 1 mm minimum so
         # HolderLabware's positive-dimension validator accepts single-tip or
         # single-row racks.
-        if data.get("length_mm") is None and xs:
-            data["length_mm"] = max(round(max(xs) - min(xs), 3), 1.0)
-        if data.get("width_mm") is None and ys:
-            data["width_mm"] = max(round(max(ys) - min(ys), 3), 1.0)
-        if data.get("height_mm") is None:
-            z_pickup = data.get("z_pickup")
-            z_drop = data.get("z_drop")
-            if z_pickup is not None and z_drop is not None:
-                data["height_mm"] = max(round(abs(z_pickup - z_drop), 3), 1.0)
+        if data.get("length") is None and xs:
+            data["length"] = max(round(max(xs) - min(xs), 3), 1.0)
+        if data.get("width") is None and ys:
+            data["width"] = max(round(max(ys) - min(ys), 3), 1.0)
+        if data.get("height") is None:
+            pickup_z = data.get("pickup_z")
+            drop_z = data.get("drop_z")
+            if pickup_z is not None and drop_z is not None:
+                data["height"] = max(round(abs(pickup_z - drop_z), 3), 1.0)
             else:
-                data["height_mm"] = 1.0
+                data["height"] = 1.0
 
         # Initialize tip_present to all-True if empty.
         if not data.get("tip_present"):

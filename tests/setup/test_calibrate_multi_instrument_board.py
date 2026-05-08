@@ -21,7 +21,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 100.0
+  total_z_range: 100.0
   y_axis_motion: head
 working_volume:
   x_min: 0.0
@@ -440,7 +440,7 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
         "z_min": 0.0,
         "z_max": 96.0,
     }
-    assert written["cnc"]["total_z_height"] == 96.0
+    assert written["cnc"]["total_z_range"] == 96.0
     assert written["grbl_settings"]["max_travel_x"] == 398.0
     assert written["grbl_settings"]["max_travel_y"] == 299.0
     assert written["grbl_settings"]["max_travel_z"] == 96.0

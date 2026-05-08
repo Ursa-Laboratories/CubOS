@@ -38,7 +38,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 working_volume:
   x_min: 0.0
   x_max: 300.0
@@ -61,8 +61,8 @@ labware:
     type: vial
     name: test_vial
     model_name: standard_vial
-    height_mm: 66.75
-    diameter_mm: 28.0
+    height: 66.75
+    diameter: 28.0
     location:
       x: 30.0
       y: 40.0
@@ -157,8 +157,8 @@ labware:
     vials:
       vial_1:
         model_name: 20ml_vial
-        height_mm: 57.0
-        diameter_mm: 28.0
+        height: 57.0
+        diameter: 28.0
         location:
           x: 17.1
           y: 0.9
@@ -209,8 +209,8 @@ labware:
     type: vial
     name: test_vial
     model_name: standard_vial
-    height_mm: 66.75
-    diameter_mm: 28.0
+    height: 66.75
+    diameter: 28.0
     location:
       x: 301.0
       y: 40.0
@@ -233,8 +233,8 @@ labware:
     type: vial
     name: test_vial
     model_name: standard_vial
-    height_mm: 66.75
-    diameter_mm: 28.0
+    height: 66.75
+    diameter: 28.0
     location:
       x: 2.0
       y: 40.0

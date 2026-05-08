@@ -63,20 +63,21 @@ PYTHONPATH=src python setup/validate_setup.py \
 
 ## Height Semantics
 
-`measurement_height` and `safe_approach_height` are **labware-relative
+`measurement_height` and `interwell_scan_height` are **labware-relative
 offsets** above the calibrated well/labware surface Z (positive = above,
 negative = below). At runtime, action and approach planes are computed
 as `well.z + offset`, where `well.z` is the calibration anchor's z (set
 in the deck YAML). Both fields are first-class arguments to the
 protocol command — instruments do not declare them. The plate's
-``height_mm`` is the physical outer dimension (rim → underside), used
-for collision/visualization and for the ``well_depth_mm <= height_mm``
+``height`` is the physical outer dimension (rim → underside), used
+for collision/visualization and for the ``well_depth <= height``
 sanity check, not for motion math.
 
-- `scan` requires `measurement_height` and `safe_approach_height`
+- `scan` requires `measurement_height` and `interwell_scan_height`
 - `measure` requires `measurement_height`
-- ASMI `indentation_limit` (top-level on `scan`): sign-agnostic
-  *magnitude* — the descent distance below the action plane
+- ASMI `indentation_limit_height` (top-level on `scan`): signed
+  labware-relative offset (mm above the well surface; negative = below)
+  for the deepest descent plane. Must be at or below `measurement_height`.
 - gantry `safe_z`: absolute deck-frame Z used for inter-labware travel
   (the only absolute Z in the engagement path)
 

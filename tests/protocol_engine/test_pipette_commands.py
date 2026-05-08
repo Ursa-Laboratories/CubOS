@@ -22,14 +22,14 @@ PIPETTE_HEIGHT_MM = 14.10
 def _mock_context(
     resolve_return: Coordinate3D | None = None,
     has_pipette: bool = True,
-    height_mm: float | None = PIPETTE_HEIGHT_MM,
+    height: float | None = PIPETTE_HEIGHT_MM,
 ) -> ProtocolContext:
     coord = resolve_return or Coordinate3D(x=100.0, y=50.0, z=PIPETTE_HEIGHT_MM)
 
     board = MagicMock()
     deck = MagicMock()
     deck.resolve.return_value = coord
-    labware = MagicMock(height_mm=height_mm)
+    labware = MagicMock(height=height)
     deck.__getitem__ = MagicMock(return_value=labware)
 
     if has_pipette:
@@ -131,7 +131,7 @@ class TestAspirateCommand:
         ctx.board.move_to_labware.assert_called_once_with("pipette", coord)
 
     def test_descends_to_well_bottom_after_approach(self):
-        """aspirate descends to ``height_mm + 0`` (the labware reference Z,
+        """aspirate descends to ``height + 0`` (the labware reference Z,
         i.e. the well bottom). Pipette commands engage at the labware
         surface — per-command Z offsets aren't surfaced yet."""
         from protocol_engine.commands.pipette import aspirate
@@ -491,9 +491,9 @@ def _make_2x3_plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_model",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=3,
         wells={
@@ -610,8 +610,8 @@ class TestSerialTransferCommand:
 
         # Make a 1x3 plate so column "1" has only 1 well (A1)
         plate = WellPlate(
-            name="plate_1", model_name="t", length_mm=100.0,
-            width_mm=80.0, height_mm=10.0, rows=1, columns=3,
+            name="plate_1", model_name="t", length=100.0,
+            width=80.0, height=10.0, rows=1, columns=3,
             wells={
                 "A1": Coordinate3D(x=0.0, y=0.0, z=75.0),
                 "A2": Coordinate3D(x=10.0, y=0.0, z=75.0),

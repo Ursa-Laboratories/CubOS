@@ -26,11 +26,11 @@ class BoundingBoxGeometry(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    length_mm: float | None = Field(default=None, description="Bounding-box X dimension.")
-    width_mm: float | None = Field(default=None, description="Bounding-box Y dimension.")
-    height_mm: float | None = Field(default=None, description="Bounding-box Z dimension.")
+    length: float | None = Field(default=None, description="Bounding-box X dimension.")
+    width: float | None = Field(default=None, description="Bounding-box Y dimension.")
+    height: float | None = Field(default=None, description="Bounding-box Z dimension.")
 
-    @field_validator("length_mm", "width_mm", "height_mm")
+    @field_validator("length", "width", "height")
     def _validate_positive_dimension(cls, value: float | None, info):  # type: ignore[override]
         if value is not None and value <= 0:
             raise ValueError(f"{info.field_name} must be positive.")

@@ -24,7 +24,7 @@ def _gantry(safe_z: float = 85.0) -> GantryConfig:
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_height=100.0,
+        total_z_range=100.0,
         working_volume=WorkingVolume(
             x_min=0.0, x_max=400.0,
             y_min=0.0, y_max=300.0,
@@ -39,9 +39,9 @@ def _deck() -> Deck:
         "plate": WellPlate(
             name="plate",
             model_name="test_plate",
-            length_mm=127.71,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=127.71,
+            width=85.43,
+            height=14.10,
             rows=1,
             columns=1,
             wells={"A1": Coordinate3D(x=100.0, y=100.0, z=14.10)},
@@ -60,7 +60,7 @@ def _board() -> Board:
     return Board(gantry=MagicMock(), instruments={"asmi": instrument})
 
 
-def _scan(safe_approach_height: float, measurement_height: float = -1.0) -> Protocol:
+def _scan(interwell_scan_height: float, measurement_height: float = -1.0) -> Protocol:
     return Protocol([
         ProtocolStep(
             index=0,
@@ -71,8 +71,8 @@ def _scan(safe_approach_height: float, measurement_height: float = -1.0) -> Prot
                 "instrument": "asmi",
                 "method": "indentation",
                 "measurement_height": measurement_height,
-                "safe_approach_height": safe_approach_height,
-                "indentation_limit": 5.0,
+                "interwell_scan_height": interwell_scan_height,
+                "indentation_limit_height": -5.0,
                 "method_kwargs": {"step_size": 0.1},
             },
         )
@@ -80,9 +80,9 @@ def _scan(safe_approach_height: float, measurement_height: float = -1.0) -> Prot
 
 
 def test_scan_approach_above_safe_z_violates():
-    """height_mm=14.10 + safe_approach_height=80 = 94.10 > safe_z=85."""
+    """height=14.10 + interwell_scan_height=80 = 94.10 > safe_z=85."""
     violations = validate_protocol_semantics(
-        _scan(safe_approach_height=80.0),
+        _scan(interwell_scan_height=80.0),
         _board(), _deck(), _gantry(safe_z=85.0),
     )
 
@@ -90,9 +90,9 @@ def test_scan_approach_above_safe_z_violates():
 
 
 def test_scan_approach_at_safe_z_passes():
-    """height_mm=14.10 + safe_approach_height=70.9 = 85.0 == safe_z."""
+    """height=14.10 + interwell_scan_height=70.9 = 85.0 == safe_z."""
     assert validate_protocol_semantics(
-        _scan(safe_approach_height=70.9),
+        _scan(interwell_scan_height=70.9),
         _board(), _deck(), _gantry(safe_z=85.0),
     ) == []
 
@@ -103,7 +103,7 @@ def test_scan_passes_when_safe_z_unconfigured():
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_height=100.0,
+        total_z_range=100.0,
         working_volume=WorkingVolume(
             x_min=0.0, x_max=400.0,
             y_min=0.0, y_max=300.0,
@@ -111,6 +111,6 @@ def test_scan_passes_when_safe_z_unconfigured():
         ),
     )
     assert validate_protocol_semantics(
-        _scan(safe_approach_height=70.0),
+        _scan(interwell_scan_height=70.0),
         _board(), _deck(), gantry,
     ) == []

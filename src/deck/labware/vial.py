@@ -14,9 +14,24 @@ class Vial(Labware):
 
     name: str = Field(..., description="Unique vial name.")
     model_name: str = Field("", description="Vial model identifier.")
-    height_mm: float = Field(..., description="Z position of the vial (absolute WPos).")
-    diameter_mm: float = Field(..., description="Vial outer diameter in millimeters.")
-    location: Coordinate3D = Field(..., description="Absolute XYZ center of this vial.")
+    height: float = Field(
+        ...,
+        description=(
+            "Vial outer height in millimeters (rim → underside). A physical "
+            "dimension used by ``BoundingBoxGeometry`` for collision and "
+            "visualization, not a Z coordinate. The deck-frame Z of the vial "
+            "rim lives on ``location.z``."
+        ),
+    )
+    diameter: float = Field(..., description="Vial outer diameter in millimeters.")
+    location: Coordinate3D = Field(
+        ...,
+        description=(
+            "Absolute XYZ center of this vial. ``location.z`` is the "
+            "deck-frame Z of the vial rim — the labware-surface reference "
+            "for protocol-command labware-relative heights."
+        ),
+    )
     capacity_ul: float = Field(..., description="Vial capacity in microliters.")
     working_volume_ul: float = Field(..., description="Working volume per vial in microliters.")
 
@@ -35,13 +50,13 @@ class Vial(Labware):
         if self.working_volume_ul > self.capacity_ul:
             raise ValueError("working_volume_ul must be <= capacity_ul.")
         self.geometry = BoundingBoxGeometry(
-            length_mm=self.diameter_mm,
-            width_mm=self.diameter_mm,
-            height_mm=self.height_mm,
+            length=self.diameter,
+            width=self.diameter,
+            height=self.height,
         )
         return self
 
-    @field_validator("diameter_mm")
+    @field_validator("diameter")
     def _validate_positive_dimension(cls, value: float, info):  # type: ignore[override]
         if value <= 0:
             raise ValueError(f"{info.field_name} must be positive.")

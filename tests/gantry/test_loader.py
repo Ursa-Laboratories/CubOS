@@ -17,7 +17,7 @@ serial_port: /dev/cu.usbserial-2130
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
   safe_z: 75.0
 working_volume:
   x_min: 0.0
@@ -67,7 +67,7 @@ class TestLoadGantryFromYaml:
             assert vol.y_max == 200.0
             assert vol.z_min == 0.0
             assert vol.z_max == 80.0
-            assert config.total_z_height == 90.0
+            assert config.total_z_range == 90.0
             assert config.safe_z == 75.0
         finally:
             os.unlink(path)
@@ -136,7 +136,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 """
         path = _write_temp_yaml(yaml_content)
         try:
@@ -151,7 +151,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 working_volume:
   x_min: 300.0
   x_max: 0.0
@@ -200,7 +200,7 @@ class TestLoadGantryFromYamlSafe:
 serial_port: /dev/ttyUSB0
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 """
         path = _write_temp_yaml(yaml_content)
         try:
@@ -218,7 +218,7 @@ cnc:
 serial_port: /dev/ttyUSB0
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 """
         path = _write_temp_yaml(yaml_content)
         try:

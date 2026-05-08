@@ -12,10 +12,10 @@ _RELOCATED_HEIGHT_FIELDS = {
         "commands. Move it from `instruments.<name>.measurement_height` "
         "in the gantry YAML to the protocol step."
     ),
-    "safe_approach_height": (
-        "`safe_approach_height` is no longer an instrument-config field — "
+    "interwell_scan_height": (
+        "`interwell_scan_height` is no longer an instrument-config field — "
         "it is a first-class argument on the protocol `scan` command. "
-        "Move it from `instruments.<name>.safe_approach_height` in the "
+        "Move it from `instruments.<name>.interwell_scan_height` in the "
         "gantry YAML to the protocol step."
     ),
 }
@@ -34,11 +34,11 @@ class InstrumentYamlEntry(BaseModel):
     protocol commands that engage with labware:
 
     * ``measurement_height`` — first-class arg to ``measure`` and ``scan``.
-    * ``safe_approach_height`` — first-class arg to ``scan``.
+    * ``interwell_scan_height`` — first-class arg to ``scan``.
 
     Inter-labware travel uses the gantry-level ``safe_z`` (absolute).
 
-    Stale ``measurement_height``/``safe_approach_height`` keys are
+    Stale ``measurement_height``/``interwell_scan_height`` keys are
     rejected explicitly — the ``extra="allow"`` policy would otherwise
     silently swallow them for drivers that accept ``**kwargs``.
     """

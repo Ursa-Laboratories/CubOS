@@ -182,7 +182,7 @@ def _updated_yaml_text(
     max_travel: dict[str, float],
 ) -> str:
     updated = copy.deepcopy(raw_config)
-    updated.setdefault("cnc", {})["total_z_height"] = _round_mm(measured_coords["z"])
+    updated.setdefault("cnc", {})["total_z_range"] = _round_mm(measured_coords["z"])
     updated["working_volume"] = {
         "x_min": 0.0,
         "x_max": _round_mm(measured_coords["x"]),
@@ -235,7 +235,7 @@ def _unique_instrument_sequence(names: Sequence[str]) -> tuple[str, ...]:
     return tuple(ordered)
 
 
-def _prompt_z_reference_height_mm(
+def _prompt_z_reference_height(
     *,
     input_reader: Callable[[str], str],
     output: Callable[[str], None],
@@ -525,21 +525,21 @@ def run_multi_instrument_calibration(
             initial_step_mm=jog_step_mm,
             limit_pull_off_mm=5.0,
         )
-        z_reference_height_mm = _prompt_z_reference_height_mm(
+        z_reference_height = _prompt_z_reference_height(
             input_reader=input_reader,
             output=output,
         )
         output(
-            f"Setting current physical pose to WPos Z={z_reference_height_mm:g} only..."
+            f"Setting current physical pose to WPos Z={z_reference_height:g} only..."
         )
-        gantry.set_work_coordinates(z=z_reference_height_mm)
+        gantry.set_work_coordinates(z=z_reference_height)
         z_origin_coords = dict(gantry.get_coordinates())
         _assert_near_xyz(
             z_origin_coords,
             expected={
                 "x": z_origin_coords["x"],
                 "y": z_origin_coords["y"],
-                "z": z_reference_height_mm,
+                "z": z_reference_height,
             },
             tolerance_mm=tolerance_mm,
             label="Lowest-instrument Z reference",

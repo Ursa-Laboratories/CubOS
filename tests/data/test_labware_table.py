@@ -23,8 +23,8 @@ def _make_vial(name: str = "vial_1") -> Vial:
     return Vial(
         name=name,
         model_name="test_vial",
-        height_mm=50.0,
-        diameter_mm=20.0,
+        height=50.0,
+        diameter=20.0,
         location=Coordinate3D(x=0.0, y=0.0, z=0.0),
         capacity_ul=5000.0,
         working_volume_ul=4000.0,
@@ -35,9 +35,9 @@ def _make_2x2_plate(name: str = "plate_1") -> WellPlate:
     return WellPlate(
         name=name,
         model_name="test_96",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=2,
         wells={

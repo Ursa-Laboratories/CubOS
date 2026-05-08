@@ -16,16 +16,16 @@ name: sbs_96_wellplate
 model_name: sbs_96_wellplate
 rows: 8
 columns: 12
-length_mm: 127.76
-width_mm: 85.47
-height_mm: 14.35           # OUTER plate height (rim → underside of plate)
-well_depth_mm: 10.67       # INSIDE well depth (rim → inside floor where sample sits).
+length: 127.76
+width: 85.47
+height: 14.35           # OUTER plate height (rim → underside of plate)
+well_depth: 10.67       # INSIDE well depth (rim → inside floor where sample sits).
                            # Standard flat-bottom shallow SBS96 (Corning 3585 etc.).
                            # Override for deep-well/V-bottom/round-bottom variants.
 calibration:
   a1: { x: 14.38, y: 11.24 }   # SBS A1 offset from plate corner
-  a2: { x: 23.38, y: 11.24 }   # next column (a1.x + x_offset_mm)
-x_offset_mm: 9.0
-y_offset_mm: 9.0
+  a2: { x: 23.38, y: 11.24 }   # next column (a1.x + x_offset)
+x_offset: 9.0
+y_offset: 9.0
 capacity_ul: 200.0
 working_volume_ul: 150.0

@@ -6,6 +6,7 @@ from typing import Any, Dict, TYPE_CHECKING
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
+from ..scan_args import normalize_scan_arguments
 from ._dispatch import inject_runtime_args
 from ._movement import engage_at_labware
 
@@ -20,6 +21,7 @@ def measure(
     position: str,
     measurement_height: float,
     method: str = "measure",
+    indentation_limit_height: float | None = None,
     method_kwargs: Dict[str, Any] = {},
 ) -> Any:
     """Measure at a deck position using *instrument*.
@@ -32,6 +34,13 @@ def measure(
     ``measurement_height`` is a required first-class argument: a
     labware-relative offset (mm above the well/labware calibrated surface Z;
     negative = below).
+
+    ``indentation_limit_height`` is optional and only meaningful for
+    closed-loop methods that declare it (e.g. ``ASMI.indentation``).
+    Same semantics as on ``scan``: a signed labware-relative offset for
+    the deepest descent plane; must be at or below ``measurement_height``.
+    Lets ``measure`` drive a single-well indentation without iterating
+    a plate.
     """
     if instrument not in context.board.instruments:
         raise ProtocolExecutionError(
@@ -45,8 +54,18 @@ def measure(
             f"Instrument '{instrument}' has no method '{method}'."
         )
 
+    # Reuse scan's legacy / first-class kwarg rejection so a user porting
+    # an old config that put ``indentation_limit`` / ``z_limit`` /
+    # ``safe_approach_height`` / ``measurement_height`` inside
+    # ``method_kwargs`` gets the same rename hint here as on ``scan``,
+    # rather than a generic Python TypeError or a silent overwrite.
     try:
-        action_z = engage_at_labware(
+        normalized = normalize_scan_arguments(method_kwargs=method_kwargs)
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
+
+    try:
+        well_z, action_z = engage_at_labware(
             context, instrument, position,
             measurement_height=measurement_height,
             command_label="measure",
@@ -59,11 +78,26 @@ def measure(
         instrument, method, method_kwargs, position, action_z,
     )
 
-    # Inject gantry + the resolved absolute action Z into closed-loop
-    # methods (e.g. ASMI.indentation) that drive the gantry themselves.
+    # Forward the labware-surface reference Z plus the user's labware-relative
+    # offset so closed-loop instrument methods can resolve their own action /
+    # target Z values. Open-loop methods that don't declare these parameters
+    # receive only the YAML-supplied ``method_kwargs``.
+    if (
+        indentation_limit_height is not None
+        and indentation_limit_height > measurement_height
+    ):
+        raise ProtocolExecutionError(
+            f"measure: indentation_limit_height ({indentation_limit_height}) "
+            f"is above measurement_height ({measurement_height}). The "
+            "deepest descent plane must be at or below the action plane "
+            "in +Z-up."
+        )
+
     callable_method = getattr(instr, method)
     kwargs = inject_runtime_args(
-        callable_method, method_kwargs, context,
-        measurement_height=action_z,
+        callable_method, normalized.method_kwargs, context,
+        well_z=well_z,
+        measurement_height=measurement_height,
+        indentation_limit_height=indentation_limit_height,
     )
     return callable_method(**kwargs)

@@ -40,7 +40,7 @@ Common optional fields are:
 - `depth` - positive tool depth below the gantry head reference point; in the +Z-up deck frame, gantry Z is computed as target/tool Z plus `depth`
 
 Instrument blocks carry only physical mounting state. Labware-relative
-motion heights (`measurement_height`, `safe_approach_height`) are
+motion heights (`measurement_height`, `interwell_scan_height`) are
 first-class arguments to the protocol command, not fields on the
 instrument config. `Board.move_to_labware` travels XY at the gantry-level
 `safe_z` (absolute deck-frame Z, set on `cnc.safe_z`).
@@ -91,7 +91,7 @@ Vernier GoDirect force sensor for indentation measurements.
 | Method | Description |
 |--------|-------------|
 | `measure(n_samples)` | Take force readings. |
-| `indentation(gantry, indentation_limit, step_size, force_limit, measurement_height, baseline_samples, measure_with_return=False)` | Step-by-step indentation. ``indentation_limit`` is a sign-agnostic *magnitude* — the descent distance below the action plane (``measurement_height``). Descend in Z steps, reading force at each step until force limit or magnitude is reached. Pass `measure_with_return=True` to also record upward return samples; every measurement carries a `direction` tag (`"down"` or `"up"`). |
+| `indentation(gantry, *, measurement_height, indentation_limit_height, well_z, step_size, force_limit, baseline_samples, measure_with_return=False)` | Step-by-step indentation. The protocol-layer YAML fields ``measurement_height`` and ``indentation_limit_height`` are *labware-relative* offsets (mm above the well surface; +above, -below); the engine injects ``well_z`` (the calibrated absolute deck-frame Z of the well surface). The driver computes ``action_z = well_z + measurement_height`` and ``target_z = well_z + indentation_limit_height`` internally, descends in Z steps, and reads force at each step until ``force_limit`` or ``target_z`` is reached. Pass `measure_with_return=True` to also record upward return samples; every measurement carries a `direction` tag (`"down"` or `"up"`). |
 | `get_force_reading()` | Single instantaneous force reading. |
 | `get_baseline_force(samples)` | Average force over N samples (returns mean and std). |
 | `get_status()` | Return sensor state. |

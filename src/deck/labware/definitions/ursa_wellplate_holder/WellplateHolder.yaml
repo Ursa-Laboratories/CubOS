@@ -7,8 +7,8 @@
 type: well_plate_holder
 name: tall_wellplate_holder
 model_name: tall_wellplate_holder
-length_mm: 127.5
-width_mm: 176.4
-height_mm: 25.0
-labware_support_height_mm: 25.0
-labware_seat_height_from_bottom_mm: 21.0
+length: 127.5
+width: 176.4
+height: 25.0
+labware_support_height: 25.0
+labware_seat_height_from_bottom: 21.0

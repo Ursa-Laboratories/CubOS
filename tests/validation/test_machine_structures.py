@@ -29,7 +29,7 @@ def _gantry(
         serial_port="/dev/ttyUSB0",
         gantry_type=gantry_type,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_height=z_max,
+        total_z_range=z_max,
         working_volume=WorkingVolume(
             x_min=0.0,
             x_max=x_max,
@@ -63,9 +63,9 @@ def _deck(*, well_z: float = 40.0) -> Deck:
         "plate": WellPlate(
             name="plate",
             model_name="test_plate",
-            length_mm=127.71,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=127.71,
+            width=85.43,
+            height=14.10,
             rows=1,
             columns=1,
             wells={"A1": Coordinate3D(x=500.0, y=150.0, z=well_z)},
@@ -216,8 +216,8 @@ def test_scan_action_z_inside_machine_structure_fails():
                 "instrument": "asmi",
                 "method": "indentation",
                 "measurement_height": 10.0,
-                "safe_approach_height": 80.0,
-                "indentation_limit": 20.0,
+                "interwell_scan_height": 80.0,
+                "indentation_limit_height": -20.0,
                 "method_kwargs": {"step_size": 0.1},
             },
         )

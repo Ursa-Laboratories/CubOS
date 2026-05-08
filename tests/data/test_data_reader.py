@@ -146,8 +146,8 @@ class TestGetLabware:
             vial = Vial(
                 name=name,
                 model_name="standard",
-                height_mm=66.75,
-                diameter_mm=28.0,
+                height=66.75,
+                diameter=28.0,
                 location=Coordinate3D(x=0.0, y=0.0, z=0.0),
                 capacity_ul=1500.0,
                 working_volume_ul=1200.0,
@@ -170,8 +170,8 @@ class TestGetLabware:
         vial = Vial(
             name="test_vial",
             model_name="standard",
-            height_mm=66.75,
-            diameter_mm=28.0,
+            height=66.75,
+            diameter=28.0,
             location=Coordinate3D(x=-30.0, y=-40.0, z=-20.0),
             capacity_ul=1500.0,
             working_volume_ul=1200.0,

@@ -17,9 +17,9 @@ def test_well_plate_requires_non_empty_name():
         WellPlate(
             name="",
             model_name="test_model",
-            length_mm=127.71,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=127.71,
+            width=85.43,
+            height=14.10,
             rows=8,
             columns=12,
             wells={"A1": Coordinate3D(x=10.0, y=10.0, z=15.0)},
@@ -31,8 +31,8 @@ def test_well_plate_requires_non_empty_name():
         Vial(
             name="  ",
             model_name="test_model",
-            height_mm=66.75,
-            diameter_mm=28.0,
+            height=66.75,
+            diameter=28.0,
             location=Coordinate3D(x=30.0, y=40.0, z=20.0),
             capacity_ul=1500.0,
             working_volume_ul=1200.0,
@@ -44,9 +44,9 @@ def test_well_plate_get_location_success_and_failure():
     plate = WellPlate(
         name="SBS_96",
         model_name="test_model",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=1,
         columns=1,
         wells={"A1": Coordinate3D(x=10.0, y=20.0, z=15.0)},
@@ -72,8 +72,8 @@ def test_vial_get_location_success_and_failure():
     vial = Vial(
         name="vial_1",
         model_name="test_model",
-        height_mm=66.75,
-        diameter_mm=28.0,
+        height=66.75,
+        diameter=28.0,
         location=Coordinate3D(x=30.0, y=40.0, z=20.0),
         capacity_ul=1500.0,
         working_volume_ul=1200.0,
@@ -86,8 +86,8 @@ def test_vial_get_location_success_and_failure():
         Vial(
             name="vial_1",
             model_name="test_model",
-            height_mm=66.75,
-            diameter_mm=28.0,
+            height=66.75,
+            diameter=28.0,
             capacity_ul=1500.0,
             working_volume_ul=1200.0,
         )
@@ -108,9 +108,9 @@ def test_well_plate_sbs_96_dimensions_and_well_lookup():
     plate = WellPlate(
         name="SBS_96",
         model_name="test_model",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=1,
         wells=wells,
@@ -119,9 +119,9 @@ def test_well_plate_sbs_96_dimensions_and_well_lookup():
     )
 
     assert plate.name == "SBS_96"
-    assert plate.length_mm == pytest.approx(127.71)
-    assert plate.width_mm == pytest.approx(85.43)
-    assert plate.height_mm == pytest.approx(14.10)
+    assert plate.length == pytest.approx(127.71)
+    assert plate.width == pytest.approx(85.43)
+    assert plate.height == pytest.approx(14.10)
     assert plate.rows == 2
     assert plate.columns == 1
 
@@ -149,9 +149,9 @@ def test_well_plate_requires_positive_dimensions_and_wells():
         WellPlate(
             name="invalid_plate",
             model_name="test_model",
-            length_mm=-1.0,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=-1.0,
+            width=85.43,
+            height=14.10,
             rows=8,
             columns=12,
             wells={},
@@ -164,9 +164,9 @@ def test_well_plate_requires_positive_dimensions_and_wells():
         WellPlate(
             name="missing_a1",
             model_name="test_model",
-            length_mm=127.71,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=127.71,
+            width=85.43,
+            height=14.10,
             rows=8,
             columns=12,
             wells={"B1": Coordinate3D(x=10.0, y=20.0, z=15.0)},
@@ -180,34 +180,34 @@ def test_vial_dimensions_and_location_lookup():
     vial = Vial(
         name="standard_vial",
         model_name="test_model",
-        height_mm=66.75,
-        diameter_mm=28.00,
+        height=66.75,
+        diameter=28.00,
         location=Coordinate3D(x=30.0, y=40.0, z=20.0),
         capacity_ul=1500.0,
         working_volume_ul=1200.0,
     )
 
     assert vial.name == "standard_vial"
-    assert vial.height_mm == pytest.approx(66.75)
-    assert vial.diameter_mm == pytest.approx(28.00)
+    assert vial.height == pytest.approx(66.75)
+    assert vial.diameter == pytest.approx(28.00)
     assert vial.geometry == BoundingBoxGeometry(
-        length_mm=28.0,
-        width_mm=28.0,
-        height_mm=66.75,
+        length=28.0,
+        width=28.0,
+        height=66.75,
     )
     assert vial.get_vial_center() == Coordinate3D(x=30.0, y=40.0, z=20.0)
     assert vial.get_initial_position() == Coordinate3D(x=30.0, y=40.0, z=20.0)
 
 
 def test_well_plate_exposes_shared_bounding_box_geometry():
-    """``WellPlate.height_mm`` is the absolute deck-frame surface Z, not a
+    """``WellPlate.height`` is the absolute deck-frame surface Z, not a
     bounding-box dimension; ``geometry`` only carries XY footprint metadata."""
     plate = WellPlate(
         name="SBS_96",
         model_name="test_model",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=1,
         columns=1,
         wells={"A1": Coordinate3D(x=10.0, y=10.0, z=15.0)},
@@ -216,10 +216,10 @@ def test_well_plate_exposes_shared_bounding_box_geometry():
     )
 
     assert plate.geometry == BoundingBoxGeometry(
-        length_mm=127.71,
-        width_mm=85.43,
+        length=127.71,
+        width=85.43,
     )
-    assert plate.height_mm == 14.10
+    assert plate.height == 14.10
 
 
 def test_vial_requires_positive_diameter():
@@ -228,8 +228,8 @@ def test_vial_requires_positive_diameter():
         Vial(
             name="invalid_vial",
             model_name="test_model",
-            height_mm=-20.0,
-            diameter_mm=0.0,
+            height=-20.0,
+            diameter=0.0,
             location=Coordinate3D(x=-30.0, y=-40.0, z=-20.0),
             capacity_ul=1500.0,
             working_volume_ul=1200.0,
@@ -243,9 +243,9 @@ def test_well_plate_extra_field_rejected():
         WellPlate(
             name="x",
             model_name="test_model",
-            length_mm=127.71,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=127.71,
+            width=85.43,
+            height=14.10,
             rows=8,
             columns=12,
             wells=wells,
@@ -262,9 +262,9 @@ def test_well_plate_volume_required_and_working_le_capacity():
         WellPlate(
             name="x",
             model_name="test_model",
-            length_mm=127.71,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=127.71,
+            width=85.43,
+            height=14.10,
             rows=8,
             columns=12,
             wells=wells,
@@ -274,9 +274,9 @@ def test_well_plate_volume_required_and_working_le_capacity():
     plate = WellPlate(
         name="x",
         model_name="test_model",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=1,
         columns=1,
         wells=wells,
@@ -293,8 +293,8 @@ def test_vial_extra_field_rejected():
         Vial(
             name="v",
             model_name="test_model",
-            height_mm=66.0,
-            diameter_mm=28.0,
+            height=66.0,
+            diameter=28.0,
             location=Coordinate3D(x=30.0, y=40.0, z=20.0),
             capacity_ul=1500.0,
             working_volume_ul=1200.0,
@@ -308,8 +308,8 @@ def test_vial_volume_required_and_working_le_capacity():
         Vial(
             name="v",
             model_name="test_model",
-            height_mm=66.0,
-            diameter_mm=28.0,
+            height=66.0,
+            diameter=28.0,
             location=Coordinate3D(x=30.0, y=40.0, z=20.0),
             capacity_ul=1000.0,
             working_volume_ul=1200.0,
@@ -326,8 +326,8 @@ def test_generate_wells_from_offsets():
         row_labels=row_labels,
         column_indices=column_indices,
         a1_center=a1_center,
-        x_offset_mm=10.0,
-        y_offset_mm=5.0,
+        x_offset=10.0,
+        y_offset=5.0,
         rounding_decimals=3,
     )
 
@@ -368,9 +368,9 @@ def test_well_plate_requires_exact_rows_columns_well_count():
         WellPlate(
             name="count_mismatch",
             model_name="test_model",
-            length_mm=127.71,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=127.71,
+            width=85.43,
+            height=14.10,
             rows=8,
             columns=12,
             wells={"A1": Coordinate3D(x=0.0, y=0.0, z=15.0)},
@@ -385,9 +385,9 @@ def test_well_plate_rows_limited_to_26():
         WellPlate(
             name="too_many_rows",
             model_name="test_model",
-            length_mm=127.71,
-            width_mm=85.43,
-            height_mm=14.10,
+            length=127.71,
+            width=85.43,
+            height=14.10,
             rows=27,
             columns=1,
             wells={"A1": Coordinate3D(x=0.0, y=0.0, z=15.0)},

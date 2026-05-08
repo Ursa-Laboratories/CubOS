@@ -6,9 +6,10 @@ agree on the same motion primitives:
 * ``Board.move_to_labware`` travels XY at the gantry's ``safe_z``
   (absolute deck-frame).
 * Engaging commands take ``measurement_height`` as a first-class command
-  argument and descend to ``labware.height_mm + measurement_height``
-  (relative). Pipette commands engage at the labware reference Z (i.e.
-  ``measurement_height = 0``).
+  argument and descend to ``well.z + measurement_height`` (where
+  ``well.z`` is the calibrated deck-frame surface Z carried on the
+  resolved coordinate). Pipette commands engage at the labware reference
+  Z (i.e. ``measurement_height = 0``).
 """
 
 from __future__ import annotations
@@ -23,7 +24,11 @@ from deck.labware.well_plate import WellPlate
 from protocol_engine.protocol import ProtocolContext
 
 
-HEIGHT_MM = 14.10
+# Calibrated deck-frame surface Z (the well coordinate's z). This is the
+# value motion code reads via the resolved coordinate; ``WellPlate.height``
+# is a separate physical-dimension field that doesn't drive Z.
+WELL_Z = 14.10
+PLATE_HEIGHT = 14.35  # outer dimension only — not used in motion math.
 
 
 def _instrument(name: str = "tool"):
@@ -39,14 +44,14 @@ def _plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_plate",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=HEIGHT_MM,
+        length=127.71,
+        width=85.43,
+        height=PLATE_HEIGHT,
         rows=1,
         columns=2,
         wells={
-            "A1": Coordinate3D(x=10.0, y=20.0, z=HEIGHT_MM),
-            "A2": Coordinate3D(x=19.0, y=20.0, z=HEIGHT_MM),
+            "A1": Coordinate3D(x=10.0, y=20.0, z=WELL_Z),
+            "A2": Coordinate3D(x=19.0, y=20.0, z=WELL_Z),
         },
         capacity_ul=200.0,
         working_volume_ul=150.0,
@@ -58,7 +63,7 @@ def _ctx(instr_name: str, instr, plate=None):
     board.instruments = {instr_name: instr}
     deck = MagicMock()
     deck.__getitem__ = MagicMock(return_value=plate or _plate())
-    deck.resolve.return_value = Coordinate3D(x=10.0, y=20.0, z=HEIGHT_MM)
+    deck.resolve.return_value = Coordinate3D(x=10.0, y=20.0, z=WELL_Z)
     return ProtocolContext(board=board, deck=deck, logger=logging.getLogger("test"))
 
 
@@ -67,12 +72,12 @@ def test_board_move_to_labware_uses_absolute_safe_z():
     instr = _instrument()
     board = Board(gantry=gantry, instruments={"tool": instr}, safe_z=20.0)
 
-    board.move_to_labware("tool", Coordinate3D(x=10.0, y=20.0, z=HEIGHT_MM))
+    board.move_to_labware("tool", Coordinate3D(x=10.0, y=20.0, z=WELL_Z))
 
     gantry.move_to.assert_called_once_with(10.0, 20.0, 20.0, travel_z=20.0)
 
 
-def test_measure_descends_to_height_mm_plus_relative_offset():
+def test_measure_descends_to_well_z_plus_relative_offset():
     from protocol_engine.commands.measure import measure
 
     instr = _instrument(name="uvvis")
@@ -82,10 +87,10 @@ def test_measure_descends_to_height_mm_plus_relative_offset():
     measure(ctx, instrument="uvvis", position="plate_1.A1", measurement_height=2.0)
 
     ctx.board.move_to_labware.assert_called_once()
-    ctx.board.move.assert_called_once_with("uvvis", (10.0, 20.0, HEIGHT_MM + 2.0))
+    ctx.board.move.assert_called_once_with("uvvis", (10.0, 20.0, WELL_Z + 2.0))
 
 
-def test_scan_first_well_descends_to_height_mm_plus_relative_offset():
+def test_scan_first_well_descends_to_well_z_plus_relative_offset():
     from protocol_engine.commands.scan import scan
 
     instr = _instrument(name="uvvis")
@@ -98,12 +103,12 @@ def test_scan_first_well_descends_to_height_mm_plus_relative_offset():
         instrument="uvvis",
         method="measure",
         measurement_height=1.0,
-        safe_approach_height=10.0,
+        interwell_scan_height=10.0,
     )
 
     move_calls = ctx.board.move.call_args_list
-    assert move_calls[0].args == ("uvvis", (10.0, 20.0, HEIGHT_MM + 10.0))
-    assert move_calls[1].args == ("uvvis", (10.0, 20.0, HEIGHT_MM + 1.0))
+    assert move_calls[0].args == ("uvvis", (10.0, 20.0, WELL_Z + 10.0))
+    assert move_calls[1].args == ("uvvis", (10.0, 20.0, WELL_Z + 1.0))
 
 
 def test_pipette_aspirate_descends_to_well_bottom():
@@ -119,7 +124,7 @@ def test_pipette_aspirate_descends_to_well_bottom():
 
     ctx.board.move_to_labware.assert_called_once()
     ctx.board.move.assert_called_once_with(
-        "pipette", (10.0, 20.0, HEIGHT_MM),
+        "pipette", (10.0, 20.0, WELL_Z),
     )
 
 

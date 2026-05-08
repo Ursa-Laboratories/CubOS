@@ -91,21 +91,23 @@ def _point_to_coord(p: _YamlPoint3D, z_value: float | None = None) -> Coordinate
 def _resolve_user_z(
     explicit_z: float | None,
     *,
-    height: float | None,
-    total_z_height: float | None,
     context: str,
     default_z: float | None = None,
 ) -> float:
-    """Resolve a deck-frame Z using explicit z or a direct height value."""
-    if height is not None:
-        del total_z_height, context
-        return height
+    """Resolve a deck-frame Z from the calibration/location anchor.
 
+    The deck YAML's calibration anchor (``calibration.a1.z`` or
+    ``location.z``) is the single source of truth for the
+    labware-surface deck-frame Z. The legacy ``height`` z-hint shorthand
+    was removed when the dimensional field was renamed from
+    ``height_mm`` to ``height`` — the z-hint and the dimension can no
+    longer share the same field name.
+    """
     if explicit_z is None:
         if default_z is not None:
             return default_z
         raise ValueError(
-            f"{context}: z is required when labware `height` is not provided."
+            f"{context}: calibration anchor must include a `z` value."
         )
     return explicit_z
 
@@ -197,19 +199,19 @@ def _build_holder_slots(
 
 def _build_tip_rack(
     entry: TipRackYamlEntry,
-    total_z_height: float | None,
+    total_z_range: float | None,
 ) -> TipRack:
-    del total_z_height
+    del total_z_range
     # Derive every tip pickup position from the two-point calibration and
     # pitch offsets, mirroring how well plates derive their wells.
-    tips = _derive_wells_from_calibration(entry, resolved_z=entry.z_pickup)
+    tips = _derive_wells_from_calibration(entry, resolved_z=entry.pickup_z)
 
     # Anchor location: use the explicit entry.location if given, otherwise
     # default to the A1 tip so the holder's bounding-box/geometry still works.
     if entry.location is not None:
         loc = _point_to_coord(
             entry.location,
-            z_value=entry.location.z if entry.location.z is not None else entry.z_pickup,
+            z_value=entry.location.z if entry.location.z is not None else entry.pickup_z,
         )
     else:
         loc = tips["A1"]
@@ -268,12 +270,12 @@ def _resolve_plate_orientation(entry: Any) -> _PlateOrientation:
 
     if same_y:
         col_step = a2.x - a1.x
-        if abs(abs(col_step) - entry.x_offset_mm) > 1e-9:
+        if abs(abs(col_step) - entry.x_offset) > 1e-9:
             raise ValueError(
                 "Calibration A2 must match one adjacent column step from A1 "
-                "(delta x magnitude must equal x_offset_mm magnitude)."
+                "(delta x magnitude must equal x_offset magnitude)."
             )
-        row_step = -entry.y_offset_mm if col_step > 0 else entry.y_offset_mm
+        row_step = -entry.y_offset if col_step > 0 else entry.y_offset
         return _PlateOrientation(
             col_delta_x=col_step, col_delta_y=0.0,
             row_delta_x=0.0, row_delta_y=row_step,
@@ -281,12 +283,12 @@ def _resolve_plate_orientation(entry: Any) -> _PlateOrientation:
 
     if same_x:
         col_step = a2.y - a1.y
-        if abs(abs(col_step) - entry.y_offset_mm) > 1e-9:
+        if abs(abs(col_step) - entry.y_offset) > 1e-9:
             raise ValueError(
                 "Calibration A2 must match one adjacent column step from A1 "
-                "(delta y magnitude must equal y_offset_mm magnitude)."
+                "(delta y magnitude must equal y_offset magnitude)."
             )
-        row_step = entry.x_offset_mm if col_step > 0 else -entry.x_offset_mm
+        row_step = entry.x_offset if col_step > 0 else -entry.x_offset
         return _PlateOrientation(
             col_delta_x=0.0, col_delta_y=col_step,
             row_delta_x=row_step, row_delta_y=0.0,
@@ -320,17 +322,15 @@ def _derive_wells_from_calibration(
 
 def _build_well_plate(
     entry: WellPlateYamlEntry,
-    total_z_height: float | None,
+    total_z_range: float | None,
 ) -> WellPlate:
     resolved_z = _resolve_user_z(
         entry.a1_point.z,
-        height=entry.height,
-        total_z_height=total_z_height,
         context=f"well_plate '{entry.name}'",
     )
     kwargs = _entry_kwargs_for_model(entry, WellPlate)
     kwargs["wells"] = _derive_wells_from_calibration(entry, resolved_z=resolved_z)
-    # ``height_mm`` is the plate's physical outer dimension (rim →
+    # ``height`` is the plate's physical outer dimension (rim →
     # underside), inherited from the labware definition. The deck-frame Z
     # of the plate surface lives on each well's ``Coordinate3D.z`` (set by
     # ``_derive_wells_from_calibration`` from the calibration anchor).
@@ -339,12 +339,10 @@ def _build_well_plate(
 
 def _build_vial(
     entry: VialYamlEntry,
-    total_z_height: float | None,
+    total_z_range: float | None,
 ) -> Vial:
     resolved_z = _resolve_user_z(
         entry.location.z,
-        height=entry.height,
-        total_z_height=total_z_height,
         context=f"vial '{entry.name}'",
     )
     kwargs = _entry_kwargs_for_model(entry, Vial)
@@ -354,14 +352,12 @@ def _build_vial(
 
 def _build_holder(
     entry: _BaseHolderYamlEntry,
-    total_z_height: float | None,
+    total_z_range: float | None,
     *,
     model_class: Type[Labware],
 ) -> Labware:
     resolved_z = _resolve_user_z(
         entry.location.z,
-        height=entry.height,
-        total_z_height=total_z_height,
         context=f"{entry.type} '{entry.name}'",
     )
     kwargs = _entry_kwargs_for_model(entry, model_class)
@@ -369,7 +365,7 @@ def _build_holder(
     kwargs["slots"] = _build_holder_slots(entry.slots, default_z=resolved_z)
     holder = model_class(**kwargs)
 
-    seat_height = getattr(holder, "labware_seat_height_from_bottom_mm", None)
+    seat_height = getattr(holder, "labware_seat_height_from_bottom", None)
     contained_labware: Dict[str, Labware] = {}
     if seat_height is not None:
         contained_z = holder.location.z + seat_height
@@ -402,8 +398,8 @@ def _build_nested_vial(
     return Vial(
         name=entry.name or vial_key,
         model_name=entry.model_name,
-        height_mm=entry.height_mm,
-        diameter_mm=entry.diameter_mm,
+        height=entry.height,
+        diameter=entry.diameter,
         location=Coordinate3D(
             x=entry.location.x,
             y=entry.location.y,
@@ -423,10 +419,10 @@ def _build_nested_well_plate(
     return WellPlate(
         name=entry.name or plate_key,
         model_name=entry.model_name,
-        length_mm=entry.length_mm,
-        width_mm=entry.width_mm,
-        height_mm=entry.height_mm,
-        well_depth_mm=entry.well_depth_mm,
+        length=entry.length,
+        width=entry.width,
+        height=entry.height,
+        well_depth=entry.well_depth,
         rows=entry.rows,
         columns=entry.columns,
         wells=_derive_wells_from_calibration(entry, resolved_z=resolved_z),
@@ -435,21 +431,21 @@ def _build_nested_well_plate(
     )
 
 
-def _build_deck_from_raw(raw: dict[str, Any], *, total_z_height: float | None = None) -> Deck:
+def _build_deck_from_raw(raw: dict[str, Any], *, total_z_range: float | None = None) -> Deck:
     raw = _resolve_load_names(raw)
     schema = DeckYamlSchema.model_validate(raw)
     labware: Dict[str, Labware] = {}
     for name, entry in schema.labware.items():
         if isinstance(entry, WellPlateYamlEntry):
-            labware[name] = _build_well_plate(entry, total_z_height=total_z_height)
+            labware[name] = _build_well_plate(entry, total_z_range=total_z_range)
         elif isinstance(entry, VialYamlEntry):
-            labware[name] = _build_vial(entry, total_z_height=total_z_height)
+            labware[name] = _build_vial(entry, total_z_range=total_z_range)
         elif isinstance(entry, TipRackYamlEntry):
-            labware[name] = _build_tip_rack(entry, total_z_height=total_z_height)
+            labware[name] = _build_tip_rack(entry, total_z_range=total_z_range)
         elif isinstance(entry, TipDisposalYamlEntry):
             labware[name] = _build_holder(
                 entry,
-                total_z_height=total_z_height,
+                total_z_range=total_z_range,
                 model_class=TipDisposal,
             )
         elif isinstance(entry, WallYamlEntry):
@@ -469,13 +465,13 @@ def _build_deck_from_raw(raw: dict[str, Any], *, total_z_height: float | None = 
         elif isinstance(entry, WellPlateHolderYamlEntry):
             labware[name] = _build_holder(
                 entry,
-                total_z_height=total_z_height,
+                total_z_range=total_z_range,
                 model_class=WellPlateHolder,
             )
         elif isinstance(entry, VialHolderYamlEntry):
             labware[name] = _build_holder(
                 entry,
-                total_z_height=total_z_height,
+                total_z_range=total_z_range,
                 model_class=VialHolder,
             )
         else:
@@ -485,7 +481,7 @@ def _build_deck_from_raw(raw: dict[str, Any], *, total_z_height: float | None = 
 
 def load_deck_from_yaml(
     path: str | Path,
-    total_z_height: float | None = None,
+    total_z_range: float | None = None,
 ) -> Deck:
     """
     Load a deck YAML file and return a Deck containing all labware.
@@ -495,12 +491,12 @@ def load_deck_from_yaml(
         raw = yaml.safe_load(handle)
     if raw is None:
         raw = {}
-    return _build_deck_from_raw(raw, total_z_height=total_z_height)
+    return _build_deck_from_raw(raw, total_z_range=total_z_range)
 
 
 def load_deck_from_yaml_safe(
     path: str | Path,
-    total_z_height: float | None = None,
+    total_z_range: float | None = None,
 ) -> Deck:
     """
     Load deck YAML with user-friendly exception formatting.
@@ -510,6 +506,6 @@ def load_deck_from_yaml_safe(
     """
     resolved_path = Path(path)
     try:
-        return load_deck_from_yaml(resolved_path, total_z_height=total_z_height)
+        return load_deck_from_yaml(resolved_path, total_z_range=total_z_range)
     except Exception as exc:
         raise DeckLoaderError(_format_loader_exception(resolved_path, exc)) from exc
