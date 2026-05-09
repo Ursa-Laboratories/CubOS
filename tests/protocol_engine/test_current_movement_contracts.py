@@ -59,10 +59,12 @@ def _plate() -> WellPlate:
 
 
 def _ctx(instr_name: str, instr, plate=None):
+    plate = plate or _plate()
     board = MagicMock()
     board.instruments = {instr_name: instr}
     deck = MagicMock()
-    deck.__getitem__ = MagicMock(return_value=plate or _plate())
+    deck.__getitem__ = MagicMock(return_value=plate)
+    deck.resolve_labware = MagicMock(return_value=plate)
     deck.resolve.return_value = Coordinate3D(x=10.0, y=20.0, z=WELL_Z)
     return ProtocolContext(board=board, deck=deck, logger=logging.getLogger("test"))
 
