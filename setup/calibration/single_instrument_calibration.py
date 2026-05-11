@@ -7,11 +7,12 @@ Internal implementation used by the sole user-facing entrypoint:
 from __future__ import annotations
 
 import copy
+import logging
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
 import yaml
 
@@ -20,7 +21,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
 from gantry import Gantry, load_gantry_from_yaml  # noqa: E402
-from gantry.gantry_driver.exceptions import (  # noqa: E402
+from gantry.errors import (  # noqa: E402
     CommandExecutionError,
     MillConnectionError,
     StatusReturnError,
@@ -55,42 +56,6 @@ class DeckOriginCalibrationResult:
     def reference_surface_z_mm(self) -> float:
         """Deprecated alias for the one-instrument lower Z assignment."""
         return self.z_min_mm
-
-
-class _GantryLike(Protocol):
-    def connect(self) -> None: ...
-    def disconnect(self) -> None: ...
-    def home(self) -> None: ...
-    def enforce_work_position_reporting(self) -> None: ...
-    def activate_work_coordinate_system(self, system: str = "G54") -> None: ...
-    def clear_g92_offsets(self) -> None: ...
-    def set_work_coordinates(
-        self,
-        x: float | None = None,
-        y: float | None = None,
-        z: float | None = None,
-    ) -> None: ...
-    def get_coordinates(self) -> dict[str, float]: ...
-    def get_status(self) -> str: ...
-    def jog(
-        self,
-        x: float = 0,
-        y: float = 0,
-        z: float = 0,
-        feed_rate: float = 2000,
-    ) -> None: ...
-    def jog_cancel(self) -> None: ...
-    def stop(self) -> None: ...
-    def unlock(self) -> None: ...
-    def reset_and_unlock(self) -> None: ...
-    def configure_soft_limits_from_spans(
-        self,
-        *,
-        max_travel_x: float,
-        max_travel_y: float,
-        max_travel_z: float,
-        tolerance_mm: float = 0.001,
-    ) -> None: ...
 
 
 KeyReader = Callable[[], tuple[str, int]]
@@ -477,7 +442,7 @@ def _prompt_z_reference_mode(
 
 
 def _set_serial_timeout_if_available(
-    gantry: _GantryLike,
+    gantry: Gantry,
     timeout_s: float,
 ) -> None:
     setter = getattr(gantry, "set_serial_timeout", None)
@@ -512,30 +477,16 @@ def _looks_like_soft_limit_jog_rejection(exc: Exception) -> bool:
     )
 
 
-def _soft_limits_enabled_from_settings(settings: object) -> bool | None:
-    if not isinstance(settings, dict):
-        return None
-    value = settings.get("$20")
-    if value is None:
-        value = settings.get("20")
-    if value is None:
-        return None
-    try:
-        return float(value) != 0.0
-    except (TypeError, ValueError):
-        return None
-
-
 def _read_soft_limits_enabled_if_available(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> bool | None:
-    reader = getattr(gantry, "read_grbl_settings", None)
+    reader = getattr(gantry, "soft_limits_enabled", None)
     if not callable(reader):
         return None
     try:
-        return _soft_limits_enabled_from_settings(reader())
+        return reader()
     except MillConnectionError:
         raise
     except (CommandExecutionError, StatusReturnError, ValueError) as exc:
@@ -545,18 +496,18 @@ def _read_soft_limits_enabled_if_available(
 
 
 def _set_soft_limits_enabled_if_available(
-    gantry: _GantryLike,
+    gantry: Gantry,
     enabled: bool,
 ) -> bool:
-    setter = getattr(gantry, "set_grbl_setting", None)
+    setter = getattr(gantry, "set_soft_limits_enabled", None)
     if not callable(setter):
         return False
-    setter("$20", 1 if enabled else 0)
+    setter(enabled)
     return True
 
 
 def _temporarily_disable_soft_limits_for_origin_jog(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> bool:
@@ -575,7 +526,7 @@ def _temporarily_disable_soft_limits_for_origin_jog(
 
 
 def _restore_soft_limits_after_origin_jog(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> None:
@@ -603,7 +554,7 @@ def _opposite_pull_off_delta(
 
 
 def _soft_reset_and_unlock_after_limit_alarm(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> None:
@@ -637,7 +588,7 @@ def _raise_if_limit_status(status: str) -> None:
             raise StatusReturnError(f"Limit pin active in status: {status}")
 
 
-def _probe_for_limit_status_after_jog(gantry: _GantryLike) -> None:
+def _probe_for_limit_status_after_jog(gantry: Gantry) -> None:
     get_status = getattr(gantry, "get_status", None)
     if not callable(get_status):
         return
@@ -645,13 +596,24 @@ def _probe_for_limit_status_after_jog(gantry: _GantryLike) -> None:
     _raise_if_limit_status(str(get_status()))
 
 
-def _read_limit_recovery_status(gantry: _GantryLike) -> str | None:
+def _read_limit_recovery_status(gantry: Gantry) -> str | None:
+    """Read status during limit-alarm recovery, tolerating expected GRBL errors.
+
+    Only :class:`StatusReturnError` / :class:`MillConnectionError` are caught
+    — those are the GRBL-side failures that can legitimately occur while the
+    controller is in alarm. Anything else is a programming bug and must
+    surface, not be silently turned into "no further pull-off needed".
+    """
     get_status = getattr(gantry, "get_status", None)
     if not callable(get_status):
         return None
     try:
         return str(get_status())
-    except Exception:
+    except (StatusReturnError, MillConnectionError) as exc:
+        logging.getLogger(__name__).warning(
+            "Status read failed during limit recovery; assuming further pull-off may be needed: %s",
+            exc,
+        )
         return None
 
 
@@ -674,7 +636,7 @@ def _needs_another_limit_pull_off(status: str | None) -> bool:
 
 
 def _recover_from_limit_alarm(
-    gantry: _GantryLike,
+    gantry: Gantry,
     delta: dict[str, float],
     *,
     pull_off_mm: float,
@@ -748,7 +710,7 @@ def _recover_from_limit_alarm(
 
 
 def _interactive_jog_to_reference(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     target_description: str,
     confirmation_description: str,
@@ -872,7 +834,7 @@ def _interactive_jog_to_reference(
 
 
 def _interactive_jog_to_xy_origin(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     key_reader: KeyReader,
     output: Callable[[str], None],
@@ -919,7 +881,7 @@ def run_calibration(
     jog_serial_timeout_s: float = 1.0,
     output: Callable[[str], None] = print,
     input_reader: Callable[[str], str] = input,
-    gantry_factory: Callable[..., _GantryLike] = Gantry,
+    gantry_factory: Callable[..., Gantry] = Gantry,
     key_reader: KeyReader = read_keypress_batch,
     stdin_flusher: Callable[[], None] = flush_stdin,
 ) -> DeckOriginCalibrationResult | DeckOriginCalibrationPlan:

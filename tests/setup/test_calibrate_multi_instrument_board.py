@@ -139,12 +139,12 @@ class _FakeGantry:
     def set_serial_timeout(self, timeout: float) -> None:
         self.calls.append(("set_serial_timeout", timeout))
 
-    def read_grbl_settings(self) -> dict[str, str]:
-        self.calls.append(("read_grbl_settings",))
-        return {"$20": "0"}
+    def soft_limits_enabled(self) -> bool | None:
+        self.calls.append(("soft_limits_enabled",))
+        return False
 
-    def set_grbl_setting(self, setting: str, value: float | int | bool) -> None:
-        self.calls.append(("set_grbl_setting", setting, value))
+    def set_soft_limits_enabled(self, enabled: bool) -> None:
+        self.calls.append(("set_soft_limits_enabled", enabled))
 
     def configure_soft_limits_from_spans(
         self,
@@ -181,15 +181,15 @@ class _SerialDropOnFirstHomeFakeGantry(_FakeGantry):
 class _SoftLimitEnabledFakeGantry(_FakeGantry):
     def __init__(self, config: dict):
         super().__init__(config)
-        self.grbl_settings = {"$20": "1"}
+        self.soft_limits_are_enabled = True
 
-    def read_grbl_settings(self) -> dict[str, str]:
-        self.calls.append(("read_grbl_settings",))
-        return dict(self.grbl_settings)
+    def soft_limits_enabled(self) -> bool | None:
+        self.calls.append(("soft_limits_enabled",))
+        return self.soft_limits_are_enabled
 
-    def set_grbl_setting(self, setting: str, value: float | int | bool) -> None:
-        self.calls.append(("set_grbl_setting", setting, value))
-        self.grbl_settings[setting] = str(value)
+    def set_soft_limits_enabled(self, enabled: bool) -> None:
+        self.calls.append(("set_soft_limits_enabled", enabled))
+        self.soft_limits_are_enabled = enabled
 
 
 def _key_reader(keys):
@@ -324,8 +324,8 @@ def test_multi_instrument_calibration_disables_stale_soft_limits_during_jogs(tmp
 
     assert isinstance(result, MultiInstrumentCalibrationResult)
     calls = _SoftLimitEnabledFakeGantry.instance.calls
-    disable_call = ("set_grbl_setting", "$20", 0)
-    restore_call = ("set_grbl_setting", "$20", 1)
+    disable_call = ("set_soft_limits_enabled", False)
+    restore_call = ("set_soft_limits_enabled", True)
     assert disable_call in calls
     assert restore_call in calls
     assert calls.index(disable_call) < calls.index(

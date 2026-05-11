@@ -14,7 +14,7 @@ def test_gantry_move_to_sends_deck_origin_z_without_sign_flip(mock_mill_cls):
 
     gantry.move_to(10.0, 20.0, -5.0)
 
-    mock_mill_cls.return_value.move_to_position.assert_called_once_with(
+    mock_mill_cls.return_value.move_to.assert_called_once_with(
         x_coordinate=10.0,
         y_coordinate=20.0,
         z_coordinate=-5.0,

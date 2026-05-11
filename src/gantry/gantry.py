@@ -11,7 +11,7 @@ from .coordinate_translator import (
 )
 from .grbl_settings import format_setting_value, normalize_expected_grbl_settings
 from .gantry_driver.driver import DEFAULT_FEED_RATE, Mill
-from .gantry_driver.exceptions import (
+from .errors import (
     CommandExecutionError,
     LocationNotFound,
     MillConnectionError,
@@ -61,21 +61,42 @@ class Gantry:
             return float(getattr(self.config, "total_z_range"))
         return None
 
-    def connect(self) -> None:
-        """Connect to the CNC mill by auto-scanning serial ports."""
+    def connect(self, port: str | None = None) -> None:
+        """Connect to the CNC mill.
+
+        If ``port`` is omitted, the low-level driver auto-scans serial ports.
+        Setup scripts use this public override instead of reaching into the
+        driver instance.
+        """
         if self._offline:
             return
         assert self._mill is not None
         try:
-            self.logger.info("Connecting to gantry via auto-scan")
-            self._mill.connect_to_mill(port=None)
+            if port is None:
+                self.logger.info("Connecting to gantry via auto-scan")
+            else:
+                self.logger.info("Connecting to gantry via %s", port)
+            self._mill.connect(port=port)
             self._validate_grbl_settings()
             self._check_alarm_state()
         except MillConnectionError as exc:
             self.logger.error("Error connecting to gantry: %s", exc)
             raise
 
+    def connected_port(self) -> str | None:
+        """Return the connected serial port, if one is available."""
+        if self._offline:
+            return None
+        assert self._mill is not None
+        return self._mill.connected_port()
+
     def disconnect(self) -> None:
+        """Close the controller connection.
+
+        Re-raises :class:`MillConnectionError` so callers know the port may
+        still be open — silently swallowing it left stale serial handles that
+        could later be reused by a reconnect.
+        """
         if self._offline:
             return
         assert self._mill is not None
@@ -83,6 +104,7 @@ class Gantry:
             self._mill.disconnect()
         except MillConnectionError as exc:
             self.logger.error("Error disconnecting gantry: %s", exc)
+            raise
 
     def is_healthy(self) -> bool:
         """Check if the gantry is connected and healthy."""
@@ -90,22 +112,22 @@ class Gantry:
             return True
         assert self._mill is not None
         if not self._mill.active_connection:
-            self.logger.debug("Health check: no active connection")
+            self.logger.warning("Health check: no active connection")
             return False
 
         try:
-            if not self._mill.ser_mill or not self._mill.ser_mill.is_open:
-                self.logger.debug("Health check: serial port not open")
+            if not self._mill.is_connected():
+                self.logger.warning("Health check: serial port not open")
                 return False
 
             status = self._mill.current_status()
             if "Alarm" in status or "Error" in status:
-                self.logger.debug("Health check: unhealthy status: %s", status)
+                self.logger.warning("Health check: unhealthy status: %s", status)
                 return False
 
             return True
         except (MillConnectionError, StatusReturnError) as exc:
-            self.logger.debug("Health check failed: %s", exc)
+            self.logger.warning("Health check failed: %s", exc)
             return False
 
     def home(self) -> None:
@@ -153,15 +175,14 @@ class Gantry:
             return
         assert self._mill is not None
 
-        self._mill.read_mill_config()
-        self._mill.read_working_volume()
+        self._mill.read_config()
         self._mill.clear_buffers()
         status = self._mill.query_raw_status()
         if status:
-            self._mill._enforce_wpos_mode()
+            self._mill.enforce_wpos_mode()
         self._mill.set_feed_rate(DEFAULT_FEED_RATE)
         if status:
-            self._mill._seed_wco()
+            self._mill.seed_wco()
         self._validate_grbl_settings()
 
     def move_to(
@@ -197,7 +218,7 @@ class Gantry:
                 if travel_z is not None
                 else None
             )
-            self._mill.move_to_position(
+            self._mill.move_to(
                 x_coordinate=machine_x,
                 y_coordinate=machine_y,
                 z_coordinate=machine_z,
@@ -264,7 +285,7 @@ class Gantry:
             return
         assert self._mill is not None
         try:
-            self._mill.reset()
+            self._mill.unlock()
         except (MillConnectionError, CommandExecutionError) as exc:
             self.logger.error("Unlock error: %s", exc)
             raise
@@ -289,7 +310,7 @@ class Gantry:
             return translate_status_string(self._mill.current_status())
         except (MillConnectionError, StatusReturnError) as exc:
             self.logger.error("Error getting status: %s", exc)
-            return "StatusQueryFailed"
+            raise
 
     def stop(self) -> None:
         """Immediately stop all gantry motion (GRBL feed hold)."""
@@ -333,8 +354,7 @@ class Gantry:
         if self._offline:
             return
         assert self._mill is not None
-        if self._mill.ser_mill is not None:
-            self._mill.ser_mill.timeout = timeout
+        self._mill.set_read_timeout(timeout)
 
     def clear_g92_offsets(self) -> None:
         """Clear transient G92 offsets before assigning a durable WPos."""
@@ -354,7 +374,7 @@ class Gantry:
             return
         assert self._mill is not None
         try:
-            self._mill._enforce_wpos_mode()
+            self._mill.enforce_wpos_mode()
         except CommandExecutionError as exc:
             self.logger.error("Error enforcing WPos status reporting: %s", exc)
             raise
@@ -459,7 +479,7 @@ class Gantry:
         if self._offline:
             return {}
         assert self._mill is not None
-        return self._mill.grbl_settings()
+        return self._mill.read_grbl_settings()
 
     def set_grbl_setting(self, setting: str, value: float | int | bool) -> None:
         """Set one GRBL ``$`` setting."""
@@ -468,6 +488,28 @@ class Gantry:
         assert self._mill is not None
         code = setting[1:] if setting.startswith("$") else setting
         self._mill.set_grbl_setting(code, format_setting_value(value))
+
+    def soft_limits_enabled(self) -> bool | None:
+        """Return whether GRBL soft limits are enabled, if readable."""
+        settings = self.read_grbl_settings()
+        raw = settings.get("$20", settings.get("20"))
+        if raw is None:
+            return None
+        try:
+            return float(raw) != 0.0
+        except (TypeError, ValueError):
+            return None
+
+    def set_soft_limits_enabled(self, enabled: bool) -> None:
+        """Enable or disable GRBL soft limits through Gantry semantics."""
+        self.set_grbl_setting("$20", 1 if enabled else 0)
+
+    def query_raw_status(self) -> str:
+        """Return one raw GRBL status string for diagnostics/recovery."""
+        if self._offline:
+            return "<Idle|WPos:0.000,0.000,0.000>"
+        assert self._mill is not None
+        return self._mill.query_raw_status()
 
     def configure_soft_limits_from_spans(
         self,
@@ -553,19 +595,19 @@ class Gantry:
 
     def _extract_status(self) -> str:
         """Extract the GRBL state word from the last raw status string."""
+        assert self._mill is not None
+        raw = getattr(self._mill, "last_status", "") or ""
+        if not raw:
+            return "Unknown"
+        match = _STATUS_RE.search(raw)
+        if match:
+            return match.group(1)
+        if "alarm" in raw.lower():
+            return "Alarm"
         try:
-            assert self._mill is not None
-            raw = getattr(self._mill, "last_status", "") or ""
-            if not raw:
-                return "Unknown"
-            match = _STATUS_RE.search(raw)
-            if match:
-                return match.group(1)
-            if "alarm" in raw.lower():
-                return "Alarm"
             return translate_status_string(raw)
-        except (ValueError, AttributeError) as exc:
-            self.logger.debug("Failed to extract status: %s", exc)
+        except ValueError as exc:
+            self.logger.warning("Failed to translate status %r: %s", raw, exc)
             return "Unknown"
 
     def _expected_grbl_settings(self) -> Optional[Dict[str, float]]:
@@ -589,22 +631,7 @@ class Gantry:
             return
 
         assert self._mill is not None
-        live = self._mill.grbl_settings()
-        mismatches = []
-        for grbl_code, expected_value in expected.items():
-            live_raw = live.get(grbl_code)
-            if live_raw is None:
-                self.logger.warning(
-                    "GRBL setting %s not found on controller", grbl_code
-                )
-                continue
-            if abs(float(live_raw) - float(expected_value)) > 0.001:
-                mismatches.append((grbl_code, float(expected_value), float(live_raw)))
-
-        if not mismatches:
-            self.logger.info("GRBL settings validation passed")
-            return
-
+        live = self._mill.read_grbl_settings()
         critical = {
             "$3",
             "$20",
@@ -617,6 +644,27 @@ class Gantry:
             "$131",
             "$132",
         }
+        mismatches = []
+        for grbl_code, expected_value in expected.items():
+            live_raw = live.get(grbl_code)
+            if live_raw is None:
+                # A missing critical setting is just as dangerous as a wrong
+                # one — record it as a mismatch with a sentinel float so the
+                # critical-fail path below still trips.
+                level = logging.ERROR if grbl_code in critical else logging.WARNING
+                self.logger.log(
+                    level, "GRBL setting %s not found on controller", grbl_code
+                )
+                if grbl_code in critical:
+                    mismatches.append((grbl_code, float(expected_value), float("nan")))
+                continue
+            if abs(float(live_raw) - float(expected_value)) > 0.001:
+                mismatches.append((grbl_code, float(expected_value), float(live_raw)))
+
+        if not mismatches:
+            self.logger.info("GRBL settings validation passed")
+            return
+
         critical_mismatches = [item for item in mismatches if item[0] in critical]
         for grbl_code, expected_value, live_value in mismatches:
             self.logger.error(

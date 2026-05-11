@@ -6,8 +6,7 @@ commit by running against a real, physically connected mill. It tests:
 1. Connection enforces WPos mode ($10=0) and absolute positioning (G90)
 2. current_coordinates() returns WPos consistently
 3. Post-homing coordinate validation works
-4. machine_coordinates() correctly computes MPos from WPos + WCO
-5. Small moves report correct WPos values
+4. Small moves report correct WPos values
 
 Usage:
     python tests/hardware/test_wpos_enforcement.py [--port /dev/ttyUSB0] [--skip-homing]
@@ -16,10 +15,9 @@ Usage:
 import argparse
 import sys
 import time
-from pathlib import Path
 
+from gantry.coordinates import Coordinates
 from gantry.gantry_driver.driver import Mill
-from gantry.gantry_driver.instruments import Coordinates
 from gantry.gantry_driver.exceptions import StatusReturnError, LocationNotFound
 
 
@@ -60,7 +58,7 @@ def test_status_returns_wpos(mill: Mill):
     print("\n--- Test: Status reports WPos ---")
     mill.ser_mill.write(b"?")
     time.sleep(0.3)
-    status = mill.read()
+    status = mill._read_serial()
     has_wpos = "WPos:" in status
     has_mpos = "MPos:" in status
     record("Status contains WPos", has_wpos, f"status={status[:80]}")
@@ -87,40 +85,12 @@ def test_current_coordinates_returns_valid(mill: Mill):
         record("current_coordinates() returns Coordinates", False, "LocationNotFound raised")
 
 
-def test_machine_coordinates(mill: Mill):
-    """Verify machine_coordinates() returns MPos = WPos + WCO."""
-    print("\n--- Test: machine_coordinates() computes MPos from WPos + WCO ---")
-    try:
-        wpos = mill.current_coordinates()
-        mpos = mill.machine_coordinates()
-        wco = mill._query_work_coordinate_offset()
-        record(
-            "machine_coordinates() succeeds",
-            True,
-            f"WPos={wpos}, MPos={mpos}, WCO={wco}",
-        )
-        # Verify MPos ≈ WPos + WCO (within rounding tolerance)
-        tol = 0.01
-        x_ok = abs(mpos.x - (wpos.x + wco.x)) < tol
-        y_ok = abs(mpos.y - (wpos.y + wco.y)) < tol
-        z_ok = abs(mpos.z - (wpos.z + wco.z)) < tol
-        record(
-            "MPos = WPos + WCO (within 0.01mm)",
-            x_ok and y_ok and z_ok,
-            f"deltas: x={abs(mpos.x - (wpos.x + wco.x)):.4f}, "
-            f"y={abs(mpos.y - (wpos.y + wco.y)):.4f}, "
-            f"z={abs(mpos.z - (wpos.z + wco.z)):.4f}",
-        )
-    except Exception as e:
-        record("machine_coordinates() succeeds", False, str(e))
-
-
 def test_absolute_positioning(mill: Mill):
     """Verify mill is in G90 (absolute) mode by checking parser state."""
     print("\n--- Test: Absolute positioning (G90) enforced ---")
     try:
-        state = mill.gcode_parser_state()
-        has_g90 = "G90" in str(state)
+        state = mill.execute_command("$G")
+        has_g90 = "g90" in str(state).lower()
         record("Parser state includes G90", has_g90, f"state={state}")
     except Exception as e:
         record("Parser state includes G90", False, str(e))
@@ -161,7 +131,7 @@ def test_homing_and_validation(mill: Mill):
     """Home the mill and verify post-homing coordinate validation passes."""
     print("\n--- Test: Homing + post-homing coordinate validation ---")
     try:
-        mill.homing_sequence()
+        mill.home()
         coords = mill.current_coordinates()
         within_tol = (
             abs(coords.x) < 10.0
@@ -173,11 +143,11 @@ def test_homing_and_validation(mill: Mill):
             within_tol,
             f"{coords}",
         )
-        record("homing_sequence() completed without error", True)
+        record("home() completed without error", True)
     except StatusReturnError as e:
         record("Post-homing coords near origin", False, str(e))
     except Exception as e:
-        record("homing_sequence() completed without error", False, str(e))
+        record("home() completed without error", False, str(e))
 
 
 def print_summary():
@@ -209,7 +179,7 @@ def main():
     # Connect
     print("\nConnecting to mill...")
     mill = Mill(port=args.port)
-    mill.connect_to_mill(port=args.port)
+    mill.connect(port=args.port)
     print(f"Connected on {mill.ser_mill.port}")
 
     # Run tests that don't require homing first
@@ -217,7 +187,6 @@ def main():
     test_status_returns_wpos(mill)
     test_absolute_positioning(mill)
     test_current_coordinates_returns_valid(mill)
-    test_machine_coordinates(mill)
 
     # Homing test
     if args.skip_homing:

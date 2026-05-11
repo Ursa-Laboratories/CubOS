@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from gantry.gantry_driver.exceptions import (
+from gantry.errors import (
     CommandExecutionError,
     StatusReturnError,
 )
@@ -180,15 +180,15 @@ class _LimitRecoveringNoReadbackFakeGantry(_LimitRecoveringFakeGantry):
 class _SoftLimitAwareFakeGantry(_FakeGantry):
     def __init__(self, config: dict):
         super().__init__(config)
-        self.grbl_settings = {"$20": "1"}
+        self.soft_limits_are_enabled = True
 
-    def read_grbl_settings(self) -> dict[str, str]:
-        self.calls.append(("read_grbl_settings",))
-        return dict(self.grbl_settings)
+    def soft_limits_enabled(self) -> bool | None:
+        self.calls.append(("soft_limits_enabled",))
+        return self.soft_limits_are_enabled
 
-    def set_grbl_setting(self, setting: str, value: float | int | bool) -> None:
-        self.calls.append(("set_grbl_setting", setting, value))
-        self.grbl_settings[setting] = str(value)
+    def set_soft_limits_enabled(self, enabled: bool) -> None:
+        self.calls.append(("set_soft_limits_enabled", enabled))
+        self.soft_limits_are_enabled = enabled
 
 
 class _SoftLimitRejectingFakeGantry(_FakeGantry):
@@ -568,8 +568,8 @@ def test_run_calibration_temporarily_disables_stale_soft_limits(tmp_path):
 
     assert isinstance(result, DeckOriginCalibrationResult)
     calls = _SoftLimitAwareFakeGantry.instance.calls
-    disable_call = ("set_grbl_setting", "$20", 0)
-    restore_call = ("set_grbl_setting", "$20", 1)
+    disable_call = ("set_soft_limits_enabled", False)
+    restore_call = ("set_soft_limits_enabled", True)
     assert disable_call in calls
     assert restore_call in calls
     assert calls.index(disable_call) < calls.index(restore_call)
@@ -614,10 +614,10 @@ def test_run_calibration_restores_soft_limits_when_jog_aborts(tmp_path):
         )
 
     calls = _SoftLimitAwareFailingJogFakeGantry.instance.calls
-    assert ("set_grbl_setting", "$20", 0) in calls
-    assert ("set_grbl_setting", "$20", 1) in calls
-    assert calls.index(("set_grbl_setting", "$20", 0)) < calls.index(
-        ("set_grbl_setting", "$20", 1)
+    assert ("set_soft_limits_enabled", False) in calls
+    assert ("set_soft_limits_enabled", True) in calls
+    assert calls.index(("set_soft_limits_enabled", False)) < calls.index(
+        ("set_soft_limits_enabled", True)
     )
     assert ("disconnect",) in calls
 
