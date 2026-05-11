@@ -302,13 +302,7 @@ class Gantry:
             raise
 
     def get_status(self) -> str:
-        """Return the current status string with normalized coordinates.
-
-        Raises :class:`MillConnectionError` / :class:`StatusReturnError` on
-        query failure rather than returning a sentinel — most callers do
-        ``"Idle" in status`` and would treat a sentinel as "not idle",
-        masking the real fault.
-        """
+        """Return the current status string with normalized coordinates."""
         if self._offline:
             return "Idle"
         assert self._mill is not None
