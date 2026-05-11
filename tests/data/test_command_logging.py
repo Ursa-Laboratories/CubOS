@@ -182,9 +182,9 @@ class TestPipetteDbTracking:
         pipette = MagicMock()
         board.instruments = {"pipette": pipette}
 
-    deck = MagicMock()
-    deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
-    deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck = MagicMock()
+        deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
+        deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
 
         ctx = ProtocolContext(
             board=board, deck=deck,
