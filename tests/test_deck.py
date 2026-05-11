@@ -96,59 +96,73 @@ def test_deck_iter():
     assert set(deck) == {"plate_1", "vial_1"}
 
 
-# ----- resolve() -----
+# ----- resolve_coordinate() -----
 
-def test_resolve_well_plate_with_location():
-    """resolve('plate_1.A1') returns coordinate for well A1."""
+def test_resolve_coordinate_well_plate_with_location():
+    """resolve_coordinate('plate_1.A1') returns coordinate for well A1."""
     deck = _make_deck()
     coord = deck.resolve_coordinate("plate_1.A1")
     assert coord == Coordinate3D(x=0.0, y=0.0, z=75.0)
 
 
-def test_resolve_well_plate_another_well():
-    """resolve('plate_1.B2') returns coordinate for well B2."""
+def test_resolve_coordinate_well_plate_another_well():
+    """resolve_coordinate('plate_1.B2') returns coordinate for well B2."""
     deck = _make_deck()
     coord = deck.resolve_coordinate("plate_1.B2")
     assert coord == Coordinate3D(x=10.0, y=8.0, z=75.0)
 
 
-def test_resolve_vial_bare_name():
-    """resolve('vial_1') returns vial center (initial position)."""
+def test_resolve_coordinate_vial_bare_name():
+    """resolve_coordinate('vial_1') returns vial center (initial position)."""
     deck = _make_deck()
     coord = deck.resolve_coordinate("vial_1")
     assert coord == Coordinate3D(x=30.0, y=40.0, z=20.0)
 
 
-def test_resolve_plate_bare_name_returns_initial_position():
-    """resolve('plate_1') with no location returns A1 (initial position)."""
+def test_resolve_coordinate_plate_bare_name_returns_initial_position():
+    """resolve_coordinate('plate_1') with no location returns A1 (initial position)."""
     deck = _make_deck()
     coord = deck.resolve_coordinate("plate_1")
     assert coord == Coordinate3D(x=0.0, y=0.0, z=75.0)
 
 
-def test_resolve_unknown_labware_raises():
-    """resolve('unknown.A1') raises KeyError for missing labware."""
+def test_resolve_coordinate_unknown_labware_raises():
+    """resolve_coordinate('unknown.A1') raises KeyError for missing labware."""
     deck = _make_deck()
     with pytest.raises(KeyError, match="unknown"):
         deck.resolve_coordinate("unknown.A1")
 
 
-def test_resolve_unknown_labware_bare_raises():
-    """resolve('unknown') raises KeyError for missing labware."""
+def test_resolve_coordinate_unknown_labware_bare_raises():
+    """resolve_coordinate('unknown') raises KeyError for missing labware."""
     deck = _make_deck()
     with pytest.raises(KeyError, match="unknown"):
         deck.resolve_coordinate("unknown")
 
 
-def test_resolve_invalid_well_id_raises():
-    """resolve('plate_1.Z99') raises KeyError for invalid well."""
+def test_resolve_coordinate_invalid_well_id_raises():
+    """resolve_coordinate('plate_1.Z99') raises KeyError for invalid well."""
     deck = _make_deck()
     with pytest.raises(KeyError, match="Z99"):
         deck.resolve_coordinate("plate_1.Z99")
 
 
-def test_resolve_vial_with_dot_location_raises():
-    """resolve('vial_1.X') raises KeyError since vial has no sub-locations."""
+def test_resolve_coordinate_vial_with_dot_location_raises():
+    """resolve_coordinate('vial_1.X') raises KeyError since vial has no sub-locations."""
     deck = _make_deck()
     with pytest.raises(KeyError):
         deck.resolve_coordinate("vial_1.X")
+
+
+@pytest.mark.parametrize("target,pattern", [
+    ("unknown.A1", "unknown"),
+    ("unknown", "unknown"),
+    ("plate_1.Z99", "Z99"),
+    ("vial_1.X", "Unknown location ID"),
+])
+def test_resolve_coordinate_match_errors_for_invalid_targets(target, pattern):
+    """Coordinate resolver raises matching errors for invalid targets."""
+    deck = _make_deck()
+
+    with pytest.raises(KeyError, match=pattern):
+        deck.resolve_coordinate(target)

@@ -393,7 +393,7 @@ class TestDropTipCommand:
 
 
 def _mock_context_multi_resolve(has_pipette: bool = True) -> ProtocolContext:
-    """Context where deck.resolve_coordinate returns different coords per position string."""
+    """Context where deck.resolve_coordinate returns different coords per position."""
     board = MagicMock()
     deck = MagicMock()
 
@@ -401,7 +401,9 @@ def _mock_context_multi_resolve(has_pipette: bool = True) -> ProtocolContext:
         "plate_1.A1": Coordinate3D(x=10.0, y=20.0, z=75.0),
         "plate_1.B1": Coordinate3D(x=10.0, y=28.0, z=75.0),
     }
-    deck.resolve_coordinate.side_effect = lambda pos: coords.get(pos, Coordinate3D(x=0.0, y=0.0, z=0.0))
+    deck.resolve_coordinate.side_effect = (
+        lambda pos: coords.get(pos, Coordinate3D(x=0.0, y=0.0, z=0.0))
+)
 
     if has_pipette:
         pipette = MagicMock()
@@ -518,7 +520,9 @@ def _serial_transfer_context(
     board = MagicMock()
     deck = MagicMock()
     deck.__getitem__ = MagicMock(return_value=plate)
-    deck.resolve_coordinate.side_effect = lambda pos: Coordinate3D(x=0.0, y=0.0, z=0.0)
+    deck.resolve_coordinate.side_effect = (
+        lambda pos: Coordinate3D(x=0.0, y=0.0, z=0.0)
+)
 
     if has_pipette:
         pipette = MagicMock()
