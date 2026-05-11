@@ -1,6 +1,6 @@
 """Unit tests for setup/test_connection.py helper functions.
 
-These tests use MockMill / offline mode — no hardware required.
+These tests use Gantry(offline=True) — no hardware required.
 """
 
 from __future__ import annotations

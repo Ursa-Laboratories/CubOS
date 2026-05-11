@@ -2,7 +2,10 @@
 
 
 class Coordinates:
-    """Immutable-style 3D coordinate representation with auto-rounding."""
+    """Mutable 3D coordinate value object. Each axis is stored as a float
+    rounded to 6 decimal places on set and on read. Supports attribute,
+    integer-index, and string-key access (e.g. ``c.x``, ``c[0]``, ``c["x"]``)
+    and equality by component value."""
 
     def __init__(self, x, y, z):
         self.x = x

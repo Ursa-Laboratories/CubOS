@@ -337,8 +337,8 @@ class TestCNCDriverLogic(unittest.TestCase):
     @patch('gantry.gantry_driver.driver.serial.Serial')
     @patch('gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('gantry.gantry_driver.driver.set_up_command_logger')
-    def test_grbl_settings_reads_live_controller(self, mock_cmd_logger, mock_mill_logger, mock_serial):
-        """Test that grbl_settings issues a live $$ read."""
+    def test_read_grbl_settings_reads_live_controller(self, mock_cmd_logger, mock_mill_logger, mock_serial):
+        """Test that read_grbl_settings issues a live $$ read."""
         mill = Mill()
         mill.ser_mill = MagicMock()
         mill.ser_mill.is_open = True
