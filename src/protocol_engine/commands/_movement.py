@@ -86,7 +86,7 @@ def engage_at_labware(
             f"{command_label}: unknown instrument '{instrument}'."
         ) from exc
     try:
-        coord = context.deck.resolve(position)
+        coord = context.deck.resolve_coordinate(position)
     except (KeyError, AttributeError, ValueError) as exc:
         raise ValueError(
             f"{command_label}: cannot resolve position {position!r} on the "

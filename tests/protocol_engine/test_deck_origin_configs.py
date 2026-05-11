@@ -124,16 +124,16 @@ def test_panda_deck_origin_layout_and_placeholders_parse():
         CONFIGS / "deck/panda_deck.yaml",
         total_z_range=gantry_config.total_z_range,
     )
-    plate = deck.resolve("well_plate_holder.plate.A1")
-    plate_a2 = deck.resolve("well_plate_holder.plate.A2")
-    tip_a1 = deck.resolve("tip_rack_left.A1")
-    tip_a2 = deck.resolve("tip_rack_left.A2")
+    plate = deck.resolve_coordinate("well_plate_holder.plate.A1")
+    plate_a2 = deck.resolve_coordinate("well_plate_holder.plate.A2")
+    tip_a1 = deck.resolve_coordinate("tip_rack_left.A1")
+    tip_a2 = deck.resolve_coordinate("tip_rack_left.A2")
 
     assert plate_a2.x == pytest.approx(plate.x)
     assert plate_a2.y > plate.y
     assert tip_a2.x == pytest.approx(tip_a1.x)
     assert tip_a2.y > tip_a1.y
-    assert deck.resolve("vial_holder.vial_9").z > deck["vial_holder"].location.z
+    assert deck.resolve_coordinate("vial_holder.vial_9").z > deck["vial_holder"].location.z
     assert set(gantry_config.instruments) == {
         "potentiostat",
         "camera",

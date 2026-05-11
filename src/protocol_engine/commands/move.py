@@ -69,7 +69,7 @@ def move(
     # (no '.'), surface a clearer error that lists both namespaces so a
     # typo in a named position doesn't masquerade as a missing labware.
     try:
-        coord = context.deck.resolve(position)
+        coord = context.deck.resolve_coordinate(position)
     except Exception as exc:
         if isinstance(position, str) and "." not in position:
             named = sorted(context.positions.keys()) if context.positions else []

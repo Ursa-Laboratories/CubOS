@@ -29,7 +29,7 @@ def _ctx(instr, well_coord=None, height=HEIGHT_MM):
     board = MagicMock()
     board.instruments = {"uvvis": instr}
     deck = MagicMock()
-    deck.resolve = MagicMock(return_value=well_coord)
+    deck.resolve_coordinate = MagicMock(return_value=well_coord)
     labware = MagicMock(height=height)
     deck.__getitem__ = MagicMock(return_value=labware)
     return ProtocolContext(board=board, deck=deck)
