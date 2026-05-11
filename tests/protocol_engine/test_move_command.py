@@ -53,7 +53,7 @@ class TestMoveCommandRouting:
         ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
         ctx.board.move_to_labware.assert_called_once_with("pipette", coord)
         ctx.board.move.assert_not_called()
-        ctx.deck.resolve.assert_not_called()
+        ctx.deck.resolve_coordinate.assert_not_called()
 
     def test_literal_list_uses_raw_move(self):
         """[x, y, z] list bypasses move_to_labware — user wants exact coords."""

@@ -114,7 +114,7 @@ def test_tip_disposal_resolves_from_deck():
         }
     )
 
-    assert deck.resolve("waste") == Coordinate3D(x=100.0, y=110.0, z=15.0)
+    assert deck.resolve_coordinate("waste") == Coordinate3D(x=100.0, y=110.0, z=15.0)
 
 
 def test_load_holder_labware_from_yaml():
@@ -167,8 +167,8 @@ labware:
         assert isinstance(deck["slide_holder"], WellPlateHolder)
         assert isinstance(deck["vial_holder"], VialHolder)
         assert deck["waste"].location.z == pytest.approx(10.0)
-        assert deck.resolve("slide_holder.plate") == Coordinate3D(x=51.0, y=61.0, z=12.0)
-        assert deck.resolve("vial_holder.vial_1") == Coordinate3D(x=71.0, y=81.0, z=15.0)
+        assert deck.resolve_coordinate("slide_holder.plate") == Coordinate3D(x=51.0, y=61.0, z=12.0)
+        assert deck.resolve_coordinate("vial_holder.vial_1") == Coordinate3D(x=71.0, y=81.0, z=15.0)
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -204,7 +204,7 @@ labware:
 
         assert isinstance(holder, VialHolder)
         assert isinstance(holder.contained_labware["vial_1"], Vial)
-        assert deck.resolve("vial_holder.vial_1") == Coordinate3D(x=17.1, y=0.9, z=182.0)
+        assert deck.resolve_coordinate("vial_holder.vial_1") == Coordinate3D(x=17.1, y=0.9, z=182.0)
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -243,9 +243,9 @@ labware:
 
         assert isinstance(holder, WellPlateHolder)
         assert isinstance(holder.contained_labware["plate"], WellPlate)
-        assert deck.resolve("plate_holder.plate") == Coordinate3D(x=221.75, y=78.5, z=188.0)
-        assert deck.resolve("plate_holder.plate.A1") == Coordinate3D(x=221.75, y=78.5, z=188.0)
-        assert deck.resolve("plate_holder.plate.B2") == Coordinate3D(x=230.75, y=69.5, z=188.0)
+        assert deck.resolve_coordinate("plate_holder.plate") == Coordinate3D(x=221.75, y=78.5, z=188.0)
+        assert deck.resolve_coordinate("plate_holder.plate.A1") == Coordinate3D(x=221.75, y=78.5, z=188.0)
+        assert deck.resolve_coordinate("plate_holder.plate.B2") == Coordinate3D(x=230.75, y=69.5, z=188.0)
     finally:
         Path(path).unlink(missing_ok=True)
 

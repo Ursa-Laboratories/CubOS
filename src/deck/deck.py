@@ -15,7 +15,6 @@ class Deck:
 
     - ``resolve_coordinate()``: resolve a deck-coordinate target string (e.g.
       ``"plate_1.A1"``) into a coordinate.
-    - ``resolve()``: backwards-compatible alias for ``resolve_coordinate()``.
     - ``resolve_labware()``: resolve a nested labware object path (e.g.
       ``"plate_holder.plate"``).
     """
@@ -40,10 +39,6 @@ class Deck:
             labware_key, location_id = target.split(".", 1)
             return self._get_labware(labware_key).get_location(location_id)
         return self._get_labware(target).get_initial_position()
-
-    def resolve(self, target: str) -> Coordinate3D:
-        """Backwards-compatible shim for coordinate lookup via ``resolve_coordinate``."""
-        return self.resolve_coordinate(target)
 
     def resolve_labware(self, target: str) -> Labware:
         """Resolve a top-level or nested labware path to a Labware object.
