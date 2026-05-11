@@ -104,6 +104,8 @@ def _mock_context(
     deck = MagicMock()
     deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
     deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+    deck.resolve_coordinate = deck.resolve
+    deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
 
     return ProtocolContext(
         board=board,
@@ -184,6 +186,7 @@ class TestPipetteDbTracking:
         deck = MagicMock()
         deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
         deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_coordinate = deck.resolve
 
         ctx = ProtocolContext(
             board=board, deck=deck,
@@ -207,6 +210,7 @@ class TestPipetteDbTracking:
 
         deck = MagicMock()
         deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_coordinate = deck.resolve
 
         ctx = ProtocolContext(
             board=board, deck=deck,

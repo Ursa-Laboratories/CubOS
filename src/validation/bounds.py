@@ -80,7 +80,7 @@ def _resolve_deck_coord(deck: Deck, target: Any) -> Coordinate3D | None:
     if not isinstance(target, str):
         return None
     try:
-        return deck.resolve(target)
+        return deck.resolve_coordinate(target)
     except (KeyError, AttributeError, ValueError):
         return None
 

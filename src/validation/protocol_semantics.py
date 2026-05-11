@@ -640,7 +640,7 @@ def _validate_measure_command(
         return violations
 
     try:
-        coord = deck.resolve(position)
+        coord = deck.resolve_coordinate(position)
     except (KeyError, AttributeError, ValueError):
         return violations
 
@@ -729,7 +729,7 @@ def _validate_move_waypoints(
         target = (named[0], named[1], named[2])
     elif isinstance(position, str):
         try:
-            coord = deck.resolve(position)
+            coord = deck.resolve_coordinate(position)
         except (KeyError, AttributeError, ValueError) as exc:
             violations.append(_violation(
                 step_index,

@@ -64,6 +64,9 @@ def _ctx(instr_name: str, instr, plate=None):
     deck = MagicMock()
     deck.__getitem__ = MagicMock(return_value=plate or _plate())
     deck.resolve.return_value = Coordinate3D(x=10.0, y=20.0, z=WELL_Z)
+    deck.resolve = MagicMock(return_value=Coordinate3D(x=10.0, y=20.0, z=WELL_Z))
+    deck.resolve_coordinate = deck.resolve
+    deck.resolve_labware = MagicMock(return_value=plate or _plate())
     return ProtocolContext(board=board, deck=deck, logger=logging.getLogger("test"))
 
 

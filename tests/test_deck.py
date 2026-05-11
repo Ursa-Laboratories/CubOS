@@ -152,3 +152,36 @@ def test_resolve_vial_with_dot_location_raises():
     deck = _make_deck()
     with pytest.raises(KeyError):
         deck.resolve("vial_1.X")
+
+
+# ----- resolve_coordinate() -----
+
+def test_resolve_coordinate_and_resolve_equivalent_for_coordinate_targets():
+    """resolve_coordinate has the existing resolve coordinate semantics."""
+    deck = _make_deck()
+
+    assert deck.resolve_coordinate("plate_1.A1") == Coordinate3D(x=0.0, y=0.0, z=75.0)
+    assert deck.resolve_coordinate("plate_1.B2") == Coordinate3D(x=10.0, y=8.0, z=75.0)
+    assert deck.resolve_coordinate("vial_1") == Coordinate3D(x=30.0, y=40.0, z=20.0)
+    assert deck.resolve_coordinate("plate_1") == Coordinate3D(x=0.0, y=0.0, z=75.0)
+
+    assert deck.resolve("plate_1.A1") == deck.resolve_coordinate("plate_1.A1")
+    assert deck.resolve("plate_1.B2") == deck.resolve_coordinate("plate_1.B2")
+    assert deck.resolve("vial_1") == deck.resolve_coordinate("vial_1")
+    assert deck.resolve("plate_1") == deck.resolve_coordinate("plate_1")
+
+
+@pytest.mark.parametrize("target,pattern", [
+    ("unknown.A1", "unknown"),
+    ("unknown", "unknown"),
+    ("plate_1.Z99", "Z99"),
+    ("vial_1.X", "Unknown location ID"),
+])
+def test_resolve_coordinate_and_resolve_match_errors_for_invalid_targets(target, pattern):
+    """Compatibility shim and explicit coordinate resolver raise matching errors."""
+    deck = _make_deck()
+
+    with pytest.raises(KeyError, match=pattern):
+        deck.resolve(target)
+    with pytest.raises(KeyError, match=pattern):
+        deck.resolve_coordinate(target)
