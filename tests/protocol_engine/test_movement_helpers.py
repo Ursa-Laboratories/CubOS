@@ -43,7 +43,7 @@ class TestAssertFiniteNumber:
 
 
 def _mock_ctx_with_well(well_z=14.10):
-    """Build a context whose deck.resolve returns a coord at *well_z*.
+    """Build a context whose deck.resolve_coordinate returns a coord at *well_z*.
 
     The well/labware coordinate's Z is the labware-surface reference Z
     that ``engage_at_labware`` adds ``measurement_height`` to.
@@ -52,7 +52,7 @@ def _mock_ctx_with_well(well_z=14.10):
     board = MagicMock()
     board.instruments = {"sensor": instr}
     deck = MagicMock()
-    deck.resolve.return_value = Coordinate3D(x=10.0, y=20.0, z=well_z)
+    deck.resolve_coordinate.return_value = Coordinate3D(x=10.0, y=20.0, z=well_z)
     ctx = MagicMock()
     ctx.board = board
     ctx.deck = deck

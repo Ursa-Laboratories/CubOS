@@ -18,8 +18,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
+from deck.labware.well_plate_holder import WellPlateHolder
 from instruments.base_instrument import BaseInstrument
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.errors import ProtocolExecutionError
@@ -76,6 +78,29 @@ def _make_2x3_plate() -> WellPlate:
     )
 
 
+def _make_8x12_plate() -> WellPlate:
+    wells = {}
+    for row_index, row_label in enumerate("ABCDEFGH"):
+        for column in range(1, 13):
+            wells[f"{row_label}{column}"] = Coordinate3D(
+                x=float(row_index * 9.0),
+                y=float((column - 1) * 9.0),
+                z=HEIGHT_MM,
+            )
+    return WellPlate(
+        name="plate",
+        model_name="test_96",
+        length=127.76,
+        width=85.47,
+        height=HEIGHT_MM,
+        rows=8,
+        columns=12,
+        wells=wells,
+        capacity_ul=200.0,
+        working_volume_ul=150.0,
+    )
+
+
 class _FakeSensor(BaseInstrument):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -127,9 +152,7 @@ def _mock_context(
 
     board = MagicMock()
     board.instruments = {"uvvis": sensor}
-
-    deck = MagicMock()
-    deck.__getitem__ = MagicMock(return_value=plate)
+    deck = Deck({plate.name: plate})
 
     return ProtocolContext(
         board=board,
@@ -362,11 +385,45 @@ class TestScanCommand:
 
         assert sensor.call_count == 4
 
+    def test_nested_holder_plate_scans_all_96_wells(self):
+        from protocol_engine.commands.scan import scan
+
+        plate = _make_8x12_plate()
+        sensor = _make_sensor()
+        holder = WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"plate": plate},
+        )
+        board = MagicMock()
+        board.instruments = {"uvvis": sensor}
+        ctx = ProtocolContext(
+            board=board,
+            deck=Deck({"plate_holder": holder}),
+            logger=logging.getLogger("test_scan_command"),
+        )
+
+        result = scan(
+            ctx,
+            plate="plate_holder.plate",
+            instrument="uvvis",
+            method="measure",
+            measurement_height=MEASUREMENT,
+            interwell_scan_height=SAFE_APPROACH,
+        )
+
+        assert len(result) == 96
+        assert sensor.call_count == 96
+        assert board.move_to_labware.call_count == 1
+
     def test_validates_plate_is_wellplate(self):
         from protocol_engine.commands.scan import scan
 
-        ctx = _mock_context()
-        ctx.deck.__getitem__ = MagicMock(return_value=MagicMock(spec=[]))
+        ctx = ProtocolContext(
+            board=MagicMock(instruments={"uvvis": _make_sensor()}),
+            deck=Deck({"vial_1": MagicMock(spec=[])}),
+            logger=logging.getLogger("test_scan_command"),
+        )
 
         with pytest.raises(ProtocolExecutionError, match="WellPlate"):
             scan(ctx, plate="vial_1", instrument="uvvis", method="measure",

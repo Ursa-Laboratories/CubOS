@@ -65,9 +65,10 @@ Holder fixtures are also supported for collision-aware deck modeling and future
 nesting workflows: `tip_holder`, `tip_disposal`, `well_plate_holder`, and
 `vial_holder`. Exact-position `tip_rack` entries are also supported for pipette
 pickup targets. Holders can define nested contained labware so holder seat
-height contributes directly to experiment Z generation. At runtime, all labware
-expose shared base-level `geometry` metadata; for current deck models this is
-represented as a bounding box.
+height or holder-specific plate surface height contributes directly to
+experiment Z generation. At runtime, all labware expose shared base-level
+`geometry` metadata; for current deck models this is represented as a bounding
+box.
 
 ```yaml
 labware:
@@ -116,6 +117,9 @@ Protocol motion notes:
 
 - `positions:` entries such as `park_position` are protocol named positions,
   not deck labware.
+- Deck targets can refer to top-level labware (`plate.A1`) or nested holder
+  labware (`plate_holder.plate.A1`). `scan.plate` accepts a top-level or
+  nested target that resolves to a `WellPlate`.
 - `move` accepts optional `travel_z` for named/literal XYZ targets. That forces
   a retract-first transit: move Z to `travel_z`, travel in XY at that Z, then
   finish at the target position.

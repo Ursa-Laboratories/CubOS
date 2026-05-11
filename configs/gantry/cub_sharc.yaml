@@ -1,0 +1,46 @@
+serial_port: /dev/ttyUSB0
+gantry_type: cub
+cnc:
+  homing_strategy: standard
+  total_z_range: 101.5
+  y_axis_motion: head
+  safe_z: 101.5
+working_volume:
+  x_min: 0.0
+  x_max: 269.0
+  y_min: 0.0
+  y_max: 175.0
+  z_min: 80.0
+  z_max: 101.5
+grbl_settings:
+  dir_invert_mask: 2
+  status_report: 0
+  hard_limits: true
+  homing_enable: true
+  homing_dir_mask: 0
+  homing_pull_off: 2.0
+  steps_per_mm_x: 800.0
+  steps_per_mm_y: 800.0
+  steps_per_mm_z: 800.0
+  max_rate_x: 2000.0
+  max_rate_y: 2000.0
+  max_rate_z: 2000.0
+  accel_x: 50.0
+  accel_y: 50.0
+  accel_z: 50.0
+  max_travel_x: 269.0
+  max_travel_y: 175.0
+  max_travel_z: 21.5
+  soft_limits: true
+instruments:
+  uv_curing:
+    type: uv_curing
+    vendor: excelitas
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    offline: true
+    port: /dev/ttyACM0
+    baud_rate: 19200
+    default_intensity: 100.0
+    default_exposure_time: 1.0

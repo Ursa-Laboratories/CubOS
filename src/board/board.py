@@ -100,7 +100,7 @@ class Board:
             instrument: Name or instance.
             labware:    A labware-reference point — anything with x/y/z
                         attributes (e.g. a ``Coordinate3D`` returned by
-                        ``Deck.resolve()``). ``(x, y, z)`` tuples are
+                        ``Deck.resolve_coordinate()``). ``(x, y, z)`` tuples are
                         accepted for convenience/testing.
 
         Raises:
