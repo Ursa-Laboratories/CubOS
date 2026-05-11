@@ -11,7 +11,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Protocol
+from typing import Any, Callable
 
 import yaml
 
@@ -55,44 +55,6 @@ class DeckOriginCalibrationResult:
     def reference_surface_z_mm(self) -> float:
         """Deprecated alias for the one-instrument lower Z assignment."""
         return self.z_min_mm
-
-
-class _GantryLike(Protocol):
-    def connect(self) -> None: ...
-    def disconnect(self) -> None: ...
-    def home(self) -> None: ...
-    def enforce_work_position_reporting(self) -> None: ...
-    def activate_work_coordinate_system(self, system: str = "G54") -> None: ...
-    def clear_g92_offsets(self) -> None: ...
-    def set_work_coordinates(
-        self,
-        x: float | None = None,
-        y: float | None = None,
-        z: float | None = None,
-    ) -> None: ...
-    def get_coordinates(self) -> dict[str, float]: ...
-    def get_status(self) -> str: ...
-    def jog(
-        self,
-        x: float = 0,
-        y: float = 0,
-        z: float = 0,
-        feed_rate: float = 2000,
-    ) -> None: ...
-    def jog_cancel(self) -> None: ...
-    def stop(self) -> None: ...
-    def unlock(self) -> None: ...
-    def reset_and_unlock(self) -> None: ...
-    def configure_soft_limits_from_spans(
-        self,
-        *,
-        max_travel_x: float,
-        max_travel_y: float,
-        max_travel_z: float,
-        tolerance_mm: float = 0.001,
-    ) -> None: ...
-    def soft_limits_enabled(self) -> bool | None: ...
-    def set_soft_limits_enabled(self, enabled: bool) -> None: ...
 
 
 KeyReader = Callable[[], tuple[str, int]]
@@ -479,7 +441,7 @@ def _prompt_z_reference_mode(
 
 
 def _set_serial_timeout_if_available(
-    gantry: _GantryLike,
+    gantry: Gantry,
     timeout_s: float,
 ) -> None:
     setter = getattr(gantry, "set_serial_timeout", None)
@@ -515,7 +477,7 @@ def _looks_like_soft_limit_jog_rejection(exc: Exception) -> bool:
 
 
 def _read_soft_limits_enabled_if_available(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> bool | None:
@@ -533,7 +495,7 @@ def _read_soft_limits_enabled_if_available(
 
 
 def _set_soft_limits_enabled_if_available(
-    gantry: _GantryLike,
+    gantry: Gantry,
     enabled: bool,
 ) -> bool:
     setter = getattr(gantry, "set_soft_limits_enabled", None)
@@ -544,7 +506,7 @@ def _set_soft_limits_enabled_if_available(
 
 
 def _temporarily_disable_soft_limits_for_origin_jog(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> bool:
@@ -563,7 +525,7 @@ def _temporarily_disable_soft_limits_for_origin_jog(
 
 
 def _restore_soft_limits_after_origin_jog(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> None:
@@ -591,7 +553,7 @@ def _opposite_pull_off_delta(
 
 
 def _soft_reset_and_unlock_after_limit_alarm(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> None:
@@ -625,7 +587,7 @@ def _raise_if_limit_status(status: str) -> None:
             raise StatusReturnError(f"Limit pin active in status: {status}")
 
 
-def _probe_for_limit_status_after_jog(gantry: _GantryLike) -> None:
+def _probe_for_limit_status_after_jog(gantry: Gantry) -> None:
     get_status = getattr(gantry, "get_status", None)
     if not callable(get_status):
         return
@@ -633,7 +595,7 @@ def _probe_for_limit_status_after_jog(gantry: _GantryLike) -> None:
     _raise_if_limit_status(str(get_status()))
 
 
-def _read_limit_recovery_status(gantry: _GantryLike) -> str | None:
+def _read_limit_recovery_status(gantry: Gantry) -> str | None:
     get_status = getattr(gantry, "get_status", None)
     if not callable(get_status):
         return None
@@ -662,7 +624,7 @@ def _needs_another_limit_pull_off(status: str | None) -> bool:
 
 
 def _recover_from_limit_alarm(
-    gantry: _GantryLike,
+    gantry: Gantry,
     delta: dict[str, float],
     *,
     pull_off_mm: float,
@@ -736,7 +698,7 @@ def _recover_from_limit_alarm(
 
 
 def _interactive_jog_to_reference(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     target_description: str,
     confirmation_description: str,
@@ -860,7 +822,7 @@ def _interactive_jog_to_reference(
 
 
 def _interactive_jog_to_xy_origin(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     key_reader: KeyReader,
     output: Callable[[str], None],
@@ -907,7 +869,7 @@ def run_calibration(
     jog_serial_timeout_s: float = 1.0,
     output: Callable[[str], None] = print,
     input_reader: Callable[[str], str] = input,
-    gantry_factory: Callable[..., _GantryLike] = Gantry,
+    gantry_factory: Callable[..., Gantry] = Gantry,
     key_reader: KeyReader = read_keypress_batch,
     stdin_flusher: Callable[[], None] = flush_stdin,
 ) -> DeckOriginCalibrationResult | DeckOriginCalibrationPlan:

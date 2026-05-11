@@ -12,7 +12,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Protocol, Sequence
+from typing import Any, Callable, Sequence
 
 import yaml
 
@@ -35,49 +35,6 @@ from setup.calibration.single_instrument_calibration import (  # noqa: E402
     _temporarily_disable_soft_limits_for_origin_jog,
 )
 from setup.keyboard_input import flush_stdin, read_keypress_batch  # noqa: E402
-
-
-class _GantryLike(Protocol):
-    def connect(self) -> None: ...
-    def disconnect(self) -> None: ...
-    def home(self) -> None: ...
-    def enforce_work_position_reporting(self) -> None: ...
-    def activate_work_coordinate_system(self, system: str = "G54") -> None: ...
-    def clear_g92_offsets(self) -> None: ...
-    def set_work_coordinates(
-        self,
-        x: float | None = None,
-        y: float | None = None,
-        z: float | None = None,
-    ) -> None: ...
-    def get_coordinates(self) -> dict[str, float]: ...
-    def move_to(
-        self,
-        x: float,
-        y: float,
-        z: float,
-        travel_z: float | None = None,
-    ) -> None: ...
-    def jog(
-        self,
-        x: float = 0,
-        y: float = 0,
-        z: float = 0,
-        feed_rate: float = 2000,
-    ) -> None: ...
-    def jog_cancel(self) -> None: ...
-    def stop(self) -> None: ...
-    def unlock(self) -> None: ...
-    def configure_soft_limits_from_spans(
-        self,
-        *,
-        max_travel_x: float,
-        max_travel_y: float,
-        max_travel_z: float,
-        tolerance_mm: float = 0.001,
-    ) -> None: ...
-    def soft_limits_enabled(self) -> bool | None: ...
-    def set_soft_limits_enabled(self, enabled: bool) -> None: ...
 
 
 KeyReader = Callable[[], tuple[str, int]]
@@ -263,7 +220,7 @@ def _looks_like_serial_device_not_configured(exc: Exception) -> bool:
 
 
 def _home_with_serial_reconnect(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     output: Callable[[str], None],
 ) -> None:
@@ -284,7 +241,7 @@ def _home_with_serial_reconnect(
 
 
 def _move_to_xy_center(
-    gantry: _GantryLike,
+    gantry: Gantry,
     bounds_coords: dict[str, float],
     *,
     output: Callable[[str], None],
@@ -302,7 +259,7 @@ def _move_to_xy_center(
 
 
 def _wait_until_idle_if_available(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     timeout_s: float = 10.0,
     poll_interval_s: float = 0.1,
@@ -326,7 +283,7 @@ def _wait_until_idle_if_available(
 
 
 def _retract_up_after_contact(
-    gantry: _GantryLike,
+    gantry: Gantry,
     *,
     retract_z_mm: float,
     feed_rate: float,
@@ -360,7 +317,7 @@ def run_multi_instrument_calibration(
     jog_serial_timeout_s: float = 1.0,
     output: Callable[[str], None] = print,
     input_reader: Callable[[str], str] = input,
-    gantry_factory: Callable[..., _GantryLike] = Gantry,
+    gantry_factory: Callable[..., Gantry] = Gantry,
     key_reader: KeyReader = read_keypress_batch,
     stdin_flusher: Callable[[], None] = flush_stdin,
 ) -> MultiInstrumentCalibrationResult | None:
