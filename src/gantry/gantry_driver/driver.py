@@ -3,10 +3,9 @@ This module contains the Mill class, which is used to control a GRBL CNC machine
 The Mill class is used by higher-level wrappers to move instruments (pipette, electrode, etc.)
 to the specified coordinates.
 
-The Mill class contains methods to connect to the mill, execute commands,
-stop the mill, reset the mill, home the mill, get the current status of the mill, get the
-gcode mode of the mill, get the gcode parameters of the mill, and get the gcode parser state
-of the mill.
+The Mill class contains methods to connect to the mill, execute GRBL commands,
+stop/reset/home the controller, read status/settings, and move to already
+resolved coordinates.
 """
 
 # pylint: disable=line-too-long
@@ -17,7 +16,7 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple
 
 # third-party libraries
 import serial
@@ -29,37 +28,19 @@ from .exceptions import (
     MillConnectionError,
     StatusReturnError,
 )
+from ..coordinates import Coordinates
 
 # local libraries
 from .logger import set_up_command_logger, set_up_mill_logger
-from .instruments import Coordinates, InstrumentManager
-
-# Formatted strings for the mill commands
-MILL_MOVE = "G01 X{} Y{} Z{}"  # Move to specified coordinates at the specified feed rate
-MILL_MOVE_Z = "G01 Z{}"  # Move to specified Z coordinate at the specified feed rate
-RAPID_MILL_MOVE = "G00 X{} Y{} Z{}"  # Move to specified coordinates at the maximum feed rate
 
 # Constants
 DEFAULT_FEED_RATE = 2000
-HOMING_FEED_RATE = 5000
 HOMING_TIMEOUT = 90
 
 # Compile regex patterns for extracting coordinates from the mill status
 wpos_pattern = re.compile(r"WPos:([\d.-]+),([\d.-]+),([\d.-]+)")
 mpos_pattern = re.compile(r"MPos:([\d.-]+),([\d.-]+),([\d.-]+)")
 wco_pattern = re.compile(r"WCO:([\d.-]+),([\d.-]+),([\d.-]+)")
-
-axis_conf_table = [
-    {"setting_value": 0, "reverse_x": 0, "reverse_y": 0, "reverse_z": 0},
-    {"setting_value": 1, "reverse_x": 1, "reverse_y": 0, "reverse_z": 0},
-    {"setting_value": 2, "reverse_x": 0, "reverse_y": 1, "reverse_z": 0},
-    {"setting_value": 3, "reverse_x": 1, "reverse_y": 1, "reverse_z": 0},
-    {"setting_value": 4, "reverse_x": 0, "reverse_y": 0, "reverse_z": 1},
-    {"setting_value": 5, "reverse_x": 1, "reverse_y": 0, "reverse_z": 1},
-    {"setting_value": 6, "reverse_x": 0, "reverse_y": 1, "reverse_z": 1},
-    {"setting_value": 7, "reverse_x": 1, "reverse_y": 1, "reverse_z": 1},
-]
-
 
 class Mill:
     """
@@ -70,16 +51,12 @@ class Mill:
         ser_mill (serial.Serial): The serial connection to the mill.
         homed (bool): True if the mill is homed, False otherwise.
         active_connection (bool): True if the connection to the mill is active, False otherwise.
-        instrument_manager (InstrumentManager): The instrument manager for the mill.
         working_volume (Coordinates): The working volume of the mill.
         logger_location (Path): The location of the logger.
         logger (Logger): The logger for the mill.
 
     Methods:
-        change_logging_level(level): Change the logging level.
-        homing_sequence(): Home the mill, set the feed rate, and clear the buffers.
         connect_to_mill(port, baudrate, timeout): Connect to the mill.
-        check_for_alarm_state(): Check if the mill is in an alarm state.
         read_mill_config(): Read the mill configuration from the mill and set it as an attribute.
         execute_command(command): Execute a command on the mill.
         stop(): Stop the mill.
@@ -89,19 +66,15 @@ class Mill:
         current_status(): Get the current status of the mill.
         set_feed_rate(rate): Set the feed rate of the mill.
         clear_buffers(): Clear the input and output buffers of the mill.
-        gcode_mode(): Get the gcode mode of the mill.
-        gcode_parameters(): Get the gcode parameters of the mill.
-        gcode_parser_state(): Get the gcode parser state of the mill.
         grbl_settings(): Get the GRBL settings of the mill.
         set_grbl_setting(setting, value): Set a GRBL setting of the mill.
-        current_coordinates(instrument): Get the current coordinates of the mill.
-        move_to_position(x, y, z, coordinates, instrument, travel_z): Move the mill to the specified coordinates, optionally via a given XY-travel Z.
-        update_offset(instrument, offset_x, offset_y, offset_z): Update the offset in the config file.
+        current_coordinates(): Get the current work coordinates of the mill.
+        move_to_position(x, y, z, coordinates, travel_z): Move the mill to the specified coordinates, optionally via a given XY-travel Z.
     """
 
-    def __init__(self, port: Optional[str] = None):
-        self.logger_location = Path(__file__).parent / "logs"
-        self.logger = set_up_mill_logger(self.logger_location)
+    def __init__(self, port: Optional[str] = None, log_dir: Path | None = None):
+        self.logger_location = log_dir
+        self.logger = set_up_mill_logger(log_dir)
         self.port = port
         self.config = {}
         self._clean_config()
@@ -113,9 +86,8 @@ class Mill:
             if isinstance(value, str) and "(" in value:
                 self.config[key] = value.split("(", 1)[0].strip()
         self.homed = False
-        self.auto_home = True
+        self.auto_home = False
         self.active_connection = False
-        self.instrument_manager: InstrumentManager = InstrumentManager()
         self.working_volume: Coordinates = self.read_working_volume()
         self.command_logger = set_up_command_logger(self.logger_location)
         self.interactive_mode = False
@@ -138,16 +110,6 @@ class Mill:
             self.logger.warning("Using default working volume")
             working_volume = Coordinates(x=-415.0, y=-300.0, z=-200.0)
         return working_volume
-
-    def change_logging_level(self, level):
-        """Change the logging level."""
-        self.logger.setLevel(level)
-
-    def homing_sequence(self):
-        """Home the mill, set the feed rate, and clear the buffers."""
-        self.home()
-        self.set_feed_rate(5000)
-        self.clear_buffers()
 
     def locate_mill_over_serial(self, port: Optional[str] = None) -> Tuple[serial.Serial, str]:
         """
@@ -261,7 +223,12 @@ class Mill:
 
         for line in statuses:
             decoded = line.decode(errors='ignore').rstrip()
-            if "Grbl" in decoded or "ok" in decoded or "error" in decoded or "Idle" in decoded:
+            if (
+                "Grbl" in decoded
+                or decoded == "ok"
+                or decoded.startswith("$")
+                or decoded.startswith("<")
+            ):
                 return True
         return False
 
@@ -337,48 +304,6 @@ class Mill:
             self._seed_wco()
         return self.ser_mill
 
-    def check_for_alarm_state(self):
-        """Check if the mill is in an alarm state."""
-        self.ser_mill.write(b"?")
-        time.sleep(0.1)
-        status = self.read()
-        self.logger.debug("Status: %s", status)
-        if not status:
-            self.logger.warning("No response to status query, retrying")
-            status = self.current_status()
-            self.logger.debug("Status: %s", status)
-            if not status:
-                self.logger.error("Failed to get status from the mill")
-                raise MillConnectionError("Failed to get status from the mill")
-        if "alarm" in status.lower():
-            self.logger.warning("Mill is in alarm state. Requesting user input")
-            reset_alarm = "y"
-            if reset_alarm[0].lower() == "y":
-                self.logger.info("Resetting the mill")
-                self.reset()
-            else:
-                self.logger.error(
-                    "Mill is in alarm state, user chose not to reset the mill"
-                )
-                raise MillConnectionError("Mill is in alarm state")
-        if "error" in status.lower():
-            self.logger.error("Error in status: %s", status)
-            raise MillConnectionError(f"Error in status: {status}")
-
-    def __enter__(self):
-        """Enter the context manager."""
-        self.connect_to_mill(port=self.port)
-        self.set_feed_rate(5000)
-
-        if not self.homed and getattr(self, "auto_home", True):
-            self.homing_sequence()
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        """Exit the context manager."""
-        self.disconnect()
-        self.logger.info("Exiting the mill context manager")
-
     def disconnect(self):
         """Close the serial connection to the mill."""
         self.logger.info("Disconnecting from the mill")
@@ -397,6 +322,18 @@ class Mill:
              self.logger.info("Serial connection was already closed or never opened.")
         return
 
+    def connected_port(self) -> str | None:
+        """Return the active serial port name, if connected."""
+        if self.ser_mill is None:
+            return self.port
+        port = getattr(self.ser_mill, "port", None)
+        return str(port) if port else self.port
+
+    def set_read_timeout(self, timeout: float) -> None:
+        """Set the serial read timeout when a connection exists."""
+        if self.ser_mill is not None:
+            self.ser_mill.timeout = timeout
+
     def read_mill_config(self):
         """Read the live mill config from the connected controller."""
         if self.ser_mill is None or not self.ser_mill.is_open:
@@ -409,7 +346,7 @@ class Mill:
         self.logger.debug("Mill config: %s", mill_config)
         return mill_config
 
-    def _parse_grbl_settings_response(self, response_lines: List[str]) -> dict:
+    def _parse_grbl_settings_response(self, response_lines: list[str]) -> dict:
         """Parse a GRBL $$ response into a settings dictionary."""
         settings_dict = {}
         self.logger.info("Parsing settings from: %s", response_lines)
@@ -434,16 +371,27 @@ class Mill:
     def execute_command(self, command: str, suppress_errors: bool = False):
         """Encodes and sends commands to the mill and returns the response."""
         try:
+            if self.ser_mill is None:
+                raise MillConnectionError("Serial connection to mill is not open")
             self.logger.debug("Command sent: %s", command)
             self.command_logger.debug("%s", command)
             command_bytes = str(command).encode(encoding="ascii")
             self.ser_mill.write(command_bytes + b"\n")
 
             if command == "$$":
+                deadline = time.time() + 5
                 full_mill_response = [
                     self.ser_mill.readline().decode(encoding="ascii").rstrip()
                 ]
                 while full_mill_response[-1] != "ok":
+                    if time.time() > deadline:
+                        raise StatusReturnError(
+                            "Timed out waiting for GRBL settings response"
+                        )
+                    if full_mill_response[-1].lower().startswith(("error", "alarm")):
+                        raise StatusReturnError(
+                            f"Error in settings response: {full_mill_response[-1]}"
+                        )
                     full_mill_response.append(
                         self.ser_mill.readline().decode(encoding="ascii").rstrip()
                     )
@@ -653,14 +601,6 @@ class Mill:
         self.last_status = status
         return status
 
-    def write(self, command: str):
-        """Write a command to the mill."""
-        command = command.upper()
-        if command != "?":
-            command += "\n"
-
-        self.ser_mill.write(command.encode(encoding="ascii"))
-
     def read(self):
         msg = self.ser_mill.read(1)
         if msg == b"":
@@ -668,12 +608,6 @@ class Mill:
         msg += self.ser_mill.read_all()
         msg = msg.decode(encoding="ascii")
         return msg
-
-    def txrx(self, command: str) -> str:
-        """Write a command to the mill and read the response."""
-        self.write(command)
-        time.sleep(0.2)
-        return self.read()
 
     def set_feed_rate(self, rate):
         """Set the feed rate."""
@@ -683,18 +617,6 @@ class Mill:
         """Clear input and output buffers."""
         self.ser_mill.flush()
         self.ser_mill.read_all()
-
-    def gcode_mode(self):
-        """Ask the mill for its gcode mode."""
-        self.execute_command("$C")
-
-    def gcode_parameters(self):
-        """Ask the mill for its gcode parameters."""
-        return self.execute_command("$#")
-
-    def gcode_parser_state(self):
-        """Ask the mill for its gcode parser state."""
-        return self.execute_command("$G")
 
     def grbl_settings(self) -> dict:
         """Return live GRBL settings from the connected controller."""
@@ -746,29 +668,6 @@ class Mill:
                 return
         self.logger.warning("Could not obtain WCO from GRBL status reports")
 
-    def _query_work_coordinate_offset(self) -> Coordinates:
-        """Return the cached Work Coordinate Offset (WCO).
-
-        WCO is the offset between machine position and work position:
-            MPos = WPos + WCO
-        """
-        if self._wco is None:
-            self._seed_wco()
-        if self._wco is None:
-            self.logger.warning("WCO unavailable, returning zero offset")
-            return Coordinates(0, 0, 0)
-        return self._wco
-
-    def machine_coordinates(self) -> Coordinates:
-        """Return the current machine position (MPos = WPos + WCO)."""
-        wpos = self.current_coordinates()
-        wco = self._query_work_coordinate_offset()
-        return Coordinates(
-            round(wpos.x + wco.x, 3),
-            round(wpos.y + wco.y, 3),
-            round(wpos.z + wco.z, 3),
-        )
-
     def is_connected(self) -> bool:
         """Check if the serial connection is open."""
         return bool(self.ser_mill and self.ser_mill.is_open)
@@ -786,21 +685,16 @@ class Mill:
                     return raw
                 time.sleep(0.05)
             return str(raw) if raw else ""
-        except Exception:
+        except Exception as exc:
+            self.logger.debug("Raw status query failed: %s", exc)
             return ""
 
-    def current_coordinates(
-        self, instrument: Optional[str] = None, instrument_only: bool = True
-    ) -> Union[Coordinates, Tuple[Coordinates, Coordinates]]:
+    def current_coordinates(self) -> Coordinates:
         """
         Get the current coordinates of the mill.
 
-        Args:
-            instrument (str): The instrument for which to get the offset coordinates.
-            instrument_only (bool): If True, return only the instrument head position.
-
         Returns:
-            Coordinates or Tuple[Coordinates, Coordinates]: mill_center [x,y,z] or (mill_center, instrument_head).
+            Coordinates: current GRBL WPos in the CubOS deck frame.
         """
         self.ser_mill.write(b"?")
         time.sleep(0.05)
@@ -817,7 +711,7 @@ class Mill:
             attempts += 1
 
         self.last_status = status
-        status_mode = int(self.config["$10"])
+        status_mode = int(self.config.get("$10", "0"))
 
         if int(status_mode) not in [0, 1, 2, 3]:
             self.logger.error("Invalid status mode")
@@ -850,8 +744,9 @@ class Mill:
                         y_coord = round(y_coord - self._wco.y, 3)
                         z_coord = round(z_coord - self._wco.z, 3)
                     else:
-                        self.logger.warning(
-                            "MPos reported but WCO unavailable; returning raw MPos"
+                        raise LocationNotFound(
+                            "MPos reported but WCO was unavailable; cannot "
+                            "derive safe WPos coordinates."
                         )
                 self.logger.info(
                     "WPos coordinates: X = %s, Y = %s, Z = %s",
@@ -881,27 +776,7 @@ class Mill:
                     status = self.read()
                     retry_attempts += 1
 
-        mill_center = Coordinates(x_coord, y_coord, z_coord)
-        # Adjust coordinates based on the instrument to report where it currently is
-        if instrument:
-            try:
-                offsets = self.instrument_manager.get_offset(instrument)
-                # NOTE: subtraction because we are reporting where the instrument head is
-                instrument_head = Coordinates(
-                    x_coord - offsets.x,
-                    y_coord - offsets.y,
-                    z_coord - offsets.z,
-                )
-
-            except Exception as exception:
-                raise ValueError("Invalid instrument") from exception
-
-            if instrument_only:
-                return instrument_head
-            else:
-                return mill_center, instrument_head
-        else:
-            return mill_center
+        return Coordinates(x_coord, y_coord, z_coord)
 
     def move_to_position(
         self,
@@ -909,7 +784,6 @@ class Mill:
         y_coordinate: float = 0.00,
         z_coordinate: float = 0.00,
         coordinates: Coordinates = None,
-        instrument: str = "center",
         travel_z: Optional[float] = None,
     ) -> None:
         """
@@ -930,7 +804,6 @@ class Mill:
             y_coordinate (float): Y coordinate.
             z_coordinate (float): Z coordinate.
             coordinates (Coordinates): Target coordinates object (overrides x/y/z params).
-            instrument (str): Instrument to move (default: "center").
             travel_z (float): Machine-space Z to hold during XY travel.
         """
         goto = (
@@ -941,17 +814,13 @@ class Mill:
         self._validate_target_coordinates(goto)
         if travel_z is not None:
             self._validate_finite_coordinate(travel_z, "travel Z")
-        offsets = self.instrument_manager.get_offset(instrument)
         current_coordinates = self.current_coordinates()
 
-        target_coordinates = self._calculate_target_coordinates(
-            goto, current_coordinates, offsets
-        )
+        target_coordinates = goto
 
         if self._is_already_at_target(target_coordinates, current_coordinates):
             self.logger.debug(
-                "%s is already at the target coordinates of [%s, %s, %s]",
-                instrument,
+                "Mill is already at the target coordinates of [%s, %s, %s]",
                 x_coordinate,
                 y_coordinate,
                 z_coordinate,
@@ -966,23 +835,11 @@ class Mill:
                 current_coordinates, target_coordinates
             )
         else:
-            gantry_travel_z = travel_z + offsets.z
             commands = self._generate_transit_commands(
-                current_coordinates, target_coordinates, gantry_travel_z
+                current_coordinates, target_coordinates, travel_z
             )
         for cmd in commands:
             self.execute_command(cmd)
-
-    def update_offset(self, instrument, offset_x, offset_y, offset_z):
-        """Update the offset for an instrument."""
-        current_offset = self.instrument_manager.get_offset(instrument)
-        new_offset = Coordinates(
-            current_offset.x + offset_x,
-            current_offset.y + offset_y,
-            current_offset.z + offset_z,
-        )
-
-        self.instrument_manager.update_instrument(instrument, new_offset)
 
     def _is_already_at_target(
         self, goto: Coordinates, current_coordinates: Coordinates
@@ -992,23 +849,6 @@ class Mill:
             current_coordinates.x,
             current_coordinates.y,
         ) and goto.z == current_coordinates.z
-
-    def _calculate_target_coordinates(
-        self, goto: Coordinates, current_coordinates: Coordinates, offsets: Coordinates
-    ):
-        """
-        Calculate the target coordinates for the mill, applying instrument offsets.
-
-        Args:
-            goto (Coordinates): The target coordinates.
-            current_coordinates (Coordinates): The current coordinates of the mill center.
-            offsets (Coordinates): The offsets for the instrument.
-        """
-        return Coordinates(
-            x=goto.x + offsets.x,
-            y=goto.y + offsets.y,
-            z=goto.z + offsets.z,
-        )
 
     def _log_target_coordinates(self, target_coordinates: Coordinates):
         self.logger.debug(

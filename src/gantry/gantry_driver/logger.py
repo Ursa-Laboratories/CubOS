@@ -1,59 +1,66 @@
-"""Logger for the grbl_cnc_mill package."""
+"""Logger helpers for the low-level GRBL driver."""
 
 import logging
 from pathlib import Path
 
 
-# Create a logger
 def set_up_mill_logger(
-    path_to_logs: Path = Path(__file__).parent / "logs",
+    path_to_logs: Path | None = None,
 ) -> logging.Logger:
     """Set up the mill logger.
 
-    Args:
-    path_to_logs (Path): The path to the logs directory.
+    File logging is opt-in. The driver is often constructed in tests and setup
+    helpers, so the default must not create package-local log files.
     """
-    path_to_logs = Path(path_to_logs)
-    if not path_to_logs.exists():
-        path_to_logs.mkdir(
-            parents=True, exist_ok=True
-        )  # Ensure the directory is created
     logger = logging.getLogger("grbl_cnc_mill")
-    if not logger.hasHandlers():
-        logger.setLevel(logging.DEBUG)
-        formatter = logging.Formatter(
-            "%(asctime)s&%(name)s&%(levelname)s&%(module)s&%(funcName)s&%(lineno)d&%(message)s"
-        )
-        system_handler = logging.FileHandler(path_to_logs / "mill_control.log")
+    logger.setLevel(logging.DEBUG)
+    if path_to_logs is None:
+        if not logger.handlers:
+            logger.addHandler(logging.NullHandler())
+        return logger
+
+    path_to_logs = Path(path_to_logs)
+    path_to_logs.mkdir(parents=True, exist_ok=True)
+    formatter = logging.Formatter(
+        "%(asctime)s&%(name)s&%(levelname)s&%(module)s&%(funcName)s&%(lineno)d&%(message)s"
+    )
+    log_file = path_to_logs / "mill_control.log"
+    if not any(
+        isinstance(handler, logging.FileHandler)
+        and Path(handler.baseFilename) == log_file
+        for handler in logger.handlers
+    ):
+        system_handler = logging.FileHandler(log_file)
         system_handler.setFormatter(formatter)
         logger.addHandler(system_handler)
-        # Add a console handler for debugging
-        console_handler = logging.StreamHandler()
-        console_handler.setLevel(logging.ERROR)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
 
     return logger
 
 
 def set_up_command_logger(
-    path_to_logs: Path = Path(__file__).parent / "logs/",
+    path_to_logs: Path | None = None,
 ) -> logging.Logger:
     """Set up the command logger.
 
-    Args:
-    path_to_logs (Path): The path to the logs directory.
+    File logging is opt-in for the same reason as ``set_up_mill_logger``.
     """
-    path_to_logs = Path(path_to_logs)
-    if not path_to_logs.exists():
-        path_to_logs.mkdir(
-            parents=True, exist_ok=True
-        )  # Ensure the directory is created
     logger = logging.getLogger("grbl_cnc_mill_cmds")
-    if not logger.hasHandlers():
-        logger.setLevel(logging.DEBUG)
-        formatter = logging.Formatter("%(message)s")
-        system_handler = logging.FileHandler(path_to_logs / "command.log")
+    logger.setLevel(logging.DEBUG)
+    if path_to_logs is None:
+        if not logger.handlers:
+            logger.addHandler(logging.NullHandler())
+        return logger
+
+    path_to_logs = Path(path_to_logs)
+    path_to_logs.mkdir(parents=True, exist_ok=True)
+    formatter = logging.Formatter("%(message)s")
+    log_file = path_to_logs / "command.log"
+    if not any(
+        isinstance(handler, logging.FileHandler)
+        and Path(handler.baseFilename) == log_file
+        for handler in logger.handlers
+    ):
+        system_handler = logging.FileHandler(log_file)
         system_handler.setFormatter(formatter)
         logger.addHandler(system_handler)
 

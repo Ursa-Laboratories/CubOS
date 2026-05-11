@@ -1,13 +1,13 @@
 import unittest
 from unittest.mock import patch
 
-from gantry.gantry import Gantry
-from gantry.gantry_driver.exceptions import (
+from gantry.errors import (
     CommandExecutionError,
     LocationNotFound,
     MillConnectionError,
     StatusReturnError,
 )
+from gantry.gantry import Gantry
 
 
 class TestGantry(unittest.TestCase):
@@ -20,6 +20,13 @@ class TestGantry(unittest.TestCase):
         gantry = Gantry(config=self.config)
         gantry.connect()
         mock_mill.connect_to_mill.assert_called_with(port=None)
+
+    @patch("gantry.gantry.Mill")
+    def test_connect_accepts_explicit_port_override(self, mock_mill_cls):
+        mock_mill = mock_mill_cls.return_value
+        gantry = Gantry(config=self.config)
+        gantry.connect(port="/dev/tty.usbserial-130")
+        mock_mill.connect_to_mill.assert_called_with(port="/dev/tty.usbserial-130")
 
     @patch("gantry.gantry.Mill")
     def test_move_delegates_to_move_to_position(self, mock_mill_cls):
@@ -339,7 +346,28 @@ class TestGantry(unittest.TestCase):
         mock_mill = mock_mill_cls.return_value
         gantry = Gantry(config=self.config)
         gantry.set_serial_timeout(0.5)
-        self.assertEqual(mock_mill.ser_mill.timeout, 0.5)
+        mock_mill.set_read_timeout.assert_called_once_with(0.5)
+
+    @patch("gantry.gantry.Mill")
+    def test_connected_port_comes_from_low_level_driver(self, mock_mill_cls):
+        mock_mill = mock_mill_cls.return_value
+        mock_mill.connected_port.return_value = "/dev/tty.usbserial-130"
+        gantry = Gantry(config=self.config)
+        self.assertEqual(gantry.connected_port(), "/dev/tty.usbserial-130")
+
+    @patch("gantry.gantry.Mill")
+    def test_soft_limits_enabled_reads_setting_semantically(self, mock_mill_cls):
+        mock_mill = mock_mill_cls.return_value
+        mock_mill.grbl_settings.return_value = {"$20": "1"}
+        gantry = Gantry(config=self.config)
+        self.assertTrue(gantry.soft_limits_enabled())
+
+    @patch("gantry.gantry.Mill")
+    def test_set_soft_limits_enabled_delegates_to_grbl_setting(self, mock_mill_cls):
+        mock_mill = mock_mill_cls.return_value
+        gantry = Gantry(config=self.config)
+        gantry.set_soft_limits_enabled(False)
+        mock_mill.set_grbl_setting.assert_called_once_with("20", "0")
 
     @patch("gantry.gantry.Mill")
     def test_configure_soft_limits_writes_and_verifies_settings(self, mock_mill_cls):

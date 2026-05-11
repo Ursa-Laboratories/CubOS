@@ -20,7 +20,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
 from gantry import Gantry, load_gantry_from_yaml  # noqa: E402
-from gantry.gantry_driver.exceptions import (  # noqa: E402
+from gantry.errors import (  # noqa: E402
     CommandExecutionError,
     MillConnectionError,
     StatusReturnError,
@@ -91,6 +91,8 @@ class _GantryLike(Protocol):
         max_travel_z: float,
         tolerance_mm: float = 0.001,
     ) -> None: ...
+    def soft_limits_enabled(self) -> bool | None: ...
+    def set_soft_limits_enabled(self, enabled: bool) -> None: ...
 
 
 KeyReader = Callable[[], tuple[str, int]]
@@ -512,30 +514,16 @@ def _looks_like_soft_limit_jog_rejection(exc: Exception) -> bool:
     )
 
 
-def _soft_limits_enabled_from_settings(settings: object) -> bool | None:
-    if not isinstance(settings, dict):
-        return None
-    value = settings.get("$20")
-    if value is None:
-        value = settings.get("20")
-    if value is None:
-        return None
-    try:
-        return float(value) != 0.0
-    except (TypeError, ValueError):
-        return None
-
-
 def _read_soft_limits_enabled_if_available(
     gantry: _GantryLike,
     *,
     output: Callable[[str], None],
 ) -> bool | None:
-    reader = getattr(gantry, "read_grbl_settings", None)
+    reader = getattr(gantry, "soft_limits_enabled", None)
     if not callable(reader):
         return None
     try:
-        return _soft_limits_enabled_from_settings(reader())
+        return reader()
     except MillConnectionError:
         raise
     except (CommandExecutionError, StatusReturnError, ValueError) as exc:
@@ -548,10 +536,10 @@ def _set_soft_limits_enabled_if_available(
     gantry: _GantryLike,
     enabled: bool,
 ) -> bool:
-    setter = getattr(gantry, "set_grbl_setting", None)
+    setter = getattr(gantry, "set_soft_limits_enabled", None)
     if not callable(setter):
         return False
-    setter("$20", 1 if enabled else 0)
+    setter(enabled)
     return True
 
 

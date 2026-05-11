@@ -1,3 +1,4 @@
+import inspect
 import unittest
 from unittest.mock import MagicMock, patch
 import sys
@@ -8,7 +9,8 @@ import math
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
-from gantry.gantry_driver.driver import Mill, wpos_pattern, mpos_pattern, Coordinates
+from gantry.coordinates import Coordinates
+from gantry.gantry_driver.driver import Mill, wpos_pattern, mpos_pattern
 from gantry.gantry_driver.exceptions import StatusReturnError
 
 class TestCNCDriverLogic(unittest.TestCase):
@@ -36,6 +38,11 @@ class TestCNCDriverLogic(unittest.TestCase):
         invalid_status = "<Idle|FS:0,0>"
         self.assertIsNone(wpos_pattern.search(invalid_status))
         self.assertIsNone(mpos_pattern.search(invalid_status))
+
+    def test_mill_motion_api_has_no_driver_level_instrument_offsets(self):
+        """Board owns instrument offsets; Mill only receives machine coordinates."""
+        signature = inspect.signature(Mill.move_to_position)
+        self.assertNotIn("instrument", signature.parameters)
 
     @patch('gantry.gantry_driver.driver.serial.Serial')
     @patch('gantry.gantry_driver.driver.set_up_mill_logger')
@@ -156,13 +163,35 @@ class TestCNCDriverLogic(unittest.TestCase):
     @patch('gantry.gantry_driver.driver.serial.Serial')
     @patch('gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_move_to_position_uses_coordinates_directly(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        mill.ser_mill = MagicMock()
+        mill.current_coordinates = MagicMock(
+            return_value=Coordinates(-100.0, -50.0, -78.0),
+        )
+        mill.execute_command = MagicMock()
+
+        mill.move_to_position(
+            x_coordinate=-110.0,
+            y_coordinate=-60.0,
+            z_coordinate=-90.0,
+        )
+
+        mill.execute_command.assert_any_call("G01 X-110.0 F2000")
+        mill.execute_command.assert_any_call("G01 Y-60.0 F2000")
+        mill.execute_command.assert_any_call("G01 Z-90.0 F2000")
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
     def test_move_to_position_with_travel_z_emits_ordered_commands(
         self, mock_cmd_logger, mock_mill_logger, mock_serial,
     ):
         """End-to-end: move_to_position(..., travel_z=...) routes
         through _generate_transit_commands and emits lift → X → Y →
-        descend in order. instrument='center' has zero offsets, so
-        the emitted travel_z matches the input."""
+        descend in order. The emitted travel_z matches the input."""
         mill = Mill()
         mill.ser_mill = MagicMock()
         mill.current_coordinates = MagicMock(
@@ -232,6 +261,20 @@ class TestCNCDriverLogic(unittest.TestCase):
                 "<Hold|WPos:0,0,0|FS:0,0>", timeout=1,
             )
 
+    @patch('gantry.gantry_driver.driver.time.time', side_effect=[0.0, 6.0])
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_grbl_settings_command_times_out_without_ok(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_time,
+    ):
+        mill = Mill()
+        mill.ser_mill = MagicMock()
+        mill.ser_mill.readline.return_value = b"$20=1\n"
+
+        with self.assertRaisesRegex(Exception, "Timed out"):
+            mill.execute_command("$$")
+
     @patch('gantry.gantry_driver.driver.time.sleep')
     @patch('gantry.gantry_driver.driver.time.time', side_effect=[0.0, 2.0])
     @patch('gantry.gantry_driver.driver.serial.Serial')
@@ -283,7 +326,6 @@ class TestCNCDriverLogic(unittest.TestCase):
             mill = Mill()
             mill.read_mill_config = MagicMock()
             mill.read_working_volume = MagicMock()
-            mill.check_for_alarm_state = MagicMock()
             mill.clear_buffers = MagicMock()
             mill._enforce_wpos_mode = MagicMock()
             mill.set_feed_rate = MagicMock()

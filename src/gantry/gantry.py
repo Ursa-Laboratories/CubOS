@@ -11,7 +11,7 @@ from .coordinate_translator import (
 )
 from .grbl_settings import format_setting_value, normalize_expected_grbl_settings
 from .gantry_driver.driver import DEFAULT_FEED_RATE, Mill
-from .gantry_driver.exceptions import (
+from .errors import (
     CommandExecutionError,
     LocationNotFound,
     MillConnectionError,
@@ -61,19 +61,34 @@ class Gantry:
             return float(getattr(self.config, "total_z_range"))
         return None
 
-    def connect(self) -> None:
-        """Connect to the CNC mill by auto-scanning serial ports."""
+    def connect(self, port: str | None = None) -> None:
+        """Connect to the CNC mill.
+
+        If ``port`` is omitted, the low-level driver auto-scans serial ports.
+        Setup scripts use this public override instead of reaching into the
+        driver instance.
+        """
         if self._offline:
             return
         assert self._mill is not None
         try:
-            self.logger.info("Connecting to gantry via auto-scan")
-            self._mill.connect_to_mill(port=None)
+            if port is None:
+                self.logger.info("Connecting to gantry via auto-scan")
+            else:
+                self.logger.info("Connecting to gantry via %s", port)
+            self._mill.connect_to_mill(port=port)
             self._validate_grbl_settings()
             self._check_alarm_state()
         except MillConnectionError as exc:
             self.logger.error("Error connecting to gantry: %s", exc)
             raise
+
+    def connected_port(self) -> str | None:
+        """Return the connected serial port, if one is available."""
+        if self._offline:
+            return None
+        assert self._mill is not None
+        return self._mill.connected_port()
 
     def disconnect(self) -> None:
         if self._offline:
@@ -94,7 +109,7 @@ class Gantry:
             return False
 
         try:
-            if not self._mill.ser_mill or not self._mill.ser_mill.is_open:
+            if not self._mill.is_connected():
                 self.logger.debug("Health check: serial port not open")
                 return False
 
@@ -333,8 +348,7 @@ class Gantry:
         if self._offline:
             return
         assert self._mill is not None
-        if self._mill.ser_mill is not None:
-            self._mill.ser_mill.timeout = timeout
+        self._mill.set_read_timeout(timeout)
 
     def clear_g92_offsets(self) -> None:
         """Clear transient G92 offsets before assigning a durable WPos."""
@@ -468,6 +482,28 @@ class Gantry:
         assert self._mill is not None
         code = setting[1:] if setting.startswith("$") else setting
         self._mill.set_grbl_setting(code, format_setting_value(value))
+
+    def soft_limits_enabled(self) -> bool | None:
+        """Return whether GRBL soft limits are enabled, if readable."""
+        settings = self.read_grbl_settings()
+        raw = settings.get("$20", settings.get("20"))
+        if raw is None:
+            return None
+        try:
+            return float(raw) != 0.0
+        except (TypeError, ValueError):
+            return None
+
+    def set_soft_limits_enabled(self, enabled: bool) -> None:
+        """Enable or disable GRBL soft limits through Gantry semantics."""
+        self.set_grbl_setting("$20", 1 if enabled else 0)
+
+    def query_raw_status(self) -> str:
+        """Return one raw GRBL status string for diagnostics/recovery."""
+        if self._offline:
+            return "<Idle|WPos:0.000,0.000,0.000>"
+        assert self._mill is not None
+        return self._mill.query_raw_status()
 
     def configure_soft_limits_from_spans(
         self,

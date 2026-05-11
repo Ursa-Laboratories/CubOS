@@ -9,7 +9,7 @@ from gantry.coordinate_translator import (
     to_user_coordinates,
     translate_status_string,
 )
-from gantry.gantry_driver.instruments import Coordinates
+from gantry.coordinates import Coordinates
 
 
 def test_to_user_coordinates_preserves_xyz_without_sign_flip() -> None:

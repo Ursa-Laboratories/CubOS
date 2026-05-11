@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import overload
 
-from .gantry_driver.instruments import Coordinates
+from .coordinates import Coordinates
 
 _STATUS_COORD_PATTERN = re.compile(
     r"(?P<label>[WM]Pos:)"

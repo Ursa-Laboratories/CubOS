@@ -75,3 +75,37 @@ class TestOfflineGantryConnection:
         gantry = Gantry(config={}, offline=True)
         coords = gantry.get_coordinates()
         assert coords == {"x": 0.0, "y": 0.0, "z": 0.0}
+
+
+class TestCollectConnectionInfo:
+    """Verify the connection script uses the public Gantry boundary."""
+
+    def test_collect_uses_gantry_port_override_and_report_methods(self, tmp_path):
+        import setup.test_connection as module
+
+        config_dir = tmp_path / "configs" / "gantry"
+        config_dir.mkdir(parents=True)
+        (config_dir / "test_gantry.yaml").write_text(
+            "serial_port: /dev/from-config\n",
+            encoding="utf-8",
+        )
+        fake_gantry = MagicMock()
+        fake_gantry.is_healthy.return_value = True
+        fake_gantry.get_coordinates.return_value = {"x": 1.0, "y": 2.0, "z": 3.0}
+        fake_gantry.get_status.return_value = "<Idle|WPos:1.000,2.000,3.000>"
+        fake_gantry.read_grbl_settings.return_value = {"$20": "1"}
+        fake_gantry.connected_port.return_value = "/dev/tty.usbserial-130"
+
+        with patch.object(module, "project_root", tmp_path), patch.object(
+            module, "Gantry", return_value=fake_gantry
+        ) as gantry_cls:
+            report = module._collect_connection_info(
+                "test_gantry",
+                "/dev/requested",
+            )
+
+        gantry_cls.assert_called_once_with(config={"serial_port": "/dev/from-config"})
+        fake_gantry.connect.assert_called_once_with(port="/dev/requested")
+        fake_gantry.read_grbl_settings.assert_called_once_with()
+        fake_gantry.connected_port.assert_called_once_with()
+        assert "Connection: /dev/tty.usbserial-130" in report
