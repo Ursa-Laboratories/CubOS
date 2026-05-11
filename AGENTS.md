@@ -56,6 +56,7 @@ Read before changing motion, coordinates, bounds, homing, or scan/protocol movem
 - Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
 
 Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`). For `cub_xl`, setup validation rejects protocols whose instrument point or known travel segment would hit the fixed right X-max rail.
+Setup bounds validation checks the concrete motion targets implied by the loaded protocol, not every physical geometry anchor or unused labware point on the deck.
 
 ### Deck YAML / labware / calibration
 - `src/deck/yaml_schema.py` — strict Pydantic schema.

@@ -212,7 +212,7 @@ labware:
     height: 66.75
     diameter: 28.0
     location:
-      x: 301.0
+      x: 306.0
       y: 40.0
       z: 20.0
     capacity_ul: 1500.0

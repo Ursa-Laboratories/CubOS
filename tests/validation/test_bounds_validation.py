@@ -9,9 +9,16 @@ from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
+from deck.labware.well_plate_holder import WellPlateHolder
 from instruments.base_instrument import BaseInstrument
 from gantry.gantry_config import GantryConfig, GantryType, HomingStrategy, WorkingVolume
-from validation.bounds import validate_deck_positions, validate_gantry_positions
+from protocol_engine.protocol import Protocol, ProtocolStep
+from validation.bounds import (
+    collect_protocol_motion_targets,
+    validate_deck_positions,
+    validate_gantry_positions,
+    validate_protocol_motion_bounds,
+)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
@@ -25,6 +32,7 @@ def _make_gantry(
     z_min: float = 0.0,
     z_max: float = 80.0,
     total_z_range: float = 90.0,
+    safe_z: float | None = None,
 ) -> GantryConfig:
     return GantryConfig(
         serial_port="/dev/ttyUSB0",
@@ -36,6 +44,7 @@ def _make_gantry(
             y_min=y_min, y_max=y_max,
             z_min=z_min, z_max=z_max,
         ),
+        safe_z=safe_z,
     )
 
 
@@ -115,6 +124,17 @@ def _make_board(*instruments: tuple) -> Board:
     for name, instr in instruments:
         instr_dict[name] = instr
     return Board(gantry=gantry, instruments=instr_dict)
+
+
+def _make_protocol(command_name: str, **args) -> Protocol:
+    return Protocol([
+        ProtocolStep(
+            index=0,
+            command_name=command_name,
+            handler=MagicMock(),
+            args=args,
+        ),
+    ])
 
 
 # ── Deck position validation ────────────────────────────────────────────
@@ -338,3 +358,124 @@ class TestValidateGantryPositions:
         # At least one well should violate x_min.
         assert len(violations) > 0
         assert all(v.instrument_name == "big_offset" for v in violations)
+
+class TestValidateProtocolMotionBounds:
+
+    def test_unused_out_of_bounds_labware_is_not_validated(self):
+        gantry = _make_gantry(z_min=0.0, z_max=80.0, safe_z=80.0)
+        deck = _make_deck(
+            used=_make_vial(x=30.0, y=40.0, z=20.0),
+            unused=_make_vial(x=-10.0, y=40.0, z=20.0),
+        )
+        board = _make_board(("probe", _make_instrument()))
+        protocol = _make_protocol(
+            "measure",
+            instrument="probe",
+            position="used",
+            measurement_height=0.0,
+        )
+
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
+
+    def test_measure_validates_only_referenced_well(self):
+        gantry = _make_gantry(y_max=20.0, safe_z=80.0)
+        plate = _make_plate(a1_y=10.0, y_offset=15.0)
+        deck = _make_deck(plate=plate)
+        board = _make_board(("probe", _make_instrument()))
+        protocol = _make_protocol(
+            "measure",
+            instrument="probe",
+            position="plate.A1",
+            measurement_height=0.0,
+        )
+
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
+
+        protocol = _make_protocol(
+            "measure",
+            instrument="probe",
+            position="plate.B1",
+            measurement_height=0.0,
+        )
+        violations = validate_protocol_motion_bounds(gantry, protocol, deck, board)
+
+        assert violations
+        assert {v.position_id for v in violations} == {"B1.safe_z", "B1.action_z"}
+
+    def test_scan_validates_every_well_it_expands_to(self):
+        gantry = _make_gantry(y_max=20.0, safe_z=80.0)
+        plate = _make_plate(a1_y=10.0, y_offset=15.0)
+        deck = _make_deck(plate=plate)
+        board = _make_board(("probe", _make_instrument()))
+        protocol = _make_protocol(
+            "scan",
+            instrument="probe",
+            plate="plate",
+            method="measure",
+            measurement_height=0.0,
+            interwell_scan_height=1.0,
+        )
+
+        violations = validate_protocol_motion_bounds(gantry, protocol, deck, board)
+
+        assert violations
+        assert any(v.position_id == "B1.action_z" for v in violations)
+        assert any(v.position_id == "B2.action_z" for v in violations)
+
+    def test_gantry_bounds_use_only_the_command_instrument(self):
+        gantry = _make_gantry(x_min=0.0, safe_z=80.0)
+        deck = _make_deck(vial=_make_vial(x=30.0, y=40.0, z=20.0))
+        board = _make_board(
+            ("used", _make_instrument(offset_x=0.0)),
+            ("unused_bad_offset", _make_instrument(offset_x=100.0)),
+        )
+        protocol = _make_protocol(
+            "measure",
+            instrument="used",
+            position="vial",
+            measurement_height=0.0,
+        )
+
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
+
+    def test_holder_base_is_ignored_when_protocol_targets_nested_labware(self):
+        gantry = _make_gantry(z_min=80.0, z_max=101.5, total_z_range=101.5,
+                              safe_z=101.5)
+        plate = _make_plate(a1_x=15.0, a1_y=17.0, a1_z=89.5)
+        holder = WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"plate": plate},
+        )
+        deck = _make_deck(plate_holder=holder)
+        board = _make_board(("probe", _make_instrument()))
+        protocol = _make_protocol(
+            "measure",
+            instrument="probe",
+            position="plate_holder.plate.A1",
+            measurement_height=1.0,
+        )
+
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
+
+    def test_collector_reports_scan_safe_approach_and_action_targets(self):
+        gantry = _make_gantry(safe_z=80.0)
+        deck = _make_deck(plate=_make_plate(rows=1, columns=2))
+        protocol = _make_protocol(
+            "scan",
+            instrument="probe",
+            plate="plate",
+            method="measure",
+            measurement_height=0.0,
+            interwell_scan_height=1.0,
+        )
+
+        targets = collect_protocol_motion_targets(gantry, protocol, deck)
+
+        assert [target.position_id for target in targets] == [
+            "A1.safe_z",
+            "A1.approach_z",
+            "A1.action_z",
+            "A2.approach_z",
+            "A2.action_z",
+        ]

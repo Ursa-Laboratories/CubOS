@@ -16,7 +16,7 @@ from gantry.loader import load_gantry_from_yaml_safe
 from gantry.origin import validate_deck_origin_minima
 from protocol_engine.loader import load_protocol_from_yaml_safe
 from protocol_engine.protocol import Protocol, ProtocolContext
-from validation.bounds import validate_deck_positions, validate_gantry_positions
+from validation.bounds import validate_protocol_motion_bounds
 from validation.errors import ProtocolSemanticValidationError, SetupValidationError
 from validation.protocol_semantics import validate_protocol_semantics
 
@@ -36,8 +36,8 @@ def setup_protocol(
         2. Load deck (labware positions)
         3. Build board (instruments with offsets)
         4. Load protocol (command steps)
-        5. Validate all deck positions within gantry bounds
-        6. Validate all gantry positions within gantry bounds
+        5. Validate protocol motion targets within gantry bounds
+        6. Validate protocol semantics
         7. Return (Protocol, ProtocolContext)
 
     Args:
@@ -103,8 +103,9 @@ def setup_protocol(
 
     protocol: Protocol = load_protocol_from_yaml_safe(protocol_path)
 
-    violations = validate_deck_positions(gantry_config, deck)
-    violations.extend(validate_gantry_positions(gantry_config, deck, board))
+    violations = validate_protocol_motion_bounds(
+        gantry_config, protocol, deck, board,
+    )
     if violations:
         raise SetupValidationError(violations)
 

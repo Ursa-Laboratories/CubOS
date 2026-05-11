@@ -44,7 +44,7 @@ PYTHONPATH=src python setup/validate_setup.py \
   configs/protocol/asmi_move_a1.yaml
 ```
 
-This loads all three configs, checks deck and instrument-adjusted positions
+This loads all three configs, checks the protocol's concrete motion targets
 against the gantry working volume, validates protocol motion semantics, and
 prints PASS/FAIL.
 

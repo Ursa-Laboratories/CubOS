@@ -1,6 +1,11 @@
 """Validation module for protocol setup."""
 
-from .bounds import validate_deck_positions, validate_gantry_positions
+from .bounds import (
+    collect_protocol_motion_targets,
+    validate_deck_positions,
+    validate_gantry_positions,
+    validate_protocol_motion_bounds,
+)
 from .errors import (
     BoundsViolation,
     ProtocolSemanticValidationError,
@@ -14,7 +19,9 @@ __all__ = [
     "ProtocolSemanticValidationError",
     "ProtocolSemanticViolation",
     "SetupValidationError",
+    "collect_protocol_motion_targets",
     "validate_deck_positions",
     "validate_gantry_positions",
+    "validate_protocol_motion_bounds",
     "validate_protocol_semantics",
 ]
