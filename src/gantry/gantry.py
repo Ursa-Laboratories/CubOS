@@ -76,7 +76,7 @@ class Gantry:
                 self.logger.info("Connecting to gantry via auto-scan")
             else:
                 self.logger.info("Connecting to gantry via %s", port)
-            self._mill.connect_to_mill(port=port)
+            self._mill.connect(port=port)
             self._validate_grbl_settings()
             self._check_alarm_state()
         except MillConnectionError as exc:
@@ -168,15 +168,14 @@ class Gantry:
             return
         assert self._mill is not None
 
-        self._mill.read_mill_config()
-        self._mill.read_working_volume()
+        self._mill.read_config()
         self._mill.clear_buffers()
         status = self._mill.query_raw_status()
         if status:
-            self._mill._enforce_wpos_mode()
+            self._mill.enforce_wpos_mode()
         self._mill.set_feed_rate(DEFAULT_FEED_RATE)
         if status:
-            self._mill._seed_wco()
+            self._mill.seed_wco()
         self._validate_grbl_settings()
 
     def move_to(
@@ -212,7 +211,7 @@ class Gantry:
                 if travel_z is not None
                 else None
             )
-            self._mill.move_to_position(
+            self._mill.move_to(
                 x_coordinate=machine_x,
                 y_coordinate=machine_y,
                 z_coordinate=machine_z,
@@ -279,7 +278,7 @@ class Gantry:
             return
         assert self._mill is not None
         try:
-            self._mill.reset()
+            self._mill.unlock()
         except (MillConnectionError, CommandExecutionError) as exc:
             self.logger.error("Unlock error: %s", exc)
             raise
@@ -368,7 +367,7 @@ class Gantry:
             return
         assert self._mill is not None
         try:
-            self._mill._enforce_wpos_mode()
+            self._mill.enforce_wpos_mode()
         except CommandExecutionError as exc:
             self.logger.error("Error enforcing WPos status reporting: %s", exc)
             raise
@@ -473,7 +472,7 @@ class Gantry:
         if self._offline:
             return {}
         assert self._mill is not None
-        return self._mill.grbl_settings()
+        return self._mill.read_grbl_settings()
 
     def set_grbl_setting(self, setting: str, value: float | int | bool) -> None:
         """Set one GRBL ``$`` setting."""
@@ -625,7 +624,7 @@ class Gantry:
             return
 
         assert self._mill is not None
-        live = self._mill.grbl_settings()
+        live = self._mill.read_grbl_settings()
         mismatches = []
         for grbl_code, expected_value in expected.items():
             live_raw = live.get(grbl_code)

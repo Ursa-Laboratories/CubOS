@@ -58,7 +58,7 @@ def test_status_returns_wpos(mill: Mill):
     print("\n--- Test: Status reports WPos ---")
     mill.ser_mill.write(b"?")
     time.sleep(0.3)
-    status = mill.read()
+    status = mill._read_serial()
     has_wpos = "WPos:" in status
     has_mpos = "MPos:" in status
     record("Status contains WPos", has_wpos, f"status={status[:80]}")
@@ -179,7 +179,7 @@ def main():
     # Connect
     print("\nConnecting to mill...")
     mill = Mill(port=args.port)
-    mill.connect_to_mill(port=args.port)
+    mill.connect(port=args.port)
     print(f"Connected on {mill.ser_mill.port}")
 
     # Run tests that don't require homing first

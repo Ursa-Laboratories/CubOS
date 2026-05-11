@@ -26,7 +26,7 @@ def _config() -> dict:
 def test_move_to_preserves_xyz_without_hidden_z_flip(mock_mill_cls) -> None:
     gantry = Gantry(config=_config())
     gantry.move_to(150.0, 100.0, 40.0)
-    mock_mill_cls.return_value.move_to_position.assert_called_once_with(
+    mock_mill_cls.return_value.move_to.assert_called_once_with(
         x_coordinate=150.0,
         y_coordinate=100.0,
         z_coordinate=40.0,
@@ -71,7 +71,7 @@ def test_zero_home_coordinates_stay_zero(mock_mill_cls) -> None:
 def test_boundary_translation(mock_mill_cls) -> None:
     gantry = Gantry(config=_config())
     gantry.move_to(300.0, 200.0, 80.0)
-    mock_mill_cls.return_value.move_to_position.assert_called_once_with(
+    mock_mill_cls.return_value.move_to.assert_called_once_with(
         x_coordinate=300.0,
         y_coordinate=200.0,
         z_coordinate=80.0,
@@ -84,7 +84,7 @@ def test_travel_z_translates_to_machine_space(mock_mill_cls) -> None:
     """travel_z is given in deck-frame space; mill receives the same Z."""
     gantry = Gantry(config=_config())
     gantry.move_to(150.0, 100.0, 40.0, travel_z=70.0)
-    mock_mill_cls.return_value.move_to_position.assert_called_once_with(
+    mock_mill_cls.return_value.move_to.assert_called_once_with(
         x_coordinate=150.0,
         y_coordinate=100.0,
         z_coordinate=40.0,
@@ -109,10 +109,10 @@ def test_jog_cancel_delegates_to_mill(mock_mill_cls) -> None:
 
 
 @patch("gantry.gantry.Mill")
-def test_unlock_delegates_to_mill_reset(mock_mill_cls) -> None:
+def test_unlock_delegates_to_mill_unlock(mock_mill_cls) -> None:
     gantry = Gantry(config=_config())
     gantry.unlock()
-    mock_mill_cls.return_value.reset.assert_called_once()
+    mock_mill_cls.return_value.unlock.assert_called_once()
 
 
 def test_total_z_range_property_from_config() -> None:

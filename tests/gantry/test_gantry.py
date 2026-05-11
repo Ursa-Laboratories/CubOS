@@ -19,21 +19,21 @@ class TestGantry(unittest.TestCase):
         mock_mill = mock_mill_cls.return_value
         gantry = Gantry(config=self.config)
         gantry.connect()
-        mock_mill.connect_to_mill.assert_called_with(port=None)
+        mock_mill.connect.assert_called_with(port=None)
 
     @patch("gantry.gantry.Mill")
     def test_connect_accepts_explicit_port_override(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
         gantry = Gantry(config=self.config)
         gantry.connect(port="/dev/tty.usbserial-130")
-        mock_mill.connect_to_mill.assert_called_with(port="/dev/tty.usbserial-130")
+        mock_mill.connect.assert_called_with(port="/dev/tty.usbserial-130")
 
     @patch("gantry.gantry.Mill")
-    def test_move_delegates_to_move_to_position(self, mock_mill_cls):
+    def test_move_delegates_to_mill_move_to(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
         gantry = Gantry(config=self.config)
         gantry.move_to(10, 20, 30)
-        mock_mill.move_to_position.assert_called_with(
+        mock_mill.move_to.assert_called_with(
             x_coordinate=10.0,
             y_coordinate=20.0,
             z_coordinate=30.0,
@@ -45,7 +45,7 @@ class TestGantry(unittest.TestCase):
         mock_mill = mock_mill_cls.return_value
         gantry = Gantry(config=self.config)
         gantry.move_to(10, 20, 30, travel_z=50)
-        mock_mill.move_to_position.assert_called_with(
+        mock_mill.move_to.assert_called_with(
             x_coordinate=10.0,
             y_coordinate=20.0,
             z_coordinate=30.0,
@@ -67,7 +67,7 @@ class TestGantry(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_connect_raises_mill_connection_error(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.connect_to_mill.side_effect = MillConnectionError("no port")
+        mock_mill.connect.side_effect = MillConnectionError("no port")
         gantry = Gantry(config=self.config)
         with self.assertRaises(MillConnectionError):
             gantry.connect()
@@ -75,7 +75,7 @@ class TestGantry(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_connect_does_not_catch_unexpected_errors(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.connect_to_mill.side_effect = RuntimeError("unexpected")
+        mock_mill.connect.side_effect = RuntimeError("unexpected")
         gantry = Gantry(config=self.config)
         with self.assertRaises(RuntimeError):
             gantry.connect()
@@ -170,18 +170,17 @@ class TestGantry(unittest.TestCase):
             "<Idle|WPos:0,0,0|FS:0,0>",
             "<Idle|WPos:0,0,0|FS:0,0>",
         ]
-        mock_mill.grbl_settings.return_value = {}
+        mock_mill.read_grbl_settings.return_value = {}
         gantry = Gantry(config=self.config)
 
         gantry.prepare_for_protocol_run()
 
         mock_mill.soft_reset_and_unlock.assert_called_once()
-        mock_mill.read_mill_config.assert_called_once()
-        mock_mill.read_working_volume.assert_called_once()
+        mock_mill.read_config.assert_called_once()
         mock_mill.clear_buffers.assert_called_once()
-        mock_mill._enforce_wpos_mode.assert_called_once()
+        mock_mill.enforce_wpos_mode.assert_called_once()
         mock_mill.set_feed_rate.assert_called_once()
-        mock_mill._seed_wco.assert_called_once()
+        mock_mill.seed_wco.assert_called_once()
 
     @patch("gantry.gantry.Mill")
     def test_prepare_for_protocol_run_noops_when_not_in_alarm(
@@ -194,7 +193,7 @@ class TestGantry(unittest.TestCase):
         gantry.prepare_for_protocol_run()
 
         mock_mill.soft_reset_and_unlock.assert_not_called()
-        mock_mill.read_mill_config.assert_not_called()
+        mock_mill.read_config.assert_not_called()
 
     @patch("gantry.gantry.Mill")
     def test_prepare_for_protocol_run_raises_if_alarm_persists(self, mock_mill_cls):
@@ -204,7 +203,7 @@ class TestGantry(unittest.TestCase):
             "<Idle|WPos:0,0,0|FS:0,0>",
             "<Alarm|WPos:0,0,0|FS:0,0>",
         ]
-        mock_mill.grbl_settings.return_value = {}
+        mock_mill.read_grbl_settings.return_value = {}
         gantry = Gantry(config=self.config)
 
         with self.assertRaises(MillConnectionError):
@@ -213,7 +212,7 @@ class TestGantry(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_move_to_raises_on_command_error(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.move_to_position.side_effect = CommandExecutionError("move failed")
+        mock_mill.move_to.side_effect = CommandExecutionError("move failed")
         gantry = Gantry(config=self.config)
         with self.assertRaises(CommandExecutionError):
             gantry.move_to(10, 20, 30)
@@ -221,7 +220,7 @@ class TestGantry(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_move_to_does_not_catch_unexpected_errors(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.move_to_position.side_effect = RuntimeError("unexpected")
+        mock_mill.move_to.side_effect = RuntimeError("unexpected")
         gantry = Gantry(config=self.config)
         with self.assertRaises(RuntimeError):
             gantry.move_to(10, 20, 30)
@@ -315,7 +314,7 @@ class TestGantry(unittest.TestCase):
         mock_mill = mock_mill_cls.return_value
         gantry = Gantry(config=self.config)
         gantry.enforce_work_position_reporting()
-        mock_mill._enforce_wpos_mode.assert_called_once_with()
+        mock_mill.enforce_wpos_mode.assert_called_once_with()
 
     @patch("gantry.gantry.Mill")
     def test_activate_work_coordinate_system_sends_g54(self, mock_mill_cls):
@@ -358,7 +357,7 @@ class TestGantry(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_soft_limits_enabled_reads_setting_semantically(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.grbl_settings.return_value = {"$20": "1"}
+        mock_mill.read_grbl_settings.return_value = {"$20": "1"}
         gantry = Gantry(config=self.config)
         self.assertTrue(gantry.soft_limits_enabled())
 
@@ -372,7 +371,7 @@ class TestGantry(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_configure_soft_limits_writes_and_verifies_settings(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.grbl_settings.return_value = {
+        mock_mill.read_grbl_settings.return_value = {
             "$20": "1",
             "$22": "1",
             "$130": "306.000",
@@ -430,7 +429,7 @@ class TestGrblSettingsValidation(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_validate_passes_when_settings_match(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.grbl_settings.return_value = {
+        mock_mill.read_grbl_settings.return_value = {
             "$3": "2",
             "$10": "1",
             "$130": "300.000",
@@ -451,7 +450,7 @@ class TestGrblSettingsValidation(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_board_expected_settings_override_gantry_settings(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.grbl_settings.return_value = {"$3": "1", "$130": "306.000"}
+        mock_mill.read_grbl_settings.return_value = {"$3": "1", "$130": "306.000"}
         gantry = Gantry(
             config={
                 "grbl_settings": {
@@ -466,7 +465,7 @@ class TestGrblSettingsValidation(unittest.TestCase):
     @patch("gantry.gantry.Mill")
     def test_validate_raises_on_critical_mismatch(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
-        mock_mill.grbl_settings.return_value = {"$3": "0", "$130": "300.000"}
+        mock_mill.read_grbl_settings.return_value = {"$3": "0", "$130": "300.000"}
         gantry = Gantry(config={"grbl_settings": {"dir_invert_mask": 2}})
         with self.assertRaises(MillConnectionError):
             gantry._validate_grbl_settings()
