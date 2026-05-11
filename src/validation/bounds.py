@@ -88,15 +88,10 @@ def _resolve_deck_coord(deck: Deck, target: Any) -> Coordinate3D | None:
 def _resolve_labware(deck: Deck, target: Any) -> Any | None:
     if not isinstance(target, str):
         return None
-    resolver = getattr(deck, "resolve_labware", None)
-    if callable(resolver):
-        try:
-            return resolver(target)
-        except (KeyError, AttributeError, ValueError):
-            return None
-    if target in deck:
-        return deck[target]
-    return None
+    try:
+        return deck.resolve_labware(target)
+    except (KeyError, ValueError):
+        return None
 
 
 def _target_label(target: str, suffix: str) -> tuple[str, str]:

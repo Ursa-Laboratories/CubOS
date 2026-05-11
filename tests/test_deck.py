@@ -4,6 +4,7 @@ import pytest
 
 from deck import Coordinate3D, WellPlate, Vial
 from deck.deck import Deck
+from deck.labware.well_plate_holder import WellPlateHolder
 
 
 # ----- Fixtures -----
@@ -166,3 +167,19 @@ def test_resolve_coordinate_match_errors_for_invalid_targets(target, pattern):
 
     with pytest.raises(KeyError, match=pattern):
         deck.resolve_coordinate(target)
+
+
+def test_resolve_labware_missing_child_reports_failing_segment():
+    deck = Deck({
+        "plate_holder": WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+        ),
+    })
+
+    with pytest.raises(KeyError) as exc_info:
+        deck.resolve_labware("plate_holder.missing_plate")
+
+    message = str(exc_info.value)
+    assert "missing_plate" in message
+    assert "plate_holder.missing_plate" not in message

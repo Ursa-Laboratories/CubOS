@@ -55,7 +55,9 @@ class Deck:
             try:
                 labware = children[child_name]
             except KeyError as exc:
-                raise KeyError(f"No nested labware '{target}' on deck.") from exc
+                raise KeyError(
+                    f"No nested labware '{child_name}' on deck."
+                ) from exc
         return labware
 
     def _get_labware(self, key: str) -> Labware:
