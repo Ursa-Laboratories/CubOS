@@ -11,6 +11,7 @@ resolved coordinates.
 # pylint: disable=line-too-long
 
 # standard libraries
+import logging
 import math
 import os
 import re
@@ -36,6 +37,7 @@ from .logger import set_up_command_logger, set_up_mill_logger
 # Constants
 DEFAULT_FEED_RATE = 2000
 HOMING_TIMEOUT = 90
+ERROR_22_MAX_RETRIES = 2
 
 # Compile regex patterns for extracting coordinates from the mill status
 wpos_pattern = re.compile(r"WPos:([\d.-]+),([\d.-]+),([\d.-]+)")
@@ -69,7 +71,6 @@ class Mill:
         self.auto_home = False
         self.active_connection = False
         self.command_logger = set_up_command_logger(self.logger_location)
-        self.interactive_mode = False
         self._wco: Optional[Coordinates] = None
         self.last_status: str = ""
 
@@ -306,6 +307,21 @@ class Mill:
         self.logger.debug("Mill config: %s", mill_config)
         return mill_config
 
+    def _collect_grbl_settings_response(self) -> dict:
+        """Drain serial until ``ok`` arrives, then parse the $$ block."""
+        deadline = time.time() + 5
+        lines = [self.ser_mill.readline().decode(encoding="ascii").rstrip()]
+        while lines[-1] != "ok":
+            if time.time() > deadline:
+                raise StatusReturnError("Timed out waiting for GRBL settings response")
+            if lines[-1].lower().startswith(("error", "alarm")):
+                raise StatusReturnError(
+                    f"Error in settings response: {lines[-1]}"
+                )
+            lines.append(self.ser_mill.readline().decode(encoding="ascii").rstrip())
+        self.logger.debug("Returned %s", lines[:-1])
+        return self._parse_grbl_settings_response(lines[:-1])
+
     def _parse_grbl_settings_response(self, response_lines: list[str]) -> dict:
         """Parse a GRBL $$ response into a settings dictionary."""
         settings_dict = {}
@@ -329,58 +345,58 @@ class Mill:
         return settings_dict
 
     def execute_command(self, command: str, suppress_errors: bool = False):
-        """Encodes and sends commands to the mill and returns the response."""
+        """Encodes and sends commands to the mill and returns the response.
+
+        Errors are always logged — ``suppress_errors=True`` only demotes the
+        log level so callers that expect transient failures (e.g. probing
+        during connect) don't spam ERROR, but the forensic trail is preserved.
+        ``error:22`` (undefined feed rate) triggers a bounded retry that
+        re-sets the feed rate and re-sends the command; persistent ``error:22``
+        raises after :data:`ERROR_22_MAX_RETRIES` attempts.
+        """
         try:
             if self.ser_mill is None:
                 raise MillConnectionError("Serial connection to mill is not open")
             self.logger.debug("Command sent: %s", command)
             self.command_logger.debug("%s", command)
-            command_bytes = str(command).encode(encoding="ascii")
-            self.ser_mill.write(command_bytes + b"\n")
 
             if command == "$$":
-                deadline = time.time() + 5
-                full_mill_response = [
-                    self.ser_mill.readline().decode(encoding="ascii").rstrip()
-                ]
-                while full_mill_response[-1] != "ok":
-                    if time.time() > deadline:
-                        raise StatusReturnError(
-                            "Timed out waiting for GRBL settings response"
-                        )
-                    if full_mill_response[-1].lower().startswith(("error", "alarm")):
-                        raise StatusReturnError(
-                            f"Error in settings response: {full_mill_response[-1]}"
-                        )
-                    full_mill_response.append(
-                        self.ser_mill.readline().decode(encoding="ascii").rstrip()
+                self.ser_mill.write(str(command).encode(encoding="ascii") + b"\n")
+                return self._collect_grbl_settings_response()
+
+            for attempt in range(ERROR_22_MAX_RETRIES + 1):
+                self.ser_mill.write(str(command).encode(encoding="ascii") + b"\n")
+                mill_response = self._read_serial().lower()
+                if not command.startswith("$"):
+                    mill_response = self._wait_until_idle(
+                        mill_response, suppress_errors=suppress_errors
                     )
-                full_mill_response = full_mill_response[:-1]
-                self.logger.debug("Returned %s", full_mill_response)
-                return self._parse_grbl_settings_response(full_mill_response)
-
-            mill_response = self._read_serial().lower()
-            if not command.startswith("$"):
-                mill_response = self._wait_until_idle(mill_response, suppress_errors=suppress_errors)
-                self.logger.debug("Returned %s", mill_response)
-            else:
                 self.logger.debug("Returned %s", mill_response)
 
-            if re.search(r"(error|alarm)", mill_response):
-                if re.search(r"error:22", mill_response):
-                    self.logger.error("Error in status: %s", mill_response)
+                if not re.search(r"(error|alarm)", mill_response):
+                    break
+
+                if re.search(r"error:22", mill_response) and attempt < ERROR_22_MAX_RETRIES:
+                    self.logger.warning(
+                        "error:22 from GRBL (attempt %d/%d); restoring feed rate and retrying: %s",
+                        attempt + 1,
+                        ERROR_22_MAX_RETRIES,
+                        mill_response,
+                    )
                     self.set_feed_rate(DEFAULT_FEED_RATE)
-                    mill_response = self.execute_command(command, suppress_errors=suppress_errors)
-                else:
-                    if not suppress_errors:
-                        self.logger.error(
-                            "current_status: Error in status: %s", mill_response
-                        )
-                    raise StatusReturnError(f"Error in status: {mill_response}")
+                    continue
+
+                level = logging.WARNING if suppress_errors else logging.ERROR
+                self.logger.log(
+                    level, "GRBL error in response to %s: %s", command, mill_response
+                )
+                raise StatusReturnError(f"Error in status: {mill_response}")
 
         except Exception as exep:
-            if not suppress_errors:
-                self.logger.error("Error executing command %s: %s", command, str(exep))
+            level = logging.WARNING if suppress_errors else logging.ERROR
+            self.logger.log(
+                level, "Error executing command %s: %s", command, str(exep)
+            )
             raise CommandExecutionError(
                 f"Error executing command {command}: {str(exep)}"
             ) from exep
@@ -545,18 +561,12 @@ class Mill:
             lines = [item.decode().rstrip() for item in raw_lines]
             if not lines:
                 self.logger.error("Failed to get status from the mill")
-                if self.interactive_mode:
-                    print("Failed to get status from the mill")
-                    return ""
                 raise StatusReturnError("Failed to get status from the mill")
             # Find the first status line (<...>) or join all lines
             status = next((l for l in lines if l.startswith("<")), "; ".join(lines))
+            self.last_status = status
             if any(re.search(r"\b(error|alarm)\b", item.lower()) for item in lines):
                 self.logger.error("Error in status: %s", status)
-                self.last_status = status
-                if self.interactive_mode:
-                    print(f"Error in status: {status}")
-                    return ""
                 raise StatusReturnError(f"Error in status: {status}")
         self.last_status = status
         return status
@@ -592,18 +602,19 @@ class Mill:
         return self.execute_command(command)
 
     def enforce_wpos_mode(self):
-        """Ensure GRBL reports WPos in status reports ($10=0) and uses absolute positioning (G90)."""
+        """Ensure GRBL reports WPos in status reports ($10=0) and uses absolute positioning (G90).
+
+        A failed ``G90`` leaves the GRBL parser in whatever modal mode it was
+        in before (potentially G91 relative). Subsequent ``G01 X<deck>``
+        commands would then move *relatively*, which is a real-motion hazard,
+        so the failure is raised — callers must decide whether to recover.
+        """
         current = self.config.get("$10", "1")
         if current != "0":
             self.logger.info("Setting $10=0 (WPos status reporting)")
             self.execute_command("$10=0")
             self.config["$10"] = "0"
-        try:
-            self.execute_command("G90")
-        except CommandExecutionError:
-            self.logger.warning(
-                "Could not verify G90 during connect; continuing with existing parser state"
-            )
+        self.execute_command("G90")
         self.logger.info("WPos mode and absolute positioning enforced")
 
     def seed_wco(self):
@@ -633,21 +644,32 @@ class Mill:
         return bool(self.ser_mill and self.ser_mill.is_open)
 
     def query_raw_status(self) -> str:
-        """Send GRBL '?' and return the raw status string (e.g. '<Idle|WPos:...>')."""
+        """Send GRBL '?' and return the raw status string (e.g. '<Idle|WPos:...>').
+
+        Returns an empty string only when the driver is not connected — callers
+        treat ``""`` as "nothing to inspect", not "no alarm". Serial errors
+        propagate so that hardware-safety paths
+        (:meth:`Gantry.prepare_for_protocol_run`,
+        :meth:`Gantry._check_alarm_state`) cannot mistake a broken transport
+        for a healthy mill.
+        """
         if not self.is_connected():
             return ""
         try:
             self.ser_mill.write(b"?")
             time.sleep(0.1)
+            raw = ""
             for _ in range(5):
                 raw = self._read_serial()
                 if isinstance(raw, str) and "<" in raw:
                     return raw
                 time.sleep(0.05)
             return str(raw) if raw else ""
-        except Exception as exc:
-            self.logger.debug("Raw status query failed: %s", exc)
-            return ""
+        except (serial.SerialException, OSError) as exc:
+            self.logger.warning("Raw status query failed: %s", exc)
+            raise MillConnectionError(
+                f"Raw status query failed: {exc}"
+            ) from exc
 
     def current_coordinates(self) -> Coordinates:
         """

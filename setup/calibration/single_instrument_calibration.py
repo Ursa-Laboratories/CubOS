@@ -7,6 +7,7 @@ Internal implementation used by the sole user-facing entrypoint:
 from __future__ import annotations
 
 import copy
+import logging
 import sys
 import time
 from dataclasses import dataclass
@@ -596,12 +597,23 @@ def _probe_for_limit_status_after_jog(gantry: Gantry) -> None:
 
 
 def _read_limit_recovery_status(gantry: Gantry) -> str | None:
+    """Read status during limit-alarm recovery, tolerating expected GRBL errors.
+
+    Only :class:`StatusReturnError` / :class:`MillConnectionError` are caught
+    — those are the GRBL-side failures that can legitimately occur while the
+    controller is in alarm. Anything else is a programming bug and must
+    surface, not be silently turned into "no further pull-off needed".
+    """
     get_status = getattr(gantry, "get_status", None)
     if not callable(get_status):
         return None
     try:
         return str(get_status())
-    except Exception:
+    except (StatusReturnError, MillConnectionError) as exc:
+        logging.getLogger(__name__).warning(
+            "Status read failed during limit recovery; assuming further pull-off may be needed: %s",
+            exc,
+        )
         return None
 
 

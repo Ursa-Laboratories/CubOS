@@ -91,6 +91,12 @@ class Gantry:
         return self._mill.connected_port()
 
     def disconnect(self) -> None:
+        """Close the controller connection.
+
+        Re-raises :class:`MillConnectionError` so callers know the port may
+        still be open — silently swallowing it left stale serial handles that
+        could later be reused by a reconnect.
+        """
         if self._offline:
             return
         assert self._mill is not None
@@ -98,6 +104,7 @@ class Gantry:
             self._mill.disconnect()
         except MillConnectionError as exc:
             self.logger.error("Error disconnecting gantry: %s", exc)
+            raise
 
     def is_healthy(self) -> bool:
         """Check if the gantry is connected and healthy."""
@@ -105,22 +112,22 @@ class Gantry:
             return True
         assert self._mill is not None
         if not self._mill.active_connection:
-            self.logger.debug("Health check: no active connection")
+            self.logger.warning("Health check: no active connection")
             return False
 
         try:
             if not self._mill.is_connected():
-                self.logger.debug("Health check: serial port not open")
+                self.logger.warning("Health check: serial port not open")
                 return False
 
             status = self._mill.current_status()
             if "Alarm" in status or "Error" in status:
-                self.logger.debug("Health check: unhealthy status: %s", status)
+                self.logger.warning("Health check: unhealthy status: %s", status)
                 return False
 
             return True
         except (MillConnectionError, StatusReturnError) as exc:
-            self.logger.debug("Health check failed: %s", exc)
+            self.logger.warning("Health check failed: %s", exc)
             return False
 
     def home(self) -> None:
@@ -295,7 +302,13 @@ class Gantry:
             raise
 
     def get_status(self) -> str:
-        """Return the current status string with normalized coordinates."""
+        """Return the current status string with normalized coordinates.
+
+        Raises :class:`MillConnectionError` / :class:`StatusReturnError` on
+        query failure rather than returning a sentinel — most callers do
+        ``"Idle" in status`` and would treat a sentinel as "not idle",
+        masking the real fault.
+        """
         if self._offline:
             return "Idle"
         assert self._mill is not None
@@ -303,7 +316,7 @@ class Gantry:
             return translate_status_string(self._mill.current_status())
         except (MillConnectionError, StatusReturnError) as exc:
             self.logger.error("Error getting status: %s", exc)
-            return "StatusQueryFailed"
+            raise
 
     def stop(self) -> None:
         """Immediately stop all gantry motion (GRBL feed hold)."""
@@ -588,19 +601,19 @@ class Gantry:
 
     def _extract_status(self) -> str:
         """Extract the GRBL state word from the last raw status string."""
+        assert self._mill is not None
+        raw = getattr(self._mill, "last_status", "") or ""
+        if not raw:
+            return "Unknown"
+        match = _STATUS_RE.search(raw)
+        if match:
+            return match.group(1)
+        if "alarm" in raw.lower():
+            return "Alarm"
         try:
-            assert self._mill is not None
-            raw = getattr(self._mill, "last_status", "") or ""
-            if not raw:
-                return "Unknown"
-            match = _STATUS_RE.search(raw)
-            if match:
-                return match.group(1)
-            if "alarm" in raw.lower():
-                return "Alarm"
             return translate_status_string(raw)
-        except (ValueError, AttributeError) as exc:
-            self.logger.debug("Failed to extract status: %s", exc)
+        except ValueError as exc:
+            self.logger.warning("Failed to translate status %r: %s", raw, exc)
             return "Unknown"
 
     def _expected_grbl_settings(self) -> Optional[Dict[str, float]]:
@@ -625,21 +638,6 @@ class Gantry:
 
         assert self._mill is not None
         live = self._mill.read_grbl_settings()
-        mismatches = []
-        for grbl_code, expected_value in expected.items():
-            live_raw = live.get(grbl_code)
-            if live_raw is None:
-                self.logger.warning(
-                    "GRBL setting %s not found on controller", grbl_code
-                )
-                continue
-            if abs(float(live_raw) - float(expected_value)) > 0.001:
-                mismatches.append((grbl_code, float(expected_value), float(live_raw)))
-
-        if not mismatches:
-            self.logger.info("GRBL settings validation passed")
-            return
-
         critical = {
             "$3",
             "$20",
@@ -652,6 +650,27 @@ class Gantry:
             "$131",
             "$132",
         }
+        mismatches = []
+        for grbl_code, expected_value in expected.items():
+            live_raw = live.get(grbl_code)
+            if live_raw is None:
+                # A missing critical setting is just as dangerous as a wrong
+                # one — record it as a mismatch with a sentinel float so the
+                # critical-fail path below still trips.
+                level = logging.ERROR if grbl_code in critical else logging.WARNING
+                self.logger.log(
+                    level, "GRBL setting %s not found on controller", grbl_code
+                )
+                if grbl_code in critical:
+                    mismatches.append((grbl_code, float(expected_value), float("nan")))
+                continue
+            if abs(float(live_raw) - float(expected_value)) > 0.001:
+                mismatches.append((grbl_code, float(expected_value), float(live_raw)))
+
+        if not mismatches:
+            self.logger.info("GRBL settings validation passed")
+            return
+
         critical_mismatches = [item for item in mismatches if item[0] in critical]
         for grbl_code, expected_value, live_value in mismatches:
             self.logger.error(

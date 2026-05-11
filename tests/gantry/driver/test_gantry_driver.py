@@ -473,6 +473,111 @@ class TestCNCDriverLogic(unittest.TestCase):
         with self.assertRaises(MillConnectionError):
             mill.soft_reset()
 
+    # ── Silent-failure regression guards ────────────────────────────────
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_enforce_wpos_mode_propagates_g90_failure(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        """A failed G90 must raise — silent fallthrough risks relative-motion bugs."""
+        from gantry.gantry_driver.exceptions import CommandExecutionError
+        mill = Mill()
+        mill.config["$10"] = "0"
+        mill.execute_command = MagicMock(
+            side_effect=CommandExecutionError("G90 rejected")
+        )
+
+        with self.assertRaises(CommandExecutionError):
+            mill.enforce_wpos_mode()
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_query_raw_status_raises_on_serial_error(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        """OSError on transport must surface, not be flattened to ''."""
+        from gantry.gantry_driver.exceptions import MillConnectionError
+        mill = Mill()
+        mill.ser_mill = MagicMock()
+        mill.ser_mill.is_open = True
+        mill.ser_mill.write.side_effect = OSError("port disappeared")
+
+        with self.assertRaises(MillConnectionError):
+            mill.query_raw_status()
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_query_raw_status_returns_empty_only_when_disconnected(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        mill.ser_mill = None
+        self.assertEqual(mill.query_raw_status(), "")
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_current_status_raises_instead_of_returning_empty_string(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        """No more interactive-mode `return ""` after alarm/error detection."""
+        from gantry.gantry_driver.exceptions import StatusReturnError
+        mill = Mill()
+        mill.ser_mill = MagicMock()
+        mill._read_serial = MagicMock(return_value="")
+        mill.ser_mill.readlines.return_value = [b"<Alarm|MPos:0,0,0>\n"]
+
+        with self.assertRaises(StatusReturnError):
+            mill.current_status()
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_execute_command_error22_is_bounded(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        """Persistent error:22 must terminate after ERROR_22_MAX_RETRIES, not recurse."""
+        from gantry.gantry_driver.driver import ERROR_22_MAX_RETRIES
+        from gantry.gantry_driver.exceptions import CommandExecutionError
+        mill = Mill()
+        mill.ser_mill = MagicMock()
+        mill._read_serial = MagicMock(return_value="error:22\nok")
+        mill._wait_until_idle = MagicMock(return_value="error:22\nok")
+        mill.set_feed_rate = MagicMock()
+
+        with self.assertRaises(CommandExecutionError):
+            mill.execute_command("G01 X10")
+
+        # set_feed_rate is called once per retry attempt (not including the final
+        # giving-up attempt that raises).
+        self.assertEqual(mill.set_feed_rate.call_count, ERROR_22_MAX_RETRIES)
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_execute_command_logs_even_when_suppress_errors(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        """suppress_errors only demotes log level — it never produces a silent path."""
+        from gantry.gantry_driver.exceptions import CommandExecutionError
+        mill = Mill()
+        mill.ser_mill = MagicMock()
+        mill._read_serial = MagicMock(return_value="error:9\nok")
+        mill._wait_until_idle = MagicMock(return_value="error:9\nok")
+        mill.logger = MagicMock()
+
+        with self.assertRaises(CommandExecutionError):
+            mill.execute_command("G01 X10", suppress_errors=True)
+
+        # Every failure must produce at least one log call.
+        self.assertTrue(mill.logger.log.called or mill.logger.error.called)
+
 
 if __name__ == '__main__':
     unittest.main()

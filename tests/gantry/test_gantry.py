@@ -81,11 +81,12 @@ class TestGantry(unittest.TestCase):
             gantry.connect()
 
     @patch("gantry.gantry.Mill")
-    def test_disconnect_swallows_mill_connection_error(self, mock_mill_cls):
+    def test_disconnect_reraises_mill_connection_error(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
         mock_mill.disconnect.side_effect = MillConnectionError("port busy")
         gantry = Gantry(config=self.config)
-        gantry.disconnect()
+        with self.assertRaises(MillConnectionError):
+            gantry.disconnect()
 
     @patch("gantry.gantry.Mill")
     def test_disconnect_does_not_catch_unexpected_errors(self, mock_mill_cls):
@@ -226,11 +227,12 @@ class TestGantry(unittest.TestCase):
             gantry.move_to(10, 20, 30)
 
     @patch("gantry.gantry.Mill")
-    def test_get_status_returns_error_on_status_error(self, mock_mill_cls):
+    def test_get_status_raises_on_status_error(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
         mock_mill.current_status.side_effect = StatusReturnError("bad")
         gantry = Gantry(config=self.config)
-        self.assertEqual(gantry.get_status(), "StatusQueryFailed")
+        with self.assertRaises(StatusReturnError):
+            gantry.get_status()
 
     @patch("gantry.gantry.Mill")
     def test_get_status_propagates_unexpected_errors(self, mock_mill_cls):
