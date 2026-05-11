@@ -289,6 +289,9 @@ class WallYamlEntry(BaseModel):
 class WellPlateHolderYamlEntry(_BaseHolderYamlEntry):
     type: Literal["well_plate_holder"] = "well_plate_holder"
     model_name: str = "SlideHolder_Top"
+    well_plate_surface_height_from_bottom: Optional[float] = Field(
+        default=None, gt=0,
+    )
     well_plate: Optional[NestedWellPlateYamlEntry] = None
 
     @model_validator(mode="after")

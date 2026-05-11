@@ -85,6 +85,7 @@ deck YAMLs keep working unmodified.
 | `ursa_vial_holder` | `VialHolder` | 9-position tight-fit 20 mL vial holder (Cub-XL). |
 | `ursa_wellplate_holder` | `WellPlateHolder` | Tall wellplate holder (Cub). |
 | `ursa_wellplate_holder_conductive` | `WellPlateHolder` | Conductive wellplate holder (Cub-XL). |
+| `sharc_80mm_sbs_wellplate_holder` | `WellPlateHolder` | SHARC 80 mm SBS holder. Uses a 75.15 mm seat plane and 89.5 mm nested plate surface reference. |
 
 See each `definitions/<name>/README.md` for physical dimensions,
 assembly notes, and 3D-printable STEP/STL files where applicable.
@@ -124,7 +125,9 @@ Top-level `a1` is still accepted for backward compatibility, but new deck files 
   offsets. Holds nested `Vial` instances at the seat height above the
   holder anchor.
 - **`well_plate_holder`** — physical fixture that seats a well plate at a
-  fixed z above the holder anchor. Holds one nested `WellPlate`.
+  fixed z above the holder anchor. Holds one nested `WellPlate`. When
+  `well_plate_surface_height_from_bottom` is set, nested wells use that
+  calibrated surface Z instead of the physical seat plane.
 - **`tip_disposal`** — bounding-box fixture for used-tip disposal.
 
 ## Adding a new definition

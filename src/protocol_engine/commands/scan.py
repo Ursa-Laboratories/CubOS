@@ -80,7 +80,10 @@ def scan(
     Returns:
         Mapping of well ID to the result of each method call.
     """
-    plate_obj = context.deck[plate]
+    try:
+        plate_obj = context.deck.resolve_labware(plate)
+    except KeyError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     if not isinstance(plate_obj, WellPlate):
         raise ProtocolExecutionError(
             f"scan requires a WellPlate, but '{plate}' is "

@@ -496,9 +496,13 @@ def _validate_scan_command(
 
     instrument = args.get("instrument")
     plate = args.get("plate")
-    if instrument not in board.instruments or plate not in deck:
+    if instrument not in board.instruments:
         return violations
-    plate_obj = deck[plate]
+
+    try:
+        plate_obj = deck.resolve_labware(plate)
+    except (KeyError, AttributeError, ValueError):
+        return violations
     if not isinstance(plate_obj, WellPlate):
         return violations
 

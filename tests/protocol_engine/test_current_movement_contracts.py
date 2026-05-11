@@ -59,6 +59,7 @@ def _plate() -> WellPlate:
 
 
 def _ctx(instr_name: str, instr, plate=None):
+    plate = plate or _plate()
     board = MagicMock()
     board.instruments = {instr_name: instr}
     deck = MagicMock()

@@ -1,0 +1,15 @@
+# SHARC 80 mm SBS wellplate holder.
+#
+# `height` is the physical holder body height. The nested plate's calibrated
+# surface/rim Z is higher than the holder body because the seated SBS plate adds
+# 14.35 mm above the 75.15 mm support plane.
+
+type: well_plate_holder
+name: sharc_80mm_sbs_wellplate_holder
+model_name: sharc_80mm_sbs_wellplate_holder
+length: 127.76
+width: 85.47
+height: 80.0
+labware_support_height: 75.15
+labware_seat_height_from_bottom: 75.15
+well_plate_surface_height_from_bottom: 89.5

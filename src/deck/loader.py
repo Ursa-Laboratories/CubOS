@@ -367,9 +367,9 @@ def _build_holder(
 
     seat_height = getattr(holder, "labware_seat_height_from_bottom", None)
     contained_labware: Dict[str, Labware] = {}
-    if seat_height is not None:
-        contained_z = holder.location.z + seat_height
-        if isinstance(entry, VialHolderYamlEntry):
+    if isinstance(entry, VialHolderYamlEntry):
+        if seat_height is not None:
+            contained_z = holder.location.z + seat_height
             contained_labware = {
                 vial_key: _build_nested_vial(
                     vial_key,
@@ -378,7 +378,20 @@ def _build_holder(
                 )
                 for vial_key, vial_entry in entry.vials.items()
             }
-        elif isinstance(entry, WellPlateHolderYamlEntry) and entry.well_plate is not None:
+    elif (
+        isinstance(entry, WellPlateHolderYamlEntry)
+        and entry.well_plate is not None
+    ):
+        surface_height = getattr(
+            holder, "well_plate_surface_height_from_bottom", None,
+        )
+        nested_height = (
+            surface_height
+            if surface_height is not None
+            else seat_height
+        )
+        if nested_height is not None:
+            contained_z = holder.location.z + nested_height
             contained_labware["plate"] = _build_nested_well_plate(
                 "plate",
                 entry.well_plate,

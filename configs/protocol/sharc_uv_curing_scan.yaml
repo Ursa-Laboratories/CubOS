@@ -1,0 +1,16 @@
+# SHARC UV curing scan.
+#
+# Targets the SBS plate nested in the SHARC holder. With the SHARC deck config,
+# measurement_height=1.0 resolves to action Z=90.5 and interwell_scan_height=5.0
+# resolves to approach Z=94.5. Uses the smoke-test UV exposure defaults.
+
+protocol:
+  - scan:
+      plate: plate_holder.plate
+      instrument: uv_curing
+      method: cure
+      measurement_height: 1.0
+      interwell_scan_height: 5.0
+      method_kwargs:
+        intensity: 1
+        exposure_time: 1.0

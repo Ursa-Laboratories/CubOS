@@ -56,10 +56,12 @@ PYTHONPATH=src python setup/validate_setup.py \
   instrument entries; those placeholders parse as config data but will not
   instantiate until real instrument drivers are registered.
 - `deck/asmi_deck.yaml`, `deck/sterling_deck.yaml`,
-  `deck/filmetrics_deck.yaml`, `deck/panda_deck.yaml`.
+  `deck/filmetrics_deck.yaml`, `deck/panda_deck.yaml`,
+  `deck/sharc_uv_deck.yaml`.
 - `protocol/asmi_move_a1.yaml`, `protocol/asmi_indentation.yaml`,
   `protocol/sterling_park.yaml`, `protocol/sterling_vial_scan.yaml`,
-  `protocol/filmetrics_scan.yaml`.
+  `protocol/filmetrics_scan.yaml`, `protocol/sharc_uv_curing_scan.yaml`,
+  `protocol/sharc_uv_motion_scan.yaml`.
 
 ## Height Semantics
 
@@ -84,6 +86,12 @@ sanity check, not for motion math.
 Pipette commands engage at the labware reference Z (well bottom, tip
 top) — `measurement_height = 0` implicitly. Unrecognized scan fields are
 rejected at protocol-load time by the command's Pydantic schema.
+
+`scan.plate` can target a top-level `WellPlate` or a nested holder path such
+as `plate_holder.plate`. The SHARC UV config uses this nested form.
+
+Use `protocol/sharc_uv_motion_scan.yaml` for SHARC gantry scan bring-up when
+you need the same 96-well motion path without issuing UV cure commands.
 
 ## Validation Status
 

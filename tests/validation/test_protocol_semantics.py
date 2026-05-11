@@ -11,6 +11,7 @@ from board.board import Board
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
+from deck.loader import load_deck_from_yaml
 from gantry.gantry_config import GantryConfig, GantryType, HomingStrategy, WorkingVolume
 from protocol_engine.protocol import Protocol, ProtocolStep
 from validation.protocol_semantics import validate_protocol_semantics
@@ -516,3 +517,43 @@ def test_scan_depth_drives_z_violation():
     violations = validate_protocol_semantics(protocol, board, deck, gantry)
 
     assert any("z" in v.message for v in violations), violations
+
+
+def test_nested_plate_scan_target_passes_semantic_validation():
+    deck = load_deck_from_yaml("configs/deck/sharc_uv_deck.yaml")
+    board = Board(
+        gantry=MagicMock(),
+        instruments={"uv": _instrument("uv")},
+    )
+    gantry = _gantry_config(x_max=300.0, y_max=300.0, z_max=100.0, safe_z=95.0)
+    protocol = _protocol({
+        "plate": "plate_holder.plate",
+        "instrument": "uv",
+        "method": "measure",
+        "measurement_height": 1.0,
+        "interwell_scan_height": 5.0,
+        "method_kwargs": {"intensity": 1, "exposure_time": 1.0},
+    })
+
+    assert validate_protocol_semantics(protocol, board, deck, gantry) == []
+
+
+def test_nested_plate_scan_target_uses_nested_surface_z_for_safe_z_validation():
+    deck = load_deck_from_yaml("configs/deck/sharc_uv_deck.yaml")
+    board = Board(
+        gantry=MagicMock(),
+        instruments={"uv": _instrument("uv")},
+    )
+    gantry = _gantry_config(x_max=300.0, y_max=300.0, z_max=100.0, safe_z=94.0)
+    protocol = _protocol({
+        "plate": "plate_holder.plate",
+        "instrument": "uv",
+        "method": "measure",
+        "measurement_height": 1.0,
+        "interwell_scan_height": 5.0,
+        "method_kwargs": {"intensity": 1, "exposure_time": 1.0},
+    })
+
+    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+
+    assert any("94.500 = 89.5+5.0" in v.message for v in violations), violations
