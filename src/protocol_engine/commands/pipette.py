@@ -214,7 +214,10 @@ def serial_transfer(
     """
     _get_pipette(context)
 
-    plate_obj = context.deck[plate]
+    try:
+        plate_obj = context.deck.resolve_labware(plate)
+    except KeyError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     if not isinstance(plate_obj, WellPlate):
         raise ProtocolExecutionError(
             f"serial_transfer requires a WellPlate, but '{plate}' is "

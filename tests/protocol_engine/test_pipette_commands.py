@@ -7,8 +7,11 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
+from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
+from deck.labware.well_plate_holder import WellPlateHolder
 from protocol_engine.errors import ProtocolExecutionError
 from protocol_engine.protocol import ProtocolContext
 
@@ -520,9 +523,10 @@ def _serial_transfer_context(
     board = MagicMock()
     deck = MagicMock()
     deck.__getitem__ = MagicMock(return_value=plate)
+    deck.resolve_labware = MagicMock(return_value=plate)
     deck.resolve_coordinate.side_effect = (
         lambda pos: Coordinate3D(x=0.0, y=0.0, z=0.0)
-)
+    )
 
     if has_pipette:
         pipette = MagicMock()
@@ -536,6 +540,36 @@ def _serial_transfer_context(
         board=board,
         deck=deck,
         logger=logging.getLogger("test_serial_transfer"),
+    )
+
+
+def _serial_transfer_nested_context() -> ProtocolContext:
+    plate = _make_2x3_plate()
+    holder = WellPlateHolder(
+        name="plate_holder",
+        location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+        contained_labware={"plate": plate},
+    )
+    source = Vial(
+        name="vial_1",
+        model_name="standard_vial",
+        height=66.75,
+        diameter=28.0,
+        location=Coordinate3D(x=90.0, y=90.0, z=30.0),
+        capacity_ul=1500.0,
+        working_volume_ul=1200.0,
+    )
+
+    board = MagicMock()
+    pipette = MagicMock()
+    pipette.aspirate.return_value = MagicMock(success=True)
+    pipette.dispense.return_value = MagicMock(success=True)
+    board.instruments = {"pipette": pipette}
+
+    return ProtocolContext(
+        board=board,
+        deck=Deck({"plate_holder": holder, "vial_1": source}),
+        logger=logging.getLogger("test_serial_transfer_nested"),
     )
 
 
@@ -561,6 +595,29 @@ class TestSerialTransferCommand:
         assert "plate_1.A1" in resolve_calls
         assert "plate_1.A2" in resolve_calls
         assert "plate_1.A3" in resolve_calls
+
+    def test_nested_plate_path_transfers_to_each_well_in_order(self):
+        from protocol_engine.commands.pipette import serial_transfer
+
+        ctx = _serial_transfer_nested_context()
+        serial_transfer(
+            ctx, source="vial_1", plate="plate_holder.plate", axis="A",
+            volumes=[10.0, 20.0, 30.0],
+        )
+
+        pip = ctx.board.instruments["pipette"]
+        assert pip.aspirate.call_count == 3
+        assert pip.dispense.call_count == 3
+
+        move_targets = [
+            call_args.args[1]
+            for call_args in ctx.board.move_to_labware.call_args_list
+        ]
+        assert move_targets[1::2] == [
+            Coordinate3D(x=0.0, y=0.0, z=75.0),
+            Coordinate3D(x=10.0, y=0.0, z=75.0),
+            Coordinate3D(x=20.0, y=0.0, z=75.0),
+        ]
 
     def test_column_axis_transfers_to_each_well_in_order(self):
         from protocol_engine.commands.pipette import serial_transfer
@@ -702,7 +759,7 @@ class TestSerialTransferCommand:
         from protocol_engine.commands.pipette import serial_transfer
 
         ctx = _serial_transfer_context()
-        ctx.deck.__getitem__ = MagicMock(return_value=MagicMock(spec=[]))
+        ctx.deck.resolve_labware = MagicMock(return_value=MagicMock(spec=[]))
 
         with pytest.raises(ProtocolExecutionError, match="WellPlate"):
             serial_transfer(
