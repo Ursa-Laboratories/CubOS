@@ -28,7 +28,7 @@ def _mock_context(
 
     board = MagicMock()
     deck = MagicMock()
-    deck.resolve.return_value = coord
+    deck.resolve_coordinate.return_value = coord
     labware = MagicMock(height=height)
     deck.__getitem__ = MagicMock(return_value=labware)
 
@@ -95,7 +95,7 @@ class TestAspirateCommand:
 
         ctx = _mock_context()
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
 
     def test_moves_then_aspirates(self):
         from protocol_engine.commands.pipette import aspirate
@@ -174,7 +174,7 @@ class TestDispenseCommand:
 
         ctx = _mock_context()
         dispense(ctx, position="plate_1.A1", volume_ul=100.0)
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
 
     def test_moves_then_dispenses(self):
         from protocol_engine.commands.pipette import dispense
@@ -219,7 +219,7 @@ class TestBlowoutCommand:
 
         ctx = _mock_context()
         blowout(ctx, position="plate_1.A1")
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
 
     def test_moves_then_blows_out(self):
         from protocol_engine.commands.pipette import blowout
@@ -264,7 +264,7 @@ class TestMixCommand:
 
         ctx = _mock_context()
         mix(ctx, position="plate_1.A1", volume_ul=50.0)
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
 
     def test_moves_then_mixes(self):
         from protocol_engine.commands.pipette import mix
@@ -309,7 +309,7 @@ class TestPickUpTipCommand:
 
         ctx = _mock_context()
         pick_up_tip(ctx, position="tiprack_1.A1")
-        ctx.deck.resolve.assert_called_once_with("tiprack_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("tiprack_1.A1")
 
     def test_moves_then_picks_up(self):
         from protocol_engine.commands.pipette import pick_up_tip
@@ -354,7 +354,7 @@ class TestDropTipCommand:
 
         ctx = _mock_context()
         drop_tip(ctx, position="waste_1")
-        ctx.deck.resolve.assert_called_once_with("waste_1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("waste_1")
 
     def test_moves_then_drops(self):
         from protocol_engine.commands.pipette import drop_tip
@@ -393,7 +393,7 @@ class TestDropTipCommand:
 
 
 def _mock_context_multi_resolve(has_pipette: bool = True) -> ProtocolContext:
-    """Context where deck.resolve returns different coords per position string."""
+    """Context where deck.resolve_coordinate returns different coords per position string."""
     board = MagicMock()
     deck = MagicMock()
 
@@ -401,7 +401,7 @@ def _mock_context_multi_resolve(has_pipette: bool = True) -> ProtocolContext:
         "plate_1.A1": Coordinate3D(x=10.0, y=20.0, z=75.0),
         "plate_1.B1": Coordinate3D(x=10.0, y=28.0, z=75.0),
     }
-    deck.resolve.side_effect = lambda pos: coords.get(pos, Coordinate3D(x=0.0, y=0.0, z=0.0))
+    deck.resolve_coordinate.side_effect = lambda pos: coords.get(pos, Coordinate3D(x=0.0, y=0.0, z=0.0))
 
     if has_pipette:
         pipette = MagicMock()
@@ -428,9 +428,9 @@ class TestTransferCommand:
         ctx = _mock_context_multi_resolve()
         transfer(ctx, source="plate_1.A1", destination="plate_1.B1", volume_ul=100.0)
 
-        ctx.deck.resolve.assert_any_call("plate_1.A1")
-        ctx.deck.resolve.assert_any_call("plate_1.B1")
-        assert ctx.deck.resolve.call_count == 2
+        ctx.deck.resolve_coordinate.assert_any_call("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_any_call("plate_1.B1")
+        assert ctx.deck.resolve_coordinate.call_count == 2
 
     def test_aspirates_from_source_then_dispenses_to_destination(self):
         from protocol_engine.commands.pipette import transfer
@@ -518,7 +518,7 @@ def _serial_transfer_context(
     board = MagicMock()
     deck = MagicMock()
     deck.__getitem__ = MagicMock(return_value=plate)
-    deck.resolve.side_effect = lambda pos: Coordinate3D(x=0.0, y=0.0, z=0.0)
+    deck.resolve_coordinate.side_effect = lambda pos: Coordinate3D(x=0.0, y=0.0, z=0.0)
 
     if has_pipette:
         pipette = MagicMock()
@@ -551,7 +551,7 @@ class TestSerialTransferCommand:
         assert pip.dispense.call_count == 3
 
         # Verify resolve was called with the right destination strings
-        resolve_calls = [c.args[0] for c in ctx.deck.resolve.call_args_list]
+        resolve_calls = [c.args[0] for c in ctx.deck.resolve_coordinate.call_args_list]
         # Each transfer resolves source + destination, so 6 calls total
         # Destinations should be plate_1.A1, plate_1.A2, plate_1.A3
         assert "plate_1.A1" in resolve_calls
@@ -571,7 +571,7 @@ class TestSerialTransferCommand:
         assert pip.aspirate.call_count == 2
         assert pip.dispense.call_count == 2
 
-        resolve_calls = [c.args[0] for c in ctx.deck.resolve.call_args_list]
+        resolve_calls = [c.args[0] for c in ctx.deck.resolve_coordinate.call_args_list]
         assert "plate_1.A2" in resolve_calls
         assert "plate_1.B2" in resolve_calls
 

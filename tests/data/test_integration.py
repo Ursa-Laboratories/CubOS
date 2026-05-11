@@ -90,7 +90,7 @@ class TestFullProtocolWithDataStore:
 
         deck = MagicMock()
         deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
-        deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
         deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
 
         store = DataStore(db_path=":memory:")
@@ -177,7 +177,7 @@ class TestFullProtocolWithoutDataStore:
 
         deck = MagicMock()
         deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
-        deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
         deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
 
         ctx = ProtocolContext(

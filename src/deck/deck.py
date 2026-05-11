@@ -11,9 +11,9 @@ class Deck:
     """
     Runtime container holding labware loaded from a deck YAML.
 
-    Provides dict-like access to labware by key, and a resolve() method
-    that translates target strings (e.g. 'plate_1.A1') into absolute
-    deck coordinates.
+    Provides dict-like access to labware by key, and a
+    ``resolve_coordinate()`` method that translates target strings (e.g.
+    'plate_1.A1') into absolute deck coordinates.
     """
 
     def __init__(self, labware: Dict[str, Labware]) -> None:
@@ -23,7 +23,7 @@ class Deck:
     def labware(self) -> Dict[str, Labware]:
         return self._labware
 
-    def resolve(self, target: str) -> Coordinate3D:
+    def resolve_coordinate(self, target: str) -> Coordinate3D:
         """
         Resolve a target string to an absolute deck coordinate.
 
