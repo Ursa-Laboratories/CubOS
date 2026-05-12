@@ -152,9 +152,12 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
-Optional per-instrument extras pull in vendor SDKs only when you need them:
+Optional per-instrument extras pull in vendor SDKs only when you need them
+(drivers import these lazily and error clearly if missing):
 
 ```bash
+# ASMI force sensor (Vernier GoDirect)
+pip install -e ".[asmi]"
 # Admiral Instruments SquidStat potentiostat (PySide6 + SquidstatPyLibrary)
 pip install -e ".[potentiostat]"
 ```
