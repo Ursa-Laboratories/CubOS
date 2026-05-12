@@ -12,6 +12,12 @@ dependencies = [
 dev = [
     "pytest",
 ]
+# Per-instrument vendor SDKs — opt in only when you actually use that instrument.
+# The drivers import these lazily and raise a clear error if missing, so the core
+# install (and instruments that don't need them) stays light.
+asmi = [
+    "godirect>=1.0.0",
+]
 potentiostat = [
     "SquidstatPyLibrary",
 ]
