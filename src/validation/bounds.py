@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from typing import Any, List, Tuple
 
+logger = logging.getLogger(__name__)
+
 from board.board import Board
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
-from deck.labware.tip_rack import TipRack
+from deck.labware.tip_rack import (
+    TipRackResolutionError,
+    resolve_tip_rack_slot,
+)
 from deck.labware.well_plate import WellPlate
 from gantry.gantry_config import GantryConfig, WorkingVolume
 from protocol_engine.protocol import Protocol
@@ -83,7 +89,7 @@ def _resolve_deck_coord(deck: Deck, target: Any) -> Coordinate3D | None:
         return None
     try:
         return deck.resolve_coordinate(target)
-    except (KeyError, AttributeError, ValueError):
+    except KeyError:
         return None
 
 
@@ -92,30 +98,15 @@ def _resolve_labware(deck: Deck, target: Any) -> Any | None:
         return None
     try:
         return deck.resolve_labware(target)
-    except (KeyError, ValueError):
+    except KeyError:
         return None
-
-
-def _resolve_tip_rack_position(
-    deck: Deck, target: Any,
-) -> tuple[TipRack, str | None] | None:
-    if not isinstance(target, str):
-        return None
-    if "." in target:
-        rack_path, tip_id = target.rsplit(".", 1)
-    else:
-        rack_path, tip_id = target, None
-    labware = _resolve_labware(deck, rack_path)
-    if not isinstance(labware, TipRack):
-        return None
-    return labware, tip_id
 
 
 def _tip_length_for_pickup(deck: Deck, target: Any) -> float | None:
-    rack_position = _resolve_tip_rack_position(deck, target)
-    if rack_position is None:
+    try:
+        rack, _ = resolve_tip_rack_slot(deck, target)
+    except TipRackResolutionError:
         return None
-    rack, _ = rack_position
     if not _is_finite_number(rack.tip_length):
         return None
     return float(rack.tip_length)
@@ -124,6 +115,16 @@ def _tip_length_for_pickup(deck: Deck, target: Any) -> float | None:
 def _height_arg(step_args: dict[str, Any], name: str, default: float = 0.0) -> float | None:
     value = step_args.get(name, default)
     if not _is_finite_number(value):
+        # Bounds validation is the last line of defense. If a non-finite
+        # height slips past the semantic validator we cannot meaningfully
+        # bounds-check the implied target, but we must not silently drop
+        # it without leaving a trace — log loudly so the missing target
+        # is visible to operators reviewing logs after a failed run.
+        logger.error(
+            "non-finite %s=%r in step %r; bounds target skipped. "
+            "Run validate_protocol_semantics() to surface this as a violation.",
+            name, value, step_args,
+        )
         return None
     return float(value)
 
@@ -238,12 +239,14 @@ def _append_move_targets(
     protocol: Protocol,
     deck: Deck,
     gantry: GantryConfig,
+    pipette_tip_extension: float = 0.0,
 ) -> None:
     instrument = step_args.get("instrument")
     position = step_args.get("position")
     travel_z = step_args.get("travel_z")
     if not isinstance(instrument, str):
         return
+    tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
 
     target_xyz: tuple[float, float, float] | None = None
     target_label = f"step.move.{position!r}"
@@ -262,6 +265,7 @@ def _append_move_targets(
             x=coord.x,
             y=coord.y,
             z=gantry.resolved_safe_z,
+            tip_extension=tip_ext,
         )
         return
     else:
@@ -278,6 +282,7 @@ def _append_move_targets(
         x=x,
         y=y,
         z=z,
+        tip_extension=tip_ext,
     )
     if _is_finite_number(travel_z):
         _append_target(
@@ -288,6 +293,7 @@ def _append_move_targets(
             x=x,
             y=y,
             z=float(travel_z),
+            tip_extension=tip_ext,
         )
 
 
@@ -297,10 +303,12 @@ def _append_measure_targets(
     step_args: dict[str, Any],
     deck: Deck,
     gantry: GantryConfig,
+    pipette_tip_extension: float = 0.0,
 ) -> None:
     instrument = step_args.get("instrument")
     if not isinstance(instrument, str):
         return
+    tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
     _append_position_engage(
         targets,
         deck=deck,
@@ -308,6 +316,7 @@ def _append_measure_targets(
         position=step_args.get("position"),
         instrument=instrument,
         measurement_height=step_args.get("measurement_height"),
+        tip_extension=tip_ext,
     )
 
 
@@ -317,6 +326,7 @@ def _append_scan_targets(
     step_args: dict[str, Any],
     deck: Deck,
     gantry: GantryConfig,
+    pipette_tip_extension: float = 0.0,
 ) -> None:
     instrument = step_args.get("instrument")
     plate = step_args.get("plate")
@@ -329,6 +339,7 @@ def _append_scan_targets(
         or not _is_finite_number(interwell_scan_height)
     ):
         return
+    tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
 
     plate_obj = _resolve_labware(deck, plate)
     if not isinstance(plate_obj, WellPlate):
@@ -355,6 +366,7 @@ def _append_scan_targets(
                 x=well.x,
                 y=well.y,
                 z=gantry.resolved_safe_z,
+                tip_extension=tip_ext,
             )
         _append_target(
             targets,
@@ -364,6 +376,7 @@ def _append_scan_targets(
             x=well.x,
             y=well.y,
             z=approach_z,
+            tip_extension=tip_ext,
         )
         _append_target(
             targets,
@@ -373,6 +386,7 @@ def _append_scan_targets(
             x=well.x,
             y=well.y,
             z=action_z,
+            tip_extension=tip_ext,
         )
 
 
@@ -493,6 +507,7 @@ def collect_protocol_motion_targets(
                 protocol=protocol,
                 deck=deck,
                 gantry=gantry,
+                pipette_tip_extension=pipette_tip_extension,
             )
         elif step.command_name == "measure":
             _append_measure_targets(
@@ -500,6 +515,7 @@ def collect_protocol_motion_targets(
                 step_args=step.args,
                 deck=deck,
                 gantry=gantry,
+                pipette_tip_extension=pipette_tip_extension,
             )
         elif step.command_name == "scan":
             _append_scan_targets(
@@ -507,6 +523,7 @@ def collect_protocol_motion_targets(
                 step_args=step.args,
                 deck=deck,
                 gantry=gantry,
+                pipette_tip_extension=pipette_tip_extension,
             )
         else:
             pipette_tip_extension = _append_pipette_targets(

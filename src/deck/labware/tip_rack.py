@@ -1,14 +1,55 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Any, Dict
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from .holder import HolderLabware
 from .labware import Coordinate3D, Labware
 
+if TYPE_CHECKING:
+    from deck.deck import Deck
+
 
 DEFAULT_TIP_LENGTH_MM = 59.3
+
+
+class TipRackResolutionError(ValueError):
+    """Raised when a target string does not resolve to a TipRack slot."""
+
+
+def resolve_tip_rack_slot(
+    deck: "Deck", target: Any,
+) -> tuple["TipRack", str | None]:
+    """Resolve ``"tips.A1"`` or ``"holder.tips.A1"`` to ``(rack, tip_id)``.
+
+    Returns ``(rack, None)`` when *target* names a TipRack without a slot
+    (``"tips"``). Raises ``TipRackResolutionError`` for non-string targets,
+    unresolved labware paths, or paths that resolve to non-TipRack labware.
+    Only ``KeyError`` from ``Deck.resolve_labware`` is caught — other
+    exceptions (``AttributeError``, ``ValueError``) indicate genuine bugs
+    and propagate.
+    """
+    if not isinstance(target, str):
+        raise TipRackResolutionError(
+            f"tip-rack target must be a string, got {type(target).__name__}."
+        )
+    if "." in target:
+        rack_path, tip_id = target.rsplit(".", 1)
+    else:
+        rack_path, tip_id = target, None
+    try:
+        labware = deck.resolve_labware(rack_path)
+    except KeyError as exc:
+        raise TipRackResolutionError(
+            f"tip-rack path {rack_path!r} is not on the deck."
+        ) from exc
+    if not isinstance(labware, TipRack):
+        raise TipRackResolutionError(
+            f"target {target!r} resolves to {type(labware).__name__}, "
+            "not a TipRack."
+        )
+    return labware, tip_id
 
 
 class TipRack(HolderLabware):
@@ -42,10 +83,12 @@ class TipRack(HolderLabware):
         default=None, gt=0, description="Optional discard/park Z for tips."
     )
     tip_length: float = Field(
-        default=DEFAULT_TIP_LENGTH_MM,
-        ge=0,
+        ...,
+        gt=0,
         description=(
-            "Attached tip extension below the bare pipette nozzle in millimeters."
+            "Attached tip extension below the bare pipette nozzle in millimeters. "
+            "Must be provided explicitly per rack — there is no safe default for "
+            "this collision-critical dimension."
         ),
     )
     tips: Dict[str, Coordinate3D] = Field(

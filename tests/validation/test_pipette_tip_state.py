@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pytest
+
 from board.board import Board
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
@@ -210,14 +212,14 @@ def test_pickup_from_used_tip_slot_violates():
     assert any("tips.A1" in v.message and "not available" in v.message for v in violations)
 
 
-def test_pickup_without_positive_tip_length_violates():
-    protocol = _protocol(_step(0, "pick_up_tip", position="tips.A1"))
+def test_tip_rack_rejects_zero_tip_length_at_construction():
+    """A collision-critical dimension must not silently accept 0; the
+    pydantic field enforces ``tip_length > 0`` so misconfigured decks
+    fail at load time, not at pickup."""
+    import pydantic
 
-    violations = validate_protocol_semantics(
-        protocol, _board(), _deck(tip_length=0.0), _gantry(),
-    )
-
-    assert any("positive `tip_length`" in v.message for v in violations)
+    with pytest.raises(pydantic.ValidationError):
+        _tip_rack(tip_length=0.0)
 
 
 def test_second_pickup_without_drop_violates():

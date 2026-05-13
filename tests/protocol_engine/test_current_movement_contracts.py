@@ -37,6 +37,7 @@ def _instrument(name: str = "tool"):
         offset_x=0.0,
         offset_y=0.0,
         depth=0.0,
+        effective_depth=0.0,
     )
 
 

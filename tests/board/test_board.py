@@ -22,6 +22,7 @@ def _mock_instrument(
     instr.offset_x = offset_x
     instr.offset_y = offset_y
     instr.depth = depth
+    instr.effective_depth = depth
     return instr
 
 

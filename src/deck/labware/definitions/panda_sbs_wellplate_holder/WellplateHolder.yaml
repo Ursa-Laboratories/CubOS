@@ -9,7 +9,7 @@ name: panda_sbs_wellplate_holder
 model_name: PandaSBSWellplateHolder
 length: 100.0
 width: 164.0
-height: 12.0
+height: 6.0
 labware_support_height: 3.0
 labware_seat_height_from_bottom: 3.0
 well_plate_surface_height_from_bottom: 17.35

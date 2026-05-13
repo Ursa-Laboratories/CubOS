@@ -4,8 +4,9 @@ CubOS labware definition for the keyed SBS 96-well plate holder in
 `Cubware/labware/panda_sbs_wellplate_holder/`.
 
 - Holder body footprint: 100.0 x 164.0 mm
-- Holder body height above deck: 12.0 mm
+- Holder body height above deck: 6.0 mm
 - Plate underside seat plane: 3.0 mm above holder body bottom
+- Printed side-wall height above plate seat: 3.0 mm
 - Nested plate rim/surface reference: 17.35 mm above holder body bottom
 - Physical key layout: four integral `9VialHolder-key.step` feet at the
   corners of a 4-by-4 PandaDeck insert block

@@ -363,7 +363,7 @@ labware:
         assert holder.name == "plate_holder"
         assert holder.length == pytest.approx(100.0)
         assert holder.width == pytest.approx(164.0)
-        assert holder.height == pytest.approx(12.0)
+        assert holder.height == pytest.approx(6.0)
         assert holder.labware_seat_height_from_bottom == pytest.approx(3.0)
         assert holder.well_plate_surface_height_from_bottom == pytest.approx(17.35)
         assert deck.resolve_coordinate("plate_holder.plate.A1").z == pytest.approx(27.35)

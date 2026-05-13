@@ -21,7 +21,10 @@ from typing import Any
 
 from board.board import Board
 from deck.deck import Deck
-from deck.labware.tip_rack import TipRack
+from deck.labware.tip_rack import (
+    TipRackResolutionError,
+    resolve_tip_rack_slot,
+)
 from deck.labware.well_plate import WellPlate
 from gantry.gantry_config import GantryConfig
 from gantry.machine_geometry import FixedStructureBox, fixed_structures_for_gantry
@@ -36,10 +39,41 @@ from .errors import ProtocolSemanticViolation
 Point3D = tuple[float, float, float]
 
 
-@dataclass
+@dataclass(frozen=True)
 class PipetteTipState:
-    has_tip: bool = False
+    """Tagged sum: untipped (``extension == 0``) or tipped (``extension > 0``).
+
+    Mutate via ``attach``/``detach``; the constructor refuses to build an
+    inconsistent state where ``has_tip`` and ``tip_extension`` disagree.
+    """
+
     tip_extension: float = 0.0
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.tip_extension, bool)
+            or not isinstance(self.tip_extension, (int, float))
+            or not math.isfinite(float(self.tip_extension))
+            or float(self.tip_extension) < 0.0
+        ):
+            raise ValueError(
+                f"tip_extension must be a non-negative finite number, "
+                f"got {self.tip_extension!r}."
+            )
+
+    @property
+    def has_tip(self) -> bool:
+        return self.tip_extension > 0.0
+
+    def attach(self, extension: float) -> "PipetteTipState":
+        if extension <= 0.0:
+            raise ValueError(
+                f"attach() requires a positive tip extension, got {extension!r}."
+            )
+        return PipetteTipState(tip_extension=float(extension))
+
+    def detach(self) -> "PipetteTipState":
+        return PipetteTipState()
 
 
 def _violation(step_index: int, command: str, message: str) -> ProtocolSemanticViolation:
@@ -79,6 +113,17 @@ def _resolved_safe_z(gantry: GantryConfig | None) -> float | None:
 
 def _row_major_key(well_id: str) -> tuple[str, int]:
     return (well_id[0], int(well_id[1:]))
+
+
+def _wells_for_axis(plate: WellPlate, axis: Any) -> list[str]:
+    if not isinstance(axis, str):
+        return []
+    axis = axis.upper()
+    if axis.isalpha():
+        wells = [well for well in plate.wells if well[0] == axis]
+    else:
+        wells = [well for well in plate.wells if well[1:] == axis]
+    return sorted(wells, key=_row_major_key)
 
 
 def _gantry_xyz_for_tip(
@@ -349,33 +394,6 @@ def _validate_below_safe_z(
     return []
 
 
-def _split_tip_rack_target(target: Any) -> tuple[str, str | None] | None:
-    if not isinstance(target, str):
-        return None
-    if "." in target:
-        rack_path, tip_id = target.rsplit(".", 1)
-    else:
-        rack_path, tip_id = target, None
-    return rack_path, tip_id
-
-
-def _resolve_tip_rack_position(
-    deck: Deck,
-    target: Any,
-) -> tuple[TipRack, str | None] | None:
-    split = _split_tip_rack_target(target)
-    if split is None:
-        return None
-    rack_path, tip_id = split
-    try:
-        labware = deck.resolve_labware(rack_path)
-    except (KeyError, AttributeError, ValueError):
-        return None
-    if not isinstance(labware, TipRack):
-        return None
-    return labware, tip_id
-
-
 def _height_value(
     args: dict[str, Any],
     field_name: str,
@@ -487,6 +505,7 @@ def _validate_scan_points(
     action_abs: float,
     approach_abs: float,
     safe_z: float | None,
+    tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
     violations: list[ProtocolSemanticViolation] = []
     for well_index, (well_id, well) in enumerate(wells):
@@ -501,6 +520,7 @@ def _validate_scan_points(
                 x=well.x,
                 y=well.y,
                 z=safe_z,
+                tip_extension=tip_extension,
             ))
         violations.extend(_validate_gantry_waypoint(
             step_index=step_index,
@@ -512,6 +532,7 @@ def _validate_scan_points(
             x=well.x,
             y=well.y,
             z=action_abs,
+            tip_extension=tip_extension,
         ))
         violations.extend(_validate_gantry_waypoint(
             step_index=step_index,
@@ -523,6 +544,7 @@ def _validate_scan_points(
             x=well.x,
             y=well.y,
             z=approach_abs,
+            tip_extension=tip_extension,
         ))
     return violations
 
@@ -615,6 +637,7 @@ def _validate_scan_command(
     deck: Deck,
     gantry: GantryConfig | None,
     current_poses: dict[str, Point3D],
+    pipette_tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
     violations: list[ProtocolSemanticViolation] = []
 
@@ -648,10 +671,11 @@ def _validate_scan_command(
     plate = args.get("plate")
     if instrument not in board.instruments:
         return violations
+    tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
 
     try:
         plate_obj = deck.resolve_labware(plate)
-    except (KeyError, AttributeError, ValueError):
+    except KeyError:
         return violations
     if not isinstance(plate_obj, WellPlate):
         return violations
@@ -717,6 +741,7 @@ def _validate_scan_command(
         action_abs=action_abs,
         approach_abs=approach_abs,
         safe_z=safe_z,
+        tip_extension=tip_ext,
     ))
 
     segment_violations, final_pose = _validate_scan_segments(
@@ -768,11 +793,13 @@ def _validate_measure_command(
     deck: Deck,
     gantry: GantryConfig | None,
     current_poses: dict[str, Point3D],
+    pipette_tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
     violations: list[ProtocolSemanticViolation] = []
     instrument = args.get("instrument")
     position = args.get("position")
     relative_action = args.get("measurement_height")
+    tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
 
     if relative_action is None:
         violations.append(_violation(
@@ -795,7 +822,7 @@ def _validate_measure_command(
 
     try:
         coord = deck.resolve_coordinate(position)
-    except (KeyError, AttributeError, ValueError):
+    except KeyError:
         return violations
 
     action_abs = coord.z + relative_action
@@ -813,6 +840,7 @@ def _validate_measure_command(
             x=safe_pose[0],
             y=safe_pose[1],
             z=safe_pose[2],
+            tip_extension=tip_ext,
         ))
         violations.extend(_validate_known_transit(
             step_index=step_index,
@@ -844,6 +872,7 @@ def _validate_measure_command(
         x=coord.x,
         y=coord.y,
         z=action_abs,
+        tip_extension=tip_ext,
     ))
     violations.extend(_validate_below_safe_z(
         step_index=step_index,
@@ -865,6 +894,7 @@ def _validate_move_waypoints(
     deck: Deck,
     gantry: GantryConfig | None,
     current_poses: dict[str, Point3D],
+    pipette_tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
     violations: list[ProtocolSemanticViolation] = []
     instrument = args.get("instrument")
@@ -872,6 +902,7 @@ def _validate_move_waypoints(
     travel_z = args.get("travel_z")
     if instrument not in board.instruments:
         return violations
+    tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
 
     target: Point3D | None = None
     target_label = f"move target {position!r}"
@@ -926,6 +957,7 @@ def _validate_move_waypoints(
         x=x,
         y=y,
         z=z,
+        tip_extension=tip_ext,
     ))
     if travel_z is not None:
         violations.extend(_validate_gantry_waypoint(
@@ -938,6 +970,7 @@ def _validate_move_waypoints(
             x=x,
             y=y,
             z=travel_z,
+            tip_extension=tip_ext,
         ))
         violations.extend(_validate_below_safe_z(
             step_index=step_index,
@@ -968,17 +1001,17 @@ def _validate_tip_pickup_metadata(
     deck: Deck,
 ) -> tuple[list[ProtocolSemanticViolation], float | None]:
     violations: list[ProtocolSemanticViolation] = []
-    rack_position = _resolve_tip_rack_position(deck, position)
-    if rack_position is None:
+    try:
+        rack, tip_id = resolve_tip_rack_slot(deck, position)
+    except TipRackResolutionError as exc:
         return [
             _violation(
                 step_index,
                 "pick_up_tip",
-                f"pick_up_tip position {position!r} must target a TipRack slot.",
+                f"pick_up_tip position {position!r} must target a TipRack slot ({exc}).",
             )
         ], None
 
-    rack, tip_id = rack_position
     if tip_id is None:
         return [
             _violation(
@@ -1034,6 +1067,17 @@ def _require_attached_tip(
     )]
 
 
+_KNOWN_PIPETTE_COMMANDS = frozenset({
+    "aspirate",
+    "blowout",
+    "drop_tip",
+    "mix",
+    "pick_up_tip",
+    "transfer",
+    "serial_transfer",
+})
+
+
 def _validate_pipette_command(
     *,
     step_index: int,
@@ -1044,19 +1088,19 @@ def _validate_pipette_command(
     gantry: GantryConfig | None,
     current_poses: dict[str, Point3D],
     tip_state: PipetteTipState,
-) -> list[ProtocolSemanticViolation]:
-    if command_name not in {
-        "aspirate",
-        "blowout",
-        "drop_tip",
-        "mix",
-        "pick_up_tip",
-        "transfer",
-        "serial_transfer",
-    }:
-        return []
+) -> tuple[list[ProtocolSemanticViolation], PipetteTipState]:
+    if command_name not in _KNOWN_PIPETTE_COMMANDS:
+        return [
+            _violation(
+                step_index,
+                command_name,
+                f"unknown protocol command {command_name!r}; the semantic "
+                "validator only knows: home, move, measure, scan, "
+                f"{', '.join(sorted(_KNOWN_PIPETTE_COMMANDS))}.",
+            )
+        ], tip_state
     if "pipette" not in board.instruments:
-        return []
+        return [], tip_state
 
     violations: list[ProtocolSemanticViolation] = []
     if command_name == "pick_up_tip":
@@ -1087,15 +1131,18 @@ def _validate_pipette_command(
             deck=deck,
         )
         violations.extend(metadata_violations)
-        if not violations and tip_extension is not None and bare_pose is not None:
-            tip_state.has_tip = True
-            tip_state.tip_extension = tip_extension
+        # Advance tip state on metadata success even if engage emitted
+        # unrelated violations (XY bounds, structure hits) — otherwise every
+        # downstream step cascades a noisy "requires an attached pipette tip"
+        # error that drowns out the real root cause.
+        if tip_extension is not None and bare_pose is not None:
+            tip_state = tip_state.attach(tip_extension)
             current_poses["pipette"] = (
                 bare_pose[0],
                 bare_pose[1],
                 bare_pose[2] - tip_extension,
             )
-        return violations
+        return violations, tip_state
 
     if command_name == "drop_tip":
         had_tip = tip_state.has_tip
@@ -1119,15 +1166,17 @@ def _validate_pipette_command(
             current_poses=current_poses,
         )
         violations.extend(engage_violations)
-        if had_tip and not engage_violations and tip_pose is not None:
-            tip_state.has_tip = False
-            tip_state.tip_extension = 0.0
+        # Like pick_up_tip above, advance state independently of engage
+        # violations so a single bad drop target doesn't mask all downstream
+        # tip-state errors.
+        if had_tip and tip_pose is not None:
+            tip_state = tip_state.detach()
             current_poses["pipette"] = (
                 tip_pose[0],
                 tip_pose[1],
                 tip_pose[2] + previous_extension,
             )
-        return violations
+        return violations, tip_state
 
     if command_name in {"aspirate", "blowout", "mix"}:
         violations.extend(_require_attached_tip(
@@ -1149,7 +1198,7 @@ def _validate_pipette_command(
             current_poses=current_poses,
         )
         violations.extend(engage_violations)
-        return violations
+        return violations, tip_state
 
     if command_name == "transfer":
         violations.extend(_require_attached_tip(
@@ -1175,7 +1224,7 @@ def _validate_pipette_command(
                 current_poses=current_poses,
             )
             violations.extend(engage_violations)
-        return violations
+        return violations, tip_state
 
     if command_name == "serial_transfer":
         violations.extend(_require_attached_tip(
@@ -1201,10 +1250,10 @@ def _validate_pipette_command(
         plate_name = args.get("plate")
         try:
             plate_obj = deck.resolve_labware(plate_name)
-        except (KeyError, AttributeError, ValueError):
-            return violations
+        except KeyError:
+            return violations, tip_state
         if not isinstance(plate_obj, WellPlate) or not isinstance(plate_name, str):
-            return violations
+            return violations, tip_state
         for well_id in _wells_for_axis(plate_obj, args.get("axis")):
             engage_violations, _ = _validate_pipette_engage(
                 step_index=step_index,
@@ -1220,9 +1269,9 @@ def _validate_pipette_command(
                 current_poses=current_poses,
             )
             violations.extend(engage_violations)
-        return violations
+        return violations, tip_state
 
-    return violations
+    return violations, tip_state
 
 
 def _validate_asmi_indentation(
@@ -1318,6 +1367,7 @@ def validate_protocol_semantics(
                 deck=deck,
                 gantry=gantry,
                 current_poses=current_poses,
+                pipette_tip_extension=pipette_tip_state.tip_extension,
             ))
         elif step.command_name == "measure":
             violations.extend(_validate_measure_command(
@@ -1327,6 +1377,7 @@ def validate_protocol_semantics(
                 deck=deck,
                 gantry=gantry,
                 current_poses=current_poses,
+                pipette_tip_extension=pipette_tip_state.tip_extension,
             ))
         elif step.command_name == "scan":
             violations.extend(_validate_scan_command(
@@ -1336,9 +1387,10 @@ def validate_protocol_semantics(
                 deck=deck,
                 gantry=gantry,
                 current_poses=current_poses,
+                pipette_tip_extension=pipette_tip_state.tip_extension,
             ))
         else:
-            violations.extend(_validate_pipette_command(
+            pipette_violations, pipette_tip_state = _validate_pipette_command(
                 step_index=step.index,
                 command_name=step.command_name,
                 args=step.args,
@@ -1347,5 +1399,6 @@ def validate_protocol_semantics(
                 gantry=gantry,
                 current_poses=current_poses,
                 tip_state=pipette_tip_state,
-            ))
+            )
+            violations.extend(pipette_violations)
     return violations

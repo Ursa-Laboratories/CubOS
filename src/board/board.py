@@ -126,27 +126,18 @@ class Board:
 
     @staticmethod
     def _effective_depth(instr: BaseInstrument) -> float:
-        """Return the currently active instrument depth.
+        """Read ``instr.effective_depth`` and guard the value as finite.
 
-        Pipettes change active depth when a disposable tip is attached. Other
-        instruments simply expose their static ``depth``.
+        ``BaseInstrument`` defines a default that returns ``depth``; only
+        instruments with runtime-mutable geometry (e.g. ``Pipette`` with an
+        attached disposable tip) need to override it.
         """
-        has_explicit_effective_depth = "effective_depth" in getattr(
-            instr, "__dict__", {},
-        )
-        has_class_effective_depth = hasattr(type(instr), "effective_depth")
-        depth = (
-            getattr(instr, "effective_depth")
-            if has_explicit_effective_depth or has_class_effective_depth
-            else instr.depth
-        )
-        if callable(depth):
-            depth = depth()
-        if not math.isfinite(depth):
+        depth = instr.effective_depth
+        if not isinstance(depth, (int, float)) or not math.isfinite(depth):
             raise ValueError(
-                f"non-finite effective_depth={depth} for instrument {instr.name!r}."
+                f"non-finite effective_depth={depth!r} for instrument {instr.name!r}."
             )
-        return depth
+        return float(depth)
 
     def object_position(
         self, obj: str | BaseInstrument | Any,

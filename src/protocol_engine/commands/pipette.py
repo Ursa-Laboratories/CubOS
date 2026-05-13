@@ -6,7 +6,10 @@ import logging
 import sqlite3
 from typing import TYPE_CHECKING, Any, List, Optional
 
-from deck.labware.tip_rack import TipRack
+from deck.labware.tip_rack import (
+    TipRackResolutionError,
+    resolve_tip_rack_slot,
+)
 from deck.labware.well_plate import WellPlate
 
 from ..errors import ProtocolExecutionError
@@ -51,30 +54,6 @@ def _engage(
         return action_z
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
-
-
-def _resolve_tip_rack_position(
-    context: ProtocolContext, position: str,
-) -> tuple[TipRack, str | None] | None:
-    if not isinstance(position, str):
-        return None
-    if "." in position:
-        rack_path, tip_id = position.rsplit(".", 1)
-    else:
-        rack_path, tip_id = position, None
-    try:
-        labware = context.deck.resolve_labware(rack_path)
-    except (KeyError, AttributeError, ValueError):
-        return None
-    if not isinstance(labware, TipRack):
-        return None
-    return labware, tip_id
-
-
-def _call_if_available(obj: Any, method_name: str, *args: Any) -> None:
-    method = getattr(obj, method_name, None)
-    if callable(method):
-        method(*args)
 
 
 def _parse_position(position: str) -> tuple[str, Optional[str]]:
@@ -172,14 +151,24 @@ def pick_up_tip(
 ) -> None:
     """Move pipette to *position*, then pick up a tip."""
     pipette = _get_pipette(context)
+    try:
+        rack, tip_id = resolve_tip_rack_slot(context.deck, position)
+    except TipRackResolutionError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
+    if tip_id is None:
+        raise ProtocolExecutionError(
+            f"pick_up_tip position {position!r} must include an explicit "
+            "tip slot such as `tips.A1`."
+        )
+    if not rack.is_tip_present(tip_id):
+        raise ProtocolExecutionError(
+            f"pick_up_tip target {position!r} is not available "
+            "(slot is unknown or already consumed)."
+        )
     _engage(context, position, command_label="pick_up_tip")
     pipette.pick_up_tip(speed)
-    rack_position = _resolve_tip_rack_position(context, position)
-    if rack_position is not None:
-        rack, tip_id = rack_position
-        _call_if_available(pipette, "set_attached_tip_extension", rack.tip_length)
-        if tip_id is not None and rack.is_tip_present(tip_id):
-            rack.mark_tip_used(tip_id)
+    pipette.set_attached_tip_extension(rack.tip_length)
+    rack.mark_tip_used(tip_id)
 
 
 @protocol_command("transfer")
@@ -220,7 +209,7 @@ def drop_tip(
     pipette = _get_pipette(context)
     _engage(context, position, command_label="drop_tip")
     pipette.drop_tip(speed)
-    _call_if_available(pipette, "clear_attached_tip_extension")
+    pipette.clear_attached_tip_extension()
 
 
 # -- Compound helpers ----------------------------------------------------------
