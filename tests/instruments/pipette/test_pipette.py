@@ -502,6 +502,19 @@ class TestOfflinePipette:
         status = pip.get_status()
         assert status.has_tip is False
 
+    def test_attached_tip_extension_changes_effective_depth(self):
+        pip = Pipette(offline=True, depth=-17.0)
+
+        assert pip.effective_depth == pytest.approx(-17.0)
+
+        pip.set_attached_tip_extension(70.0)
+        assert pip.attached_tip_extension == pytest.approx(70.0)
+        assert pip.effective_depth == pytest.approx(53.0)
+
+        pip.drop_tip()
+        assert pip.attached_tip_extension == pytest.approx(0.0)
+        assert pip.effective_depth == pytest.approx(-17.0)
+
     def test_warm_up_homes_and_primes(self):
         pip = Pipette(offline=True)
         pip.connect()

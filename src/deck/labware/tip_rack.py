@@ -8,6 +8,9 @@ from .holder import HolderLabware
 from .labware import Coordinate3D, Labware
 
 
+DEFAULT_TIP_LENGTH_MM = 59.3
+
+
 class TipRack(HolderLabware):
     """Tip rack labware with addressable pickup positions and per-tip presence tracking.
 
@@ -17,6 +20,7 @@ class TipRack(HolderLabware):
 
     * ``rows`` / ``columns`` — rack layout (used only for validation).
     * ``pickup_z`` / ``drop_z`` — default pickup and discard Z.
+    * ``tip_length`` — extra active tool depth added after pickup.
     * ``tips`` — mapping from tip ID (``"A1"``, ``"A2"``...) to absolute XYZ.
     * ``tip_present`` — per-tip boolean flag; ``True`` = loaded, ``False`` =
       empty/consumed. Auto-initializes to all-True from the ``tips`` keys
@@ -36,6 +40,13 @@ class TipRack(HolderLabware):
     pickup_z: float = Field(..., gt=0, description="Default pickup Z for each tip.")
     drop_z: float | None = Field(
         default=None, gt=0, description="Optional discard/park Z for tips."
+    )
+    tip_length: float = Field(
+        default=DEFAULT_TIP_LENGTH_MM,
+        ge=0,
+        description=(
+            "Attached tip extension below the bare pipette nozzle in millimeters."
+        ),
     )
     tips: Dict[str, Coordinate3D] = Field(
         ...,

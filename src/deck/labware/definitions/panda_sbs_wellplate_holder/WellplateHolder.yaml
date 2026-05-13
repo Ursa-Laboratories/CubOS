@@ -1,0 +1,15 @@
+# Panda SBS 96-well plate holder for the keyed PandaDeck insert grid.
+#
+# `height` is the printed holder body height above the deck surface. The
+# integral keys extend below the body into PandaDeck slots and are not included
+# in this body-height value.
+
+type: well_plate_holder
+name: panda_sbs_wellplate_holder
+model_name: PandaSBSWellplateHolder
+length: 100.0
+width: 164.0
+height: 12.0
+labware_support_height: 3.0
+labware_seat_height_from_bottom: 3.0
+well_plate_surface_height_from_bottom: 17.35

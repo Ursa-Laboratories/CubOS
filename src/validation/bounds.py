@@ -9,6 +9,7 @@ from typing import Any, List, Tuple
 from board.board import Board
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
+from deck.labware.tip_rack import TipRack
 from deck.labware.well_plate import WellPlate
 from gantry.gantry_config import GantryConfig, WorkingVolume
 from protocol_engine.protocol import Protocol
@@ -26,6 +27,7 @@ class ProtocolMotionTarget:
     x: float
     y: float
     z: float
+    tip_extension: float = 0.0
 
 
 def _check_point(
@@ -94,6 +96,38 @@ def _resolve_labware(deck: Deck, target: Any) -> Any | None:
         return None
 
 
+def _resolve_tip_rack_position(
+    deck: Deck, target: Any,
+) -> tuple[TipRack, str | None] | None:
+    if not isinstance(target, str):
+        return None
+    if "." in target:
+        rack_path, tip_id = target.rsplit(".", 1)
+    else:
+        rack_path, tip_id = target, None
+    labware = _resolve_labware(deck, rack_path)
+    if not isinstance(labware, TipRack):
+        return None
+    return labware, tip_id
+
+
+def _tip_length_for_pickup(deck: Deck, target: Any) -> float | None:
+    rack_position = _resolve_tip_rack_position(deck, target)
+    if rack_position is None:
+        return None
+    rack, _ = rack_position
+    if not _is_finite_number(rack.tip_length):
+        return None
+    return float(rack.tip_length)
+
+
+def _height_arg(step_args: dict[str, Any], name: str, default: float = 0.0) -> float | None:
+    value = step_args.get(name, default)
+    if not _is_finite_number(value):
+        return None
+    return float(value)
+
+
 def _target_label(target: str, suffix: str) -> tuple[str, str]:
     if "." in target:
         labware_key, position_id = target.rsplit(".", 1)
@@ -110,6 +144,7 @@ def _append_target(
     x: float,
     y: float,
     z: float,
+    tip_extension: float = 0.0,
 ) -> None:
     labware_key, position_id = _target_label(target, suffix)
     targets.append(ProtocolMotionTarget(
@@ -119,6 +154,7 @@ def _append_target(
         x=x,
         y=y,
         z=z,
+        tip_extension=tip_extension,
     ))
 
 
@@ -130,6 +166,7 @@ def _append_engage_targets(
     instrument: str,
     measurement_height: float,
     gantry: GantryConfig,
+    tip_extension: float = 0.0,
 ) -> None:
     _append_target(
         targets,
@@ -139,6 +176,7 @@ def _append_engage_targets(
         x=coord.x,
         y=coord.y,
         z=gantry.resolved_safe_z,
+        tip_extension=tip_extension,
     )
     _append_target(
         targets,
@@ -148,6 +186,7 @@ def _append_engage_targets(
         x=coord.x,
         y=coord.y,
         z=coord.z + measurement_height,
+        tip_extension=tip_extension,
     )
 
 
@@ -159,6 +198,7 @@ def _append_position_engage(
     position: Any,
     instrument: str,
     measurement_height: float,
+    tip_extension: float = 0.0,
 ) -> None:
     if not isinstance(position, str) or not _is_finite_number(measurement_height):
         return
@@ -172,6 +212,7 @@ def _append_position_engage(
         instrument=instrument,
         measurement_height=float(measurement_height),
         gantry=gantry,
+        tip_extension=tip_extension,
     )
 
 
@@ -342,8 +383,22 @@ def _append_pipette_targets(
     step_args: dict[str, Any],
     deck: Deck,
     gantry: GantryConfig,
-) -> None:
-    if command_name in {"aspirate", "blowout", "drop_tip", "mix", "pick_up_tip"}:
+    tip_extension: float,
+) -> float:
+    if command_name in {"aspirate", "blowout", "mix"}:
+        height = _height_arg(step_args, "height")
+        if height is None:
+            return tip_extension
+        _append_position_engage(
+            targets,
+            deck=deck,
+            gantry=gantry,
+            position=step_args.get("position"),
+            instrument="pipette",
+            measurement_height=height,
+            tip_extension=tip_extension,
+        )
+    elif command_name == "pick_up_tip":
         _append_position_engage(
             targets,
             deck=deck,
@@ -351,30 +406,59 @@ def _append_pipette_targets(
             position=step_args.get("position"),
             instrument="pipette",
             measurement_height=0.0,
+            tip_extension=tip_extension,
         )
+        picked_up_tip_length = _tip_length_for_pickup(deck, step_args.get("position"))
+        if picked_up_tip_length is not None:
+            return picked_up_tip_length
+    elif command_name == "drop_tip":
+        _append_position_engage(
+            targets,
+            deck=deck,
+            gantry=gantry,
+            position=step_args.get("position"),
+            instrument="pipette",
+            measurement_height=0.0,
+            tip_extension=tip_extension,
+        )
+        return 0.0
     elif command_name == "transfer":
-        for position_key in ("source", "destination"):
+        for position_key, height_key in (
+            ("source", "source_height"),
+            ("destination", "destination_height"),
+        ):
+            height = _height_arg(step_args, height_key)
+            if height is None:
+                continue
             _append_position_engage(
                 targets,
                 deck=deck,
                 gantry=gantry,
                 position=step_args.get(position_key),
                 instrument="pipette",
-                measurement_height=0.0,
+                measurement_height=height,
+                tip_extension=tip_extension,
             )
     elif command_name == "serial_transfer":
+        source_height = _height_arg(step_args, "source_height")
+        if source_height is None:
+            source_height = 0.0
         _append_position_engage(
             targets,
             deck=deck,
             gantry=gantry,
             position=step_args.get("source"),
             instrument="pipette",
-            measurement_height=0.0,
+            measurement_height=source_height,
+            tip_extension=tip_extension,
         )
         plate_name = step_args.get("plate")
         plate_obj = _resolve_labware(deck, plate_name)
         if not isinstance(plate_obj, WellPlate) or not isinstance(plate_name, str):
-            return
+            return tip_extension
+        destination_height = _height_arg(step_args, "destination_height")
+        if destination_height is None:
+            return tip_extension
         for well_id in _wells_for_axis(plate_obj, step_args.get("axis")):
             _append_position_engage(
                 targets,
@@ -382,8 +466,10 @@ def _append_pipette_targets(
                 gantry=gantry,
                 position=f"{plate_name}.{well_id}",
                 instrument="pipette",
-                measurement_height=0.0,
+                measurement_height=destination_height,
+                tip_extension=tip_extension,
             )
+    return tip_extension
 
 
 def collect_protocol_motion_targets(
@@ -398,6 +484,7 @@ def collect_protocol_motion_targets(
     bounds validation should only fail for points this protocol can command.
     """
     targets: list[ProtocolMotionTarget] = []
+    pipette_tip_extension = 0.0
     for step in protocol.steps:
         if step.command_name == "move":
             _append_move_targets(
@@ -422,12 +509,13 @@ def collect_protocol_motion_targets(
                 gantry=gantry,
             )
         else:
-            _append_pipette_targets(
+            pipette_tip_extension = _append_pipette_targets(
                 targets,
                 command_name=step.command_name,
                 step_args=step.args,
                 deck=deck,
                 gantry=gantry,
+                tip_extension=pipette_tip_extension,
             )
     return targets
 
@@ -447,7 +535,7 @@ def validate_protocol_motion_bounds(
             continue
         gx = target.x - instrument.offset_x
         gy = target.y - instrument.offset_y
-        gz = target.z + instrument.depth
+        gz = target.z + instrument.depth + target.tip_extension
         for axis, bound_name, bound_value in _check_point(volume, gx, gy, gz):
             violations.append(BoundsViolation(
                 labware_key=target.labware_key,

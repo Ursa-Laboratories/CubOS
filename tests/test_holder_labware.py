@@ -325,6 +325,52 @@ labware:
         Path(path).unlink(missing_ok=True)
 
 
+def test_panda_sbs_holder_definition_loads_through_registry():
+    yaml_str = """
+labware:
+  plate_holder:
+    load_name: panda_sbs_wellplate_holder
+    location:
+      x: 90.0
+      y: 112.5
+      z: 10.0
+    well_plate:
+      model_name: sbs_96_wellplate
+      rows: 8
+      columns: 12
+      length: 127.76
+      width: 85.47
+      height: 14.35
+      calibration:
+        a1:
+          x: 61.645
+          y: 59.86
+        a2:
+          x: 61.645
+          y: 68.86
+      x_offset: 9.0
+      y_offset: 9.0
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as handle:
+        handle.write(yaml_str)
+        path = handle.name
+
+    try:
+        deck = load_deck_from_yaml(path)
+        holder = deck["plate_holder"]
+
+        assert isinstance(holder, WellPlateHolder)
+        assert holder.name == "plate_holder"
+        assert holder.length == pytest.approx(100.0)
+        assert holder.width == pytest.approx(164.0)
+        assert holder.height == pytest.approx(12.0)
+        assert holder.labware_seat_height_from_bottom == pytest.approx(3.0)
+        assert holder.well_plate_surface_height_from_bottom == pytest.approx(17.35)
+        assert deck.resolve_coordinate("plate_holder.plate.A1").z == pytest.approx(27.35)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 def test_sharc_deck_nested_plate_surface_resolves_to_plate_rim_z():
     deck = load_deck_from_yaml("configs/deck/sharc_uv_deck.yaml")
     holder = deck["plate_holder"]

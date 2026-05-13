@@ -9,6 +9,7 @@ import pytest
 
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
+from deck.labware.tip_rack import DEFAULT_TIP_LENGTH_MM, TipRack
 from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
 from deck.labware.well_plate_holder import WellPlateHolder
@@ -134,9 +135,7 @@ class TestAspirateCommand:
         ctx.board.move_to_labware.assert_called_once_with("pipette", coord)
 
     def test_descends_to_well_bottom_after_approach(self):
-        """aspirate descends to ``height + 0`` (the labware reference Z,
-        i.e. the well bottom). Pipette commands engage at the labware
-        surface — per-command Z offsets aren't surfaced yet."""
+        """aspirate descends to the labware reference Z by default."""
         from protocol_engine.commands.pipette import aspirate
 
         coord = Coordinate3D(x=10.0, y=20.0, z=PIPETTE_HEIGHT_MM)
@@ -339,6 +338,33 @@ class TestPickUpTipCommand:
         pick_up_tip(ctx, position="tiprack_1.A1")
         _get_pipette(ctx).pick_up_tip.assert_called_once_with(50.0)
 
+    def test_sets_attached_tip_extension_and_consumes_tip(self):
+        from protocol_engine.commands.pipette import pick_up_tip
+
+        rack = TipRack(
+            name="tips",
+            model_name="test_tip_rack",
+            rows=1,
+            columns=1,
+            pickup_z=42.0,
+            drop_z=32.0,
+            location=Coordinate3D(x=10.0, y=20.0, z=42.0),
+            length=1.0,
+            width=1.0,
+            height=10.0,
+            tips={"A1": Coordinate3D(x=10.0, y=20.0, z=42.0)},
+        )
+        board = MagicMock()
+        pipette = MagicMock()
+        board.instruments = {"pipette": pipette}
+        ctx = ProtocolContext(board=board, deck=Deck({"tips": rack}))
+
+        pick_up_tip(ctx, position="tips.A1")
+
+        pipette.pick_up_tip.assert_called_once_with(50.0)
+        pipette.set_attached_tip_extension.assert_called_once_with(DEFAULT_TIP_LENGTH_MM)
+        assert rack.is_tip_present("A1") is False
+
     def test_raises_when_no_pipette(self):
         from protocol_engine.commands.pipette import pick_up_tip
 
@@ -383,6 +409,14 @@ class TestDropTipCommand:
         ctx = _mock_context()
         drop_tip(ctx, position="waste_1")
         _get_pipette(ctx).drop_tip.assert_called_once_with(50.0)
+
+    def test_clears_attached_tip_extension_after_drop(self):
+        from protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        drop_tip(ctx, position="waste_1")
+
+        _get_pipette(ctx).clear_attached_tip_extension.assert_called_once_with()
 
     def test_raises_when_no_pipette(self):
         from protocol_engine.commands.pipette import drop_tip

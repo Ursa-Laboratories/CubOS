@@ -64,7 +64,12 @@ Defines physical labware on the deck. Well plates use two-point calibration
 Holder fixtures are also supported for collision-aware deck modeling and future
 nesting workflows: `tip_holder`, `tip_disposal`, `well_plate_holder`, and
 `vial_holder`. Exact-position `tip_rack` entries are also supported for pipette
-pickup targets. Holders can define nested contained labware so holder seat
+pickup targets. Tip racks default `tip_length` to 59.3 mm for the current
+Opentrons 300 uL tips so validation can account for the attached disposable tip
+as active pipette depth after `pick_up_tip`; override it if measured hardware
+differs.
+
+Holders can define nested contained labware so holder seat
 height or holder-specific plate surface height contributes directly to
 experiment Z generation. At runtime, all labware expose shared base-level
 `geometry` metadata; for current deck models this is represented as a bounding
@@ -127,9 +132,11 @@ Protocol motion notes:
   arguments: `scan` requires both `measurement_height` (action plane)
   and `interwell_scan_height` (between-wells XY-travel plane, must be at
   or above the action plane); `measure` requires `measurement_height`.
-  Both are mm above the well/labware calibrated surface Z (negative = below). Pipette
-  commands engage at the labware reference Z (well bottom, tip top)
-  with no Z offset.
+  Both are mm above the well/labware calibrated surface Z (negative = below).
+  Pipette commands default to the labware reference Z, but liquid-handling
+  steps can specify `height`, or `source_height` / `destination_height` for
+  transfers. Validation requires tip pickup before liquid handling and adds
+  the attached tip length to pipette safe_z/action bounds.
 - The first well of a scan and inter-labware travel use the gantry's
   absolute `cnc.safe_z` (default `working_volume.z_max`).
 - Legacy names `entry_travel_z`, `entry_travel_height`,

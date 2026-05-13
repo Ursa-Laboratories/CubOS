@@ -6,6 +6,7 @@ import logging
 import sqlite3
 from typing import TYPE_CHECKING, Any, List, Optional
 
+from deck.labware.tip_rack import TipRack
 from deck.labware.well_plate import WellPlate
 
 from ..errors import ProtocolExecutionError
@@ -28,22 +29,52 @@ def _get_pipette(context: ProtocolContext):
     return context.board.instruments["pipette"]
 
 
-def _engage(context: ProtocolContext, position: str, *, command_label: str) -> float:
+def _engage(
+    context: ProtocolContext,
+    position: str,
+    *,
+    command_label: str,
+    height: float = 0.0,
+) -> float:
     """Wrap ``engage_at_labware`` so configuration errors surface as
     ``ProtocolExecutionError`` instead of bare ``ValueError``s — matching
     how ``measure`` and ``scan`` handle their command boundary.
 
-    Pipette commands engage at the labware reference Z (well bottom,
-    tip top, etc.) — i.e. ``measurement_height=0``. Per-command Z offsets
-    aren't surfaced here yet; raise an issue if you need them."""
+    Pipette commands default to the resolved labware coordinate
+    (``height=0``). ``height`` is a labware-relative
+    offset in the same convention as ``measurement_height`` for measure/scan."""
     try:
         _, action_z = engage_at_labware(
             context, "pipette", position,
-            measurement_height=0.0, command_label=command_label,
+            measurement_height=height, command_label=command_label,
         )
         return action_z
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
+
+
+def _resolve_tip_rack_position(
+    context: ProtocolContext, position: str,
+) -> tuple[TipRack, str | None] | None:
+    if not isinstance(position, str):
+        return None
+    if "." in position:
+        rack_path, tip_id = position.rsplit(".", 1)
+    else:
+        rack_path, tip_id = position, None
+    try:
+        labware = context.deck.resolve_labware(rack_path)
+    except (KeyError, AttributeError, ValueError):
+        return None
+    if not isinstance(labware, TipRack):
+        return None
+    return labware, tip_id
+
+
+def _call_if_available(obj: Any, method_name: str, *args: Any) -> None:
+    method = getattr(obj, method_name, None)
+    if callable(method):
+        method(*args)
 
 
 def _parse_position(position: str) -> tuple[str, Optional[str]]:
@@ -80,10 +111,11 @@ def aspirate(
     position: str,
     volume_ul: float,
     speed: float = 50.0,
+    height: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then aspirate."""
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="aspirate")
+    _engage(context, position, command_label="aspirate", height=height)
     return pipette.aspirate(volume_ul, speed)
 
 
@@ -92,6 +124,7 @@ def dispense(
     position: str,
     volume_ul: float,
     speed: float = 50.0,
+    height: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then dispense.
 
@@ -99,7 +132,7 @@ def dispense(
     which correctly tracks source labware for DB logging.
     """
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="dispense")
+    _engage(context, position, command_label="dispense", height=height)
     return pipette.dispense(volume_ul, speed)
 
 
@@ -108,10 +141,11 @@ def blowout(
     context: ProtocolContext,
     position: str,
     speed: float = 50.0,
+    height: float = 0.0,
 ) -> None:
     """Move pipette to *position*, then blowout."""
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="blowout")
+    _engage(context, position, command_label="blowout", height=height)
     pipette.blowout(speed)
 
 
@@ -122,10 +156,11 @@ def mix(
     volume_ul: float,
     repetitions: int = 3,
     speed: float = 50.0,
+    height: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then mix."""
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="mix")
+    _engage(context, position, command_label="mix", height=height)
     return pipette.mix(volume_ul, repetitions, speed)
 
 
@@ -139,6 +174,12 @@ def pick_up_tip(
     pipette = _get_pipette(context)
     _engage(context, position, command_label="pick_up_tip")
     pipette.pick_up_tip(speed)
+    rack_position = _resolve_tip_rack_position(context, position)
+    if rack_position is not None:
+        rack, tip_id = rack_position
+        _call_if_available(pipette, "set_attached_tip_extension", rack.tip_length)
+        if tip_id is not None and rack.is_tip_present(tip_id):
+            rack.mark_tip_used(tip_id)
 
 
 @protocol_command("transfer")
@@ -148,12 +189,20 @@ def transfer(
     destination: str,
     volume_ul: float,
     speed: float = 50.0,
+    source_height: float = 0.0,
+    destination_height: float = 0.0,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*."""
     pipette = _get_pipette(context)
-    _engage(context, source, command_label="transfer.aspirate")
+    _engage(
+        context, source, command_label="transfer.aspirate",
+        height=source_height,
+    )
     pipette.aspirate(volume_ul, speed)
-    _engage(context, destination, command_label="transfer.dispense")
+    _engage(
+        context, destination, command_label="transfer.dispense",
+        height=destination_height,
+    )
     pipette.dispense(volume_ul, speed)
 
     source_key, _ = _parse_position(source)
@@ -171,6 +220,7 @@ def drop_tip(
     pipette = _get_pipette(context)
     _engage(context, position, command_label="drop_tip")
     pipette.drop_tip(speed)
+    _call_if_available(pipette, "clear_attached_tip_extension")
 
 
 # -- Compound helpers ----------------------------------------------------------
@@ -206,6 +256,8 @@ def serial_transfer(
     volumes: Optional[List[float]] = None,
     volume_range: Optional[List[float]] = None,
     speed: float = 50.0,
+    source_height: float = 0.0,
+    destination_height: float = 0.0,
 ) -> None:
     """Transfer from *source* to each well along a row or column.
 
@@ -249,4 +301,5 @@ def serial_transfer(
     for well_id, vol in zip(well_ids, volumes):
         destination = f"{plate}.{well_id}"
         transfer(context, source=source, destination=destination,
-                 volume_ul=vol, speed=speed)
+                 volume_ul=vol, speed=speed, source_height=source_height,
+                 destination_height=destination_height)

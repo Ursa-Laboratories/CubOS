@@ -70,11 +70,12 @@ class Board:
             raise ValueError(
                 f"non-finite travel_z={travel_z} for instrument {instr.name!r}."
             )
+        depth = self._effective_depth(instr)
         gantry_x = x - instr.offset_x
         gantry_y = y - instr.offset_y
-        gantry_z = z + instr.depth
+        gantry_z = z + depth
         gantry_travel_z = (
-            travel_z + instr.depth if travel_z is not None else None
+            travel_z + depth if travel_z is not None else None
         )
         self.logger.info(
             "Moving %s to (%.3f, %.3f, %.3f) → gantry (%.3f, %.3f, %.3f)",
@@ -122,6 +123,30 @@ class Board:
                 raise ValueError(
                     f"non-finite {label}={value} for instrument {instr_name!r}."
                 )
+
+    @staticmethod
+    def _effective_depth(instr: BaseInstrument) -> float:
+        """Return the currently active instrument depth.
+
+        Pipettes change active depth when a disposable tip is attached. Other
+        instruments simply expose their static ``depth``.
+        """
+        has_explicit_effective_depth = "effective_depth" in getattr(
+            instr, "__dict__", {},
+        )
+        has_class_effective_depth = hasattr(type(instr), "effective_depth")
+        depth = (
+            getattr(instr, "effective_depth")
+            if has_explicit_effective_depth or has_class_effective_depth
+            else instr.depth
+        )
+        if callable(depth):
+            depth = depth()
+        if not math.isfinite(depth):
+            raise ValueError(
+                f"non-finite effective_depth={depth} for instrument {instr.name!r}."
+            )
+        return depth
 
     def object_position(
         self, obj: str | BaseInstrument | Any,

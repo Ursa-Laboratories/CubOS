@@ -172,7 +172,11 @@ well/labware surface Z) and first-class command arguments:
 - `interwell_scan_height` — between-wells XY-travel plane. Required on
   `scan`. Must be at or above `measurement_height` (in +Z-up).
 
-Pipette commands engage at the labware reference Z (`measurement_height = 0`).
+Pipette commands default to the labware reference Z (`height = 0`).
+Liquid-handling commands may set `height`, or `source_height` /
+`destination_height` for transfers. After `pick_up_tip`, validation uses the
+target tip rack's `tip_length` as active pipette depth until `drop_tip`.
+Omitted `tip_length` defaults to 59.3 mm for the current Opentrons 300 uL tips.
 
 Inter-labware travel uses the gantry's absolute `safe_z`. Legacy names
 `entry_travel_z`, `entry_travel_height`, `interwell_travel_height`, and

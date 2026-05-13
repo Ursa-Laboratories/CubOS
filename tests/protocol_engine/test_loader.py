@@ -47,6 +47,16 @@ protocol:
       interwell_scan_height: 10.0
 """
 
+VALID_TRANSFER_WITH_HEIGHTS = """
+protocol:
+  - transfer:
+      source: vial_1
+      destination: plate_1.A1
+      volume_ul: 50.0
+      source_height: 2.0
+      destination_height: -1.0
+"""
+
 
 def _write_yaml(content: str) -> str:
     """Write YAML content to a temp file and return its path."""
@@ -121,6 +131,22 @@ def test_scan_accepts_new_height_names():
             "method": "measure",
             "measurement_height": 0.0,
             "interwell_scan_height": 10.0,
+        }
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_transfer_accepts_source_and_destination_heights():
+    path = _write_yaml(VALID_TRANSFER_WITH_HEIGHTS)
+    try:
+        protocol = load_protocol_from_yaml(path)
+        args = protocol.steps[0].args
+        assert args == {
+            "source": "vial_1",
+            "destination": "plate_1.A1",
+            "volume_ul": 50.0,
+            "source_height": 2.0,
+            "destination_height": -1.0,
         }
     finally:
         Path(path).unlink(missing_ok=True)

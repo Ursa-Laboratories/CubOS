@@ -152,6 +152,17 @@ class TestBoardMove:
         # gantry_z = tip_z + depth: target 10+4=14, travel 30+4=34.
         gantry.move_to.assert_called_once_with(50.0, 25.0, 14.0, travel_z=34.0)
 
+    def test_move_uses_effective_depth_when_instrument_has_attached_geometry(self):
+        """Attached pipette tips change the active tool depth at runtime."""
+        gantry = _mock_gantry()
+        instr = _mock_instrument("pipette", offset_x=0.0, offset_y=0.0, depth=4.0)
+        instr.effective_depth = 44.0
+        board = Board(gantry=gantry, instruments={"pipette": instr})
+
+        board.move("pipette", (50.0, 25.0, 10.0), travel_z=30.0)
+
+        gantry.move_to.assert_called_once_with(50.0, 25.0, 54.0, travel_z=74.0)
+
     def test_move_rejects_non_finite_travel_z(self):
         """travel_z flows straight through to the gantry/mill as raw
         G-code; an NaN/Inf here would emit `G01 Znan` to GRBL. Guard

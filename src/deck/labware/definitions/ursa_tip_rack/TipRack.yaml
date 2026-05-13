@@ -13,6 +13,9 @@ columns: 2
 length: 66.0
 width: 138.0
 height: 22.0
+# Override with the measured disposable tip extension below the bare pipette
+# nozzle before using this definition for hardware protocols.
+tip_length: 59.3
 pickup_z: 191.0
 drop_z: 174.8
 calibration:
