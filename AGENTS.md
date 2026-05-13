@@ -1,12 +1,12 @@
 # CubOS Agent Guide
 
-CubOS controls real lab hardware: a GRBL CNC gantry plus mounted instruments. **This file is the source of truth for agent retrieval.** Prefer repo source over model memory; keep retrieval focused.
+CubOS controls real lab hardware: a GRBL CNC gantry plus mounted instruments. Prefer repo source over model memory; keep retrieval focused.
 
 ## Fast Start
 
 1. Read this file and `CLAUDE.md`.
-2. Jump to the **Subsystem Index** below for the area you are touching.
-3. Read only the source/docs needed for the task unless you are changing shared interfaces, coordinate semantics, hardware motion, YAML schemas, or protocol setup.
+2. Use `docs/agent-index.md` to find the small set of source/docs/tests for the area you are touching.
+3. Read broadly only when changing shared interfaces, coordinate semantics, hardware motion, YAML schemas, or protocol setup.
 
 ## Hardware Safety
 
@@ -40,67 +40,9 @@ Retrieval rule: do not infer sign flips from older code or model memory. Confirm
 
 Two kinds of Z fields coexist:
 - **Absolute deck-frame Z** (`gantry.cnc.safe_z`, working-volume bounds, `move`'s `travel_z`, named positions, literal `[x, y, z]` targets). `safe_z` is the travel ceiling: every resolved approach/action Z must be ≤ `safe_z`. Defaults to `working_volume.z_max` when omitted.
-- **Labware-relative offsets** (`measurement_height`, `interwell_scan_height`, `indentation_limit_height` on `scan`/`measure`). Positive = above the well's calibrated surface Z; negative = below. Resolved at command time as `well.z + relative_offset`, where `well.z` is the calibration anchor's z. The labware's `height` is the *physical outer dimension*, not a Z reference.
+- **Labware-relative offsets** (`measurement_height`, `interwell_scan_height`, `indentation_limit_height` on `scan`/`measure`). Positive = above the well's calibrated surface Z; negative = below. Resolved at command time as `well.z + relative_offset`, where `well.z` is the calibration anchor's z. The labware's `height` is the physical outer dimension, not a Z reference.
 
-These offsets live on the protocol command, never on instruments. `scan` requires both `measurement_height` and `interwell_scan_height`; `measure` requires `measurement_height`. Pipette commands engage at the labware reference Z (`measurement_height = 0` implicitly). ASMI `indentation_limit_height` is a *signed* labware-relative offset (negative = below the well surface); must be at or below `measurement_height`.
-
-## Subsystem Index
-
-### Gantry / motion / coordinates / homing
-Read before changing motion, coordinates, bounds, homing, or scan/protocol movement.
-- `src/gantry/gantry.py`, `gantry_config.py`, `origin.py` — frame, working volume, deck-origin calibration.
-- `src/gantry/machine_geometry.py` — built-in fixed-structure AABBs per gantry family (e.g. `cub_xl` right-rail guard). Not user-authored YAML; consumed by setup validation.
-- `src/gantry/coordinate_translator.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `offline.py`.
-- `src/board/board.py`, `src/board/loader.py` — instrument offsets and labware movement.
-- `src/validation/bounds.py`, `src/validation/protocol_semantics.py` — offline safety checks (incl. fixed-structure rail collision).
-- Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
-
-Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`). For `cub_xl`, setup validation rejects protocols whose instrument point or known travel segment would hit the fixed right X-max rail.
-Setup bounds validation checks the concrete motion targets implied by the loaded protocol, not every physical geometry anchor or unused labware point on the deck.
-
-### Deck YAML / labware / calibration
-- `src/deck/yaml_schema.py` — strict Pydantic schema.
-- `src/deck/loader.py` — load-name expansion, calibration, derived wells, nested labware.
-- `src/deck/labware/`, `src/deck/labware/definitions/`.
-- `configs/deck/`.
-- Tests: `tests/test_deck_loader.py`, `tests/test_holder_labware.py`, `tests/test_panda_deck_yaml.py`.
-
-After schema/config changes: focused tests, then `setup/validate_setup.py` for affected real triples.
-
-### Protocol engine / setup validation
-- `src/protocol_engine/yaml_schema.py`, `loader.py`, `setup.py`.
-- `src/protocol_engine/commands/` — command behavior.
-- `setup/validate_setup.py` — end-to-end offline validation.
-- `configs/protocol/`.
-- Tests: `tests/protocol_engine/`.
-
-`scan.plate` may target either a top-level `WellPlate` key or a nested holder
-path such as `plate_holder.plate`, as long as that path resolves to a
-`WellPlate`.
-
-```bash
-python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
-```
-
-### Instruments
-- `src/instruments/<instrument>/driver.py`, `mock.py`, `models.py`, `exceptions.py`.
-- `src/instruments/registry.yaml`, `src/instruments/yaml_schema.py`.
-- `src/protocol_engine/measurements.py`, `data/data_store.py` — persisted measurements.
-- Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
-
-## Calibration Scripts
-
-- `setup/calibrate_gantry.py` — only supported user-facing calibration entrypoint. Loads input gantry YAML, dispatches single- or multi-instrument flow by instrument count. Without `--output-gantry`, prompts before overwriting input; with it, writes the explicit path without extra prompt.
-- `setup/calibration/single_instrument_calibration.py` — internal one-instrument flow.
-- `setup/calibration/multi_instrument_calibration.py` — internal multi-instrument flow.
-- Detailed operator steps and offset math live in `docs/calibration.md`.
-
-## Setup Scripts
-
-- `setup/validate_setup.py` — offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
-- `setup/run_protocol.py` — load, validate, connect hardware, run protocol end-to-end. Connects gantry (clearing expected GRBL alarm, restoring state) and instruments before first step; disconnects in `finally`.
-- `setup/hello_world.py` — interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y ±1mm), Z (down 1mm), X (up 1mm), Q (quit).
-- `setup/keyboard_input.py` — single-keypress reader (Unix `tty`/`termios`).
+These offsets live on the protocol command, never on instruments. `scan` requires both `measurement_height` and `interwell_scan_height`; `measure` requires `measurement_height`. Pipette commands engage at the labware reference Z (`measurement_height = 0` implicitly). ASMI `indentation_limit_height` is a signed labware-relative offset (negative = below the well surface); must be at or below `measurement_height`.
 
 ## Debugging Mode
 
@@ -125,4 +67,4 @@ Report exact commands and observed results in the PR body.
 
 ## When to Update This File
 
-Update `AGENTS.md` only when agent retrieval, hardware-safety workflow, or source-of-truth pointers change. Update `README.md` / docs only when public CLI/workflow, YAML schema/config, coordinate/motion/calibration semantics, protocol behavior, or cross-repo interfaces change.
+Update `AGENTS.md` only when agent retrieval, hardware-safety workflow, or source-of-truth pointers change. Update `docs/agent-index.md` when detailed retrieval maps change. Update `README.md` / docs when public CLI/workflow, YAML schema/config, coordinate/motion/calibration semantics, protocol behavior, or cross-repo interfaces change.
