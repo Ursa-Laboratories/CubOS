@@ -6,8 +6,12 @@
 
 ## Submodules
 
+- [src.instruments.asmi](asmi/index.md)
 - [src.instruments.base_instrument](base_instrument.md)
 - [src.instruments.filmetrics](filmetrics/index.md)
 - [src.instruments.pipette](pipette/index.md)
+- [src.instruments.potentiostat](potentiostat/index.md)
+- [src.instruments.registry](registry.md)
 - [src.instruments.uv_curing](uv_curing/index.md)
 - [src.instruments.uvvis_ccs](uvvis_ccs/index.md)
+- [src.instruments.yaml_schema](yaml_schema.md)
