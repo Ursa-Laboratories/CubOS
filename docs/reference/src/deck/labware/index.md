@@ -6,6 +6,12 @@
 
 ## Submodules
 
+- [src.deck.labware.holder](holder.md)
 - [src.deck.labware.labware](labware.md)
+- [src.deck.labware.tip_disposal](tip_disposal.md)
+- [src.deck.labware.tip_rack](tip_rack.md)
 - [src.deck.labware.vial](vial.md)
+- [src.deck.labware.vial_holder](vial_holder.md)
+- [src.deck.labware.wall](wall.md)
 - [src.deck.labware.well_plate](well_plate.md)
+- [src.deck.labware.well_plate_holder](well_plate_holder.md)

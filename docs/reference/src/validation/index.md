@@ -8,3 +8,4 @@
 
 - [src.validation.bounds](bounds.md)
 - [src.validation.errors](errors.md)
+- [src.validation.protocol_semantics](protocol_semantics.md)
