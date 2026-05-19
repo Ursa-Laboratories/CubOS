@@ -1066,7 +1066,13 @@ def run_calibration(
             z_min_mm = 0.0
             z_reference_wpos_mm = block_touch_wpos_z_mm
             reachable_z_min_mm = _round_mm(block_height_mm - block_touch_wpos_z_mm)
-        else:
+            if reachable_z_min_mm < 0:
+                raise RuntimeError(
+                    f"block_touch_wpos_z ({block_touch_wpos_z_mm:.4f} mm) exceeds "
+                    f"block_height ({block_height_mm:.4f} mm); "
+                    "verify the calibration block height and re-run."
+                )
+        elif z_reference_mode == "ruler-gap":
             if tip_gap_mm is None:
                 tip_gap_mm = _prompt_tip_gap_mm(
                     input_reader=input_reader,
@@ -1077,6 +1083,11 @@ def run_calibration(
             z_min_mm = 0.0
             z_reference_wpos_mm = z_min_mm
             reachable_z_min_mm = _round_mm(tip_gap_mm)
+        else:
+            raise ValueError(
+                f"Unrecognised z_reference_mode after resolution: {z_reference_mode!r}. "
+                "Expected one of: bottom, block, ruler-gap."
+            )
 
         z_max_mm = _round_mm(z_min_mm + theoretical_z_range_mm)
 

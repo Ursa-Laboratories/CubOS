@@ -140,8 +140,8 @@ def _updated_yaml_text(
     measured_coords: dict[str, float],
     instrument_calibrations: dict[str, dict[str, float]],
     max_travel: dict[str, float],
+    theoretical_z_range_mm: float,
 ) -> str:
-    theoretical_z_range_mm = _theoretical_z_range(raw_config)
     updated = copy.deepcopy(raw_config)
     updated["working_volume"] = {
         "x_min": 0.0,
@@ -609,6 +609,7 @@ def run_multi_instrument_calibration(
             measured_coords=measured_coords,
             instrument_calibrations=instrument_calibrations,
             max_travel=max_travel,
+            theoretical_z_range_mm=theoretical_z_range_mm,
         )
         _print_yaml_block(
             title="Full calibrated multi-instrument gantry YAML to copy/paste:",

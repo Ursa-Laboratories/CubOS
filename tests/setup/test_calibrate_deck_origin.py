@@ -12,6 +12,7 @@ from gantry.errors import (
 )
 from setup.calibration.single_instrument_calibration import (
     DeckOriginCalibrationResult,
+    _theoretical_z_range,
     run_calibration,
 )
 
@@ -768,3 +769,111 @@ def test_rejects_legacy_negative_space_config(tmp_path):
 
     with pytest.raises(ValueError, match="Deck-origin calibration requires"):
         run_calibration(path, dry_run=True)
+
+
+# --- _theoretical_z_range unit tests ---
+
+
+def test_theoretical_z_range_returns_value():
+    assert _theoretical_z_range({"cnc": {"total_z_range": 87.0}}) == 87.0
+
+
+def test_theoretical_z_range_raises_if_cnc_key_missing():
+    with pytest.raises(ValueError, match="cnc.total_z_range"):
+        _theoretical_z_range({})
+
+
+def test_theoretical_z_range_raises_if_total_z_range_key_missing():
+    with pytest.raises(ValueError, match="cnc.total_z_range"):
+        _theoretical_z_range({"cnc": {"homing_strategy": "standard"}})
+
+
+def test_theoretical_z_range_raises_if_cnc_not_a_dict():
+    with pytest.raises(ValueError, match="cnc.total_z_range"):
+        _theoretical_z_range({"cnc": "standard"})
+
+
+def test_theoretical_z_range_raises_if_non_numeric():
+    with pytest.raises(ValueError, match="numeric"):
+        _theoretical_z_range({"cnc": {"total_z_range": "not-a-number"}})
+
+
+def test_theoretical_z_range_raises_if_zero():
+    with pytest.raises(ValueError, match="> 0"):
+        _theoretical_z_range({"cnc": {"total_z_range": 0.0}})
+
+
+def test_theoretical_z_range_raises_if_negative():
+    with pytest.raises(ValueError, match="> 0"):
+        _theoretical_z_range({"cnc": {"total_z_range": -5.0}})
+
+
+# --- block mode guard tests ---
+
+
+def test_block_mode_raises_if_touch_at_or_below_tolerance(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+
+    with pytest.raises(RuntimeError, match="Block touch WPos Z must be positive"):
+        run_calibration(
+            path,
+            output=lambda _: None,
+            gantry_factory=_FakeGantry,
+            key_reader=_key_reader([("\r", 1)]),
+            stdin_flusher=lambda: None,
+            tip_gap_mm=35.0,
+            z_reference_mode="block",
+        )
+
+
+def _write_gantry_small_z(path):
+    path.write_text(
+        """\
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+cnc:
+  homing_strategy: standard
+  total_z_range: 15.0
+  y_axis_motion: head
+  safe_z: 12.0
+working_volume:
+  x_min: 0.0
+  x_max: 400.0
+  y_min: 0.0
+  y_max: 300.0
+  z_min: 0.0
+  z_max: 15.0
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_block_mode_raises_if_touch_exceeds_theoretical_z_range(tmp_path):
+    path = _write_gantry_small_z(tmp_path / "gantry.yaml")
+
+    with pytest.raises(RuntimeError, match="Block touch WPos Z exceeds"):
+        run_calibration(
+            path,
+            output=lambda _: None,
+            gantry_factory=_FakeGantry,
+            key_reader=_key_reader([("X", 20), ("\r", 1)]),
+            stdin_flusher=lambda: None,
+            tip_gap_mm=10.0,
+            z_reference_mode="block",
+        )
+
+
+def test_block_mode_raises_if_reachable_z_min_is_negative(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+
+    with pytest.raises(RuntimeError, match="block_touch_wpos_z.*exceeds.*block_height"):
+        run_calibration(
+            path,
+            output=lambda _: None,
+            gantry_factory=_FakeGantry,
+            key_reader=_key_reader([("X", 30), ("\r", 1)]),
+            stdin_flusher=lambda: None,
+            tip_gap_mm=20.0,
+            z_reference_mode="block",
+        )
