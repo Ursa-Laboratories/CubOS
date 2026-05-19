@@ -1,0 +1,46 @@
+serial_port: /dev/ttyUSB0
+gantry_type: cub
+cnc:
+  homing_strategy: standard
+  total_z_range: 105.0
+  y_axis_motion: head
+  safe_z: 80.0
+working_volume:
+  x_min: 0.0
+  x_max: 274.0
+  y_min: 0.0
+  y_max: 142.0
+  z_min: 70.0
+  z_max: 105.0
+grbl_settings:
+  dir_invert_mask: 2
+  status_report: 0
+  soft_limits: true
+  hard_limits: true
+  homing_enable: true
+  homing_dir_mask: 0
+  homing_pull_off: 2.0
+  steps_per_mm_x: 800.0
+  steps_per_mm_y: 800.0
+  steps_per_mm_z: 800.0
+  max_rate_x: 2000.0
+  max_rate_y: 2000.0
+  max_rate_z: 2000.0
+  accel_x: 50.0
+  accel_y: 50.0
+  accel_z: 50.0
+  max_travel_x: 274.0
+  max_travel_y: 142.0
+  max_travel_z: 35.0
+instruments:
+  raman:
+    type: asmi
+    vendor: vernier
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    offline: true
+    default_force: 0
+    force_threshold: -50
+    sensor_channels:
+    - 1
