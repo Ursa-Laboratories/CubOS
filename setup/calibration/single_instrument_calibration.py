@@ -41,8 +41,11 @@ class DeckOriginCalibrationResult:
     xy_origin_verification: tuple[float, float, float]
     z_reference_verification: tuple[float, float, float]
     z_min_mm: float
+    theoretical_z_range_mm: float
     z_reference_mode: str
     reachable_z_min_mm: float | None
+    block_height_mm: float | None
+    block_touch_wpos_z_mm: float | None
     grbl_max_travel: tuple[float, float, float] | None
     instrument_name: str | None
     plan: DeckOriginCalibrationPlan
@@ -90,15 +93,36 @@ def _round_mm(value: float) -> float:
     return round(float(value), 3)
 
 
+def _theoretical_z_range(raw_config: dict[str, Any]) -> float:
+    cnc = raw_config.get("cnc")
+    if not isinstance(cnc, dict) or "total_z_range" not in cnc:
+        raise ValueError(
+            "Gantry YAML must seed cnc.total_z_range before calibration; "
+            "calibration preserves that theoretical Z range."
+        )
+    try:
+        value = float(cnc["total_z_range"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError("cnc.total_z_range must be numeric.") from exc
+    if value <= 0:
+        raise ValueError("cnc.total_z_range must be > 0.")
+    return _round_mm(value)
+
+
 def _calculate_grbl_max_travel(
     measured_coords: dict[str, float],
     *,
     z_min_mm: float,
     tolerance_mm: float,
+    z_span_mm: float | None = None,
 ) -> dict[str, float]:
     x_span = _round_mm(float(measured_coords["x"]))
     y_span = _round_mm(float(measured_coords["y"]))
-    z_span = _round_mm(float(measured_coords["z"]) - float(z_min_mm))
+    z_span = (
+        _round_mm(z_span_mm)
+        if z_span_mm is not None
+        else _round_mm(float(measured_coords["z"]) - float(z_min_mm))
+    )
     spans = {
         "max_travel_x": x_span,
         "max_travel_y": y_span,
@@ -137,17 +161,17 @@ def _updated_gantry_yaml_text(
     *,
     measured_coords: dict[str, float],
     z_min_mm: float,
+    z_max_mm: float,
     max_travel: dict[str, float] | None = None,
 ) -> str:
     updated = copy.deepcopy(raw_config)
-    updated.setdefault("cnc", {})["total_z_range"] = _round_mm(measured_coords["z"])
     updated["working_volume"] = {
         "x_min": 0.0,
         "x_max": _round_mm(measured_coords["x"]),
         "y_min": 0.0,
         "y_max": _round_mm(measured_coords["y"]),
         "z_min": _round_mm(z_min_mm),
-        "z_max": _round_mm(measured_coords["z"]),
+        "z_max": _round_mm(z_max_mm),
     }
     if max_travel is not None:
         updated["grbl_settings"] = _build_gantry_grbl_settings(
@@ -281,16 +305,23 @@ def _print_config_patch(
     *,
     z_reference_coords: dict[str, float],
     z_min_mm: float,
+    z_max_mm: float,
+    theoretical_z_range_mm: float,
     z_reference_mode: str,
     instrument_name: str | None,
+    block_height_mm: float | None,
+    block_touch_wpos_z_mm: float | None,
+    reachable_z_min_mm: float | None,
     output: Callable[[str], None],
 ) -> None:
-    x_max, y_max, z_max = _coords_tuple(coords)
+    x_max, y_max, measured_home_z = _coords_tuple(coords)
     output("")
-    output("Measured physical working volume from calibrated origin:")
+    output("Calibrated working volume from calibrated origin:")
     output(f"  X: 0.000 to {x_max:.3f} mm")
     output(f"  Y: 0.000 to {y_max:.3f} mm")
-    output(f"  Z: {z_min_mm:.3f} to {z_max:.3f} mm")
+    output(f"  Z: {z_min_mm:.3f} to {z_max_mm:.3f} mm")
+    output(f"  Seeded theoretical Z range: {theoretical_z_range_mm:.3f} mm")
+    output(f"  Homed Z readback after calibration: {measured_home_z:.3f} mm")
     output("")
     output("Update the gantry YAML working_volume to:")
     output("  working_volume:")
@@ -299,10 +330,10 @@ def _print_config_patch(
     output("    y_min: 0.0")
     output(f"    y_max: {y_max:.3f}")
     output(f"    z_min: {z_min_mm:.3f}")
-    output(f"    z_max: {z_max:.3f}")
+    output(f"    z_max: {z_max_mm:.3f}")
     output("")
-    output("Also set cnc.total_z_range to:")
-    output(f"  total_z_range: {z_max:.3f}")
+    output("Keep the seeded cnc.total_z_range unchanged:")
+    output(f"  total_z_range: {theoretical_z_range_mm:.3f}")
     output("")
     output("Z reference point after XY origining:")
     output(
@@ -312,14 +343,20 @@ def _print_config_patch(
         f"Z={z_reference_coords['z']:.3f}"
     )
     output(f"  mode: {z_reference_mode}")
-    if z_min_mm > 0:
+    if block_height_mm is not None and block_touch_wpos_z_mm is not None:
+        output("")
+        output("Calibration block lower-reach calculation:")
+        output(f"  block_height: {block_height_mm:.3f} mm")
+        output(f"  block_touch_wpos_z: {block_touch_wpos_z_mm:.3f} mm")
+        if reachable_z_min_mm is not None:
+            output(
+                "  inferred_lowest_reachable_height_above_deck: "
+                f"{reachable_z_min_mm:.3f} mm"
+            )
+    if reachable_z_min_mm is not None and reachable_z_min_mm > 0:
         reach_name = instrument_name or "reference_tcp"
         output("")
-        output(
-            "This one-instrument config starts above physical deck bottom "
-            "because the TCP cannot reach Z=0."
-        )
-        output(f"  {reach_name}_reachable_z_min: {z_min_mm:.3f} mm")
+        output(f"  {reach_name}_reachable_z_min: {reachable_z_min_mm:.3f} mm")
         output(
             "For a future multi-instrument config, keep one shared deck frame "
             "and encode this as a per-instrument lower-reach limit instead of "
@@ -349,7 +386,10 @@ def _print_dry_run(
     for command in commands:
         output(f"  {command}")
     output("")
-    output("No configured max travel values will be trusted as measured volume.")
+    output(
+        "The seeded gantry YAML cnc.total_z_range will be preserved and used "
+        "as calibrated Z travel."
+    )
 
 
 def _commands_for_z_min(
@@ -358,14 +398,14 @@ def _commands_for_z_min(
     *,
     z_reference_mode: str = "ruler-gap",
 ) -> tuple[str, ...]:
-    z_value = (
-        "0"
-        if z_reference_mode == "bottom"
-        else ("<tip_gap_mm>" if tip_gap_mm is None else f"{tip_gap_mm:g}")
-    )
+    z_value = "0"
     confirmation = "<confirm true deck-bottom contact>"
     if z_reference_mode in ("prompt", "ruler-gap", "known-height"):
-        confirmation = "<confirm bottom contact or enter ruler-measured TCP gap>"
+        gap_value = "<tip_gap_mm>" if tip_gap_mm is None else f"{tip_gap_mm:g}"
+        confirmation = (
+            "<confirm bottom contact or enter ruler-measured TCP gap; "
+            f"reach metadata={gap_value}>"
+        )
     return tuple(
         command.replace("<z_min_mm>", z_value).replace(
             "<confirm deck-bottom contact or enter ruler-measured TCP gap>",
@@ -889,6 +929,7 @@ def run_calibration(
     gantry_path = gantry_path.resolve()
     gantry_config = load_gantry_from_yaml(gantry_path)
     raw_config = _load_raw_config(gantry_path)
+    theoretical_z_range_mm = _theoretical_z_range(raw_config)
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     plan = build_deck_origin_calibration_plan(gantry_config)
@@ -923,7 +964,7 @@ def run_calibration(
     output("  - Attach exactly one reference instrument/TCP for this calibration.")
     output("  - Place a calibration block at the front-left origin point.")
     output("  - Jog the instrument tip/probe to touch the block top at that point.")
-    output("  - This will set X=0, Y=0, and Z to the calibration block height at the same pose.")
+    output("  - This will set X=0 and Y=0 at that pose, then set Z from the selected reference mode.")
     if measure_reachable_z_min is True:
         output(
             "  - --measure-reachable-z-min is deprecated; the lower reach is "
@@ -992,10 +1033,14 @@ def run_calibration(
                 input_reader=input_reader,
                 output=output,
             )
+        block_height_mm: float | None = None
+        block_touch_wpos_z_mm: float | None = None
         if z_reference_mode == "bottom":
             if tip_gap_mm is not None and tip_gap_mm != 0:
                 raise ValueError("Bottom Z mode cannot use a non-zero tip gap.")
             z_min_mm = 0.0
+            z_reference_wpos_mm = z_min_mm
+            reachable_z_min_mm = z_min_mm
         elif z_reference_mode == "block":
             if tip_gap_mm is None:
                 tip_gap_mm = _prompt_block_height(
@@ -1004,7 +1049,23 @@ def run_calibration(
                 )
             if tip_gap_mm <= 0:
                 raise ValueError("block height must be > 0 in block mode.")
-            z_min_mm = float(tip_gap_mm)
+            block_height_mm = float(tip_gap_mm)
+            block_touch_wpos_z_mm = float(xy_origin_coords["z"])
+            if block_touch_wpos_z_mm <= tolerance_mm:
+                raise RuntimeError(
+                    "Block touch WPos Z must be positive so calibration can "
+                    "place the lower reachable Z at WPos 0. "
+                    f"Got Z={block_touch_wpos_z_mm:.4f}."
+                )
+            if block_touch_wpos_z_mm > theoretical_z_range_mm + tolerance_mm:
+                raise RuntimeError(
+                    "Block touch WPos Z exceeds the seeded theoretical Z range: "
+                    f"touch={block_touch_wpos_z_mm:.4f}, "
+                    f"total_z_range={theoretical_z_range_mm:.4f}."
+                )
+            z_min_mm = 0.0
+            z_reference_wpos_mm = block_touch_wpos_z_mm
+            reachable_z_min_mm = _round_mm(block_height_mm - block_touch_wpos_z_mm)
         else:
             if tip_gap_mm is None:
                 tip_gap_mm = _prompt_tip_gap_mm(
@@ -1013,14 +1074,18 @@ def run_calibration(
                 )
             if tip_gap_mm <= 0:
                 raise ValueError("tip_gap_mm must be > 0 in ruler-gap mode.")
-            z_min_mm = float(tip_gap_mm)
+            z_min_mm = 0.0
+            z_reference_wpos_mm = z_min_mm
+            reachable_z_min_mm = _round_mm(tip_gap_mm)
 
-        output(f"Setting current physical pose to WPos Z={z_min_mm:g}...")
-        gantry.set_work_coordinates(z=z_min_mm)
+        z_max_mm = _round_mm(z_min_mm + theoretical_z_range_mm)
+
+        output(f"Setting current physical pose to WPos Z={z_reference_wpos_mm:g}...")
+        gantry.set_work_coordinates(z=z_reference_wpos_mm)
         z_reference_coords = dict(gantry.get_coordinates())
         _assert_near_z_reference(
             z_reference_coords,
-            z_min_mm=z_min_mm,
+            z_min_mm=z_reference_wpos_mm,
             tolerance_mm=tolerance_mm,
         )
         output(
@@ -1029,8 +1094,6 @@ def run_calibration(
             f"Y={z_reference_coords['y']:.3f} "
             f"Z={z_reference_coords['z']:.3f}"
         )
-
-        reachable_z_min_mm = z_min_mm
 
         output("Re-homing to measure physical working-volume maxima...")
         _set_serial_timeout_if_available(gantry, homing_serial_timeout_s)
@@ -1045,6 +1108,7 @@ def run_calibration(
             measured_coords,
             z_min_mm=z_min_mm,
             tolerance_mm=tolerance_mm,
+            z_span_mm=theoretical_z_range_mm,
         )
         if skip_soft_limit_config:
             output("Skipping GRBL soft-limit programming by request.")
@@ -1060,14 +1124,20 @@ def run_calibration(
             measured_coords,
             z_reference_coords=z_reference_coords,
             z_min_mm=z_min_mm,
+            z_max_mm=z_max_mm,
+            theoretical_z_range_mm=theoretical_z_range_mm,
             z_reference_mode=z_reference_mode,
             instrument_name=instrument_name,
+            block_height_mm=block_height_mm,
+            block_touch_wpos_z_mm=block_touch_wpos_z_mm,
+            reachable_z_min_mm=reachable_z_min_mm,
             output=output,
         )
         gantry_yaml_text = _updated_gantry_yaml_text(
             raw_config,
             measured_coords=measured_coords,
             z_min_mm=z_min_mm,
+            z_max_mm=z_max_mm,
             max_travel=max_travel,
         )
         _print_yaml_block(
@@ -1084,12 +1154,19 @@ def run_calibration(
         )
 
         return DeckOriginCalibrationResult(
-            measured_working_volume=_coords_tuple(measured_coords),
+            measured_working_volume=(
+                float(measured_coords["x"]),
+                float(measured_coords["y"]),
+                z_max_mm,
+            ),
             xy_origin_verification=_coords_tuple(xy_origin_coords),
             z_reference_verification=_coords_tuple(z_reference_coords),
             z_min_mm=z_min_mm,
+            theoretical_z_range_mm=theoretical_z_range_mm,
             z_reference_mode=z_reference_mode,
             reachable_z_min_mm=reachable_z_min_mm,
+            block_height_mm=block_height_mm,
+            block_touch_wpos_z_mm=block_touch_wpos_z_mm,
             grbl_max_travel=(
                 max_travel["max_travel_x"],
                 max_travel["max_travel_y"],
