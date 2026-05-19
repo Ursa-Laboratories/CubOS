@@ -326,7 +326,7 @@ labware:
 
 
 def test_sharc_deck_nested_plate_surface_resolves_to_plate_rim_z():
-    deck = load_deck_from_yaml("configs/deck/sharc_uv_deck.yaml")
+    deck = load_deck_from_yaml("tests/fixtures/configs/deck/mock_nested_plate_deck.yaml")
     holder = deck["plate_holder"]
     plate = deck.resolve_labware("plate_holder.plate")
 

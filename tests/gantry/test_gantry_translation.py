@@ -116,5 +116,5 @@ def test_unlock_delegates_to_mill_unlock(mock_mill_cls) -> None:
 
 
 def test_total_z_range_property_from_config() -> None:
-    gantry = Gantry(config=_config())
+    gantry = Gantry(config=_config(), offline=True)
     assert gantry.total_z_range == 90.0

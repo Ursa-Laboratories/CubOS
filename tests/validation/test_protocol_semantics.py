@@ -520,7 +520,7 @@ def test_scan_depth_drives_z_violation():
 
 
 def test_nested_plate_scan_target_passes_semantic_validation():
-    deck = load_deck_from_yaml("configs/deck/sharc_uv_deck.yaml")
+    deck = load_deck_from_yaml("tests/fixtures/configs/deck/mock_nested_plate_deck.yaml")
     board = Board(
         gantry=MagicMock(),
         instruments={"uv": _instrument("uv")},
@@ -539,7 +539,7 @@ def test_nested_plate_scan_target_passes_semantic_validation():
 
 
 def test_nested_plate_scan_target_uses_nested_surface_z_for_safe_z_validation():
-    deck = load_deck_from_yaml("configs/deck/sharc_uv_deck.yaml")
+    deck = load_deck_from_yaml("tests/fixtures/configs/deck/mock_nested_plate_deck.yaml")
     board = Board(
         gantry=MagicMock(),
         instruments={"uv": _instrument("uv")},

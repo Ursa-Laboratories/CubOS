@@ -12,6 +12,7 @@ from gantry.errors import (
 )
 from setup.calibration.single_instrument_calibration import (
     DeckOriginCalibrationResult,
+    _calculated_z_range,
     run_calibration,
 )
 
@@ -255,9 +256,10 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
     assert result.z_reference_verification == (0.0, 0.0, 0.0)
     assert result.reference_verification == (0.0, 0.0, 0.0)
     assert result.z_min_mm == 0.0
+    assert result.calculated_z_range_mm == 100.0
     assert result.reachable_z_min_mm == 0.0
-    assert result.measured_working_volume == (398.5, 299.25, 96.75)
-    assert result.grbl_max_travel == (398.5, 299.25, 96.75)
+    assert result.measured_working_volume == (398.5, 299.25, 100.0)
+    assert result.grbl_max_travel == (398.5, 299.25, 100.0)
     assert result.plan.origin_wpos == (0.0, 0.0, 0.0)
     assert _FakeGantry.instance.calls == [
         ("connect",),
@@ -282,16 +284,54 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
         ("home",),
         ("set_serial_timeout", 1.0),
         ("get_coordinates",),
-        ("configure_soft_limits_from_spans", 398.5, 299.25, 96.75, 0.25),
+        ("configure_soft_limits_from_spans", 398.5, 299.25, 100.0, 0.25),
         ("set_serial_timeout", 0.05),
         ("disconnect",),
     ]
     assert any("WPos Z=0" in message for message in messages)
     assert any("Z reference point after XY origining" in message for message in messages)
-    assert any("Measured physical working volume" in message for message in messages)
+    assert any("Calibrated working volume" in message for message in messages)
 
 
-def test_run_calibration_assigns_ruler_gap_to_lower_reach_z(tmp_path):
+def test_run_calibration_block_mode_uses_seeded_calculated_z_range(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+    messages: list[str] = []
+
+    result = run_calibration(
+        path,
+        output=messages.append,
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader(
+            [
+                ("X", 20),
+                ("\r", 1),
+            ]
+        ),
+        stdin_flusher=lambda: None,
+        tip_gap_mm=35.0,
+        z_reference_mode="block",
+    )
+
+    assert isinstance(result, DeckOriginCalibrationResult)
+    assert result.xy_origin_verification == (0.0, 0.0, 20.0)
+    assert result.z_reference_verification == (0.0, 0.0, 20.0)
+    assert result.z_min_mm == 0.0
+    assert result.calculated_z_range_mm == 100.0
+    assert result.reachable_z_min_mm == 15.0
+    assert result.block_height_mm == 35.0
+    assert result.block_touch_wpos_z_mm == 20.0
+    assert result.measured_working_volume == (398.5, 299.25, 100.0)
+    assert result.grbl_max_travel == (398.5, 299.25, 100.0)
+    assert ("set_work_coordinates", None, None, 20.0) in _FakeGantry.instance.calls
+    assert any("block_height: 35.000" in message for message in messages)
+    assert any("block_touch_wpos_z: 20.000" in message for message in messages)
+    assert any(
+        "inferred_lowest_reachable_height_above_deck: 15.000" in message
+        for message in messages
+    )
+
+
+def test_run_calibration_records_ruler_gap_but_sets_z_min_to_wpos_zero(tmp_path):
     path = _write_gantry(tmp_path / "gantry.yaml")
     messages: list[str] = []
 
@@ -311,14 +351,17 @@ def test_run_calibration_assigns_ruler_gap_to_lower_reach_z(tmp_path):
 
     assert isinstance(result, DeckOriginCalibrationResult)
     assert result.xy_origin_verification == (0.0, 0.0, 0.0)
-    assert result.z_reference_verification == (0.0, 0.0, 43.0)
-    assert result.z_min_mm == 43.0
+    assert result.z_reference_verification == (0.0, 0.0, 0.0)
+    assert result.z_min_mm == 0.0
+    assert result.calculated_z_range_mm == 100.0
     assert result.reachable_z_min_mm == 43.0
-    assert result.grbl_max_travel == (398.5, 299.25, 53.75)
+    assert result.measured_working_volume == (398.5, 299.25, 100.0)
+    assert result.grbl_max_travel == (398.5, 299.25, 100.0)
     assert ("set_work_coordinates", 0.0, 0.0, None) in _FakeGantry.instance.calls
-    assert ("set_work_coordinates", None, None, 43.0) in _FakeGantry.instance.calls
-    assert any("WPos Z=43" in message for message in messages)
-    assert any("z_min: 43.000" in message for message in messages)
+    assert ("set_work_coordinates", None, None, 0.0) in _FakeGantry.instance.calls
+    assert any("WPos Z=0" in message for message in messages)
+    assert any("z_min: 0.000" in message for message in messages)
+    assert any("reference_tcp_reachable_z_min: 43.000" in message for message in messages)
 
 
 def test_run_calibration_prints_full_gantry_yaml_with_grbl_settings(tmp_path):
@@ -371,7 +414,9 @@ instruments:
     assert "homing_enable: true" in output_text
     assert "max_travel_x: 398.5" in output_text
     assert "max_travel_y: 299.25" in output_text
-    assert "max_travel_z: 72.75" in output_text
+    assert "total_z_range: 100.0" in output_text
+    assert "z_max: 100.0" in output_text
+    assert "max_travel_z: 100.0" in output_text
     assert "instruments:" in output_text
     assert _FakeGantry.instance.calls[0] == ("connect",)
 
@@ -395,7 +440,9 @@ def test_run_calibration_can_prompt_and_write_gantry_yaml(tmp_path):
     written = output_path.read_text(encoding="utf-8")
     assert "grbl_settings:" in written
     assert "soft_limits: true" in written
-    assert "max_travel_z: 96.75" in written
+    assert "total_z_range: 100.0" in written
+    assert "z_max: 100.0" in written
+    assert "max_travel_z: 100.0" in written
 
 
 def test_run_calibration_prompts_for_tip_gap_when_omitted(tmp_path):
@@ -419,7 +466,7 @@ def test_run_calibration_prompts_for_tip_gap_when_omitted(tmp_path):
 
     assert isinstance(result, DeckOriginCalibrationResult)
     assert result.xy_origin_verification == (0.0, 0.0, 0.0)
-    assert result.z_reference_verification == (0.0, 0.0, 12.5)
+    assert result.z_reference_verification == (0.0, 0.0, 0.0)
     assert prompts == ["Deck-to-TCP gap in mm: "]
 
 
@@ -482,8 +529,8 @@ def test_run_calibration_prompt_mode_uses_ruler_gap_when_not_touching(tmp_path):
 
     assert isinstance(result, DeckOriginCalibrationResult)
     assert result.z_reference_mode == "ruler-gap"
-    assert result.z_min_mm == 14.5
-    assert result.z_reference_verification == (0.0, 0.0, 14.5)
+    assert result.z_min_mm == 0.0
+    assert result.z_reference_verification == (0.0, 0.0, 0.0)
     assert result.reachable_z_min_mm == pytest.approx(14.5)
     assert prompts == [
         "Is the TCP touching true deck bottom at the current pose? [y/N]: ",
@@ -513,7 +560,7 @@ def test_run_calibration_deprecated_reach_flag_does_not_add_extra_jog(tmp_path):
 
     assert isinstance(result, DeckOriginCalibrationResult)
     assert result.xy_origin_verification == (0.0, 0.0, 0.0)
-    assert result.z_reference_verification == (0.0, 0.0, 43.0)
+    assert result.z_reference_verification == (0.0, 0.0, 0.0)
     assert result.reachable_z_min_mm == pytest.approx(43.0)
     assert ("jog", 0.0, 0.0, -10.0, 2500.0) not in _FakeGantry.instance.calls
     assert any("deprecated" in message.lower() for message in messages)
@@ -680,7 +727,10 @@ def test_dry_run_prints_commands_without_connecting(tmp_path):
     assert "  $132=<z_span_mm>" in messages
     assert "  $22=1" in messages
     assert "  $20=1" in messages
-    assert "No configured max travel values will be trusted as measured volume." in messages
+    assert (
+        "The seeded gantry YAML cnc.total_z_range will be preserved and used "
+        "as calibrated Z travel."
+    ) in messages
 
 
 def test_dry_run_prints_ruler_gap_step(tmp_path):
@@ -695,8 +745,8 @@ def test_dry_run_prints_ruler_gap_step(tmp_path):
         tip_gap_mm=5.0,
     )
 
-    assert "  <confirm bottom contact or enter ruler-measured TCP gap>" in messages
-    assert "  G10 L20 P1 Z5" in messages
+    assert "  <confirm bottom contact or enter ruler-measured TCP gap; reach metadata=5>" in messages
+    assert "  G10 L20 P1 Z0" in messages
 
 
 def test_dry_run_prints_bottom_reference_step(tmp_path):
@@ -719,3 +769,111 @@ def test_rejects_legacy_negative_space_config(tmp_path):
 
     with pytest.raises(ValueError, match="Deck-origin calibration requires"):
         run_calibration(path, dry_run=True)
+
+
+# --- _calculated_z_range unit tests ---
+
+
+def test_calculated_z_range_returns_value():
+    assert _calculated_z_range({"cnc": {"total_z_range": 87.0}}) == 87.0
+
+
+def test_calculated_z_range_raises_if_cnc_key_missing():
+    with pytest.raises(ValueError, match="cnc.total_z_range"):
+        _calculated_z_range({})
+
+
+def test_calculated_z_range_raises_if_total_z_range_key_missing():
+    with pytest.raises(ValueError, match="cnc.total_z_range"):
+        _calculated_z_range({"cnc": {"homing_strategy": "standard"}})
+
+
+def test_calculated_z_range_raises_if_cnc_not_a_dict():
+    with pytest.raises(ValueError, match="cnc.total_z_range"):
+        _calculated_z_range({"cnc": "standard"})
+
+
+def test_calculated_z_range_raises_if_non_numeric():
+    with pytest.raises(ValueError, match="numeric"):
+        _calculated_z_range({"cnc": {"total_z_range": "not-a-number"}})
+
+
+def test_calculated_z_range_raises_if_zero():
+    with pytest.raises(ValueError, match="> 0"):
+        _calculated_z_range({"cnc": {"total_z_range": 0.0}})
+
+
+def test_calculated_z_range_raises_if_negative():
+    with pytest.raises(ValueError, match="> 0"):
+        _calculated_z_range({"cnc": {"total_z_range": -5.0}})
+
+
+# --- block mode guard tests ---
+
+
+def test_block_mode_raises_if_touch_at_or_below_tolerance(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+
+    with pytest.raises(RuntimeError, match="Block touch WPos Z must be positive"):
+        run_calibration(
+            path,
+            output=lambda _: None,
+            gantry_factory=_FakeGantry,
+            key_reader=_key_reader([("\r", 1)]),
+            stdin_flusher=lambda: None,
+            tip_gap_mm=35.0,
+            z_reference_mode="block",
+        )
+
+
+def _write_gantry_small_z(path):
+    path.write_text(
+        """\
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+cnc:
+  homing_strategy: standard
+  total_z_range: 15.0
+  y_axis_motion: head
+  safe_z: 12.0
+working_volume:
+  x_min: 0.0
+  x_max: 400.0
+  y_min: 0.0
+  y_max: 300.0
+  z_min: 0.0
+  z_max: 15.0
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_block_mode_raises_if_touch_exceeds_calculated_z_range(tmp_path):
+    path = _write_gantry_small_z(tmp_path / "gantry.yaml")
+
+    with pytest.raises(RuntimeError, match="Block touch WPos Z exceeds"):
+        run_calibration(
+            path,
+            output=lambda _: None,
+            gantry_factory=_FakeGantry,
+            key_reader=_key_reader([("X", 20), ("\r", 1)]),
+            stdin_flusher=lambda: None,
+            tip_gap_mm=10.0,
+            z_reference_mode="block",
+        )
+
+
+def test_block_mode_raises_if_reachable_z_min_is_negative(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+
+    with pytest.raises(RuntimeError, match="block_touch_wpos_z.*exceeds.*block_height"):
+        run_calibration(
+            path,
+            output=lambda _: None,
+            gantry_factory=_FakeGantry,
+            key_reader=_key_reader([("X", 30), ("\r", 1)]),
+            stdin_flusher=lambda: None,
+            tip_gap_mm=20.0,
+            z_reference_mode="block",
+        )

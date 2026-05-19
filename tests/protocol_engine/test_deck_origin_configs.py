@@ -1,4 +1,4 @@
-"""Movement-plan checks for issue #87 deck-origin configs."""
+"""Movement-plan checks using mock deck-origin YAML fixtures."""
 
 from __future__ import annotations
 
@@ -19,15 +19,15 @@ from validation.protocol_semantics import validate_protocol_semantics
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIGS = ROOT / "configs"
+FIXTURES = ROOT / "tests/fixtures/configs"
 
 
-def test_asmi_config_generates_deck_origin_scan_waypoints():
+def test_mock_asmi_config_generates_deck_origin_scan_waypoints():
     gantry_config = load_gantry_from_yaml(
-        CONFIGS / "gantry/cub_xl_asmi.yaml"
+        FIXTURES / "gantry/mock_asmi.yaml"
     )
     deck = load_deck_from_yaml(
-        CONFIGS / "deck/asmi_deck.yaml",
+        FIXTURES / "deck/mock_asmi_deck.yaml",
         total_z_range=gantry_config.total_z_range,
     )
     mock_gantry = MagicMock()
@@ -56,7 +56,7 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
 
     board.instruments["asmi"].indentation = fake_indentation
     protocol = load_protocol_from_yaml(
-        CONFIGS / "protocol/asmi_indentation.yaml"
+        FIXTURES / "protocol/mock_asmi_indentation.yaml"
     )
 
     scan_step = next(step for step in protocol.steps if step.command_name == "scan")
@@ -116,12 +116,12 @@ def test_asmi_config_generates_deck_origin_scan_waypoints():
     assert indentation_calls[0]["gantry"] is mock_gantry
 
 
-def test_panda_deck_origin_layout_and_placeholders_parse():
+def test_mock_panda_deck_origin_layout_and_placeholders_parse():
     gantry_config = load_gantry_from_yaml(
-        CONFIGS / "gantry/cub_xl_panda.yaml"
+        FIXTURES / "gantry/mock_panda.yaml"
     )
     deck = load_deck_from_yaml(
-        CONFIGS / "deck/panda_deck.yaml",
+        FIXTURES / "deck/mock_panda_deck.yaml",
         total_z_range=gantry_config.total_z_range,
     )
     plate = deck.resolve_coordinate("well_plate_holder.plate.A1")
@@ -141,10 +141,10 @@ def test_panda_deck_origin_layout_and_placeholders_parse():
     }
 
 
-def test_filmetrics_deck_origin_config_validates_setup():
-    gantry_path = CONFIGS / "gantry/cub_filmetrics.yaml"
-    deck_path = CONFIGS / "deck/filmetrics_deck.yaml"
-    protocol_path = CONFIGS / "protocol/filmetrics_scan.yaml"
+def test_mock_filmetrics_deck_origin_config_validates_setup():
+    gantry_path = FIXTURES / "gantry/mock_filmetrics.yaml"
+    deck_path = FIXTURES / "deck/mock_filmetrics_deck.yaml"
+    protocol_path = FIXTURES / "protocol/mock_filmetrics_scan.yaml"
 
     gantry_config = load_gantry_from_yaml(gantry_path)
     deck = load_deck_from_yaml(deck_path, total_z_range=gantry_config.total_z_range)
@@ -178,9 +178,9 @@ def test_filmetrics_deck_origin_config_validates_setup():
 
 def test_sharc_motion_scan_config_does_not_call_uv_cure():
     protocol, context = setup_protocol(
-        CONFIGS / "gantry/cub_sharc.yaml",
-        CONFIGS / "deck/sharc_uv_deck.yaml",
-        CONFIGS / "protocol/sharc_uv_motion_scan.yaml",
+        FIXTURES / "gantry/mock_sharc.yaml",
+        FIXTURES / "deck/mock_nested_plate_deck.yaml",
+        FIXTURES / "protocol/mock_sharc_uv_motion_scan.yaml",
     )
     uv = context.board.instruments["uv_curing"]
     uv.cure = MagicMock(side_effect=AssertionError("cure should not be called"))
@@ -195,18 +195,18 @@ def test_sharc_motion_scan_config_does_not_call_uv_cure():
 
 def test_sterling_candidate_validates_with_park_protocol():
     _, context = setup_protocol(
-        CONFIGS / "gantry/cub_xl_sterling.yaml",
-        CONFIGS / "deck/sterling_deck.yaml",
-        CONFIGS / "protocol/sterling_park.yaml",
+        FIXTURES / "gantry/mock_sterling.yaml",
+        FIXTURES / "deck/mock_sterling_deck.yaml",
+        FIXTURES / "protocol/mock_sterling_park.yaml",
     )
     assert context.board.instruments["potentiostat"]._offline is True
 
 
 def test_sterling_vial_scan_visits_vials_in_alternating_order():
     protocol, context = setup_protocol(
-        CONFIGS / "gantry/cub_xl_sterling.yaml",
-        CONFIGS / "deck/sterling_deck.yaml",
-        CONFIGS / "protocol/sterling_vial_scan.yaml",
+        FIXTURES / "gantry/mock_sterling.yaml",
+        FIXTURES / "deck/mock_sterling_deck.yaml",
+        FIXTURES / "protocol/mock_sterling_vial_scan.yaml",
     )
 
     move_positions = [

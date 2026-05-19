@@ -1,0 +1,16 @@
+labware:
+  plate:
+    load_name: sbs_96_wellplate
+    name: mock_asmi_96_well_plate
+    model_name: mock_asmi_96_well_plate
+    calibration:
+      a1:
+        x: 347.0
+        y: 42.0
+        z: 30.0
+      a2:
+        x: 338.0
+        y: 42.0
+        z: 30.0
+    x_offset: 9.0
+    y_offset: 9.0

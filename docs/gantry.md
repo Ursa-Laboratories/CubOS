@@ -88,8 +88,10 @@ rail is valid only when the instrument point is above the built-in rail height.
 
 `homing_strategy` must be `standard`, which runs GRBL `$H`.
 
-`total_z_range` is required and must be greater than zero. It describes the
-configured vertical envelope. Deck labware deck-frame Z values come from
+`total_z_range` is required and must be greater than zero. It is the seeded
+calculated vertical travel range for the gantry family/workcell and is not
+rewritten by calibration. Calibration uses it to set `working_volume.z_max`
+and GRBL `$132` / `max_travel_z`. Deck labware deck-frame Z values come from
 calibration anchors only — `calibration.a1.z` (plates / holders / tip racks)
 or `location.z` (vials / holders). The labware `height` field is the
 *physical outer dimension* (rim → underside) and is not a Z shorthand;
@@ -115,13 +117,16 @@ Protocol setup requires:
 - non-negative `z_min`
 
 Use [Calibrate Deck Origin](calibration.md) to measure the physical working
-volume. The calibration script jogs to the front-left lower-reach origin, sets
-X/Y with `G10 L20 P1 X0 Y0`, assigns Z by bottom contact or ruler gap, then
-re-homes and reports the measured homed WPos as `(x_max, y_max, z_max)`.
+volume. The calibration script jogs to the front-left block/reference point,
+sets X/Y with `G10 L20 P1 X0 Y0`, preserves the seeded `cnc.total_z_range`,
+then re-homes to measure X/Y bounds. For the single-instrument block flow, the
+block-touch WPos Z becomes the remaining travel above WPos 0, so the calibrated
+working volume uses `z_min: 0.0` and `z_max: cnc.total_z_range`.
 
-For one-instrument bottom contact, use `z_min: 0.0`. For ruler-gap calibration,
-use the measured gap as `z_min`. Example: if the TCP stops 5 mm above deck and
-the homed WPos reads `Z=105`, use `z_min: 5.0`, `z_max: 105.0`.
+Example: a Cub XL seeded with `total_z_range: 110.0` touches a 35 mm block at
+WPos Z=20. The lowest reachable point is inferred as 15 mm above the physical
+deck (`35 - 20`), but the calibrated WPos lower bound remains `z_min: 0.0`,
+`z_max: 110.0`, and `max_travel_z: 110.0`.
 
 Multi-instrument setups need per-instrument lower-reach limits and inactive-tool
 collision checks instead of one global lower reach for every tool.

@@ -96,8 +96,8 @@ class TestFullProtocolWithDataStore:
         store = DataStore(db_path=":memory:")
         cid = store.create_campaign(
             description="integration test",
-            deck_config="configs/deck.yaml",
-            protocol_config="configs/protocol.yaml",
+            deck_config="mock/deck.yaml",
+            protocol_config="mock/protocol.yaml",
         )
         store.register_labware(cid, "plate_1", plate)
         store.register_labware(cid, "reagent_vial", vial)
