@@ -80,6 +80,7 @@ deck YAMLs keep working unmodified.
 
 | `load_name:` | Python class | Notes |
 | --- | --- | --- |
+| `analytical_sales_96_aluminum_vial_well_plate` | `WellPlate` | Analytical Sales & Services 8 x 12 aluminum vial plate for 8 mm x 30 mm, 1 mL vials; `well_depth` must be measured/overridden if sample-floor calculations are needed. |
 | `sbs_96_wellplate` | `WellPlate` | Generic ANSI SLAS 96-well microplate. Override `capacity_ul`/`height` for vendor-specific variants. |
 | `ursa_tip_rack` | `TipRack` | Ursa 2-column × 15-row pipette tip rack. |
 | `ursa_vial_holder` | `VialHolder` | 9-position tight-fit 20 mL vial holder (Cub-XL). |
