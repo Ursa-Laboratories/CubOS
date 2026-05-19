@@ -89,7 +89,7 @@ rail is valid only when the instrument point is above the built-in rail height.
 `homing_strategy` must be `standard`, which runs GRBL `$H`.
 
 `total_z_range` is required and must be greater than zero. It is the seeded
-theoretical vertical travel range for the gantry family/workcell and is not
+calculated vertical travel range for the gantry family/workcell and is not
 rewritten by calibration. Calibration uses it to set `working_volume.z_max`
 and GRBL `$132` / `max_travel_z`. Deck labware deck-frame Z values come from
 calibration anchors only — `calibration.a1.z` (plates / holders / tip racks)

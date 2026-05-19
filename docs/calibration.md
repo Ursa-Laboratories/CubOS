@@ -39,7 +39,7 @@ For a gantry YAML with one mounted instrument, the flow asks you to place a
 calibration block at the front-left origin point and jog the instrument
 tip/probe to touch the block top. It assigns X/Y at that physical pose, reads
 the block-touch WPos Z as the remaining downward travel to WPos 0, and preserves
-the gantry YAML's seeded `cnc.total_z_range` as the theoretical Z travel.
+the gantry YAML's seeded `cnc.total_z_range` as the calculated Z travel.
 
 The calibrated YAML keeps `cnc.total_z_range` unchanged, writes
 `working_volume.z_min: 0.0`, writes `working_volume.z_max` from

@@ -32,7 +32,7 @@ from setup.calibration.single_instrument_calibration import (  # noqa: E402
     _restore_soft_limits_after_origin_jog,
     _round_mm,
     _set_serial_timeout_if_available,
-    _theoretical_z_range,
+    _calculated_z_range,
     _temporarily_disable_soft_limits_for_origin_jog,
 )
 from setup.keyboard_input import flush_stdin, read_keypress_batch  # noqa: E402
@@ -140,7 +140,7 @@ def _updated_yaml_text(
     measured_coords: dict[str, float],
     instrument_calibrations: dict[str, dict[str, float]],
     max_travel: dict[str, float],
-    theoretical_z_range_mm: float,
+    calculated_z_range_mm: float,
 ) -> str:
     updated = copy.deepcopy(raw_config)
     updated["working_volume"] = {
@@ -149,7 +149,7 @@ def _updated_yaml_text(
         "y_min": 0.0,
         "y_max": _round_mm(measured_coords["y"]),
         "z_min": 0.0,
-        "z_max": theoretical_z_range_mm,
+        "z_max": calculated_z_range_mm,
     }
     updated["grbl_settings"] = _build_grbl_settings(raw_config, max_travel)
 
@@ -327,7 +327,7 @@ def run_multi_instrument_calibration(
     gantry_config = load_gantry_from_yaml(gantry_path)
     validate_deck_origin_minima(gantry_config)
     raw_config = _load_raw_config(gantry_path)
-    theoretical_z_range_mm = _theoretical_z_range(raw_config)
+    calculated_z_range_mm = _calculated_z_range(raw_config)
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     available_instruments = _instrument_names(raw_config)
@@ -574,7 +574,7 @@ def run_multi_instrument_calibration(
             measured_coords,
             z_min_mm=0.0,
             tolerance_mm=tolerance_mm,
-            z_span_mm=theoretical_z_range_mm,
+            z_span_mm=calculated_z_range_mm,
         )
         if skip_soft_limit_config:
             output("Skipping GRBL soft-limit programming by request.")
@@ -609,7 +609,7 @@ def run_multi_instrument_calibration(
             measured_coords=measured_coords,
             instrument_calibrations=instrument_calibrations,
             max_travel=max_travel,
-            theoretical_z_range_mm=theoretical_z_range_mm,
+            calculated_z_range_mm=calculated_z_range_mm,
         )
         _print_yaml_block(
             title="Full calibrated multi-instrument gantry YAML to copy/paste:",
@@ -628,7 +628,7 @@ def run_multi_instrument_calibration(
             measured_working_volume=(
                 float(measured_coords["x"]),
                 float(measured_coords["y"]),
-                theoretical_z_range_mm,
+                calculated_z_range_mm,
             ),
             xy_bounds_after_origin=_coords_tuple(xy_bounds_coords),
             xy_origin_verification=_coords_tuple(xy_origin_coords),

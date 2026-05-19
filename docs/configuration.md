@@ -19,7 +19,7 @@ Gantry YAML defines:
 - serial port
 - gantry type (`cub` or `cub_xl`)
 - CNC homing strategy
-- seeded theoretical Z travel range (`cnc.total_z_range`)
+- seeded calculated Z travel range (`cnc.total_z_range`)
 - Y-axis motion mode
 - working volume
 - optional absolute `safe_z` plane (inter-labware travel)
@@ -77,7 +77,7 @@ segment would hit the fixed right X-max rail. The rail is not deck labware and
 is not configured in YAML.
 
 Run [Calibrate Deck Origin](calibration.md) before trusting measured working
-volume values on real hardware. Seed `cnc.total_z_range` with the theoretical
+volume values on real hardware. Seed `cnc.total_z_range` with the calculated
 gantry Z travel before calibration; calibration preserves that value and uses it
 for calibrated Z bounds and GRBL `max_travel_z`. Use [Gantry Bring-Up](admin/gantry-bring-up.md)
 first if controller direction, homing, or WPos reporting is unknown.

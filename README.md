@@ -183,7 +183,7 @@ BRT pose and does not make an automatic center move. It sets G54 WPos X/Y first,
 then sets WPos Z to the calibration block height from the lowest instrument,
 then records each instrument's `offset_x`, `offset_y`, and `depth` from the
 shared block point. Calibration preserves the seeded `cnc.total_z_range` from
-the input gantry YAML and uses that theoretical range for calibrated Z bounds
+the input gantry YAML and uses that calculated range for calibrated Z bounds
 and GRBL `max_travel_z`; it does not rewrite the Z range from homed readback.
 
 See the docs for the full operator tutorial:

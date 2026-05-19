@@ -41,7 +41,7 @@ class DeckOriginCalibrationResult:
     xy_origin_verification: tuple[float, float, float]
     z_reference_verification: tuple[float, float, float]
     z_min_mm: float
-    theoretical_z_range_mm: float
+    calculated_z_range_mm: float
     z_reference_mode: str
     reachable_z_min_mm: float | None
     block_height_mm: float | None
@@ -93,12 +93,12 @@ def _round_mm(value: float) -> float:
     return round(float(value), 3)
 
 
-def _theoretical_z_range(raw_config: dict[str, Any]) -> float:
+def _calculated_z_range(raw_config: dict[str, Any]) -> float:
     cnc = raw_config.get("cnc")
     if not isinstance(cnc, dict) or "total_z_range" not in cnc:
         raise ValueError(
             "Gantry YAML must seed cnc.total_z_range before calibration; "
-            "calibration preserves that theoretical Z range."
+            "calibration preserves that calculated Z range."
         )
     try:
         value = float(cnc["total_z_range"])
@@ -306,7 +306,7 @@ def _print_config_patch(
     z_reference_coords: dict[str, float],
     z_min_mm: float,
     z_max_mm: float,
-    theoretical_z_range_mm: float,
+    calculated_z_range_mm: float,
     z_reference_mode: str,
     instrument_name: str | None,
     block_height_mm: float | None,
@@ -320,7 +320,7 @@ def _print_config_patch(
     output(f"  X: 0.000 to {x_max:.3f} mm")
     output(f"  Y: 0.000 to {y_max:.3f} mm")
     output(f"  Z: {z_min_mm:.3f} to {z_max_mm:.3f} mm")
-    output(f"  Seeded theoretical Z range: {theoretical_z_range_mm:.3f} mm")
+    output(f"  Seeded calculated Z range: {calculated_z_range_mm:.3f} mm")
     output(f"  Homed Z readback after calibration: {measured_home_z:.3f} mm")
     output("")
     output("Update the gantry YAML working_volume to:")
@@ -333,7 +333,7 @@ def _print_config_patch(
     output(f"    z_max: {z_max_mm:.3f}")
     output("")
     output("Keep the seeded cnc.total_z_range unchanged:")
-    output(f"  total_z_range: {theoretical_z_range_mm:.3f}")
+    output(f"  total_z_range: {calculated_z_range_mm:.3f}")
     output("")
     output("Z reference point after XY origining:")
     output(
@@ -929,7 +929,7 @@ def run_calibration(
     gantry_path = gantry_path.resolve()
     gantry_config = load_gantry_from_yaml(gantry_path)
     raw_config = _load_raw_config(gantry_path)
-    theoretical_z_range_mm = _theoretical_z_range(raw_config)
+    calculated_z_range_mm = _calculated_z_range(raw_config)
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     plan = build_deck_origin_calibration_plan(gantry_config)
@@ -1057,11 +1057,11 @@ def run_calibration(
                     "place the lower reachable Z at WPos 0. "
                     f"Got Z={block_touch_wpos_z_mm:.4f}."
                 )
-            if block_touch_wpos_z_mm > theoretical_z_range_mm + tolerance_mm:
+            if block_touch_wpos_z_mm > calculated_z_range_mm + tolerance_mm:
                 raise RuntimeError(
-                    "Block touch WPos Z exceeds the seeded theoretical Z range: "
+                    "Block touch WPos Z exceeds the seeded calculated Z range: "
                     f"touch={block_touch_wpos_z_mm:.4f}, "
-                    f"total_z_range={theoretical_z_range_mm:.4f}."
+                    f"total_z_range={calculated_z_range_mm:.4f}."
                 )
             z_min_mm = 0.0
             z_reference_wpos_mm = block_touch_wpos_z_mm
@@ -1089,7 +1089,7 @@ def run_calibration(
                 "Expected one of: bottom, block, ruler-gap."
             )
 
-        z_max_mm = _round_mm(z_min_mm + theoretical_z_range_mm)
+        z_max_mm = _round_mm(z_min_mm + calculated_z_range_mm)
 
         output(f"Setting current physical pose to WPos Z={z_reference_wpos_mm:g}...")
         gantry.set_work_coordinates(z=z_reference_wpos_mm)
@@ -1119,7 +1119,7 @@ def run_calibration(
             measured_coords,
             z_min_mm=z_min_mm,
             tolerance_mm=tolerance_mm,
-            z_span_mm=theoretical_z_range_mm,
+            z_span_mm=calculated_z_range_mm,
         )
         if skip_soft_limit_config:
             output("Skipping GRBL soft-limit programming by request.")
@@ -1136,7 +1136,7 @@ def run_calibration(
             z_reference_coords=z_reference_coords,
             z_min_mm=z_min_mm,
             z_max_mm=z_max_mm,
-            theoretical_z_range_mm=theoretical_z_range_mm,
+            calculated_z_range_mm=calculated_z_range_mm,
             z_reference_mode=z_reference_mode,
             instrument_name=instrument_name,
             block_height_mm=block_height_mm,
@@ -1173,7 +1173,7 @@ def run_calibration(
             xy_origin_verification=_coords_tuple(xy_origin_coords),
             z_reference_verification=_coords_tuple(z_reference_coords),
             z_min_mm=z_min_mm,
-            theoretical_z_range_mm=theoretical_z_range_mm,
+            calculated_z_range_mm=calculated_z_range_mm,
             z_reference_mode=z_reference_mode,
             reachable_z_min_mm=reachable_z_min_mm,
             block_height_mm=block_height_mm,

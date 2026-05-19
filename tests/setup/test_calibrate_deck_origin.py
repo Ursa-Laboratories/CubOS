@@ -12,7 +12,7 @@ from gantry.errors import (
 )
 from setup.calibration.single_instrument_calibration import (
     DeckOriginCalibrationResult,
-    _theoretical_z_range,
+    _calculated_z_range,
     run_calibration,
 )
 
@@ -256,7 +256,7 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
     assert result.z_reference_verification == (0.0, 0.0, 0.0)
     assert result.reference_verification == (0.0, 0.0, 0.0)
     assert result.z_min_mm == 0.0
-    assert result.theoretical_z_range_mm == 100.0
+    assert result.calculated_z_range_mm == 100.0
     assert result.reachable_z_min_mm == 0.0
     assert result.measured_working_volume == (398.5, 299.25, 100.0)
     assert result.grbl_max_travel == (398.5, 299.25, 100.0)
@@ -293,7 +293,7 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
     assert any("Calibrated working volume" in message for message in messages)
 
 
-def test_run_calibration_block_mode_uses_seeded_theoretical_z_range(tmp_path):
+def test_run_calibration_block_mode_uses_seeded_calculated_z_range(tmp_path):
     path = _write_gantry(tmp_path / "gantry.yaml")
     messages: list[str] = []
 
@@ -316,7 +316,7 @@ def test_run_calibration_block_mode_uses_seeded_theoretical_z_range(tmp_path):
     assert result.xy_origin_verification == (0.0, 0.0, 20.0)
     assert result.z_reference_verification == (0.0, 0.0, 20.0)
     assert result.z_min_mm == 0.0
-    assert result.theoretical_z_range_mm == 100.0
+    assert result.calculated_z_range_mm == 100.0
     assert result.reachable_z_min_mm == 15.0
     assert result.block_height_mm == 35.0
     assert result.block_touch_wpos_z_mm == 20.0
@@ -353,7 +353,7 @@ def test_run_calibration_records_ruler_gap_but_sets_z_min_to_wpos_zero(tmp_path)
     assert result.xy_origin_verification == (0.0, 0.0, 0.0)
     assert result.z_reference_verification == (0.0, 0.0, 0.0)
     assert result.z_min_mm == 0.0
-    assert result.theoretical_z_range_mm == 100.0
+    assert result.calculated_z_range_mm == 100.0
     assert result.reachable_z_min_mm == 43.0
     assert result.measured_working_volume == (398.5, 299.25, 100.0)
     assert result.grbl_max_travel == (398.5, 299.25, 100.0)
@@ -771,41 +771,41 @@ def test_rejects_legacy_negative_space_config(tmp_path):
         run_calibration(path, dry_run=True)
 
 
-# --- _theoretical_z_range unit tests ---
+# --- _calculated_z_range unit tests ---
 
 
-def test_theoretical_z_range_returns_value():
-    assert _theoretical_z_range({"cnc": {"total_z_range": 87.0}}) == 87.0
+def test_calculated_z_range_returns_value():
+    assert _calculated_z_range({"cnc": {"total_z_range": 87.0}}) == 87.0
 
 
-def test_theoretical_z_range_raises_if_cnc_key_missing():
+def test_calculated_z_range_raises_if_cnc_key_missing():
     with pytest.raises(ValueError, match="cnc.total_z_range"):
-        _theoretical_z_range({})
+        _calculated_z_range({})
 
 
-def test_theoretical_z_range_raises_if_total_z_range_key_missing():
+def test_calculated_z_range_raises_if_total_z_range_key_missing():
     with pytest.raises(ValueError, match="cnc.total_z_range"):
-        _theoretical_z_range({"cnc": {"homing_strategy": "standard"}})
+        _calculated_z_range({"cnc": {"homing_strategy": "standard"}})
 
 
-def test_theoretical_z_range_raises_if_cnc_not_a_dict():
+def test_calculated_z_range_raises_if_cnc_not_a_dict():
     with pytest.raises(ValueError, match="cnc.total_z_range"):
-        _theoretical_z_range({"cnc": "standard"})
+        _calculated_z_range({"cnc": "standard"})
 
 
-def test_theoretical_z_range_raises_if_non_numeric():
+def test_calculated_z_range_raises_if_non_numeric():
     with pytest.raises(ValueError, match="numeric"):
-        _theoretical_z_range({"cnc": {"total_z_range": "not-a-number"}})
+        _calculated_z_range({"cnc": {"total_z_range": "not-a-number"}})
 
 
-def test_theoretical_z_range_raises_if_zero():
+def test_calculated_z_range_raises_if_zero():
     with pytest.raises(ValueError, match="> 0"):
-        _theoretical_z_range({"cnc": {"total_z_range": 0.0}})
+        _calculated_z_range({"cnc": {"total_z_range": 0.0}})
 
 
-def test_theoretical_z_range_raises_if_negative():
+def test_calculated_z_range_raises_if_negative():
     with pytest.raises(ValueError, match="> 0"):
-        _theoretical_z_range({"cnc": {"total_z_range": -5.0}})
+        _calculated_z_range({"cnc": {"total_z_range": -5.0}})
 
 
 # --- block mode guard tests ---
@@ -849,7 +849,7 @@ working_volume:
     return path
 
 
-def test_block_mode_raises_if_touch_exceeds_theoretical_z_range(tmp_path):
+def test_block_mode_raises_if_touch_exceeds_calculated_z_range(tmp_path):
     path = _write_gantry_small_z(tmp_path / "gantry.yaml")
 
     with pytest.raises(RuntimeError, match="Block touch WPos Z exceeds"):
