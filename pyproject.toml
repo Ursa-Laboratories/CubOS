@@ -11,9 +11,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
-    # Needed by tests/instruments/test_registry_packaging.py, which shells
-    # out to setuptools.build_meta. Python 3.12+ no longer bundles setuptools.
-    "setuptools",
+]
+# Per-instrument vendor SDKs — opt in only when you actually use that instrument.
+# The drivers import these lazily and raise a clear error if missing, so the core
+# install (and instruments that don't need them) stays light.
+asmi = [
+    "godirect>=1.0.0",
 ]
 potentiostat = [
     "SquidstatPyLibrary",
@@ -33,6 +36,17 @@ include = ["board", "board.*", "data", "data.*", "deck", "deck.*",
 [tool.setuptools.package-data]
 "instruments" = ["registry.yaml"]
 "gantry.gantry_driver" = ["*.json"]
+# Deck labware definitions: registry.yaml at the package root + each
+# definition's config YAML in a non-package subdir. Without these the
+# `load_name:` deck-yaml feature breaks under `pip install` because the
+# YAMLs don't get copied to site-packages.
+"deck.labware.definitions" = [
+    "registry.yaml",
+    "*/*.yaml",
+    "*/*.glb",
+    "*/*.stl",
+    "*/*.step",
+]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]

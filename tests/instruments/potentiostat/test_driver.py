@@ -45,11 +45,10 @@ class TestConstructor:
         assert p.name == "station_a"
 
     def test_offsets_propagate_to_base(self):
-        p = Potentiostat(offset_x=1.5, offset_y=-2.0, depth=3.0, measurement_height=4.0)
+        p = Potentiostat(offset_x=1.5, offset_y=-2.0, depth=3.0)
         assert p.offset_x == 1.5
         assert p.offset_y == -2.0
         assert p.depth == 3.0
-        assert p.measurement_height == 4.0
 
     def test_negative_channel_rejected(self):
         with pytest.raises(PotentiostatConfigError, match="channel"):

@@ -17,7 +17,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
-from gantry import Gantry, load_gantry_from_yaml
+from gantry import Gantry
 
 
 def format_grbl_settings(grbl_settings: dict[str, str]) -> list[str]:
@@ -79,14 +79,8 @@ def _load_gantry_config(gantry_name: str) -> dict[str, Any]:
 def _collect_connection_info(gantry_name: str, port: str | None) -> str:
     """Connect to the gantry and return a formatted diagnostic report."""
     config = _load_gantry_config(gantry_name)
-    gantry_config = load_gantry_from_yaml(str(project_root / "configs" / "gantry" / f"{gantry_name}.yaml"))
     report_port = port or config.get("serial_port", "<auto-scan>")
     gantry = Gantry(config=config)
-
-    if port:
-        # The low-level driver keeps the selected port on the Mill instance.
-        assert gantry._mill is not None
-        gantry._mill.port = port
 
     grbl_settings: dict[str, str] = {}
     status = "Unknown"
@@ -95,14 +89,13 @@ def _collect_connection_info(gantry_name: str, port: str | None) -> str:
     alarm = False
 
     try:
-        gantry.connect()
+        gantry.connect(port=port)
         healthy = gantry.is_healthy()
         coordinates = gantry.get_coordinates()
         status = gantry.get_status()
         alarm = "alarm" in status.lower()
-        if gantry._mill is not None:
-            grbl_settings = gantry._mill.grbl_settings()
-            report_port = getattr(gantry._mill.ser_mill, "port", report_port)
+        grbl_settings = gantry.read_grbl_settings()
+        report_port = gantry.connected_port() or report_port
     finally:
         gantry.disconnect()
 

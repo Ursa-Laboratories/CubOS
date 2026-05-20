@@ -8,10 +8,4 @@
 
 - [src.gantry.gantry_driver.driver](driver.md)
 - [src.gantry.gantry_driver.exceptions](exceptions.md)
-- [src.gantry.gantry_driver.grbl_commands](grbl_commands.md)
-- [src.gantry.gantry_driver.grbl_gcode_reference](grbl_gcode_reference.md)
-- [src.gantry.gantry_driver.instruments](instruments.md)
 - [src.gantry.gantry_driver.logger](logger.md)
-- [src.gantry.gantry_driver.mock](mock.md)
-- [src.gantry.gantry_driver.status_codes](status_codes.md)
-- [src.gantry.gantry_driver.types](types.md)

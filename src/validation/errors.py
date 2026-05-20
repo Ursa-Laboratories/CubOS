@@ -39,3 +39,27 @@ class SetupValidationError(Exception):
             f"Bounds validation failed with {len(self.violations)} violation(s):\n"
             + "\n".join(messages)
         )
+
+
+@dataclass(frozen=True)
+class ProtocolSemanticViolation:
+    """One protocol step with internally inconsistent runtime semantics."""
+
+    step_index: int
+    command_name: str
+    message: str
+
+
+class ProtocolSemanticValidationError(Exception):
+    """Raised when setup detects unsafe or contradictory protocol semantics."""
+
+    def __init__(self, violations: list[ProtocolSemanticViolation]) -> None:
+        self.violations: Tuple[ProtocolSemanticViolation, ...] = tuple(violations)
+        messages = [
+            f"  step {v.step_index} ({v.command_name}): {v.message}"
+            for v in self.violations
+        ]
+        super().__init__(
+            f"Protocol semantic validation failed with "
+            f"{len(self.violations)} violation(s):\n" + "\n".join(messages)
+        )

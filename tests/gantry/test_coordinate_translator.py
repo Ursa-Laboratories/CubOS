@@ -9,15 +9,15 @@ from gantry.coordinate_translator import (
     to_user_coordinates,
     translate_status_string,
 )
-from gantry.gantry_driver.instruments import Coordinates
+from gantry.coordinates import Coordinates
 
 
-def test_to_user_coordinates_preserves_xy_and_flips_z() -> None:
-    assert to_user_coordinates(150.0, 100.0, -40.0) == (150.0, 100.0, 40.0)
+def test_to_user_coordinates_preserves_xyz_without_sign_flip() -> None:
+    assert to_user_coordinates(150.0, 100.0, -40.0) == (150.0, 100.0, -40.0)
 
 
-def test_to_machine_coordinates_preserves_xy_and_flips_z() -> None:
-    assert to_machine_coordinates(150.0, 100.0, 40.0) == (150.0, 100.0, -40.0)
+def test_to_machine_coordinates_preserves_xyz_without_sign_flip() -> None:
+    assert to_machine_coordinates(150.0, 100.0, 40.0) == (150.0, 100.0, 40.0)
 
 
 def test_round_trip_tuple_coordinates_is_identity() -> None:
@@ -37,7 +37,7 @@ def test_coordinates_object_translation_returns_coordinates() -> None:
     machine = Coordinates(x=1.5, y=2.5, z=-3.5)
     user = to_user_coordinates(machine)
     assert isinstance(user, Coordinates)
-    assert (user.x, user.y, user.z) == (1.5, 2.5, 3.5)
+    assert (user.x, user.y, user.z) == (1.5, 2.5, -3.5)
 
     machine_again = to_machine_coordinates(user)
     assert isinstance(machine_again, Coordinates)
@@ -47,13 +47,13 @@ def test_coordinates_object_translation_returns_coordinates() -> None:
 def test_translate_status_string_wpos_coordinates() -> None:
     status = "<Idle|WPos:150.000,100.000,-40.000|FS:0,0>"
     translated = translate_status_string(status)
-    assert translated == "<Idle|WPos:150.000,100.000,40.000|FS:0,0>"
+    assert translated == "<Idle|WPos:150.000,100.000,-40.000|FS:0,0>"
 
 
 def test_translate_status_string_mpos_coordinates() -> None:
     status = "<Idle|MPos:300.5,200.25,-80.125|Bf:15,127|FS:0,0>"
     translated = translate_status_string(status)
-    assert translated == "<Idle|MPos:300.5,200.25,80.125|Bf:15,127|FS:0,0>"
+    assert translated == "<Idle|MPos:300.5,200.25,-80.125|Bf:15,127|FS:0,0>"
 
 
 def test_translate_status_string_without_coordinates_is_passthrough() -> None:
@@ -67,4 +67,4 @@ def test_translation_handles_extreme_float_values() -> None:
     ux, uy, uz = to_user_coordinates(huge, tiny, -math.pi)
     assert ux == 1e9
     assert uy == 1e-9
-    assert uz == math.pi
+    assert uz == -math.pi

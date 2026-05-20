@@ -4,15 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 
 class HomingStrategy(str, Enum):
     """Supported CNC homing strategies."""
 
-    XY_HARD_LIMITS = "xy_hard_limits"
     STANDARD = "standard"
-    MANUAL_ORIGIN = "manual_origin"
 
 
 class YAxisMotion(str, Enum):
@@ -22,12 +20,19 @@ class YAxisMotion(str, Enum):
     BED = "bed"
 
 
+class GantryType(str, Enum):
+    """Supported physical gantry families."""
+
+    CUB = "cub"
+    CUB_XL = "cub_xl"
+
+
 @dataclass(frozen=True)
 class WorkingVolume:
     """Gantry working volume bounds in millimeters.
 
-    Bounds are inclusive and may be either positive-space or negative-space,
-    depending on the gantry calibration in use.
+    Bounds are inclusive and use the CubOS deck-origin frame for supported
+    protocol execution.
     """
 
     x_min: float
@@ -60,14 +65,38 @@ class GantryConfig:
     """Loaded gantry configuration."""
 
     serial_port: str
+    gantry_type: GantryType
     homing_strategy: HomingStrategy
-    total_z_height: float
+    total_z_range: float
     working_volume: WorkingVolume
     y_axis_motion: YAxisMotion = YAxisMotion.HEAD
+    safe_z: Optional[float] = None
     expected_grbl_settings: Optional[Dict[str, float]] = field(default=None)
+    instruments: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.total_z_height <= 0:
+        try:
+            object.__setattr__(self, "gantry_type", GantryType(self.gantry_type))
+        except ValueError as exc:
             raise ValueError(
-                f"total_z_height ({self.total_z_height}) must be > 0"
+                f"Unsupported gantry_type {self.gantry_type!r}."
+            ) from exc
+        if self.total_z_range <= 0:
+            raise ValueError(
+                f"total_z_range ({self.total_z_range}) must be > 0"
             )
+        if self.safe_z is not None:
+            if not (
+                self.working_volume.z_min
+                <= self.safe_z
+                <= self.working_volume.z_max
+            ):
+                raise ValueError(
+                    "safe_z must be within the configured "
+                    "working-volume Z bounds."
+                )
+
+    @property
+    def resolved_safe_z(self) -> float:
+        """Effective safe travel Z: explicit ``safe_z`` or ``working_volume.z_max``."""
+        return self.safe_z if self.safe_z is not None else self.working_volume.z_max

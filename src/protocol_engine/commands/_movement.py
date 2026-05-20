@@ -1,70 +1,99 @@
-"""Shared movement helpers used by engaging protocol commands.
+"""Shared movement helpers for protocol commands.
 
-Every command that *engages* with a labware (measure, scan, aspirate,
-dispense, etc.) follows the same two-phase motion:
+CubOS uses a +Z-up deck frame and labware-relative action heights.
 
-    1. Approach: ``board.move_to_labware`` — retract (if below approach)
-       and travel XY at ``labware.z + safe_approach_height``.
-    2. Descend: raw ``board.move`` straight down to
-       ``labware.z + measurement_height``.
+* ``measurement_height`` and ``interwell_scan_height`` are *labware-relative*
+  offsets above (positive) or below (negative) the labware's surface
+  reference Z (the deck-frame Z carried by the resolved well/labware
+  coordinate). Both are first-class arguments to the protocol commands
+  that use them (``measure`` and ``scan`` for ``measurement_height``,
+  ``scan`` for ``interwell_scan_height``). Instruments do not carry them.
+* Inter-labware travel uses the gantry's absolute ``safe_z``, exposed on
+  ``Board.safe_z``.
 
-Centralising that composition here prevents docstring/behaviour drift
-between command modules.
+There is no inter-labware helper. Callers compose the motion explicitly:
+``board.move_to_labware`` (travels at ``safe_z``) followed by
+``board.move`` to descend to the per-labware action plane.
 """
 
 from __future__ import annotations
 
-from typing import Any, TYPE_CHECKING
+import math
+from typing import Any
 
-if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+
+def _assert_finite_number(value: Any, *, field_name: str, source: str) -> None:
+    """Reject non-numeric / non-finite values reaching the height resolver.
+
+    YAML loads `Dict[str, Any]` paths can carry strings, bools, NaN, or inf
+    that would otherwise hit late `TypeError`s deep in motion arithmetic.
+    """
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(
+            f"{source}: `{field_name}` must be a finite number, got "
+            f"{type(value).__name__} {value!r}."
+        )
+    if not math.isfinite(float(value)):
+        raise ValueError(
+            f"{source}: `{field_name}` must be a finite number, got {value!r}."
+        )
 
 
 def unpack_xyz(coord: Any) -> tuple[float, float, float]:
-    """Extract ``(x, y, z)`` from a ``Coordinate3D``-like object, a
-    tuple, or a list.
-
-    Commands receive ``coord`` from ``Deck.resolve()`` which returns a
-    ``Coordinate3D`` in production. Tests frequently pass raw tuples.
-    """
+    """Extract ``(x, y, z)`` from a ``Coordinate3D``-like object, tuple, or list."""
     if isinstance(coord, (tuple, list)):
         return (coord[0], coord[1], coord[2])
     return (coord.x, coord.y, coord.z)
 
 
-def approach_and_descend(
-    context: "ProtocolContext",
+def engage_at_labware(
+    context: Any,
     instrument: str,
-    coord: Any,
-    safe_approach_height: float | None = None,
-) -> None:
-    """Safely travel above a labware target, then descend to action Z.
+    position: str,
+    *,
+    measurement_height: float,
+    command_label: str,
+) -> tuple[float, float]:
+    """Travel above *position* at ``safe_z``, descend to the action plane.
 
-    Args:
-        context:    Runtime context (board + instruments).
-        instrument: Name of the instrument registered on the board.
-        coord:      Labware-reference point (``Coordinate3D``-like or
-                    ``(x, y, z)`` tuple).
-        safe_approach_height:
-                    Optional protocol-level override for the XY-travel
-                    absolute Z coordinate.
+    ``measurement_height`` is a labware-relative offset (mm above the
+    labware's surface reference Z, i.e. the deck-frame Z carried by the
+    resolved coordinate — the well-rim Z for plates, the tip-top Z for
+    tip racks, the vial-rim Z for vials). The gantry descends to
+    ``coord.z + measurement_height``.
+
+    Returns a ``(well_z, action_z)`` pair where ``well_z`` is the labware
+    surface reference (the resolved coordinate's Z) and ``action_z`` is
+    that reference plus ``measurement_height``. Callers forward the
+    well-surface Z to closed-loop instrument methods that compute their
+    own descent geometry from a labware-relative ``measurement_height`` /
+    ``indentation_limit_height``.
+
+    Raises:
+        ValueError: missing instrument, position, or labware on the deck;
+            non-finite ``measurement_height``. All command-boundary
+            failures surface as ``ValueError`` so callers can wrap them
+            into ``ProtocolExecutionError`` consistently.
     """
-    instr = context.board.instruments[instrument]
-    x, y, z = unpack_xyz(coord)
-    action_z = z - instr.measurement_height
-    if safe_approach_height is None:
-        context.board.move_to_labware(instrument, coord)
-    else:
-        if safe_approach_height > action_z:
-            raise ValueError(
-                f"safe_approach_height ({safe_approach_height}) must be <= "
-                f"action_z ({action_z}) for instrument {instrument!r}."
-            )
-        approach_z = safe_approach_height
-        context.board.move(
-            instrument, (x, y, approach_z), travel_z=approach_z,
-        )
-    # User-space Z is positive-down; subtract so a positive ``measurement_height``
-    # means "above the labware surface" (non-contact probes) and a negative
-    # one means "dipping into the sample" (contact instruments).
+    _assert_finite_number(
+        measurement_height, field_name="measurement_height",
+        source=f"command '{command_label}'",
+    )
+    try:
+        context.board.instruments[instrument]
+    except KeyError as exc:
+        raise ValueError(
+            f"{command_label}: unknown instrument '{instrument}'."
+        ) from exc
+    try:
+        coord = context.deck.resolve_coordinate(position)
+    except (KeyError, AttributeError, ValueError) as exc:
+        raise ValueError(
+            f"{command_label}: cannot resolve position {position!r} on the "
+            f"deck: {exc}"
+        ) from exc
+    x, y, well_z = unpack_xyz(coord)
+    action_z = well_z + measurement_height
+    context.board.move_to_labware(instrument, coord)
     context.board.move(instrument, (x, y, action_z))
+    return well_z, action_z

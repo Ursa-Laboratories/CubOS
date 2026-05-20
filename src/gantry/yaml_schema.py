@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Dict, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from instruments.yaml_schema import InstrumentYamlEntry
+
+from .grbl_settings import GrblSettingsYaml
 
 
 class WorkingVolumeYaml(BaseModel):
@@ -31,90 +35,68 @@ class WorkingVolumeYaml(BaseModel):
         return self
 
 
-class GrblSettingsYaml(BaseModel):
-    """Expected GRBL controller settings, validated against live hardware on connect.
-
-    These mirror the GRBL $ settings that affect motion behavior.
-    All fields are optional — only specified values are checked.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    dir_invert_mask: Optional[int] = None       # $3  — direction port invert bitmask
-    status_report: Optional[int] = None         # $10 — 0=WPos, 1=MPos
-    soft_limits: Optional[bool] = None          # $20
-    hard_limits: Optional[bool] = None          # $21
-    homing_enable: Optional[bool] = None        # $22
-    homing_dir_mask: Optional[int] = None       # $23 — homing direction invert bitmask
-    homing_pull_off: Optional[float] = None     # $27 — mm
-    steps_per_mm_x: Optional[float] = None      # $100
-    steps_per_mm_y: Optional[float] = None      # $101
-    steps_per_mm_z: Optional[float] = None      # $102
-    max_rate_x: Optional[float] = None          # $110 — mm/min
-    max_rate_y: Optional[float] = None          # $111
-    max_rate_z: Optional[float] = None          # $112
-    accel_x: Optional[float] = None             # $120 — mm/s²
-    accel_y: Optional[float] = None             # $121
-    accel_z: Optional[float] = None             # $122
-    max_travel_x: Optional[float] = None        # $130 — mm
-    max_travel_y: Optional[float] = None        # $131
-    max_travel_z: Optional[float] = None        # $132
-
-
-# Mapping from GrblSettingsYaml field names to GRBL $ codes
-GRBL_FIELD_TO_SETTING = {
-    "dir_invert_mask": "$3",
-    "status_report": "$10",
-    "soft_limits": "$20",
-    "hard_limits": "$21",
-    "homing_enable": "$22",
-    "homing_dir_mask": "$23",
-    "homing_pull_off": "$27",
-    "steps_per_mm_x": "$100",
-    "steps_per_mm_y": "$101",
-    "steps_per_mm_z": "$102",
-    "max_rate_x": "$110",
-    "max_rate_y": "$111",
-    "max_rate_z": "$112",
-    "accel_x": "$120",
-    "accel_y": "$121",
-    "accel_z": "$122",
-    "max_travel_x": "$130",
-    "max_travel_y": "$131",
-    "max_travel_z": "$132",
-}
-
-
 class CncYaml(BaseModel):
     """CNC gantry settings."""
 
     model_config = ConfigDict(extra="forbid")
 
-    homing_strategy: Literal["xy_hard_limits", "standard", "manual_origin"]
-    total_z_height: float
+    homing_strategy: Literal["standard"]
+    total_z_range: float
     y_axis_motion: Literal["head", "bed"] = "head"
+    safe_z: Optional[float] = None
 
     @model_validator(mode="after")
-    def _validate_total_z_height_positive(self) -> "CncYaml":
-        if self.total_z_height <= 0:
-            raise ValueError("total_z_height must be > 0.")
+    def _validate_total_z_range_positive(self) -> "CncYaml":
+        if self.total_z_range <= 0:
+            raise ValueError("total_z_range must be > 0.")
         return self
 
 
 class GantryYamlSchema(BaseModel):
-    """Root gantry YAML schema."""
+    """Root gantry YAML schema.
+
+    A gantry YAML is the machine configuration: motion envelope, controller
+    expectations, and mounted instruments.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     serial_port: str
+    gantry_type: Literal["cub", "cub_xl"]
     cnc: CncYaml
     working_volume: WorkingVolumeYaml
     grbl_settings: Optional[GrblSettingsYaml] = None
+    instruments: Dict[str, InstrumentYamlEntry] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_total_height_covers_working_z(self) -> "GantryYamlSchema":
-        if self.cnc.total_z_height < self.working_volume.z_max:
+    def _validate_total_z_range_covers_working_z(self) -> "GantryYamlSchema":
+        if self.cnc.total_z_range < self.working_volume.z_max:
             raise ValueError(
-                "cnc.total_z_height must be >= working_volume.z_max."
+                "cnc.total_z_range must be >= working_volume.z_max."
             )
         return self
+
+    @model_validator(mode="after")
+    def _validate_safe_z_within_working_volume(self) -> "GantryYamlSchema":
+        if self.cnc.safe_z is None:
+            return self
+        if not (
+            self.working_volume.z_min
+            <= self.cnc.safe_z
+            <= self.working_volume.z_max
+        ):
+            raise ValueError(
+                f"cnc.safe_z ({self.cnc.safe_z}) must be within "
+                f"[{self.working_volume.z_min}, {self.working_volume.z_max}]."
+            )
+        return self
+
+    @property
+    def safe_z(self) -> float:
+        """Resolved absolute deck-frame safe travel Z.
+
+        Defaults to ``working_volume.z_max`` when ``cnc.safe_z`` is omitted.
+        """
+        if self.cnc.safe_z is not None:
+            return self.cnc.safe_z
+        return self.working_volume.z_max

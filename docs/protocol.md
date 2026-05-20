@@ -16,29 +16,32 @@ Representative example:
 
 ```yaml
 positions:
-  safe_z: [0.0, 0.0, -50.0]
+  park_position: [360.0, 260.0, 85.0]
 
 protocol:
-  # Home the gantry and zero coordinates
+  # Home the gantry without redefining calibrated deck-origin WPos
   - home:
 
-  # Scan all wells: move to each well, run indentation
+  # Scan all wells: travel at gantry safe_z to the first well, descend to
+  # interwell_scan_height above each plate surface, then to measurement_height.
   - scan:
       plate: plate
       instrument: asmi
       method: indentation
+      # Labware-relative offsets above the well surface (negative = below).
+      measurement_height: -1.0       # 1 mm into the well surface
+      interwell_scan_height: 8.0     # 8 mm above the well for between-wells travel
+      indentation_limit_height: -5.0 # 5 mm into the well at deepest descent
       method_kwargs:
-        z_limit: -83.0
         step_size: 0.01
         force_limit: 10.0
-        measurement_height: -73.0
         baseline_samples: 10
         measure_with_return: false  # true = down + return (up) sampling
 
-  # Return to safe Z after scan
+  # Return to park position after scan
   - move:
       instrument: asmi
-      position: safe_z
+      position: park_position
 
   # Home the gantry
   - home:
@@ -76,9 +79,39 @@ The `move` command accepts:
 
 - a named position from the top-level `positions` mapping
 - raw `[x, y, z]` coordinates
-- a deck target string such as `plate_1.A1` or `vial_1`
+- a deck target string such as `plate_1.A1`, `plate_holder.plate.A1`, or
+  `vial_1`
 
-The `measure` command requires both `instrument` and `position`. It resolves the deck target, applies the instrument's `measurement_height`, moves there, and then calls the selected method. The default method is `measure`.
+The `scan` command's `plate` argument accepts a top-level well plate key or a
+nested holder path such as `plate_holder.plate`. The resolved object must be a
+`WellPlate`.
+
+The `measure` command requires `instrument`, `position`, and
+`measurement_height`. It travels XY at the gantry's absolute `safe_z`,
+descends to `well.z + measurement_height` (where `well.z` is the
+calibrated deck-frame surface Z of the resolved position), and calls
+the selected method. The default method is `measure`.
+
+## Heights on engaging commands
+
+Heights are *labware-relative* offsets above the calibrated well/labware
+surface Z (positive = above; negative = below) and are first-class
+command arguments:
+
+- `measurement_height` — required on `measure` and `scan`. Action plane
+  offset.
+- `interwell_scan_height` — required on `scan`. Between-wells XY-travel
+  offset; must be at or above `measurement_height` in +Z-up.
+- `indentation_limit_height` (ASMI scan) — signed labware-relative offset
+  (mm above the well surface; negative = below). The deepest absolute Z
+  reached during descent is `well.z + indentation_limit_height`. Must be
+  at or below `measurement_height`. Legacy `indentation_limit` (sign-agnostic
+  magnitude) and `z_limit` are rejected.
+
+Pipette commands (aspirate/dispense/etc.) engage at the labware reference
+Z (well bottom, tip top) — i.e. `measurement_height = 0` implicitly.
+Inter-labware travel and the first-well entry of a scan use the gantry's
+absolute `safe_z`, not these labware-relative fields.
 
 Example:
 
@@ -88,6 +121,7 @@ protocol:
       instrument: uvvis
       position: plate_1.A1
       method: measure
+      measurement_height: 3.0
 ```
 
 ## Where Commands Live

@@ -101,18 +101,18 @@ class TestCampaignCRUD:
         store = _make_store()
         cid = store.create_campaign(
             description="test",
-            deck_config="configs/deck.yaml",
-            board_config="configs/board.yaml",
-            gantry_config="configs/gantry.yaml",
-            protocol_config="configs/protocol.yaml",
+            deck_config="mock/deck.yaml",
+            board_config="legacy-board.yaml",
+            gantry_config="mock/gantry.yaml",
+            protocol_config="mock/protocol.yaml",
         )
         row = store._conn.execute(
             "SELECT deck_config, board_config, gantry_config, protocol_config "
             "FROM campaigns WHERE id = ?",
             (cid,),
         ).fetchone()
-        assert row == ("configs/deck.yaml", "configs/board.yaml",
-                       "configs/gantry.yaml", "configs/protocol.yaml")
+        assert row == ("mock/deck.yaml", "legacy-board.yaml",
+                       "mock/gantry.yaml", "mock/protocol.yaml")
         store.close()
 
     def test_default_status(self):

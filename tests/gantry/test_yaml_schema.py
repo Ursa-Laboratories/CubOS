@@ -11,7 +11,8 @@ from gantry.yaml_schema import GantryYamlSchema
 def _valid_gantry_dict() -> dict:
     return {
         "serial_port": "/dev/cu.usbserial-2130",
-        "cnc": {"homing_strategy": "xy_hard_limits", "total_z_height": 90.0},
+        "gantry_type": "cub_xl",
+        "cnc": {"homing_strategy": "standard", "total_z_range": 90.0},
         "working_volume": {
             "x_min": 0.0,
             "x_max": 300.0,
@@ -30,8 +31,9 @@ class TestGantryYamlSchema:
         schema = GantryYamlSchema.model_validate(data)
 
         assert schema.serial_port == "/dev/cu.usbserial-2130"
-        assert schema.cnc.homing_strategy == "xy_hard_limits"
-        assert schema.cnc.total_z_height == 90.0
+        assert schema.gantry_type == "cub_xl"
+        assert schema.cnc.homing_strategy == "standard"
+        assert schema.cnc.total_z_range == 90.0
         assert schema.working_volume.x_min == 0.0
         assert schema.working_volume.x_max == 300.0
         assert schema.working_volume.y_min == 0.0
@@ -39,9 +41,8 @@ class TestGantryYamlSchema:
         assert schema.working_volume.z_min == 0.0
         assert schema.working_volume.z_max == 80.0
 
-    def test_standard_homing_strategy_accepted(self):
+    def test_only_standard_homing_strategy_accepted(self):
         data = _valid_gantry_dict()
-        data["cnc"]["homing_strategy"] = "standard"
         schema = GantryYamlSchema.model_validate(data)
         assert schema.cnc.homing_strategy == "standard"
 
@@ -55,6 +56,24 @@ class TestGantryYamlSchema:
         data = _valid_gantry_dict()
         del data["serial_port"]
         with pytest.raises(ValidationError, match="serial_port"):
+            GantryYamlSchema.model_validate(data)
+
+    def test_missing_gantry_type_raises(self):
+        data = _valid_gantry_dict()
+        del data["gantry_type"]
+        with pytest.raises(ValidationError, match="gantry_type"):
+            GantryYamlSchema.model_validate(data)
+
+    def test_cub_gantry_type_is_accepted(self):
+        data = _valid_gantry_dict()
+        data["gantry_type"] = "cub"
+        schema = GantryYamlSchema.model_validate(data)
+        assert schema.gantry_type == "cub"
+
+    def test_unknown_gantry_type_rejected(self):
+        data = _valid_gantry_dict()
+        data["gantry_type"] = "other_machine"
+        with pytest.raises(ValidationError, match="gantry_type"):
             GantryYamlSchema.model_validate(data)
 
     def test_missing_cnc_section_raises(self):
@@ -104,22 +123,70 @@ class TestGantryYamlSchema:
         with pytest.raises(ValidationError, match="x_min"):
             GantryYamlSchema.model_validate(data)
 
-    def test_missing_total_z_height_raises(self):
+    def test_missing_total_z_range_raises(self):
         data = _valid_gantry_dict()
-        del data["cnc"]["total_z_height"]
-        with pytest.raises(ValidationError, match="total_z_height"):
+        del data["cnc"]["total_z_range"]
+        with pytest.raises(ValidationError, match="total_z_range"):
             GantryYamlSchema.model_validate(data)
 
-    def test_total_z_height_must_be_positive(self):
+    def test_total_z_range_must_be_positive(self):
         data = _valid_gantry_dict()
-        data["cnc"]["total_z_height"] = 0.0
-        with pytest.raises(ValidationError, match="total_z_height"):
+        data["cnc"]["total_z_range"] = 0.0
+        with pytest.raises(ValidationError, match="total_z_range"):
             GantryYamlSchema.model_validate(data)
 
-    def test_total_z_height_must_cover_working_z_max(self):
+    def test_total_z_range_must_cover_working_z_max(self):
         data = _valid_gantry_dict()
-        data["cnc"]["total_z_height"] = 79.9
-        with pytest.raises(ValidationError, match="total_z_height"):
+        data["cnc"]["total_z_range"] = 79.9
+        with pytest.raises(ValidationError, match="total_z_range"):
+            GantryYamlSchema.model_validate(data)
+
+    def test_safe_z_is_optional_and_parsed(self):
+        data = _valid_gantry_dict()
+        data["cnc"]["safe_z"] = 75.0
+        schema = GantryYamlSchema.model_validate(data)
+        assert schema.cnc.safe_z == 75.0
+        assert schema.safe_z == 75.0
+
+    def test_safe_z_defaults_to_z_max_when_omitted(self):
+        data = _valid_gantry_dict()
+        schema = GantryYamlSchema.model_validate(data)
+        assert schema.cnc.safe_z is None
+        assert schema.safe_z == schema.working_volume.z_max
+
+    def test_safe_z_above_z_max_rejected(self):
+        data = _valid_gantry_dict()
+        data["cnc"]["safe_z"] = data["working_volume"]["z_max"] + 1.0
+        with pytest.raises(ValidationError, match="safe_z"):
+            GantryYamlSchema.model_validate(data)
+
+    def test_safe_z_below_z_min_rejected(self):
+        data = _valid_gantry_dict()
+        data["cnc"]["safe_z"] = data["working_volume"]["z_min"] - 1.0
+        with pytest.raises(ValidationError, match="safe_z"):
+            GantryYamlSchema.model_validate(data)
+
+    def test_old_structure_clearance_z_field_rejected(self):
+        data = _valid_gantry_dict()
+        data["cnc"]["structure_clearance_z"] = 75.0
+        with pytest.raises(ValidationError):
+            GantryYamlSchema.model_validate(data)
+
+    def test_machine_structures_yaml_is_rejected(self):
+        data = _valid_gantry_dict()
+        data["machine_structures"] = {
+            "right_x_max_rail": {
+                "type": "box",
+                "x_min": 480.0,
+                "x_max": 540.0,
+                "y_min": 0.0,
+                "y_max": 300.0,
+                "z_min": 0.0,
+                "z_max": 100.0,
+            }
+        }
+
+        with pytest.raises(ValidationError, match="machine_structures"):
             GantryYamlSchema.model_validate(data)
 
     def test_extra_top_level_key_rejected(self):
@@ -138,6 +205,44 @@ class TestGantryYamlSchema:
         data = _valid_gantry_dict()
         data["cnc"]["extra_field"] = "value"
         with pytest.raises(ValidationError):
+            GantryYamlSchema.model_validate(data)
+
+    def test_instruments_are_parsed_when_present(self):
+        data = _valid_gantry_dict()
+        data["instruments"] = {
+            "asmi": {
+                "type": "asmi",
+                "vendor": "vernier",
+                "sensor_channels": [1],
+            }
+        }
+        schema = GantryYamlSchema.model_validate(data)
+        assert schema.instruments["asmi"].type == "asmi"
+        assert schema.instruments["asmi"].model_extra["sensor_channels"] == [1]
+
+    def test_instrument_measurement_height_rejected_with_migration_hint(self):
+        """A stale `measurement_height:` on the instrument YAML must fail
+        loudly. With ``extra="allow"`` it would otherwise slip through
+        ``**kwargs`` for drivers that accept them, silently doing nothing."""
+        data = _valid_gantry_dict()
+        data["instruments"] = {
+            "filmetrics": {
+                "type": "filmetrics", "vendor": "kla",
+                "measurement_height": -1.0,
+            },
+        }
+        with pytest.raises(ValidationError, match="measurement_height"):
+            GantryYamlSchema.model_validate(data)
+
+    def test_instrument_interwell_scan_height_rejected_with_migration_hint(self):
+        data = _valid_gantry_dict()
+        data["instruments"] = {
+            "asmi": {
+                "type": "asmi", "vendor": "vernier",
+                "interwell_scan_height": 8.0,
+            },
+        }
+        with pytest.raises(ValidationError, match="interwell_scan_height"):
             GantryYamlSchema.model_validate(data)
 
 

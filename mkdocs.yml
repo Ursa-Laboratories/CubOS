@@ -7,11 +7,14 @@ nav:
   - Home: index.md
   - Getting Started: getting-started.md
   - Configuration: configuration.md
+  - Calibration: calibration.md
   - Gantry: gantry.md
   - Deck: deck.md
   - Board: board.md
   - Protocol: protocol.md
   - Data: data.md
+  - Admin:
+    - Gantry Bring-Up: admin/gantry-bring-up.md
   - API Reference:
     - Overview: reference/index.md
     - board: reference/src/board/index.md

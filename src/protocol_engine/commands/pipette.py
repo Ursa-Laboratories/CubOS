@@ -10,7 +10,7 @@ from deck.labware.well_plate import WellPlate
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
-from ._movement import approach_and_descend
+from ._movement import engage_at_labware
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +26,24 @@ def _get_pipette(context: ProtocolContext):
             "Add one via Board(instruments={'pipette': ...})"
         )
     return context.board.instruments["pipette"]
+
+
+def _engage(context: ProtocolContext, position: str, *, command_label: str) -> float:
+    """Wrap ``engage_at_labware`` so configuration errors surface as
+    ``ProtocolExecutionError`` instead of bare ``ValueError``s — matching
+    how ``measure`` and ``scan`` handle their command boundary.
+
+    Pipette commands engage at the labware reference Z (well bottom,
+    tip top, etc.) — i.e. ``measurement_height=0``. Per-command Z offsets
+    aren't surfaced here yet; raise an issue if you need them."""
+    try:
+        _, action_z = engage_at_labware(
+            context, "pipette", position,
+            measurement_height=0.0, command_label=command_label,
+        )
+        return action_z
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
 
 
 def _parse_position(position: str) -> tuple[str, Optional[str]]:
@@ -64,9 +82,8 @@ def aspirate(
     speed: float = 50.0,
 ) -> Any:
     """Move pipette to *position*, then aspirate."""
-    coord = context.deck.resolve(position)
     pipette = _get_pipette(context)
-    approach_and_descend(context, "pipette", coord)
+    _engage(context, position, command_label="aspirate")
     return pipette.aspirate(volume_ul, speed)
 
 
@@ -81,9 +98,8 @@ def dispense(
     Not exposed as a YAML protocol command — use ``transfer`` instead,
     which correctly tracks source labware for DB logging.
     """
-    coord = context.deck.resolve(position)
     pipette = _get_pipette(context)
-    approach_and_descend(context, "pipette", coord)
+    _engage(context, position, command_label="dispense")
     return pipette.dispense(volume_ul, speed)
 
 
@@ -94,9 +110,8 @@ def blowout(
     speed: float = 50.0,
 ) -> None:
     """Move pipette to *position*, then blowout."""
-    coord = context.deck.resolve(position)
     pipette = _get_pipette(context)
-    approach_and_descend(context, "pipette", coord)
+    _engage(context, position, command_label="blowout")
     pipette.blowout(speed)
 
 
@@ -109,9 +124,8 @@ def mix(
     speed: float = 50.0,
 ) -> Any:
     """Move pipette to *position*, then mix."""
-    coord = context.deck.resolve(position)
     pipette = _get_pipette(context)
-    approach_and_descend(context, "pipette", coord)
+    _engage(context, position, command_label="mix")
     return pipette.mix(volume_ul, repetitions, speed)
 
 
@@ -122,9 +136,8 @@ def pick_up_tip(
     speed: float = 50.0,
 ) -> None:
     """Move pipette to *position*, then pick up a tip."""
-    coord = context.deck.resolve(position)
     pipette = _get_pipette(context)
-    approach_and_descend(context, "pipette", coord)
+    _engage(context, position, command_label="pick_up_tip")
     pipette.pick_up_tip(speed)
 
 
@@ -137,12 +150,10 @@ def transfer(
     speed: float = 50.0,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*."""
-    source_coord = context.deck.resolve(source)
-    dest_coord = context.deck.resolve(destination)
     pipette = _get_pipette(context)
-    approach_and_descend(context, "pipette", source_coord)
+    _engage(context, source, command_label="transfer.aspirate")
     pipette.aspirate(volume_ul, speed)
-    approach_and_descend(context, "pipette", dest_coord)
+    _engage(context, destination, command_label="transfer.dispense")
     pipette.dispense(volume_ul, speed)
 
     source_key, _ = _parse_position(source)
@@ -157,9 +168,8 @@ def drop_tip(
     speed: float = 50.0,
 ) -> None:
     """Move pipette to *position*, then drop the tip."""
-    coord = context.deck.resolve(position)
     pipette = _get_pipette(context)
-    approach_and_descend(context, "pipette", coord)
+    _engage(context, position, command_label="drop_tip")
     pipette.drop_tip(speed)
 
 
@@ -204,7 +214,10 @@ def serial_transfer(
     """
     _get_pipette(context)
 
-    plate_obj = context.deck[plate]
+    try:
+        plate_obj = context.deck.resolve_labware(plate)
+    except KeyError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     if not isinstance(plate_obj, WellPlate):
         raise ProtocolExecutionError(
             f"serial_transfer requires a WellPlate, but '{plate}' is "

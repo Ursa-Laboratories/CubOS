@@ -24,9 +24,9 @@ def _make_plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_96",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=2,
         wells={
@@ -44,8 +44,8 @@ def _make_vial() -> Vial:
     return Vial(
         name="reagent_vial",
         model_name="test_vial",
-        height_mm=50.0,
-        diameter_mm=20.0,
+        height=50.0,
+        diameter=20.0,
         location=Coordinate3D(x=50.0, y=0.0, z=0.0),
         capacity_ul=5000.0,
         working_volume_ul=4000.0,
@@ -81,7 +81,7 @@ class TestFullProtocolWithDataStore:
         labware_map = {"plate_1": plate, "reagent_vial": vial}
 
         sensor = _FakeUVVis(
-            name="uvvis", offset_x=0.0, offset_y=0.0, depth=0.0
+            name="uvvis", offset_x=0.0, offset_y=0.0, depth=0.0,
         )
         pipette = MagicMock()
 
@@ -90,13 +90,14 @@ class TestFullProtocolWithDataStore:
 
         deck = MagicMock()
         deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
-        deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
 
         store = DataStore(db_path=":memory:")
         cid = store.create_campaign(
             description="integration test",
-            deck_config="configs/deck.yaml",
-            protocol_config="configs/protocol.yaml",
+            deck_config="mock/deck.yaml",
+            protocol_config="mock/protocol.yaml",
         )
         store.register_labware(cid, "plate_1", plate)
         store.register_labware(cid, "reagent_vial", vial)
@@ -122,7 +123,7 @@ class TestFullProtocolWithDataStore:
         assert len(contents_b1) == 1
 
         # Step 2: Scan entire plate
-        results = scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        results = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
         assert len(results) == 4
 
         # Verify DB rows
@@ -167,7 +168,7 @@ class TestFullProtocolWithoutDataStore:
         labware_map = {"plate_1": plate, "reagent_vial": vial}
 
         sensor = _FakeUVVis(
-            name="uvvis", offset_x=0.0, offset_y=0.0, depth=0.0
+            name="uvvis", offset_x=0.0, offset_y=0.0, depth=0.0,
         )
         pipette = MagicMock()
 
@@ -176,7 +177,8 @@ class TestFullProtocolWithoutDataStore:
 
         deck = MagicMock()
         deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
-        deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
 
         ctx = ProtocolContext(
             board=board,
@@ -185,7 +187,7 @@ class TestFullProtocolWithoutDataStore:
         )
 
         transfer(ctx, source="reagent_vial", destination="plate_1.A1", volume_ul=50.0)
-        results = scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        results = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
 
         assert len(results) == 4
         assert all(isinstance(v, UVVisSpectrum) for v in results.values())

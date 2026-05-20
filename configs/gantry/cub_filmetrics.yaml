@@ -1,11 +1,20 @@
-# CubOS — Genmitsu 3018 PROVer V2 (standard gantry)
-# Positive-space XY after xy_hard_limits homing. Z positive (down from home).
+# Filmetrics gantry configuration for the CubOS deck-origin frame.
+#
+# This translates configs/gantry/cub_filmetrics.yaml into the CubOS deck frame:
+# front-left-bottom origin, +X right, +Y back, +Z up, -Z down.
+# Confirm live GRBL settings, homing corner, jog directions, and usable Z travel
+# before running on hardware.
 
 serial_port: /dev/ttyUSB0
+gantry_type: cub
+
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
   y_axis_motion: head
+  # Absolute deck-frame Z used for inter-labware travel and the entry
+  # approach to the first well of a scan.
+  safe_z: 80.0
 
 working_volume:
   x_min: 0.0
@@ -13,14 +22,16 @@ working_volume:
   y_min: 0.0
   y_max: 175.0
   z_min: 0.0
-  z_max: 36.0
+  z_max: 90.0
 
 grbl_settings:
-  dir_invert_mask: 2  # $3
+  # Copied from the legacy Filmetrics controller config as a starting point.
+  # Re-verify live settings before trusting physical motion.
+  dir_invert_mask: 2
   status_report: 0
   hard_limits: true
   homing_enable: true
-  homing_dir_mask: 0  # $23
+  homing_dir_mask: 0
   homing_pull_off: 2.0
   steps_per_mm_x: 800.0
   steps_per_mm_y: 800.0
@@ -34,3 +45,15 @@ grbl_settings:
   max_travel_x: 300.0
   max_travel_y: 200.0
   max_travel_z: 80.0
+
+instruments:
+  filmetrics:
+    type: filmetrics
+    vendor: kla
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    # Labware-relative motion heights live on the protocol command.
+    exe_path: ""
+    recipe_name: ""

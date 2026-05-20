@@ -1,4 +1,15 @@
-"""Tests for the scan protocol command."""
+"""Tests for the scan protocol command.
+
+The scan command's per-well motion under the labware-relative model is:
+
+* **First well of the plate**: ``move_to_labware`` (travels XY at gantry
+  ``safe_z``) → raw move to ``height + interwell_scan_height`` →
+  raw move to ``height + measurement_height`` → call instrument method.
+* **Subsequent wells**: raw move to ``height + interwell_scan_height``
+  with ``travel_z`` set so XY travel happens at that height → raw move to
+  the action plane → call instrument method.
+* **End of scan**: raw move that lifts back to ``height + interwell_scan_height``.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +18,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
+from deck.labware.well_plate_holder import WellPlateHolder
 from instruments.base_instrument import BaseInstrument
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.errors import ProtocolExecutionError
@@ -16,23 +29,27 @@ from protocol_engine.measurements import InstrumentMeasurement
 from protocol_engine.protocol import ProtocolContext
 
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
+HEIGHT_MM = 14.10
+SAFE_APPROACH = 10.0
+MEASUREMENT = 1.0
+APPROACH_ABS = HEIGHT_MM + SAFE_APPROACH
+ACTION_ABS = HEIGHT_MM + MEASUREMENT
 
 
 def _make_2x2_plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_96",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=HEIGHT_MM,
         rows=2,
         columns=2,
         wells={
-            "A1": Coordinate3D(x=0.0, y=0.0, z=75.0),
-            "A2": Coordinate3D(x=10.0, y=0.0, z=75.0),
-            "B1": Coordinate3D(x=0.0, y=8.0, z=75.0),
-            "B2": Coordinate3D(x=10.0, y=8.0, z=75.0),
+            "A1": Coordinate3D(x=0.0, y=0.0, z=HEIGHT_MM),
+            "A2": Coordinate3D(x=10.0, y=0.0, z=HEIGHT_MM),
+            "B1": Coordinate3D(x=0.0, y=8.0, z=HEIGHT_MM),
+            "B2": Coordinate3D(x=10.0, y=8.0, z=HEIGHT_MM),
         },
         capacity_ul=200.0,
         working_volume_ul=150.0,
@@ -43,31 +60,51 @@ def _make_2x3_plate() -> WellPlate:
     return WellPlate(
         name="plate_2",
         model_name="test_model",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=HEIGHT_MM,
         rows=2,
         columns=3,
         wells={
-            "A1": Coordinate3D(x=0.0, y=0.0, z=75.0),
-            "A2": Coordinate3D(x=10.0, y=0.0, z=75.0),
-            "A3": Coordinate3D(x=20.0, y=0.0, z=75.0),
-            "B1": Coordinate3D(x=0.0, y=8.0, z=75.0),
-            "B2": Coordinate3D(x=10.0, y=8.0, z=75.0),
-            "B3": Coordinate3D(x=20.0, y=8.0, z=75.0),
+            "A1": Coordinate3D(x=0.0, y=0.0, z=HEIGHT_MM),
+            "A2": Coordinate3D(x=10.0, y=0.0, z=HEIGHT_MM),
+            "A3": Coordinate3D(x=20.0, y=0.0, z=HEIGHT_MM),
+            "B1": Coordinate3D(x=0.0, y=8.0, z=HEIGHT_MM),
+            "B2": Coordinate3D(x=10.0, y=8.0, z=HEIGHT_MM),
+            "B3": Coordinate3D(x=20.0, y=8.0, z=HEIGHT_MM),
         },
         capacity_ul=200.0,
         working_volume_ul=150.0,
     )
 
 
-class _FakeSensor(BaseInstrument):
-    """Concrete BaseInstrument subclass for scan tests."""
+def _make_8x12_plate() -> WellPlate:
+    wells = {}
+    for row_index, row_label in enumerate("ABCDEFGH"):
+        for column in range(1, 13):
+            wells[f"{row_label}{column}"] = Coordinate3D(
+                x=float(row_index * 9.0),
+                y=float((column - 1) * 9.0),
+                z=HEIGHT_MM,
+            )
+    return WellPlate(
+        name="plate",
+        model_name="test_96",
+        length=127.76,
+        width=85.47,
+        height=HEIGHT_MM,
+        rows=8,
+        columns=12,
+        wells=wells,
+        capacity_ul=200.0,
+        working_volume_ul=150.0,
+    )
 
+
+class _FakeSensor(BaseInstrument):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.call_count = 0
-        self.received_plates = []
         self._return_value = True
 
     def connect(self) -> None:
@@ -82,6 +119,22 @@ class _FakeSensor(BaseInstrument):
     def measure(self) -> bool:
         self.call_count += 1
         return self._return_value
+
+    def indentation(
+        self,
+        *,
+        measurement_height: float,
+        indentation_limit_height: float,
+        well_z: float,
+        gantry=None,
+    ) -> dict:
+        self.call_count += 1
+        return {
+            "measurement_height": measurement_height,
+            "indentation_limit_height": indentation_limit_height,
+            "well_z": well_z,
+            "gantry": gantry,
+        }
 
 
 def _make_sensor(**kwargs) -> _FakeSensor:
@@ -99,9 +152,7 @@ def _mock_context(
 
     board = MagicMock()
     board.instruments = {"uvvis": sensor}
-
-    deck = MagicMock()
-    deck.__getitem__ = MagicMock(return_value=plate)
+    deck = Deck({plate.name: plate})
 
     return ProtocolContext(
         board=board,
@@ -110,301 +161,308 @@ def _mock_context(
     )
 
 
-# ─── Tests ────────────────────────────────────────────────────────────────────
+def _scan_args(**overrides):
+    args = {
+        "plate": "plate_1",
+        "instrument": "uvvis",
+        "method": "measure",
+        "measurement_height": MEASUREMENT,
+        "interwell_scan_height": SAFE_APPROACH,
+    }
+    args.update(overrides)
+    return args
 
 
 class TestScanCommand:
 
-    def test_moves_instrument_to_each_well(self):
+    def test_first_well_uses_move_to_labware(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
-        sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        scan(ctx, **_scan_args())
 
-        assert ctx.board.move_to_labware.call_count == 4
+        assert ctx.board.move_to_labware.call_count == 1
 
     def test_visits_wells_in_row_major_order(self):
         from protocol_engine.commands.scan import scan
 
         plate = _make_2x3_plate()
-        sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context(plate=plate)
 
-        scan(ctx, plate="plate_2", instrument="uvvis", method="measure")
+        scan(ctx, plate="plate_2", instrument="uvvis", method="measure",
+             measurement_height=MEASUREMENT, interwell_scan_height=SAFE_APPROACH)
 
-        # Row-major: A1, A2, A3, B1, B2, B3
-        move_calls = ctx.board.move_to_labware.call_args_list
-        positions = [c.args[1] for c in move_calls]
-        xs = [p.x for p in positions]
+        action_zs = [
+            c for c in ctx.board.move.call_args_list
+            if c.args[1][2] == ACTION_ABS
+        ]
+        xs = [c.args[1][0] for c in action_zs]
         assert xs == [0.0, 10.0, 20.0, 0.0, 10.0, 20.0]
 
-    def test_passes_raw_well_coord_to_move_to_labware(self):
-        # scan delegates safe approach to Board.move_to_labware; descent
-        # to action Z happens in scan's subsequent raw board.move call.
+    def test_per_well_motion_uses_relative_offsets(self):
+        """First well: move_to_labware → approach Z → action Z.
+        Subsequent wells: approach (with travel_z) → action Z.
+        Plus a final retract."""
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()  # wells at z=75.0
-        sensor = _make_sensor(measurement_height=3.0)
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        scan(ctx, **_scan_args())
 
-        move_calls = ctx.board.move_to_labware.call_args_list
-        zs = [c.args[1].z for c in move_calls]
-        # Raw well z — offset is applied inside move_to_labware.
-        assert zs == [75.0, 75.0, 75.0, 75.0]
+        zs = [c.args[1][2] for c in ctx.board.move.call_args_list]
+        assert zs == [
+            APPROACH_ABS, ACTION_ABS,    # A1
+            APPROACH_ABS, ACTION_ABS,    # A2
+            APPROACH_ABS, ACTION_ABS,    # B1
+            APPROACH_ABS, ACTION_ABS,    # B2
+            APPROACH_ABS,                # final retract
+        ]
 
-    def test_descends_to_action_z_after_approach_per_well(self):
-        """scan must emit the descent raw-move per well at
-        well.z - measurement_height. A regression dropping this line
-        would leave the instrument floating at safe_approach_height."""
+    def test_first_well_descend_does_not_pass_travel_z(self):
+        """Action descents must NOT pass travel_z (would re-introduce
+        the lift-then-drop detour)."""
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()  # wells at z=75.0
-        sensor = _make_sensor(measurement_height=3.0, safe_approach_height=10.0)
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        scan(ctx, **_scan_args())
 
-        # 4 wells => 4 descent calls + 1 retract after last well.
-        assert ctx.board.move.call_count == 5
-        move_zs = [c.args[1][2] for c in ctx.board.move.call_args_list]
-        # First 4: action_z = 75 - 3 = 72 (descent to measurement_height).
-        # Last: approach_z = 75 - 10 = 65 (retract to safe_approach_height).
-        assert move_zs == [72.0, 72.0, 72.0, 72.0, 65.0]
+        action_calls = [
+            c for c in ctx.board.move.call_args_list
+            if c.args[1][2] == ACTION_ABS
+        ]
+        for call in action_calls:
+            assert call.kwargs.get("travel_z") is None
 
-    def test_protocol_safe_approach_height_override_is_used_for_every_well(self):
+    def test_subsequent_wells_use_travel_z_for_xy_at_approach(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()  # wells at z=75.0
-        sensor = _make_sensor(measurement_height=3.0, safe_approach_height=10.0)
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
-        scan(
-            ctx,
-            plate="plate_1",
-            instrument="uvvis",
-            method="measure",
-            safe_approach_height=20.0,
-        )
+        scan(ctx, **_scan_args())
 
-        ctx.board.move_to_labware.assert_not_called()
-        # 4 wells => 4 approach calls + 4 descent calls + 1 final retract.
-        assert ctx.board.move.call_count == 9
-        move_zs = [c.args[1][2] for c in ctx.board.move.call_args_list]
-        assert move_zs == [20.0, 72.0, 20.0, 72.0, 20.0, 72.0, 20.0, 72.0, 20.0]
-        approach_calls = ctx.board.move.call_args_list[:-1:2]
+        approach_calls = [
+            c for c in ctx.board.move.call_args_list
+            if c.args[1][2] == APPROACH_ABS and c.kwargs.get("travel_z") is not None
+        ]
+        assert len(approach_calls) == 4
         for call in approach_calls:
-            assert call.kwargs["travel_z"] == 20.0
+            assert call.kwargs["travel_z"] == APPROACH_ABS
 
-    def test_final_retract_uses_protocol_safe_approach_height_override(self):
+    def test_final_retract_returns_to_safe_approach(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()  # wells at z=75.0
-        sensor = _make_sensor(measurement_height=3.0, safe_approach_height=10.0)
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
-        scan(
-            ctx,
-            plate="plate_1",
-            instrument="uvvis",
-            method="measure",
-            safe_approach_height=20.0,
-        )
+        scan(ctx, **_scan_args())
 
         last_move = ctx.board.move.call_args_list[-1]
         instr_name, position = last_move.args
         assert instr_name == "uvvis"
-        assert position == (10.0, 8.0, 20.0)
-        assert last_move.kwargs == {}
+        assert position == (10.0, 8.0, APPROACH_ABS)
+        assert last_move.kwargs.get("travel_z") == APPROACH_ABS
 
-    def test_entry_travel_z_applies_only_to_first_well(self):
+    def test_measurement_height_from_command_arg_drives_action_z(self):
+        """Action plane is `plate.height + scan.measurement_height`."""
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()  # wells at z=75.0
-        sensor = _make_sensor(measurement_height=3.0, safe_approach_height=10.0)
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
-        scan(
-            ctx,
-            plate="plate_1",
-            instrument="uvvis",
-            method="measure",
-            entry_travel_z=30.0,
-            safe_approach_height=20.0,
+        scan(ctx, **_scan_args(measurement_height=2.0))
+
+        action_zs = [
+            c.args[1][2] for c in ctx.board.move.call_args_list
+            if c.args[1][2] == HEIGHT_MM + 2.0
+        ]
+        assert len(action_zs) == 4
+
+    def test_missing_measurement_height_rejected(self):
+        from protocol_engine.commands.scan import scan
+
+        ctx = _mock_context()
+
+        args = _scan_args()
+        args.pop("measurement_height")
+        with pytest.raises(TypeError, match="measurement_height"):
+            scan(ctx, **args)
+
+    def test_missing_interwell_scan_height_rejected(self):
+        from protocol_engine.commands.scan import scan
+
+        ctx = _mock_context()
+
+        args = _scan_args()
+        args.pop("interwell_scan_height")
+        with pytest.raises(TypeError, match="interwell_scan_height"):
+            scan(ctx, **args)
+
+    def test_safe_approach_below_measurement_rejected(self):
+        from protocol_engine.commands.scan import scan
+
+        ctx = _mock_context()
+
+        with pytest.raises(ProtocolExecutionError, match="Approach must be at or above"):
+            scan(ctx, **_scan_args(measurement_height=5.0, interwell_scan_height=2.0))
+
+    def test_relative_offsets_and_well_z_passed_to_method_when_supported(self):
+        """When the method signature has ``measurement_height`` /
+        ``indentation_limit_height`` / ``well_z``, the engine forwards
+        the user's relative offsets verbatim and injects ``well_z`` from
+        the plate's calibrated well coordinate. The instrument resolves
+        absolute Z values internally."""
+        from protocol_engine.commands.scan import scan
+
+        ctx = _mock_context()
+        ctx.board.gantry = object()
+
+        results = scan(
+            ctx, plate="plate_1", instrument="uvvis", method="indentation",
+            measurement_height=2.0,
+            interwell_scan_height=SAFE_APPROACH,
+            indentation_limit_height=-5.0,   # 5 mm into the well at deepest
         )
 
-        move_zs = [c.args[1][2] for c in ctx.board.move.call_args_list]
-        assert move_zs == [30.0, 72.0, 20.0, 72.0, 20.0, 72.0, 20.0, 72.0, 20.0]
+        for r in results.values():
+            assert r["measurement_height"] == 2.0
+            assert r["indentation_limit_height"] == -5.0
+            assert r["well_z"] == HEIGHT_MM
 
-        first_move = ctx.board.move.call_args_list[0]
-        assert first_move.kwargs == {"travel_z": 30.0}
-        later_approaches = ctx.board.move.call_args_list[2:-1:2]
-        for call in later_approaches:
-            assert call.kwargs == {"travel_z": 20.0}
-
-    def test_descent_and_retract_moves_do_not_pass_travel_z(self):
-        """Regression guard: raw moves (descent per well + final retract)
-        must NOT pass a travel_z. If they did, the gantry would lift to
-        travel_z before moving — reintroducing the original detour bug."""
+    def test_legacy_z_limit_rejected_at_runtime(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
-        sensor = _make_sensor(measurement_height=3.0, safe_approach_height=10.0)
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
-
-        for call in ctx.board.move.call_args_list:
-            assert call.kwargs.get("travel_z") is None, (
-                f"raw move must not pass travel_z; got {call.kwargs!r}"
+        with pytest.raises(ProtocolExecutionError, match="z_limit"):
+            scan(
+                ctx, plate="plate_1", instrument="uvvis", method="indentation",
+                measurement_height=MEASUREMENT,
+                interwell_scan_height=SAFE_APPROACH,
+                method_kwargs={"z_limit": 5.0},
             )
 
-    def test_approach_then_descend_then_method_per_well(self):
-        """Per-well call order: move_to_labware -> move (descent) -> method,
-        followed by a final retract move after the last well."""
+    def test_legacy_interwell_travel_height_rejected(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
-        sensor = _make_sensor(measurement_height=3.0)
-        ctx = _mock_context(plate=plate, sensor=sensor)
-        order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **k: order.append("approach")
-        ctx.board.move.side_effect = lambda *a, **k: order.append("move")
-        sensor.measure = lambda *a, **k: (order.append("measure") or "ok")
+        ctx = _mock_context()
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
-
-        assert order == ["approach", "move", "measure"] * 4 + ["move"]
-
-    def test_retracts_to_safe_approach_height_after_last_well(self):
-        """After the last measurement, the gantry must retract to
-        safe_approach_height above the last well."""
-        from protocol_engine.commands.scan import scan
-
-        plate = _make_2x2_plate()  # wells at z=75.0
-        sensor = _make_sensor(measurement_height=3.0, safe_approach_height=10.0)
-        ctx = _mock_context(plate=plate, sensor=sensor)
-
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
-
-        last_move = ctx.board.move.call_args_list[-1]
-        instr_name, position = last_move.args
-        assert instr_name == "uvvis"
-        # Last well in row-major order is B2 at (10, 8, 75).
-        # Retract z = 75 - 10 = 65.
-        assert position == (10.0, 8.0, 65.0)
+        with pytest.raises(ProtocolExecutionError, match="interwell_travel_height"):
+            scan(
+                ctx, plate="plate_1", instrument="uvvis", method="measure",
+                measurement_height=MEASUREMENT,
+                interwell_scan_height=SAFE_APPROACH,
+                method_kwargs={"interwell_travel_height": 5.0},
+            )
 
     def test_returns_dict_of_results_per_well(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
-        sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
-        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        result = scan(ctx, **_scan_args())
 
-        assert isinstance(result, dict)
         assert set(result.keys()) == {"A1", "A2", "B1", "B2"}
         assert all(v is True for v in result.values())
 
     def test_captures_false_results(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
         sensor = _make_sensor()
         sensor._return_value = False
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context(sensor=sensor)
 
-        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        result = scan(ctx, **_scan_args())
 
         assert all(v is False for v in result.values())
 
     def test_calls_method_once_per_well(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
         sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context(sensor=sensor)
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        scan(ctx, **_scan_args())
 
         assert sensor.call_count == 4
 
-    def test_method_called_with_no_args(self):
+    def test_nested_holder_plate_scans_all_96_wells(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
+        plate = _make_8x12_plate()
         sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        holder = WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"plate": plate},
+        )
+        board = MagicMock()
+        board.instruments = {"uvvis": sensor}
+        ctx = ProtocolContext(
+            board=board,
+            deck=Deck({"plate_holder": holder}),
+            logger=logging.getLogger("test_scan_command"),
+        )
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        result = scan(
+            ctx,
+            plate="plate_holder.plate",
+            instrument="uvvis",
+            method="measure",
+            measurement_height=MEASUREMENT,
+            interwell_scan_height=SAFE_APPROACH,
+        )
 
-        assert sensor.call_count == 4
+        assert len(result) == 96
+        assert sensor.call_count == 96
+        assert board.move_to_labware.call_count == 1
 
     def test_validates_plate_is_wellplate(self):
         from protocol_engine.commands.scan import scan
 
-        sensor = _make_sensor()
-        ctx = _mock_context(sensor=sensor)
-        # Make deck return a non-WellPlate object
-        ctx.deck.__getitem__ = MagicMock(return_value=MagicMock(spec=[]))
+        ctx = ProtocolContext(
+            board=MagicMock(instruments={"uvvis": _make_sensor()}),
+            deck=Deck({"vial_1": MagicMock(spec=[])}),
+            logger=logging.getLogger("test_scan_command"),
+        )
 
         with pytest.raises(ProtocolExecutionError, match="WellPlate"):
-            scan(ctx, plate="vial_1", instrument="uvvis", method="measure")
+            scan(ctx, plate="vial_1", instrument="uvvis", method="measure",
+                 measurement_height=MEASUREMENT, interwell_scan_height=SAFE_APPROACH)
 
     def test_unknown_instrument_raises(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
-        sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
         with pytest.raises(ProtocolExecutionError, match="instrument"):
-            scan(ctx, plate="plate_1", instrument="nonexistent", method="measure")
+            scan(ctx, plate="plate_1", instrument="nonexistent", method="measure",
+                 measurement_height=MEASUREMENT, interwell_scan_height=SAFE_APPROACH)
 
     def test_unknown_method_raises(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
-        sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
         with pytest.raises(ProtocolExecutionError, match="method"):
-            scan(ctx, plate="plate_1", instrument="uvvis", method="nonexistent")
-
-    def test_moves_with_correct_instrument_name(self):
-        from protocol_engine.commands.scan import scan
-
-        plate = _make_2x2_plate()
-        sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
-
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
-
-        for c in ctx.board.move_to_labware.call_args_list:
-            assert c.args[0] == "uvvis"
+            scan(ctx, plate="plate_1", instrument="uvvis", method="nonexistent",
+                 measurement_height=MEASUREMENT, interwell_scan_height=SAFE_APPROACH)
 
     def test_logs_normalized_instrument_measurement(self):
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
         sensor = _make_sensor()
         sensor._return_value = UVVisSpectrum(
             wavelengths=(400.0, 500.0),
             intensities=(0.1, 0.2),
             integration_time_s=0.24,
         )
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context(sensor=sensor)
         ctx.data_store = MagicMock()
         ctx.data_store.get_contents.return_value = []
         ctx.data_store.create_experiment.return_value = 101
         ctx.campaign_id = 77
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        scan(ctx, **_scan_args())
 
         assert ctx.data_store.log_measurement.call_count == 4
         measurement = ctx.data_store.log_measurement.call_args_list[0].args[1]
@@ -414,13 +472,10 @@ class TestScanCommand:
         from unittest.mock import patch
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
-        sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
         with patch("protocol_engine.commands.scan.time.sleep") as mock_sleep:
-            scan(ctx, plate="plate_1", instrument="uvvis", method="measure", delay_s=5.0)
-            # 4 wells, delay between wells = 3 sleeps (not before first)
+            scan(ctx, **_scan_args(delay_s=5.0))
             assert mock_sleep.call_count == 3
             mock_sleep.assert_called_with(5.0)
 
@@ -428,10 +483,8 @@ class TestScanCommand:
         from unittest.mock import patch
         from protocol_engine.commands.scan import scan
 
-        plate = _make_2x2_plate()
-        sensor = _make_sensor()
-        ctx = _mock_context(plate=plate, sensor=sensor)
+        ctx = _mock_context()
 
         with patch("protocol_engine.commands.scan.time.sleep") as mock_sleep:
-            scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+            scan(ctx, **_scan_args())
             mock_sleep.assert_not_called()

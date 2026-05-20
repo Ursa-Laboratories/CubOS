@@ -1,0 +1,72 @@
+# PANDA gantry configuration for the CubOS deck-origin frame.
+#
+# This setup still needs staged hardware validation. It encodes the CubOS deck frame:
+# front-left-bottom origin, +X right, +Y back, +Z up, -Z down.
+#
+# Estimated work volume from the Cub XL / Genmitsu PROVerXL 4030 V2 setup.
+# Confirm live $130/$131/$132 and jog directions before using on hardware.
+
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+
+cnc:
+  homing_strategy: standard
+  total_z_range: 100.0
+  y_axis_motion: head
+  # Absolute deck-frame Z used for inter-labware travel and the entry
+  # approach to the first well of a scan.
+  safe_z: 85.0
+
+working_volume:
+  x_min: 0.0
+  x_max: 400.0
+  y_min: 0.0
+  y_max: 300.0
+  z_min: 0.0
+  z_max: 100.0
+
+grbl_settings:
+  # Starting point copied from the Cub XL ASMI controller config. Re-verify on
+  # the actual PANDA controller before trusting physical motion.
+  dir_invert_mask: 1
+  status_report: 0
+  homing_enable: true
+  homing_dir_mask: 0
+  steps_per_mm_x: 400.0
+  steps_per_mm_y: 400.0
+  steps_per_mm_z: 400.0
+  max_travel_x: 400.0
+  max_travel_y: 300.0
+  max_travel_z: 100.0
+
+instruments:
+  potentiostat:
+    type: potentiostat
+    vendor: admiral
+    port: ""
+    channel: 0
+    offline: true
+    offset_x: -55.0
+    offset_y: 0.0
+    depth: 58.0
+    layout_note: Left red probe; approximate offset from center camera mount.
+
+  camera:
+    type: placeholder_camera
+    vendor: placeholder
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 32.0
+    placeholder_driver_required: true
+    layout_note: Center mount; estimated imaging standoff above deck targets.
+
+  vial_capper_decapper:
+    type: placeholder_vial_capper_decapper
+    vendor: placeholder
+    offline: true
+    offset_x: 58.0
+    offset_y: 0.0
+    depth: 48.0
+    placeholder_driver_required: true
+    layout_note: Right white tool; approximate capper/decapper centerline.

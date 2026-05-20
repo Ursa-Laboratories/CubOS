@@ -20,10 +20,12 @@ labware:
     rows: 8
     columns: 12
     calibration:
-      a1: { x: -49.7, y: -236.8, z: -50.0 }
-      a2: { x: -58.7, y: -236.8, z: -50.0 }
-    x_offset_mm: -9.0
-    y_offset_mm: 9.0
+      # A1 → A2 is the column-step direction. Here A2.x < A1.x, so
+      # columns advance toward -X. Y stays constant between A1 and A2.
+      a1: { x: 347.0, y: 42.0, z: 30.0 }
+      a2: { x: 338.0, y: 42.0, z: 30.0 }
+    x_offset: 9.0   # pitch magnitude only; sign comes from A1→A2 delta
+    y_offset: 9.0
 ```
 
 Use the deck YAML when:
@@ -38,8 +40,11 @@ Common labware — standard SBS microplates, Ursa-specific 3D-printed
 fixtures, standard tip racks — is pre-described under
 `src/deck/labware/definitions/`. A deck YAML can pull in a definition by
 name via `load_name:` and override only the fields that are deck-specific
-(typically `calibration`, `location`, or the sign of `x_offset_mm` /
-`y_offset_mm` to match the deck's orientation).
+(typically `calibration` or `location` for the physical placement; pitch
+fields like `x_offset` / `y_offset` rarely need overriding because they
+match the standard SBS spacing and are validated as positive magnitudes).
+Direction is not configured separately — column- and row-advance
+directions are derived from the A1→A2 delta in `calibration`.
 
 ```yaml
 labware:
@@ -48,9 +53,9 @@ labware:
     name: asmi_96_well
     model_name: asmi_96_well
     calibration:
-      a1: { x: -49.7, y: -236.8, z: -50.0 }
-      a2: { x: -58.7, y: -236.8, z: -50.0 }
-    x_offset_mm: -9.0   # ASMI deck walks columns in -x
+      # A2 is one column step from A1; A2.x < A1.x means columns advance in -X.
+      a1: { x: 347.0, y: 42.0, z: 30.0 }
+      a2: { x: 338.0, y: 42.0, z: 30.0 }
 ```
 
 The loader:
@@ -75,27 +80,34 @@ deck YAMLs keep working unmodified.
 
 | `load_name:` | Python class | Notes |
 | --- | --- | --- |
-| `sbs_96_wellplate` | `WellPlate` | Generic ANSI SLAS 96-well microplate. Override `capacity_ul`/`height_mm` for vendor-specific variants. |
+| `analytical_sales_96_aluminum_vial_well_plate` | `WellPlate` | Analytical Sales & Services 8 x 12 aluminum vial plate for 8 mm x 30 mm, 1 mL vials; `well_depth` must be measured/overridden if sample-floor calculations are needed. |
+| `sbs_96_wellplate` | `WellPlate` | Generic ANSI SLAS 96-well microplate. Override `capacity_ul`/`height` for vendor-specific variants. |
 | `ursa_tip_rack` | `TipRack` | Ursa 2-column × 15-row pipette tip rack. |
 | `ursa_vial_holder` | `VialHolder` | 9-position tight-fit 20 mL vial holder (Cub-XL). |
 | `ursa_wellplate_holder` | `WellPlateHolder` | Tall wellplate holder (Cub). |
 | `ursa_wellplate_holder_conductive` | `WellPlateHolder` | Conductive wellplate holder (Cub-XL). |
+| `sharc_80mm_sbs_wellplate_holder` | `WellPlateHolder` | SHARC 80 mm SBS holder. Uses a 75.15 mm seat plane and 89.5 mm nested plate surface reference. |
 
 See each `definitions/<name>/README.md` for physical dimensions,
 assembly notes, and 3D-printable STEP/STL files where applicable.
 
 ## Z Coordinates
 
-Labware positions can define Z in either of two ways:
+The labware-surface deck-frame Z is carried by the calibration anchor:
 
-- Provide explicit `z` values on calibration or location points.
-- Provide `height` on the labware entry and load the deck with the gantry `total_z_height`; CubOS computes Z as `total_z_height - height`.
+- Well plates / tip racks / holders — `calibration.a1.z` (and
+  `calibration.a2.z` matching).
+- Vials — `location.z`.
+- Holders — `location.z`.
 
-If `height` is used, `total_z_height` must be available from the gantry config. If `height` is not used, explicit Z coordinates are required.
+`height` on a labware entry is the *physical outer dimension* of the
+fixture (rim → underside), not a Z coordinate. The legacy shorthand of
+using `height` as the absolute Z was removed when the dimensional field
+took over the name; calibration-anchor `z` is the only source.
 
 ## Well Plate Calibration
 
-For well plates, `calibration.a1` is the A1 well center and `calibration.a2` must be one adjacent column step from A1. A2 must share either the same X or the same Y as A1, and its delta must match either `x_offset_mm` or `y_offset_mm` depending on the plate orientation. Diagonal calibration is rejected.
+For well plates, `calibration.a1` is the A1 well center and `calibration.a2` must be one adjacent column step from A1. A2 must share either the same X or the same Y as A1, and its delta must match either `x_offset` or `y_offset` depending on the plate orientation. Diagonal calibration is rejected.
 
 Top-level `a1` is still accepted for backward compatibility, but new deck files should use `calibration.a1`.
 
@@ -114,7 +126,9 @@ Top-level `a1` is still accepted for backward compatibility, but new deck files 
   offsets. Holds nested `Vial` instances at the seat height above the
   holder anchor.
 - **`well_plate_holder`** — physical fixture that seats a well plate at a
-  fixed z above the holder anchor. Holds one nested `WellPlate`.
+  fixed z above the holder anchor. Holds one nested `WellPlate`. When
+  `well_plate_surface_height_from_bottom` is set, nested wells use that
+  calibrated surface Z instead of the physical seat plane.
 - **`tip_disposal`** — bounding-box fixture for used-tip disposal.
 
 ## Adding a new definition

@@ -1,0 +1,18 @@
+# Minimal Sterling gantry bring-up protocol.
+#
+# This exercises the consolidated Sterling gantry machine config without
+# descending toward the vial holder. Run only after homing, WPos calibration,
+# jog-direction checks, and clearance checks pass on the physical setup.
+
+positions:
+  park_position: [280.0, 280.0, 85.0]
+
+protocol:
+  - home:
+
+  - move:
+      instrument: potentiostat
+      position: park_position
+      travel_z: 85.0
+
+  - home:

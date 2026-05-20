@@ -1,53 +1,36 @@
-# ASMI indentation protocol.
-# Scans the well plate, performing step-by-step indentation at each well.
-# Uses CubOS protocol engine.
+# ASMI indentation protocol for the CubOS deck-origin frame.
 #
-# Coordinate convention (positive-down): user-space Z is 0 at the gantry's
-# home position and grows toward the deck. "Above" = smaller z; "below" =
-# larger z. Indentation steps descend by INCREASING z, capped at z_limit.
-#
-# Flow per well (handled by scan + indentation method):
-#   1. Move to well XY at safe_approach_height above labware
-#   2. Descend to measurement_height (absolute z to start the indent)
-#   3. Step z toward z_limit (increasing), reading force at each step
-#   4. Stop on force_limit or z_limit (whichever comes first)
-#
-# Protocol-level flow:
-#   home → scan all wells → move safe_z → home
+# +Z is up. Heights on `scan` (`measurement_height`, `interwell_scan_height`,
+# `indentation_limit_height`) are *labware-relative* offsets above the
+# well's calibrated deck-frame surface Z. Inter-labware travel uses the
+# gantry's `safe_z`. Run only after staged jog-direction, homing, WPos
+# calibration, and clearance checks pass.
 
 positions:
-  # Park 50 mm below home, well clear of any labware on the deck.
-  safe_z: [0.0, 0.0, 20.0]
+  # High park pose near the back-right/home side, intentionally below the
+  # physical max Z but high enough to clear the Y rail in the side view.
+  park_position: [360.0, 260.0, 85.0]
 
 protocol:
-  # Home the gantry and zero coordinates
   - home:
 
-  # Scan all wells: move to each well, run indentation
   - scan:
       plate: plate
       instrument: asmi
       method: indentation
-      # Absolute Z used only for the first transit into A1.
-      entry_travel_z: 20.0
-      # Absolute Z used for XY travel between wells.
-      safe_approach_height: 70.0
+      # Labware-relative offsets above the well surface (mm; negative = below).
+      measurement_height: -1.0       # 1 mm into the well for seating
+      interwell_scan_height: 8.0     # 8 mm above the well surface
+      indentation_limit_height: -5.0 # 5 mm into the well at deepest descent
       method_kwargs:
-        # Absolute Zs (not offsets). measurement_height is where the
-        # indent starts; z_limit is the deepest the tip is allowed to
-        # reach (must be > measurement_height in positive-down space).
-        measurement_height: 73.0
-        z_limit: 70.0
-        step_size: 0.01
+        step_size: 0.1
         force_limit: 10.0
         baseline_samples: 10
         measure_with_return: false
 
-  # Return to safe Z after scan
   - move:
       instrument: asmi
-      position: safe_z
-      travel_z: 20.0
+      position: park_position
+      travel_z: 85.0
 
-  # Home the gantry
   - home:

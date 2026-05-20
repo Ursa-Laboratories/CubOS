@@ -1,24 +1,28 @@
-# Sample deck configuration: labware only (no gantry settings).
-# Load with: load_deck_from_yaml("configs/deck/deck.sample.yaml")
-# Returns: Deck containing labware keyed by the names below (e.g. "plate_1", "vial_1").
+# Filmetrics deck layout for the CubOS deck-origin frame.
+#
+# Translated from configs/deck/filmetrics_deck.yaml and
+# configs/gantry/cub_filmetrics.yaml:
+#
+#   old A1 = (-10.0, -35.0, 20.0)
+#   new A1 = (280 - 10.0, 175 - 35.0, 90 - 20.0)
+#          = (270.0, 140.0, 70.0)
+#
+# The translated deck-origin layout keeps columns moving toward lower
+# deck-frame Y.
 
 labware:
   plate_1:
     load_name: sbs_96_wellplate
-    name: opentrons_96_well_20ml
+    name: filmetrics_96_well_deck_origin
     model_name: opentrons_96_well_20ml
-    # Opentrons 96-well 20 mL block is a hair off the ANSI SBS footprint.
-    length_mm: 127.71
-    width_mm: 85.43
-    height_mm: 14.10
-    x_offset_mm: -9.0
-    y_offset_mm: -9.0
     calibration:
       a1:
-        x: 261.0
-        y: 122.0
-        z: 20.0
+        x: 270.0
+        y: 140.0
+        z: 70.0
       a2:
-        x: 261.0
-        y: 113.0
-        z: 20.0
+        x: 270.0
+        y: 131.0
+        z: 70.0
+    x_offset: 9.0
+    y_offset: 9.0

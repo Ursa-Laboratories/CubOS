@@ -16,15 +16,16 @@ from deck import (
     WellPlateHolder,
 )
 from deck.loader import load_deck_from_yaml
-from gantry.gantry_config import GantryConfig, HomingStrategy, WorkingVolume
+from gantry.gantry_config import GantryConfig, GantryType, HomingStrategy, WorkingVolume
 from validation.bounds import validate_deck_positions
 
 
 def _make_gantry() -> GantryConfig:
     return GantryConfig(
         serial_port="/dev/ttyUSB0",
+        gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_height=90.0,
+        total_z_range=90.0,
         working_volume=WorkingVolume(
             x_min=0.0,
             x_max=300.0,
@@ -46,24 +47,24 @@ def test_holder_seat_offset_metadata_is_encoded():
         location=Coordinate3D(x=0.0, y=0.0, z=0.0),
     )
 
-    assert vial_holder.height_mm == pytest.approx(35.1)
-    assert vial_holder.labware_support_height_mm == pytest.approx(35.1)
-    assert vial_holder.labware_seat_height_from_bottom_mm == pytest.approx(18.0)
+    assert vial_holder.height == pytest.approx(35.1)
+    assert vial_holder.labware_support_height == pytest.approx(35.1)
+    assert vial_holder.labware_seat_height_from_bottom == pytest.approx(18.0)
     assert vial_holder.geometry == BoundingBoxGeometry(
-        length_mm=36.2,
-        width_mm=300.2,
-        height_mm=35.1,
+        length=36.2,
+        width=300.2,
+        height=35.1,
     )
 
     # Keep the existing collision-envelope height, while separately storing
     # the base/support geometry that defines the seated plate offset.
-    assert plate_holder.height_mm == pytest.approx(14.8)
-    assert plate_holder.labware_support_height_mm == pytest.approx(10.0)
-    assert plate_holder.labware_seat_height_from_bottom_mm == pytest.approx(5.0)
+    assert plate_holder.height == pytest.approx(14.8)
+    assert plate_holder.labware_support_height == pytest.approx(10.0)
+    assert plate_holder.labware_seat_height_from_bottom == pytest.approx(5.0)
     assert plate_holder.geometry == BoundingBoxGeometry(
-        length_mm=100.0,
-        width_mm=155.0,
-        height_mm=14.8,
+        length=100.0,
+        width=155.0,
+        height=14.8,
     )
 
 
@@ -79,9 +80,9 @@ def test_well_plate_holder_resolves_named_slot_positions():
         },
     )
 
-    assert holder.length_mm == pytest.approx(100.0)
-    assert holder.width_mm == pytest.approx(155.0)
-    assert holder.height_mm == pytest.approx(14.8)
+    assert holder.length == pytest.approx(100.0)
+    assert holder.width == pytest.approx(155.0)
+    assert holder.height == pytest.approx(14.8)
     assert holder.get_location("plate") == Coordinate3D(x=51.0, y=61.0, z=12.0)
     assert holder.iter_positions()["plate"] == Coordinate3D(x=51.0, y=61.0, z=12.0)
 
@@ -113,7 +114,7 @@ def test_tip_disposal_resolves_from_deck():
         }
     )
 
-    assert deck.resolve("waste") == Coordinate3D(x=100.0, y=110.0, z=15.0)
+    assert deck.resolve_coordinate("waste") == Coordinate3D(x=100.0, y=110.0, z=15.0)
 
 
 def test_load_holder_labware_from_yaml():
@@ -125,6 +126,7 @@ labware:
     location:
       x: 25.0
       y: 35.0
+      z: 10.0
     height: 10.0
   slide_holder:
     type: well_plate_holder
@@ -146,7 +148,7 @@ labware:
     location:
       x: 70.0
       y: 80.0
-    height: 15.0
+      z: 15.0
     slots:
       vial_1:
         location:
@@ -160,13 +162,13 @@ labware:
         path = handle.name
 
     try:
-        deck = load_deck_from_yaml(path, total_z_height=90.0)
+        deck = load_deck_from_yaml(path, total_z_range=90.0)
         assert isinstance(deck["waste"], TipDisposal)
         assert isinstance(deck["slide_holder"], WellPlateHolder)
         assert isinstance(deck["vial_holder"], VialHolder)
-        assert deck["waste"].location.z == pytest.approx(80.0)
-        assert deck.resolve("slide_holder.plate") == Coordinate3D(x=51.0, y=61.0, z=12.0)
-        assert deck.resolve("vial_holder.vial_1") == Coordinate3D(x=71.0, y=81.0, z=75.0)
+        assert deck["waste"].location.z == pytest.approx(10.0)
+        assert deck.resolve_coordinate("slide_holder.plate") == Coordinate3D(x=51.0, y=61.0, z=12.0)
+        assert deck.resolve_coordinate("vial_holder.vial_1") == Coordinate3D(x=71.0, y=81.0, z=15.0)
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -184,8 +186,8 @@ labware:
     vials:
       vial_1:
         model_name: 20ml_vial
-        height_mm: 57.0
-        diameter_mm: 28.0
+        height: 57.0
+        diameter: 28.0
         location:
           x: 17.1
           y: 0.9
@@ -202,7 +204,7 @@ labware:
 
         assert isinstance(holder, VialHolder)
         assert isinstance(holder.contained_labware["vial_1"], Vial)
-        assert deck.resolve("vial_holder.vial_1") == Coordinate3D(x=17.1, y=0.9, z=182.0)
+        assert deck.resolve_coordinate("vial_holder.vial_1") == Coordinate3D(x=17.1, y=0.9, z=182.0)
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -228,8 +230,8 @@ labware:
         a2:
           x: 230.75
           y: 78.5
-      x_offset_mm: 9.0
-      y_offset_mm: 9.0
+      x_offset: 9.0
+      y_offset: 9.0
 """
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as handle:
         handle.write(yaml_str)
@@ -241,9 +243,9 @@ labware:
 
         assert isinstance(holder, WellPlateHolder)
         assert isinstance(holder.contained_labware["plate"], WellPlate)
-        assert deck.resolve("plate_holder.plate") == Coordinate3D(x=221.75, y=78.5, z=188.0)
-        assert deck.resolve("plate_holder.plate.A1") == Coordinate3D(x=221.75, y=78.5, z=188.0)
-        assert deck.resolve("plate_holder.plate.B2") == Coordinate3D(x=230.75, y=87.5, z=188.0)
+        assert deck.resolve_coordinate("plate_holder.plate") == Coordinate3D(x=221.75, y=78.5, z=188.0)
+        assert deck.resolve_coordinate("plate_holder.plate.A1") == Coordinate3D(x=221.75, y=78.5, z=188.0)
+        assert deck.resolve_coordinate("plate_holder.plate.B2") == Coordinate3D(x=230.75, y=69.5, z=188.0)
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -276,22 +278,71 @@ labware:
         vials = deck["my_vials"]
         assert isinstance(vials, VialHolder)
         assert vials.name == "my_vials"  # defaulted to deck key
-        assert vials.length_mm == pytest.approx(36.2)
-        assert vials.width_mm == pytest.approx(300.2)
-        assert vials.height_mm == pytest.approx(35.1)
-        assert vials.labware_seat_height_from_bottom_mm == pytest.approx(18.0)
+        assert vials.length == pytest.approx(36.2)
+        assert vials.width == pytest.approx(300.2)
+        assert vials.height == pytest.approx(35.1)
+        assert vials.labware_seat_height_from_bottom == pytest.approx(18.0)
         assert vials.slot_count == 9
         assert vials.location == Coordinate3D(x=17.1, y=132.9, z=164.0)
 
         plate_holder = deck["my_plate_holder"]
         assert isinstance(plate_holder, WellPlateHolder)
         assert plate_holder.name == "my_plate_holder"
-        assert plate_holder.length_mm == pytest.approx(100.0)
-        assert plate_holder.width_mm == pytest.approx(155.0)
-        assert plate_holder.height_mm == pytest.approx(14.8)
-        assert plate_holder.labware_seat_height_from_bottom_mm == pytest.approx(5.0)
+        assert plate_holder.length == pytest.approx(100.0)
+        assert plate_holder.width == pytest.approx(155.0)
+        assert plate_holder.height == pytest.approx(14.8)
+        assert plate_holder.labware_seat_height_from_bottom == pytest.approx(5.0)
     finally:
         Path(path).unlink(missing_ok=True)
+
+
+def test_sharc_holder_definition_loads_through_registry():
+    yaml_str = """
+labware:
+  plate_holder:
+    load_name: sharc_80mm_sbs_wellplate_holder
+    location:
+      x: 0.0
+      y: 0.0
+      z: 0.0
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as handle:
+        handle.write(yaml_str)
+        path = handle.name
+
+    try:
+        deck = load_deck_from_yaml(path)
+        holder = deck["plate_holder"]
+
+        assert isinstance(holder, WellPlateHolder)
+        assert holder.name == "plate_holder"
+        assert holder.length == pytest.approx(127.76)
+        assert holder.width == pytest.approx(85.47)
+        assert holder.height == pytest.approx(80.0)
+        assert holder.labware_seat_height_from_bottom == pytest.approx(75.15)
+        assert holder.well_plate_surface_height_from_bottom == pytest.approx(89.5)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_sharc_deck_nested_plate_surface_resolves_to_plate_rim_z():
+    deck = load_deck_from_yaml("tests/fixtures/configs/deck/mock_nested_plate_deck.yaml")
+    holder = deck["plate_holder"]
+    plate = deck.resolve_labware("plate_holder.plate")
+
+    assert isinstance(holder, WellPlateHolder)
+    assert isinstance(plate, WellPlate)
+    assert holder.location == Coordinate3D(x=0.0, y=0.0, z=0.0)
+    assert "location" in holder.iter_positions()
+    assert deck.resolve_coordinate("plate_holder.plate.A1") == Coordinate3D(
+        x=15.0, y=17.0, z=89.5,
+    )
+    assert deck.resolve_coordinate("plate_holder.plate.A2") == Coordinate3D(
+        x=15.0, y=26.0, z=89.5,
+    )
+    assert deck.resolve_coordinate("plate_holder.plate.B1") == Coordinate3D(
+        x=24.0, y=17.0, z=89.5,
+    )
 
 
 def test_deck_yaml_unknown_load_name_raises_clear_error():

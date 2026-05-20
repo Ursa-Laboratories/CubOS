@@ -5,10 +5,11 @@ from unittest.mock import MagicMock
 import pytest
 
 from deck.labware.labware import Coordinate3D
-from protocol_engine.commands._movement import approach_and_descend, unpack_xyz
-
-
-# ─── unpack_xyz ─────────────────────────────────────────────────────────────
+from protocol_engine.commands._movement import (
+    _assert_finite_number,
+    engage_at_labware,
+    unpack_xyz,
+)
 
 
 class TestUnpackXyz:
@@ -28,85 +29,63 @@ class TestUnpackXyz:
         assert unpack_xyz(obj) == (10.0, 20.0, 30.0)
 
 
-# ─── approach_and_descend ───────────────────────────────────────────────────
+class TestAssertFiniteNumber:
+
+    def test_accepts_int_and_float(self):
+        _assert_finite_number(0, field_name="x", source="test")
+        _assert_finite_number(1.5, field_name="x", source="test")
+        _assert_finite_number(-1.0, field_name="x", source="test")
+
+    @pytest.mark.parametrize("bad", ["", "1.0", "abc", float("nan"), float("inf"), True, False, None])
+    def test_rejects_non_finite_or_wrong_type(self, bad):
+        with pytest.raises(ValueError, match="must be a finite number"):
+            _assert_finite_number(bad, field_name="x", source="test")
 
 
-def _mock_ctx(measurement_height=0.0):
+def _mock_ctx_with_well(well_z=14.10):
+    """Build a context whose deck.resolve_coordinate returns a coord at *well_z*.
+
+    The well/labware coordinate's Z is the labware-surface reference Z
+    that ``engage_at_labware`` adds ``measurement_height`` to.
+    """
     instr = MagicMock()
-    instr.measurement_height = measurement_height
     board = MagicMock()
     board.instruments = {"sensor": instr}
+    deck = MagicMock()
+    deck.resolve_coordinate.return_value = Coordinate3D(x=10.0, y=20.0, z=well_z)
     ctx = MagicMock()
     ctx.board = board
+    ctx.deck = deck
     return ctx, instr
 
 
-class TestApproachAndDescend:
+class TestEngageAtLabware:
 
-    def test_calls_move_to_labware_then_descent_move(self):
-        ctx, instr = _mock_ctx(measurement_height=3.0)
-        coord = Coordinate3D(x=10.0, y=20.0, z=30.0)
-
-        order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **k: order.append("approach")
-        ctx.board.move.side_effect = lambda *a, **k: order.append("descent")
-
-        approach_and_descend(ctx, "sensor", coord)
-
-        assert order == ["approach", "descent"]
-        ctx.board.move_to_labware.assert_called_once_with("sensor", coord)
-
-    def test_descent_uses_measurement_height(self):
-        ctx, instr = _mock_ctx(measurement_height=3.0)
-        coord = Coordinate3D(x=10.0, y=20.0, z=30.0)
-        approach_and_descend(ctx, "sensor", coord)
-        # User-space is positive-down: action_z = z - measurement_height =
-        # 30 - 3 = 27 (probe held 3 mm ABOVE the labware surface).
-        ctx.board.move.assert_called_once_with("sensor", (10.0, 20.0, 27.0))
-
-    def test_descent_for_contact_instrument_is_below_reference(self):
-        # Negative measurement_height means the tip dips INTO the sample
-        # (larger user-space z = closer to/below the deck surface).
-        ctx, instr = _mock_ctx(measurement_height=-5.0)
-        coord = Coordinate3D(x=10.0, y=20.0, z=30.0)
-        approach_and_descend(ctx, "sensor", coord)
-        ctx.board.move.assert_called_once_with("sensor", (10.0, 20.0, 35.0))
-
-    def test_descent_for_non_contact_lands_at_same_z_as_approach(self):
-        """Non-contact instrument: action == approach Z. Descent is a
-        structural no-op (same Z) but the call still happens."""
-        ctx, instr = _mock_ctx(measurement_height=0.0)
-        coord = Coordinate3D(x=10.0, y=20.0, z=30.0)
-        approach_and_descend(ctx, "sensor", coord)
-        ctx.board.move.assert_called_once_with("sensor", (10.0, 20.0, 30.0))
-
-    def test_accepts_tuple_coord(self):
-        ctx, instr = _mock_ctx(measurement_height=2.0)
-        approach_and_descend(ctx, "sensor", (5.0, 6.0, 7.0))
-        # 7.0 - 2.0 = 5.0 (2 mm above the tuple's z).
-        ctx.board.move.assert_called_once_with("sensor", (5.0, 6.0, 5.0))
-
-    def test_safe_approach_height_override_uses_protocol_value(self):
-        ctx, instr = _mock_ctx(measurement_height=3.0)
-        coord = Coordinate3D(x=10.0, y=20.0, z=30.0)
-
-        approach_and_descend(
-            ctx, "sensor", coord, safe_approach_height=20.0,
+    def test_descends_to_well_z_plus_offset(self):
+        ctx, _ = _mock_ctx_with_well(well_z=14.10)
+        well_z, action_z = engage_at_labware(
+            ctx, "sensor", "plate.A1",
+            measurement_height=2.0, command_label="measure",
         )
+        assert well_z == pytest.approx(14.10)
+        assert action_z == pytest.approx(16.10)
+        ctx.board.move_to_labware.assert_called_once()
+        ctx.board.move.assert_called_once_with("sensor", (10.0, 20.0, 16.10))
 
-        ctx.board.move_to_labware.assert_not_called()
-        assert len(ctx.board.move.call_args_list) == 2
-        first_call, second_call = ctx.board.move.call_args_list
-        assert first_call.args == ("sensor", (10.0, 20.0, 20.0))
-        assert first_call.kwargs == {"travel_z": 20.0}
-        assert second_call.args == ("sensor", (10.0, 20.0, 27.0))
-        assert second_call.kwargs == {}
+    def test_negative_offset_descends_below_surface(self):
+        ctx, _ = _mock_ctx_with_well(well_z=14.10)
+        well_z, action_z = engage_at_labware(
+            ctx, "sensor", "plate.A1",
+            measurement_height=-1.0, command_label="measure",
+        )
+        assert well_z == pytest.approx(14.10)
+        assert action_z == pytest.approx(13.10)
 
-    def test_safe_approach_height_override_must_not_sit_below_action_height(self):
-        ctx, instr = _mock_ctx(measurement_height=3.0)
-        coord = Coordinate3D(x=10.0, y=20.0, z=30.0)
-
-        with pytest.raises(ValueError, match="safe_approach_height"):
-            approach_and_descend(
-                ctx, "sensor", coord, safe_approach_height=28.0,
+    @pytest.mark.parametrize("bad", ["", "1.0", float("nan"), True])
+    def test_rejects_non_finite_measurement_height(self, bad):
+        ctx, _ = _mock_ctx_with_well(well_z=14.10)
+        with pytest.raises(ValueError, match="finite number"):
+            engage_at_labware(
+                ctx, "sensor", "plate.A1",
+                measurement_height=bad, command_label="measure",
             )

@@ -10,13 +10,13 @@ name: ursa_tip_rack
 model_name: panda_2x15_tip_rack
 rows: 15
 columns: 2
-length_mm: 66.0
-width_mm: 138.0
-height_mm: 22.0
-z_pickup: 191.0
-z_drop: 174.8
+length: 66.0
+width: 138.0
+height: 22.0
+pickup_z: 191.0
+drop_z: 174.8
 calibration:
   a1: { x: 111.9, y: 2.7 }
-  a2: { x: 120.4, y: 2.7 }   # same y as a1 → next column (a1.x + x_offset_mm)
-x_offset_mm: 8.5
-y_offset_mm: 8.5
+  a2: { x: 120.4, y: 2.7 }   # same y as a1 → next column (a1.x + x_offset)
+x_offset: 8.5
+y_offset: 8.5

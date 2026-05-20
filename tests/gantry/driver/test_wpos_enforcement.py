@@ -3,8 +3,9 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from gantry.gantry_driver.driver import Mill, wpos_pattern, mpos_pattern, wco_pattern
-from gantry.gantry_driver.instruments import Coordinates
+from gantry.coordinates import Coordinates
+from gantry.gantry_driver.driver import Mill, wco_pattern
+from gantry.gantry_driver.exceptions import LocationNotFound
 
 
 class TestWposEnforcement(unittest.TestCase):
@@ -25,7 +26,7 @@ class TestWposEnforcement(unittest.TestCase):
     def test_current_coordinates_returns_wpos_when_wpos_reported(self):
         mill = self._make_mill()
         mill.ser_mill.write = MagicMock()
-        mill.read = MagicMock(return_value="<Idle|WPos:10.000,20.000,5.000|Bf:15,127|FS:0,0>")
+        mill._read_serial = MagicMock(return_value="<Idle|WPos:10.000,20.000,5.000|Bf:15,127|FS:0,0>")
         coords = mill.current_coordinates()
         self.assertEqual(coords.x, 10.0)
         self.assertEqual(coords.y, 20.0)
@@ -36,7 +37,7 @@ class TestWposEnforcement(unittest.TestCase):
         mill.config["$10"] = "1"  # Force MPos mode
         mill._wco = Coordinates(-300.0, -200.0, -80.0)
         mill.ser_mill.write = MagicMock()
-        mill.read = MagicMock(
+        mill._read_serial = MagicMock(
             return_value="<Idle|MPos:-290.000,-190.000,-75.000|Bf:15,127|FS:0,0>"
         )
         coords = mill.current_coordinates()
@@ -45,10 +46,22 @@ class TestWposEnforcement(unittest.TestCase):
         self.assertAlmostEqual(coords.y, 10.0, places=3)
         self.assertAlmostEqual(coords.z, 5.0, places=3)
 
+    def test_current_coordinates_rejects_mpos_without_wco(self):
+        mill = self._make_mill()
+        mill.config["$10"] = "1"
+        mill.ser_mill.write = MagicMock()
+        mill._read_serial = MagicMock(
+            return_value="<Idle|MPos:-290.000,-190.000,-75.000|Bf:15,127|FS:0,0>"
+        )
+        mill.seed_wco = MagicMock()
+
+        with self.assertRaises(LocationNotFound):
+            mill.current_coordinates()
+
     def test_current_coordinates_updates_wco_from_status(self):
         mill = self._make_mill()
         mill.ser_mill.write = MagicMock()
-        mill.read = MagicMock(
+        mill._read_serial = MagicMock(
             return_value="<Idle|WPos:0.000,0.000,0.000|Bf:15,127|FS:0,0|WCO:-300.000,-200.000,-80.000>"
         )
         self.assertIsNone(mill._wco)
@@ -58,35 +71,6 @@ class TestWposEnforcement(unittest.TestCase):
         self.assertEqual(mill._wco.y, -200.0)
         self.assertEqual(mill._wco.z, -80.0)
 
-    def test_machine_coordinates_returns_mpos(self):
-        mill = self._make_mill()
-        mill._wco = Coordinates(-300.0, -200.0, -80.0)
-        mill.ser_mill.write = MagicMock()
-        mill.read = MagicMock(return_value="<Idle|WPos:10.000,10.000,5.000|Bf:15,127|FS:0,0>")
-        mpos = mill.machine_coordinates()
-        # MPos = WPos + WCO = 10 + (-300) = -290, etc.
-        self.assertAlmostEqual(mpos.x, -290.0, places=3)
-        self.assertAlmostEqual(mpos.y, -190.0, places=3)
-        self.assertAlmostEqual(mpos.z, -75.0, places=3)
-
-    def test_query_wco_returns_cached(self):
-        mill = self._make_mill()
-        mill._wco = Coordinates(-300.0, -200.0, -80.0)
-        wco = mill._query_work_coordinate_offset()
-        self.assertEqual(wco.x, -300.0)
-        self.assertEqual(wco.y, -200.0)
-        self.assertEqual(wco.z, -80.0)
-
-    def test_query_wco_seeds_when_none(self):
-        mill = self._make_mill()
-        mill.ser_mill.write = MagicMock()
-        mill.read = MagicMock(
-            return_value="<Idle|WPos:0.000,0.000,0.000|Bf:15,127|FS:0,0|WCO:-300.000,-200.000,-80.000>"
-        )
-        self.assertIsNone(mill._wco)
-        wco = mill._query_work_coordinate_offset()
-        self.assertEqual(wco.x, -300.0)
-
     def test_wco_pattern_matches(self):
         status = "<Idle|WPos:0,0,0|Bf:15,127|FS:0,0|WCO:-300.000,-200.000,-80.000>"
         match = wco_pattern.search(status)
@@ -95,17 +79,17 @@ class TestWposEnforcement(unittest.TestCase):
         self.assertEqual(float(match.group(2)), -200.0)
         self.assertEqual(float(match.group(3)), -80.0)
 
-    def test_move_to_position_uses_wpos_internally(self):
-        """Verify move_to_position's internal current_coordinates call gets WPos."""
+    def test_move_to_uses_wpos_internally(self):
+        """Verify move_to's internal current_coordinates call gets WPos."""
         mill = self._make_mill()
         mill.config["$10"] = "0"
         mill.ser_mill.write = MagicMock()
-        mill.read = MagicMock(return_value="<Idle|WPos:0.000,0.000,0.000|Bf:15,127|FS:0,0>")
+        mill._read_serial = MagicMock(return_value="<Idle|WPos:0.000,0.000,0.000|Bf:15,127|FS:0,0>")
 
         commands_sent = []
         mill.execute_command = lambda cmd: commands_sent.append(cmd) or "ok"
 
-        mill.move_to_position(x_coordinate=-10.0, y_coordinate=-10.0, z_coordinate=0.0)
+        mill.move_to(x_coordinate=-10.0, y_coordinate=-10.0, z_coordinate=0.0)
 
         # X and Y are always emitted on separate lines — no diagonal.
         x_commands = [c for c in commands_sent if "X-10.0" in c and "Y" not in c]

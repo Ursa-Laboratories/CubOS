@@ -7,6 +7,11 @@
 # coexist with other vendors (e.g. opentrons, sbs) added later.
 
 labware:
+  analytical_sales_96_aluminum_vial_well_plate:
+    module: deck.labware.well_plate
+    class_name: WellPlate
+    config: analytical_sales_96_aluminum_vial_well_plate/AluminumVialWellPlate.yaml
+
   ursa_vial_holder:
     module: deck.labware.vial_holder
     class_name: VialHolder
@@ -26,6 +31,11 @@ labware:
     module: deck.labware.well_plate_holder
     class_name: WellPlateHolder
     config: ursa_wellplate_holder_conductive/WellplateHolder.yaml
+
+  sharc_80mm_sbs_wellplate_holder:
+    module: deck.labware.well_plate_holder
+    class_name: WellPlateHolder
+    config: sharc_80mm_sbs_wellplate_holder/WellplateHolder.yaml
 
   sbs_96_wellplate:
     module: deck.labware.well_plate

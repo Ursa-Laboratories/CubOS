@@ -1,45 +1,32 @@
-"""First-run interactive router test.
+"""First-run interactive deck-origin gantry jog test.
 
-Welcomes the user, homes the CNC gantry, then lets them jog the
-router interactively with keyboard keys while displaying position.
+Loads an explicit gantry YAML, homes the CNC gantry without rewriting WPos, then
+lets the operator jog in the CubOS deck frame while displaying position.
 """
 
+import argparse
 import logging
 import sys
 import time
 from pathlib import Path
-
-import yaml
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
 
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
-from gantry import Gantry
+from gantry import Gantry, load_gantry_from_yaml_safe
+from gantry.origin import validate_deck_origin_minima
 from setup.keyboard_input import read_keypress
-
-CONFIGS_DIR = project_root / "configs"
-
-GANTRIES = {
-    "CUB_XL": {
-        "label": "Cub-XL (415x300x200mm)",
-        "config_file": CONFIGS_DIR / "gantry" / "cub_xl.yaml",
-    },
-    "CUB": {
-        "label": "Cub (300x200x80mm)",
-        "config_file": CONFIGS_DIR / "gantry" / "cub.yaml",
-    },
-}
 
 STEP = 1.0
 
 CONTROLS_LEGEND = """
 Controls:
   Arrow LEFT/RIGHT  — Move X axis (±1mm)
-  Arrow UP/DOWN     — Move Y axis (-/+1mm)
-  Z                 — Move Z down (+1mm)
-  X                 — Move Z up (-1mm)
+  Arrow UP/DOWN     — Move Y axis (+/-1mm)
+  Z                 — Move Z down (-1mm)
+  X                 — Move Z up (+1mm)
   Q                 — Quit
 """
 
@@ -48,38 +35,30 @@ def print_position(coords: dict) -> None:
     print(f"  Position -> X: {coords['x']:.1f}  Y: {coords['y']:.1f}  Z: {coords['z']:.1f}")
 
 
-def load_gantry_config(config_file: Path) -> dict:
-    with open(config_file) as f:
-        return yaml.safe_load(f)
-
-
-def select_gantry() -> tuple:
-    """Returns (gantry_entry, loaded_config)."""
-    print("\nWhich system are you working with?")
-    print("  1) Cub-XL — the larger gantry  (415x300x200mm)")
-    print("  2) Cub    — the smaller gantry (300x200x80mm)")
-
-    while True:
-        choice = input("\nEnter 1 or 2: ").strip()
-        if choice in ("1", "2"):
-            key = "CUB_XL" if choice == "1" else "CUB"
-            gantry_entry = GANTRIES[key]
-            config = load_gantry_config(gantry_entry["config_file"])
-            return gantry_entry, config
-        print("Invalid choice. Please enter 1 or 2.")
-
-
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--gantry",
+        type=Path,
+        required=True,
+        help="Path to calibrated deck-origin gantry YAML",
+    )
+    args = parser.parse_args()
+    gantry_path = args.gantry.resolve()
+    if not gantry_path.is_file():
+        print(f"ERROR: Gantry config not found: {gantry_path}", file=sys.stderr)
+        sys.exit(1)
+
     print("=" * 50)
     print("  CubOS — Hello World")
-    print("  First-run interactive jog test")
+    print("  First-run deck-origin jog test")
     print("=" * 50)
 
-    gantry_entry, config = select_gantry()
-    print(f"\nSelected: {gantry_entry['label']}")
+    config = load_gantry_from_yaml_safe(gantry_path)
+    validate_deck_origin_minima(config)
+    print(f"\nLoaded: {gantry_path}")
 
     gantry = Gantry(config=config)
-    volume = config["working_volume"]
 
     t0 = time.monotonic()
     print("\nConnecting to gantry...")
@@ -111,13 +90,13 @@ def main() -> None:
             elif key == "RIGHT":
                 gantry.jog(x=STEP)
             elif key == "UP":
-                gantry.jog(y=-STEP)
-            elif key == "DOWN":
                 gantry.jog(y=STEP)
+            elif key == "DOWN":
+                gantry.jog(y=-STEP)
             elif key == "Z":
-                gantry.jog(z=STEP)
-            elif key == "X":
                 gantry.jog(z=-STEP)
+            elif key == "X":
+                gantry.jog(z=STEP)
             elif key == "Q":
                 print("\nExiting...")
                 break

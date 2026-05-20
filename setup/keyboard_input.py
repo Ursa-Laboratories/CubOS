@@ -3,6 +3,7 @@
 Cross-platform: uses tty/termios on Unix, msvcrt on Windows.
 """
 
+from collections import deque
 import sys
 import time
 
@@ -30,12 +31,39 @@ _ARROW_MAP_WINDOWS = {
     b"K": "LEFT",
 }
 
+_REPEAT_BATCH_TIMEOUT_S = 0.03
+_PENDING_KEYS = deque()
+
+
+def _read_one_or_pending(read_one):
+    if _PENDING_KEYS:
+        return _PENDING_KEYS.popleft()
+    return read_one()
+
+
+def _read_keypress_batch_impl(read_one, key_available, repeat_timeout_s):
+    """Batch same-key repeats without discarding the next different key."""
+    key = _read_one_or_pending(read_one)
+    count = 1
+
+    while key_available(repeat_timeout_s):
+        next_key = _read_one_or_pending(read_one)
+        if next_key == key:
+            count += 1
+        else:
+            _PENDING_KEYS.appendleft(next_key)
+            break
+
+    return key, count
+
 
 # ── Unix implementation ───────────────────────────────────────────────────────
 
 def _unix_read_one_key():
     """Read a single key. Must already be in raw mode."""
     ch = sys.stdin.read(1)
+    if ch == "\x03":
+        raise KeyboardInterrupt
     if ch == "\x1b":
         seq = sys.stdin.read(2)
         return _ARROW_MAP_UNIX.get(seq, ch)
@@ -44,6 +72,7 @@ def _unix_read_one_key():
 
 def _unix_flush_stdin():
     """Discard any buffered stdin without blocking."""
+    _PENDING_KEYS.clear()
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
     try:
@@ -59,18 +88,15 @@ def _unix_read_keypress_batch():
     old_settings = termios.tcgetattr(fd)
     try:
         tty.setraw(fd)
-        key = _unix_read_one_key()
-        count = 1
 
-        # 150ms timeout catches held-key repeats (typical repeat rate 30-100ms)
-        while select.select([sys.stdin], [], [], 0.15)[0]:
-            next_key = _unix_read_one_key()
-            if next_key == key:
-                count += 1
-            else:
-                break
+        def key_available(timeout_s):
+            return bool(_PENDING_KEYS) or bool(select.select([sys.stdin], [], [], timeout_s)[0])
 
-        return key, count
+        return _read_keypress_batch_impl(
+            _unix_read_one_key,
+            key_available,
+            _REPEAT_BATCH_TIMEOUT_S,
+        )
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
@@ -80,6 +106,8 @@ def _unix_read_keypress_batch():
 def _windows_read_one_key():
     """Read a single key using msvcrt."""
     ch = msvcrt.getch()
+    if ch == b"\x03":
+        raise KeyboardInterrupt
     if ch in (b"\xe0", b"\x00"):
         scan = msvcrt.getch()
         return _ARROW_MAP_WINDOWS.get(scan, "")
@@ -88,28 +116,27 @@ def _windows_read_one_key():
 
 def _windows_flush_stdin():
     """Discard any buffered stdin without blocking."""
+    _PENDING_KEYS.clear()
     while msvcrt.kbhit():
         msvcrt.getch()
 
 
 def _windows_read_keypress_batch():
-    key = _windows_read_one_key()
-    count = 1
-
-    # 150ms timeout catches held-key repeats
-    deadline = time.monotonic() + 0.15
-    while time.monotonic() < deadline:
-        if msvcrt.kbhit():
-            next_key = _windows_read_one_key()
-            if next_key == key:
-                count += 1
-                deadline = time.monotonic() + 0.15
-            else:
-                break
-        else:
+    def key_available(timeout_s):
+        if _PENDING_KEYS:
+            return True
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if msvcrt.kbhit():
+                return True
             time.sleep(0.005)
+        return False
 
-    return key, count
+    return _read_keypress_batch_impl(
+        _windows_read_one_key,
+        key_available,
+        _REPEAT_BATCH_TIMEOUT_S,
+    )
 
 
 # ── Public API ────────────────────────────────────────────────────────────────

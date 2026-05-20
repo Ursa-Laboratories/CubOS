@@ -12,9 +12,11 @@ if TYPE_CHECKING:
 
 @protocol_command("home")
 def home(context: "ProtocolContext") -> None:
-    """Home the gantry and zero coordinates.
+    """Home the gantry without redefining a calibrated deck-origin WCS.
 
-    Sends GRBL $H homing cycle, then zeros the work coordinate system.
+    Deck-origin configs rely on persistent G54 WPos established by the
+    calibration script. This command intentionally does not apply ``G92`` or
+    otherwise rewrite work coordinates after homing.
 
     Args:
         context: Runtime context (board, deck, logger).
@@ -22,6 +24,7 @@ def home(context: "ProtocolContext") -> None:
     context.logger.info("home: homing gantry")
     gantry = context.board.gantry
     gantry.set_serial_timeout(10)
-    gantry.home()
-    gantry.zero_coordinates()
-    gantry.set_serial_timeout(0.05)
+    try:
+        gantry.home()
+    finally:
+        gantry.set_serial_timeout(0.05)

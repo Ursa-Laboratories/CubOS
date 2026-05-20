@@ -1,14 +1,13 @@
 """Load, validate, and run a protocol end-to-end.
 
 Usage:
-    python setup/run_protocol.py <gantry.yaml> <deck.yaml> <board.yaml> <protocol.yaml>
+    python setup/run_protocol.py <gantry.yaml> <deck.yaml> <protocol.yaml>
 
 Example:
     python setup/run_protocol.py \\
-        configs/gantry/cub_xl.yaml \\
-        configs/deck/mofcat_deck.yaml \\
-        configs/board/mofcat_board.yaml \\
-        configs/protocol/protocol.sample.yaml
+        configs/gantry/cub_xl_asmi.yaml \\
+        configs/deck/asmi_deck.yaml \\
+        configs/protocol/asmi_move_a1.yaml
 
 Steps:
     1. Validate all configs and bounds (offline, no hardware)
@@ -39,21 +38,27 @@ SEPARATOR = "-" * 60
 
 
 def main() -> None:
-    if len(sys.argv) != 5:
-        print("Usage: python setup/run_protocol.py <gantry.yaml> <deck.yaml> <board.yaml> <protocol.yaml>")
+    if len(sys.argv) not in (4, 5):
+        print("Usage: python setup/run_protocol.py <gantry.yaml> <deck.yaml> <protocol.yaml>")
         print()
         print("Example:")
         print("  python setup/run_protocol.py \\")
-        print("    configs/gantry/cub_xl.yaml \\")
-        print("    configs/deck/mofcat_deck.yaml \\")
-        print("    configs/board/mofcat_board.yaml \\")
-        print("    configs/protocol/protocol.sample.yaml")
+        print("    configs/gantry/cub_xl_asmi.yaml \\")
+        print("    configs/deck/asmi_deck.yaml \\")
+        print("    configs/protocol/asmi_move_a1.yaml")
         sys.exit(1)
 
-    gantry_path, deck_path, board_path, protocol_path = sys.argv[1:5]
+    board_path = None
+    if len(sys.argv) == 4:
+        gantry_path, deck_path, protocol_path = sys.argv[1:4]
+    else:
+        gantry_path, deck_path, board_path, protocol_path = sys.argv[1:5]
 
     # Phase 1: Validate (offline, before touching hardware)
-    result = run_validation(gantry_path, deck_path, board_path, protocol_path)
+    if board_path is None:
+        result = run_validation(gantry_path, deck_path, protocol_path)
+    else:
+        result = run_validation(gantry_path, deck_path, board_path, protocol_path)
     print(result.output)
     if not result.passed:
         print("\nAborting — validation did not pass.")
@@ -77,9 +82,14 @@ def main() -> None:
 
     # Phase 3: Run setup_protocol with real gantry (re-loads + validates)
     try:
-        protocol, context = setup_protocol(
-            gantry_path, deck_path, board_path, protocol_path, gantry=gantry,
-        )
+        if board_path is None:
+            protocol, context = setup_protocol(
+                gantry_path, deck_path, protocol_path, gantry=gantry,
+            )
+        else:
+            protocol, context = setup_protocol(
+                gantry_path, deck_path, board_path, protocol_path, gantry=gantry,
+            )
     except SetupValidationError as exc:
         print(f"Validation failed:\n{exc}")
         sys.exit(1)

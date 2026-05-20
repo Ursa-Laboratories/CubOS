@@ -1,244 +1,260 @@
 # CubOS
 
-CubOS is a lab automation package for running self-driving experiments on a
-modified CNC gantry.
+CubOS is the Python control layer for CNC-based lab automation. It connects a
+GRBL gantry, mounted instruments, deck labware, YAML protocols, offline motion
+validation, and SQLite-backed experiment data into one operator workflow.
 
-## Configuration
+Use CubOS when you want to:
 
-Four YAML files define a runnable experiment:
+- describe a lab setup with machine, deck, and protocol YAML files
+- validate motion targets before hardware moves
+- run measurements or liquid-handling steps from reproducible protocols
+- store experiment state and measurement data for later analysis
+- extend the platform with new instruments or labware definitions
 
-### 1. Gantry (`configs/gantry/*.yaml`)
+## Safety Model
 
-Defines the controller serial port, homing strategy, working volume, optional
-GRBL expectations, and `cnc.total_z_height`.
+CubOS can move real hardware. Treat every config or protocol change as a
+potential motion change.
 
-Coordinate convention:
+- Validate YAML offline before connecting to hardware.
+- Calibrate the gantry work frame before trusting real coordinates.
+- Keep an E-stop reachable during calibration, jog tests, and protocol runs.
+- Start with a minimal move protocol before scans, indentation, or dispensing.
 
-- User-facing coordinates are always treated as positive `X`, `Y`, and `Z`.
-- Callers should think in the lab/workcell coordinate system, not raw CNC
-  machine coordinates.
-- The underlying gantry boundary code currently translates user-facing `Z`
-  values to negative machine `Z` before sending them to the controller, similar
-  to CNC mode. Callers should not manually negate `Z`; that translation stays
-  internal.
-- TODO: in a later PR, redefine `Z` from the base deck reference instead of
-  the gantry head/top reference.
+The high-level deck frame is:
 
-```yaml
+- origin: front-left-bottom reachable work volume
+- `+X`: operator-right
+- `+Y`: back, away from the operator
+- `+Z`: up, away from the deck
+
+GRBL homing may physically move to the opposite back-right-top corner. CubOS
+keeps that controller detail behind the gantry boundary and preserves the
+calibrated G54 work-coordinate frame during protocol `home`.
+
+## Quick Start
+
+~~~bash
+git clone https://github.com/Ursa-Laboratories/CubOS.git
+cd CubOS
+python -m venv .venv
+source .venv/bin/activate
+pip install -U pip
+pip install -e ".[dev]"
+~~~
+
+Validate an example setup without moving hardware:
+
+~~~bash
+PYTHONPATH=src python setup/validate_setup.py \
+  configs/gantry/cub_xl_asmi.yaml \
+  configs/deck/asmi_deck.yaml \
+  configs/protocol/asmi_move_a1.yaml
+~~~
+
+Run a protocol after calibration and hardware checks:
+
+~~~bash
+PYTHONPATH=src python setup/run_protocol.py \
+  configs/gantry/cub_xl_asmi.yaml \
+  configs/deck/asmi_deck.yaml \
+  configs/protocol/asmi_move_a1.yaml
+~~~
+
+## Configuration Files
+
+A runnable experiment is defined by three YAML files:
+
+~~~text
+configs/
+  gantry/      # machine envelope, serial port, homing, instruments
+  deck/        # labware placement, holder nesting, calibration anchors
+  protocol/    # ordered experiment steps
+~~~
+
+### Gantry
+
+Gantry config defines the physical machine and mounted instruments:
+
+~~~yaml
 serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 87.0
+  safe_z: 85.0
 
 working_volume:
   x_min: 0.0
-  x_max: 300.0
+  x_max: 399.0
   y_min: 0.0
-  y_max: 200.0
+  y_max: 280.0
   z_min: 0.0
-  z_max: 80.0
-```
+  z_max: 87.0
 
-Included examples:
-
-| Config | System |
-|--------|--------|
-| `cub.yaml` | Cub |
-| `cub_xl.yaml` | Cub-XL |
-
-### 2. Deck (`configs/deck/*.yaml`)
-
-Defines physical labware on the deck. Well plates use two-point calibration
-(`calibration.a1` + `calibration.a2`); vials use a single fixed location.
-Holder fixtures are also supported for collision-aware deck modeling and future
-nesting workflows: `tip_holder`, `tip_disposal`, `well_plate_holder`, and
-`vial_holder`. Exact-position `tip_rack` entries are also supported for pipette
-pickup targets. Holders can define nested contained labware so holder seat
-height contributes directly to experiment Z generation. At runtime, all labware
-now expose shared base-level `geometry` metadata; for current deck models this
-is represented as a bounding box.
-
-```yaml
-labware:
-  plate:
-    type: well_plate
-    name: asmi_96_well
-    model_name: asmi_96_well
-    rows: 8
-    columns: 12
-    calibration:
-      a1: { x: 100.0, y: 100.0, z: 15.0 }
-      a2: { x: 109.0, y: 100.0, z: 15.0 }
-    x_offset_mm: 9.0
-    y_offset_mm: 9.0
-
-  vial_holder:
-    type: vial_holder
-    name: reagent_vials
-    location: { x: 180.0, y: 60.0 }
-    height: 20.0
-    vials:
-      vial_1:
-        location: { x: 180.0, y: 60.0 }
-        model_name: 20ml_vial
-        height_mm: 57.0
-        diameter_mm: 28.0
-        capacity_ul: 20000.0
-        working_volume_ul: 18000.0
-```
-
-Included examples:
-
-- `configs/deck/panda_deck.yaml` — YAML deck config derived from `panda.json`, with two 2x15 tip racks, a nested well plate holder, and a nested vial holder. Contained vial / plate Z positions are generated from holder seat heights.
-
-### 3. Board (`configs/board/*.yaml`)
-
-Defines instruments mounted on the gantry head, including offsets and
-hardware-specific parameters.
-
-Board-level Z semantics:
-
-- `measurement_height` is the instrument's relative action offset from the
-  labware reference Z.
-- `safe_approach_height` is the instrument's relative XY-travel offset from
-  the labware reference Z.
-- These board-level fields are used by generic deck-target motion such as
-  `move` to a deck target, `measure`, and pipette commands.
-
-```yaml
 instruments:
-  pipette:
-    type: pipette
-    vendor: opentrons
-    offset_x: 5.0
+  asmi:
+    type: asmi
+    vendor: vernier
+    offset_x: 0.0
     offset_y: 0.0
     depth: 0.0
-```
+~~~
 
-### 4. Protocol (`configs/protocol/*.yaml`)
+`gantry_type` selects built-in machine-family validation. For `cub_xl`,
+setup validation rejects commanded instrument points or known travel segments
+that would hit the fixed right X-max rail.
 
-Defines the experiment as a sequence of commands. Positions can reference
-labware by key and well ID, for example `plate_1.A1`.
+`cnc.safe_z` is the absolute deck-frame travel ceiling used for inter-labware
+travel and first-well scan entry. If omitted, it defaults to
+`working_volume.z_max`.
 
-```yaml
+### Deck
+
+Deck config defines labware and calibration anchors. Well plates use two-point
+calibration; vials and holders use fixed locations or nested contained labware.
+
+~~~yaml
+labware:
+  plate:
+    load_name: sbs_96_wellplate
+    name: asmi_96_well
+    model_name: asmi_96_well
+    calibration:
+      a1: { x: 347.0, y: 42.0, z: 30.0 }
+      a2: { x: 338.0, y: 42.0, z: 30.0 }
+    x_offset: -9.0
+    y_offset: 9.0
+~~~
+
+Labware `height` is the physical outer dimension. It is not a shortcut for a Z
+reference point; Z comes from calibration anchors or fixed locations.
+
+### Protocol
+
+Protocol config defines the ordered experiment steps:
+
+~~~yaml
 positions:
-  safe_z: [0.0, 0.0, 20.0]
+  park_position: [360.0, 260.0, 85.0]
 
 protocol:
   - home:
   - move:
-      instrument: pipette
-      position: plate_1.A1
-```
+      instrument: asmi
+      position: plate.A1
+~~~
 
-Available protocol commands include `home`, `move`, `scan`, `measure`,
-`pause`, and the pipette command set.
+Common commands include `home`, `move`, `scan`, `measure`, `pause`,
+and the pipette command set.
 
-Protocol motion notes:
+Deck targets can reference top-level labware such as `plate.A1` or nested
+holder paths such as `plate_holder.plate.A1`. `scan.plate` accepts a
+top-level or nested target that resolves to a `WellPlate`.
 
-- `positions:` entries such as `safe_z` are protocol named positions, not deck
-  labware.
-- `move` accepts optional `travel_z` for named/literal XYZ targets. That forces
-  a retract-first transit: move Z to `travel_z`, travel in XY at that Z, then
-  finish at the target position.
-- `scan.entry_travel_z` is an absolute Z used only for the first move into the
-  first well.
-- `scan.safe_approach_height` is also an absolute Z, but only for well-to-well
-  travel inside the scan.
-- This is intentionally different from board-level `safe_approach_height`,
-  which remains a relative offset from labware for generic motion helpers.
+Protocol motion heights are labware-relative command arguments:
 
-ASMI-specific note:
+- `measurement_height`: action plane for `measure` and `scan`
+- `interwell_scan_height`: between-wells travel plane for `scan`
+- `indentation_limit_height`: ASMI deepest descent plane
 
-- ASMI has two different `measurement_height` concepts.
-- Board YAML `measurement_height` is the generic relative instrument offset.
-- `scan.method_kwargs.measurement_height` for `ASMI.indentation()` is an
-  absolute Z where the indentation begins.
+Positive values are above the calibrated labware surface; negative values are
+below it. Inter-labware travel still uses the gantry's absolute `safe_z`.
 
-## Setup and Execution
+## Calibration
 
-Install dependencies:
+Use the wrapper script as the operator entrypoint:
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
-```
+~~~bash
+PYTHONPATH=src python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
+~~~
 
-Optional per-instrument extras pull in vendor SDKs only when you need them:
+With only an input path, the script prompts before overwriting that gantry YAML.
+To write a calibrated copy:
 
-```bash
-# Admiral Instruments SquidStat potentiostat (PySide6 + SquidstatPyLibrary)
+~~~bash
+PYTHONPATH=src python setup/calibrate_gantry.py \
+  configs/gantry/cub_xl_asmi.yaml \
+  --output-gantry configs/gantry/cub_xl_asmi_calibrated.yaml
+~~~
+
+The wrapper detects whether the gantry has one or multiple mounted instruments
+and chooses the matching guided flow. Multi-instrument calibration asks for the
+left-most reference instrument and lowest instrument, then records
+`offset_x`, `offset_y`, and `depth` against a shared calibration block.
+
+After calibration, run:
+
+~~~bash
+PYTHONPATH=src python setup/hello_world.py \
+  --gantry configs/gantry/cub_xl_asmi.yaml
+~~~
+
+Use the jog test to confirm physical direction before running protocols.
+
+## Optional Instrument Extras
+
+Core dependencies stay small. Vendor SDKs are installed only when needed:
+
+~~~bash
+# Vernier GoDirect ASMI force sensor
+pip install -e ".[asmi]"
+
+# Admiral Instruments SquidStat potentiostat
 pip install -e ".[potentiostat]"
-```
+~~~
 
-Interactive jog test:
+Instrument drivers import optional SDKs lazily and raise clear errors if the
+required extra is missing.
 
-```bash
-python setup/hello_world.py
-```
+## Python API
 
-Manual-origin homing:
-
-```bash
-python setup/home_manual.py
-```
-
-This uses the same user-facing positive `X/Y/Z` convention. The script and
-high-level gantry wrapper handle any controller-specific `Z` translation
-internally.
-
-Validate a setup:
-
-```bash
-python setup/validate_setup.py \
-    configs/gantry/cub.yaml \
-    configs/deck/mofcat_deck.yaml \
-    configs/board/mofcat_board.yaml \
-    configs/protocol/protocol.sample.yaml
-```
-
-Run a protocol:
-
-```bash
-python setup/run_protocol.py \
-    configs/gantry/cub.yaml \
-    configs/deck/mofcat_deck.yaml \
-    configs/board/mofcat_board.yaml \
-    configs/protocol/protocol.sample.yaml
-```
-
-`setup/run_protocol.py` runs offline validation first, then:
-
-- connects to the gantry
-- clears the expected GRBL alarm state if present and restores controller state
-- connects all board instruments
-- executes the protocol
-- disconnects instruments and gantry in `finally`
-
-Programmatic setup:
-
-```python
+~~~python
 from protocol_engine.setup import setup_protocol
 
 protocol, context = setup_protocol(
-    gantry_path="configs/gantry/cub.yaml",
-    deck_path="configs/deck/mofcat_deck.yaml",
-    board_path="configs/board/mofcat_board.yaml",
-    protocol_path="configs/protocol/protocol.sample.yaml",
+    gantry_path="configs/gantry/cub_xl_asmi.yaml",
+    deck_path="configs/deck/asmi_deck.yaml",
+    protocol_path="configs/protocol/asmi_move_a1.yaml",
     mock_mode=True,
 )
+
 protocol.run(context)
-```
+~~~
 
 ## Data Persistence
 
 Campaign state can be stored in SQLite through `data.DataStore`. Measurement
-commands can log into a `ProtocolContext` when `data_store` and `campaign_id`
-are provided.
+commands can log into a `ProtocolContext` when `data_store` and
+`campaign_id` are provided.
 
 ## Development
 
-```bash
-pytest tests/
-```
+Install developer dependencies, run the tests, and build docs locally:
+
+~~~bash
+pip install -e ".[dev,docs]"
+PYTHONPATH=src pytest tests/
+mkdocs serve
+~~~
+
+For focused hardware-adjacent changes, validate the affected setup explicitly:
+
+~~~bash
+PYTHONPATH=src python setup/validate_setup.py \
+  configs/gantry/cub_xl_asmi.yaml \
+  configs/deck/asmi_deck.yaml \
+  configs/protocol/asmi_indentation.yaml
+~~~
+
+## Documentation
+
+- [Getting Started](docs/getting-started.md)
+- [Configuration](docs/configuration.md)
+- [Gantry](docs/gantry.md)
+- [Deck](docs/deck.md)
+- [Protocol](docs/protocol.md)
+- [Calibration](docs/calibration.md)
+- [Data](docs/data.md)
+- [Gantry Bring-Up](docs/admin/gantry-bring-up.md)

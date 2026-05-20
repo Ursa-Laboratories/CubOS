@@ -11,9 +11,12 @@ class Deck:
     """
     Runtime container holding labware loaded from a deck YAML.
 
-    Provides dict-like access to labware by key, and a resolve() method
-    that translates target strings (e.g. 'plate_1.A1') into absolute
-    deck coordinates.
+    Provides dict-like access to labware by key plus:
+
+    - ``resolve_coordinate()``: resolve a deck-coordinate target string (e.g.
+      ``"plate_1.A1"``) into a coordinate.
+    - ``resolve_labware()``: resolve a nested labware object path (e.g.
+      ``"plate_holder.plate"``).
     """
 
     def __init__(self, labware: Dict[str, Labware]) -> None:
@@ -23,9 +26,9 @@ class Deck:
     def labware(self) -> Dict[str, Labware]:
         return self._labware
 
-    def resolve(self, target: str) -> Coordinate3D:
+    def resolve_coordinate(self, target: str) -> Coordinate3D:
         """
-        Resolve a target string to an absolute deck coordinate.
+        Resolve a deck coordinate target to an absolute ``Coordinate3D``.
 
         Formats:
             'plate_1.A1'  -> well A1 on plate_1
@@ -36,6 +39,26 @@ class Deck:
             labware_key, location_id = target.split(".", 1)
             return self._get_labware(labware_key).get_location(location_id)
         return self._get_labware(target).get_initial_position()
+
+    def resolve_labware(self, target: str) -> Labware:
+        """Resolve a top-level or nested labware path to a Labware object.
+
+        Formats:
+            'plate_1'            -> top-level plate_1 object
+            'plate_holder.plate' -> contained plate object
+        """
+        parts = target.split(".")
+        labware = self._get_labware(parts[0])
+
+        for child_name in parts[1:]:
+            children = getattr(labware, "contained_labware", {})
+            try:
+                labware = children[child_name]
+            except KeyError as exc:
+                raise KeyError(
+                    f"No nested labware '{child_name}' on deck."
+                ) from exc
+        return labware
 
     def _get_labware(self, key: str) -> Labware:
         try:

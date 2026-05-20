@@ -31,9 +31,11 @@ def _ensure_commands_registered():
 
 GANTRY_YAML = """\
 serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
+  safe_z: 70.0
 working_volume:
   x_min: 0.0
   x_max: 300.0
@@ -41,6 +43,13 @@ working_volume:
   y_max: 200.0
   z_min: 0.0
   z_max: 80.0
+instruments:
+  pipette:
+    type: pipette
+    vendor: opentrons
+    offset_x: 5.0
+    offset_y: 0.0
+    depth: 3.0
 """
 
 DECK_YAML = """\
@@ -51,9 +60,9 @@ labware:
     model_name: test_96_well
     rows: 2
     columns: 3
-    length_mm: 50.0
-    width_mm: 30.0
-    height_mm: 14.0
+    length: 50.0
+    width: 30.0
+    height: 14.0
     calibration:
       a1:
         x: 100.0
@@ -63,33 +72,22 @@ labware:
         x: 109.0
         y: 100.0
         z: 15.0
-    x_offset_mm: 9.0
-    y_offset_mm: 9.0
+    x_offset: 9.0
+    y_offset: 9.0
     capacity_ul: 200.0
     working_volume_ul: 150.0
   waste_vial:
     type: vial
     name: waste
     model_name: waste_container
-    height_mm: 100.0
-    diameter_mm: 50.0
+    height: 100.0
+    diameter: 50.0
     location:
       x: 250.0
       y: 150.0
       z: 30.0
     capacity_ul: 50000.0
     working_volume_ul: 40000.0
-"""
-
-BOARD_YAML = """\
-instruments:
-  pipette:
-    type: pipette
-    vendor: opentrons
-    offset_x: 5.0
-    offset_y: 0.0
-    depth: 3.0
-    measurement_height: 0.0
 """
 
 PROTOCOL_YAML = """\
@@ -116,7 +114,6 @@ class TestEndToEndSetup:
         paths = [
             _write_temp_yaml(GANTRY_YAML),
             _write_temp_yaml(DECK_YAML),
-            _write_temp_yaml(BOARD_YAML),
             _write_temp_yaml(PROTOCOL_YAML),
         ]
         try:
@@ -137,7 +134,6 @@ class TestEndToEndSetup:
         paths = [
             _write_temp_yaml(GANTRY_YAML),
             _write_temp_yaml(DECK_YAML),
-            _write_temp_yaml(BOARD_YAML),
             _write_temp_yaml(PROTOCOL_YAML),
         ]
         try:
@@ -155,8 +151,8 @@ labware:
     type: vial
     name: far_away
     model_name: far_vial
-    height_mm: 50.0
-    diameter_mm: 20.0
+    height: 50.0
+    diameter: 20.0
     location:
           x: 500.0
           y: 40.0
@@ -164,11 +160,16 @@ labware:
     capacity_ul: 1000.0
     working_volume_ul: 800.0
 """
+        bad_protocol = """\
+protocol:
+  - move:
+      instrument: pipette
+      position: far_vial
+"""
         paths = [
             _write_temp_yaml(GANTRY_YAML),
             _write_temp_yaml(bad_deck),
-            _write_temp_yaml(BOARD_YAML),
-            _write_temp_yaml(PROTOCOL_YAML),
+            _write_temp_yaml(bad_protocol),
         ]
         try:
             with pytest.raises(SetupValidationError) as exc_info:
@@ -187,8 +188,8 @@ labware:
     type: vial
     name: edge
     model_name: edge_vial
-    height_mm: 50.0
-    diameter_mm: 20.0
+    height: 50.0
+    diameter: 20.0
     location:
           x: 1.0
           y: 40.0
@@ -196,11 +197,16 @@ labware:
     capacity_ul: 1000.0
     working_volume_ul: 800.0
 """
+        edge_protocol = """\
+protocol:
+  - move:
+      instrument: pipette
+      position: edge_vial
+"""
         paths = [
             _write_temp_yaml(GANTRY_YAML),
             _write_temp_yaml(edge_deck),
-            _write_temp_yaml(BOARD_YAML),
-            _write_temp_yaml(PROTOCOL_YAML),
+            _write_temp_yaml(edge_protocol),
         ]
         try:
             with pytest.raises(SetupValidationError) as exc_info:
@@ -215,9 +221,10 @@ labware:
     def test_setup_with_tight_bounds_validates_all_well_positions(self):
         tight_gantry = """\
 serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 working_volume:
   x_min: 0.0
   x_max: 50.0
@@ -225,12 +232,18 @@ working_volume:
   y_max: 50.0
   z_min: 0.0
   z_max: 50.0
+instruments:
+  pipette:
+    type: pipette
+    vendor: opentrons
+    offset_x: 5.0
+    offset_y: 0.0
+    depth: 3.0
 """
         # plate_1 and waste_vial positions are outside tight positive bounds.
         paths = [
             _write_temp_yaml(tight_gantry),
             _write_temp_yaml(DECK_YAML),
-            _write_temp_yaml(BOARD_YAML),
             _write_temp_yaml(PROTOCOL_YAML),
         ]
         try:

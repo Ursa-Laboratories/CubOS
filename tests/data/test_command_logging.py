@@ -24,9 +24,9 @@ def _make_2x2_plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_96",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=2,
         wells={
@@ -44,8 +44,8 @@ def _make_vial(name: str = "vial_1") -> Vial:
     return Vial(
         name=name,
         model_name="test_vial",
-        height_mm=50.0,
-        diameter_mm=20.0,
+        height=50.0,
+        diameter=20.0,
         location=Coordinate3D(x=50.0, y=0.0, z=0.0),
         capacity_ul=5000.0,
         working_volume_ul=4000.0,
@@ -91,7 +91,7 @@ def _mock_context(
     plate = plate or _make_2x2_plate()
     vial = vial or _make_vial()
     sensor = sensor or _FakeSensor(
-        name="uvvis", offset_x=0.0, offset_y=0.0, depth=0.0
+        name="uvvis", offset_x=0.0, offset_y=0.0, depth=0.0,
     )
 
     labware_map = {"plate_1": plate, "vial_1": vial}
@@ -103,7 +103,8 @@ def _mock_context(
 
     deck = MagicMock()
     deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
-    deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+    deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
+    deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
 
     return ProtocolContext(
         board=board,
@@ -126,7 +127,7 @@ class TestScanCommandLogging:
         store, cid = _make_store_with_labware(plate=plate)
         ctx = _mock_context(plate=plate, store=store, campaign_id=cid)
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
 
         uvvis_count = store._conn.execute(
             "SELECT COUNT(*) FROM uvvis_measurements"
@@ -141,7 +142,7 @@ class TestScanCommandLogging:
         store.record_dispense(cid, "plate_1", "A1", "vial_1", 50.0)
         ctx = _mock_context(plate=plate, store=store, campaign_id=cid)
 
-        scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
 
         row = store._conn.execute(
             "SELECT contents FROM experiments WHERE well_id = 'A1'"
@@ -153,14 +154,14 @@ class TestScanCommandLogging:
         from protocol_engine.commands.scan import scan
 
         ctx = _mock_context()
-        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
         assert len(result) == 4
 
     def test_returns_any_type(self):
         from protocol_engine.commands.scan import scan
 
         ctx = _mock_context()
-        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure")
+        result = scan(ctx, plate="plate_1", instrument="uvvis", method="measure", measurement_height=0.0, interwell_scan_height=10.0)
         assert all(isinstance(v, UVVisSpectrum) for v in result.values())
 
 
@@ -183,7 +184,7 @@ class TestPipetteDbTracking:
 
         deck = MagicMock()
         deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
-        deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
 
         ctx = ProtocolContext(
             board=board, deck=deck,
@@ -206,7 +207,7 @@ class TestPipetteDbTracking:
         board.instruments = {"pipette": pipette}
 
         deck = MagicMock()
-        deck.resolve = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
 
         ctx = ProtocolContext(
             board=board, deck=deck,

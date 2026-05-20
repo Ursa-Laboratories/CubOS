@@ -1,48 +1,73 @@
 # Gantry
 
-The gantry is the CNC motion platform that moves instruments over the deck. CubOS communicates with GRBL-based controllers over serial.
+The gantry is the CNC motion platform that moves instruments over the deck.
+CubOS communicates with GRBL-based controllers over serial.
+
+## Coordinate Convention
+
+The high-level gantry boundary uses the CubOS deck frame:
+
+- origin `(0, 0, 0)` is the front-left-bottom reachable work volume
+- `+X` moves right from the operator perspective
+- `+Y` moves away from the operator, toward the back of the deck
+- `+Z` moves up, away from the deck
+- `-Z` moves down, toward the deck
+
+The low-level controller may physically home at the opposite back-right-top
+corner. That machine-frame detail stays at the controller/GRBL boundary. CubOS
+does not apply a hidden Z sign flip in the high-level `Gantry` wrapper.
+
+Protocol `home` runs GRBL `$H` and preserves the calibrated G54 WPos frame. It
+does not apply `G92` or redefine work coordinates after homing.
 
 ## Config
 
 Gantry YAML defines:
 
 - serial port
+- gantry type (`cub` or `cub_xl`)
 - CNC homing strategy
 - total Z reference height
 - Y-axis motion mode
 - working volume
+- optional `safe_z` (absolute deck-frame travel ceiling)
 - optional GRBL settings expectations
+- mounted instruments, offsets, reach depths, and driver settings
 
 Representative example:
 
 ```yaml
 serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
 cnc:
-  homing_strategy: xy_hard_limits
-  total_z_height: 90.0
+  homing_strategy: standard
+  total_z_range: 87.0
   y_axis_motion: head
+  # Absolute deck-frame Z used for inter-labware travel and the entry
+  # approach to the first well of a scan. Defaults to working_volume.z_max.
+  safe_z: 85.0
 
 working_volume:
   x_min: 0.0
-  x_max: 300.0
+  x_max: 399.0
   y_min: 0.0
-  y_max: 200.0
+  y_max: 280.0
   z_min: 0.0
-  z_max: 80.0
+  z_max: 87.0
 
 grbl_settings:
-  dir_invert_mask: 2
+  dir_invert_mask: 1
   status_report: 0
-  hard_limits: true
   homing_enable: true
-  homing_dir_mask: 3
-  homing_pull_off: 2.0
-  steps_per_mm_x: 800.0
-  steps_per_mm_y: 800.0
-  steps_per_mm_z: 800.0
-  max_travel_x: 300.0
-  max_travel_y: 200.0
-  max_travel_z: 80.0
+  homing_dir_mask: 0
+
+instruments:
+  asmi:
+    type: asmi
+    vendor: vernier
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
 ```
 
 Use this file when:
@@ -50,125 +75,117 @@ Use this file when:
 - switching to a different gantry
 - changing travel limits
 - updating homing behavior
-- validating expected controller settings
+- recording expected controller settings
+- changing mounted instruments, offsets, reach depths, or driver-specific connection settings
 
 ## CNC Fields
 
-`homing_strategy` must be one of:
+`gantry_type` is required at the gantry YAML root and identifies the physical
+machine family. Supported values are `cub` and `cub_xl`. For `cub_xl`, setup
+validation applies a built-in right X-max rail guard and rejects protocols whose
+instrument point or known travel segment would hit the rail. A pose over the
+rail is valid only when the instrument point is above the built-in rail height.
 
-- `xy_hard_limits`
-- `standard`
-- `manual_origin`
+`homing_strategy` must be `standard`, which runs GRBL `$H`.
 
-`total_z_height` is required and must be greater than zero. Deck labware can use a `height` field instead of explicit Z coordinates; in that case CubOS computes user-space Z as `total_z_height - height`.
+`total_z_range` is required and must be greater than zero. It is the seeded
+calculated vertical travel range for the gantry family/workcell and is not
+rewritten by calibration. Calibration uses it to set `working_volume.z_max`
+and GRBL `$132` / `max_travel_z`. Deck labware deck-frame Z values come from
+calibration anchors only — `calibration.a1.z` (plates / holders / tip racks)
+or `location.z` (vials / holders). The labware `height` field is the
+*physical outer dimension* (rim → underside) and is not a Z shorthand;
+omitting an anchor `z` raises a load-time error.
 
-`y_axis_motion` is optional and defaults to `head`. Use `head` when the gantry head moves along Y, and `bed` when the machine bed moves along Y.
+`y_axis_motion` is optional and defaults to `head`. Use `head` when the gantry
+head moves along Y, and `bed` when the machine bed moves along Y.
 
-Working volume bounds are inclusive. Current configs include both positive-space gantries and the older ASMI negative-space gantry, so match the coordinate convention used by your selected gantry config.
+`safe_z` is optional and defaults to `working_volume.z_max`. It is the
+absolute deck-frame Z used for inter-labware travel and the entry approach
+for the first well of a scan. Validation requires every resolved approach
+and action Z to satisfy `z <= safe_z` so the gantry can always retract
+above the deck.
 
-## GRBL Axis And Homing Normalization
+## Working Volume
 
-Use this procedure when bringing up a new machine or normalizing multiple GRBL
-controllers to the same physical convention.
+Working volume bounds are inclusive and use the CubOS deck frame.
 
-Target behavior:
+Protocol setup requires:
 
-- home is back-right-top
-- `+X` moves right
-- `+Y` moves back, away from the user
-- `+Z` moves up
+- `x_min: 0.0`
+- `y_min: 0.0`
+- non-negative `z_min`
 
-In CubOS gantry config, these GRBL fields map to the live controller settings:
+Use [Calibrate Deck Origin](calibration.md) to measure the physical working
+volume. The calibration script jogs to the front-left block/reference point,
+sets X/Y with `G10 L20 P1 X0 Y0`, preserves the seeded `cnc.total_z_range`,
+then re-homes to measure X/Y bounds. For the single-instrument block flow, the
+block-touch WPos Z becomes the remaining travel above WPos 0, so the calibrated
+working volume uses `z_min: 0.0` and `z_max: cnc.total_z_range`.
 
-- `grbl_settings.dir_invert_mask` -> `$3`
-- `grbl_settings.homing_dir_mask` -> `$23`
+Example: a Cub XL seeded with `total_z_range: 110.0` touches a 35 mm block at
+WPos Z=20. The lowest reachable point is inferred as 15 mm above the physical
+deck (`35 - 20`), but the calibrated WPos lower bound remains `z_min: 0.0`,
+`z_max: 110.0`, and `max_travel_z: 110.0`.
 
-Inspect the current controller state first:
+Multi-instrument setups need per-instrument lower-reach limits and inactive-tool
+collision checks instead of one global lower reach for every tool.
 
-```text
-$$
-```
+## Instrument Fields
 
-Record `$3` and `$23` before changing anything.
+Mounted instruments live under the gantry YAML `instruments` key.
 
-### Safety
+- `offset_x` and `offset_y` describe XY offsets from the gantry/router
+  reference point.
+- `depth` is positive tool depth below the gantry reference point; in the +Z-up
+  deck frame, gantry Z is computed as target/tool Z plus `depth`.
 
-- ensure the tool is clear of fixtures, stock, and cables
-- keep a hand on the E-stop or controller reset
-- use low jog speeds while validating motion
+Instrument blocks carry only physical mounting state. Labware-relative
+motion heights live on the protocol command — see "Protocol Height
+Fields" below. Inter-labware and first-well-entry travel use the
+gantry-level `safe_z`, not any instrument field.
 
-### Procedure
+## Protocol Height Fields
 
-1. Start with a known homing direction, for example:
+Labware-relative offsets above the calibrated well/labware surface Z
+(positive = above; negative = below) are first-class arguments to the
+protocol commands that consume them:
 
-   ```text
-   $23=0
-   ```
+- `measurement_height` — required on `measure` and `scan`. It is the
+  action plane offset.
+- `interwell_scan_height` — required on `scan`. It is the between-wells
+  XY-travel offset and must be at or above `measurement_height`.
 
-2. Run homing:
+Pipette commands (aspirate/dispense/etc.) engage at the labware reference
+Z (well bottom, tip top) — i.e. `measurement_height = 0` implicitly.
+- `park_position` is an explicit rest pose (absolute coords, not relative).
+- ASMI `indentation_limit_height` is a *signed* labware-relative offset
+  (mm above the well surface; negative = below). It must be at or below
+  `measurement_height` (descent goes down).
 
-   ```text
-   $H
-   ```
+Legacy names `entry_travel_z`, `entry_travel_height`,
+`interwell_travel_height`, `safe_approach_height`, `indentation_limit`,
+and ASMI `z_limit` are rejected before motion.
 
-3. Check which corner the machine reaches. The goal is back-right-top.
-4. If homing is wrong, adjust `$23` and home again. GRBL uses this bitmask:
-   - `X=1`
-   - `Y=2`
-   - `Z=4`
+## Controller Bring-Up
 
-   Example:
+Axis and homing normalization is controller administration, not routine
+operator calibration. Use [Gantry Bring-Up](admin/gantry-bring-up.md) when a
+machine is new or controller direction/WPos behavior is unknown.
 
-   ```text
-   $23=3
-   ```
+That admin procedure covers:
 
-   This flips the X and Y homing directions.
-
-5. After homing is correct, jog each axis and verify:
-   - `+X` moves right
-   - `+Y` moves back
-   - `+Z` moves up
-
-6. If jogging is wrong, adjust `$3` using the same bitmask:
-
-   ```text
-   $3=2
-   ```
-
-   This inverts Y motion.
-
-7. Run `$H` again after changing `$3`. `$3` and `$23` are coupled, so a motion
-   change can also affect homing behavior.
-8. Repeat the `$23` and `$3` adjustments until both of these are true:
-   - `$H` always goes to back-right-top
-   - positive jog directions are right, back, and up
-9. Save the final `$3` and `$23` values in the gantry config so the expected
-   controller settings are documented with the machine:
-
-   ```yaml
-   grbl_settings:
-     dir_invert_mask: 2
-     homing_dir_mask: 3
-   ```
-
-### Acceptance Criteria
-
-- `$H` always goes to back-right-top
-- `+X`, `+Y`, and `+Z` always move right, back, and up
-- the same `$3` / `$23` pair is documented and reused for identical machines
-
-### Quick Reference
-
-- `$3` bitmask: `X=1`, `Y=2`, `Z=4`
-- `$23` bitmask: `X=1`, `Y=2`, `Z=4`
-- `$3` controls motion direction
-- `$23` controls homing direction
-- validate them together, not independently
+- controller setting snapshots and rollback notes
+- `$3` jog direction invert mask
+- `$10` WPos status reporting
+- `$23` homing direction invert mask
+- WPos/MPos/WCO checks
 
 ## Supported Gantries
 
-| Config | System | Working Volume |
+| Config | System | Current status |
 |--------|--------|----------------|
-| `cub_xl.yaml` | CubOS-XL / Genmitsu 3018 PRO | 400 x 300 x 80 mm |
-| `cub.yaml` | CubOS / Genmitsu 3018 PROVer V2 | 300 x 200 x 80 mm |
+| `configs/gantry/cub_xl_asmi.yaml` | CubOS-XL + ASMI | Measured deck-origin ASMI config from 2026-04-24; still requires staged hardware checks before broad reuse |
+| `configs/gantry/cub_xl_sterling.yaml` | Sterling ASMI | Sterling ASMI setup; validate on hardware before real protocols |
+| `configs/gantry/cub_filmetrics.yaml` | Cub + Filmetrics | Converted deck-origin starting point; recalibrate and hardware-validate before real Filmetrics runs |
+| `configs/gantry/cub_xl_panda.yaml` | CubOS-XL + PANDA-style board | Estimated layout/config surface; placeholders require follow-up before real multi-instrument use |

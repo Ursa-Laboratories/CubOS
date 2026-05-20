@@ -8,8 +8,15 @@ import yaml
 from pydantic import ValidationError
 
 from .errors import GantryLoaderError
-from .gantry_config import GantryConfig, HomingStrategy, WorkingVolume, YAxisMotion
-from .yaml_schema import GRBL_FIELD_TO_SETTING, GantryYamlSchema
+from .gantry_config import (
+    GantryConfig,
+    GantryType,
+    HomingStrategy,
+    WorkingVolume,
+    YAxisMotion,
+)
+from .grbl_settings import normalize_expected_grbl_settings
+from .yaml_schema import GantryYamlSchema
 
 
 def _format_loader_exception(path: Path, error: Exception) -> str:
@@ -25,7 +32,11 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
         if "missing" in error_type or "Field required" in detail:
             guidance = "Add the missing required YAML field shown in the error location."
         elif "extra_forbidden" in error_type or "Extra inputs are not permitted" in detail:
-            guidance = "Remove unknown YAML fields; only 'serial_port', 'cnc', and 'working_volume' are allowed at root."
+            guidance = (
+                "Remove unknown YAML fields; only 'serial_port', 'cnc', "
+                "'gantry_type', 'working_volume', 'grbl_settings', and "
+                "'instruments' are allowed at root."
+            )
         else:
             guidance = "Review the YAML values against the gantry schema."
 
@@ -66,18 +77,18 @@ def load_gantry_from_yaml(path: str | Path) -> GantryConfig:
 
     schema = GantryYamlSchema.model_validate(raw)
 
-    expected_grbl = None
-    if schema.grbl_settings:
-        expected_grbl = {}
-        for field_name, grbl_code in GRBL_FIELD_TO_SETTING.items():
-            value = getattr(schema.grbl_settings, field_name)
-            if value is not None:
-                expected_grbl[grbl_code] = float(value)
+    expected_grbl = normalize_expected_grbl_settings(schema.grbl_settings)
+    instruments = {
+        name: entry.model_dump()
+        for name, entry in schema.instruments.items()
+    }
 
     return GantryConfig(
         serial_port=schema.serial_port,
+        gantry_type=GantryType(schema.gantry_type),
         homing_strategy=HomingStrategy(schema.cnc.homing_strategy),
-        total_z_height=schema.cnc.total_z_height,
+        total_z_range=schema.cnc.total_z_range,
+        safe_z=schema.safe_z,
         working_volume=WorkingVolume(
             x_min=schema.working_volume.x_min,
             x_max=schema.working_volume.x_max,
@@ -88,6 +99,7 @@ def load_gantry_from_yaml(path: str | Path) -> GantryConfig:
         ),
         y_axis_motion=YAxisMotion(schema.cnc.y_axis_motion),
         expected_grbl_settings=expected_grbl,
+        instruments=instruments,
     )
 
 

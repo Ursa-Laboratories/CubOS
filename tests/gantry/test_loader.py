@@ -14,9 +14,11 @@ from gantry.loader import load_gantry_from_yaml, load_gantry_from_yaml_safe
 
 VALID_GANTRY_YAML = """\
 serial_port: /dev/cu.usbserial-2130
+gantry_type: cub_xl
 cnc:
-  homing_strategy: xy_hard_limits
-  total_z_height: 90.0
+  homing_strategy: standard
+  total_z_range: 90.0
+  safe_z: 75.0
 working_volume:
   x_min: 0.0
   x_max: 300.0
@@ -26,6 +28,16 @@ working_volume:
   z_max: 80.0
 """
 
+GANTRY_WITH_INSTRUMENTS_YAML = VALID_GANTRY_YAML + """\
+grbl_settings:
+  status_report: 0
+  homing_enable: true
+instruments:
+  asmi:
+    type: asmi
+    vendor: vernier
+    sensor_channels: [1]
+"""
 
 def _write_temp_yaml(content: str) -> str:
     f = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
@@ -55,7 +67,8 @@ class TestLoadGantryFromYaml:
             assert vol.y_max == 200.0
             assert vol.z_min == 0.0
             assert vol.z_max == 80.0
-            assert config.total_z_height == 90.0
+            assert config.total_z_range == 90.0
+            assert config.safe_z == 75.0
         finally:
             os.unlink(path)
 
@@ -64,6 +77,7 @@ class TestLoadGantryFromYaml:
         try:
             config = load_gantry_from_yaml(path)
             assert config.serial_port == "/dev/cu.usbserial-2130"
+            assert config.gantry_type == "cub_xl"
         finally:
             os.unlink(path)
 
@@ -71,7 +85,36 @@ class TestLoadGantryFromYaml:
         path = _write_temp_yaml(VALID_GANTRY_YAML)
         try:
             config = load_gantry_from_yaml(path)
-            assert config.homing_strategy == "xy_hard_limits"
+            assert config.homing_strategy == "standard"
+        finally:
+            os.unlink(path)
+
+    def test_loaded_gantry_has_instruments_and_grbl_settings(self):
+        path = _write_temp_yaml(GANTRY_WITH_INSTRUMENTS_YAML)
+        try:
+            config = load_gantry_from_yaml(path)
+            assert config.expected_grbl_settings == {"$10": 0.0, "$22": 1.0}
+            assert config.instruments["asmi"]["type"] == "asmi"
+            assert config.instruments["asmi"]["sensor_channels"] == [1]
+        finally:
+            os.unlink(path)
+
+    def test_machine_structures_yaml_is_rejected(self):
+        yaml_content = VALID_GANTRY_YAML + """\
+machine_structures:
+  right_x_max_rail:
+    type: box
+    x_min: 480.0
+    x_max: 540.0
+    y_min: 0.0
+    y_max: 300.0
+    z_min: 0.0
+    z_max: 100.0
+"""
+        path = _write_temp_yaml(yaml_content)
+        try:
+            with pytest.raises(Exception, match="machine_structures"):
+                load_gantry_from_yaml(path)
         finally:
             os.unlink(path)
 
@@ -90,9 +133,10 @@ class TestLoadGantryFromYaml:
     def test_missing_working_volume_raises_validation_error(self):
         yaml_content = """\
 serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 """
         path = _write_temp_yaml(yaml_content)
         try:
@@ -104,9 +148,10 @@ cnc:
     def test_reversed_bounds_raises_validation_error(self):
         yaml_content = """\
 serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 working_volume:
   x_min: 300.0
   x_max: 0.0
@@ -155,7 +200,7 @@ class TestLoadGantryFromYamlSafe:
 serial_port: /dev/ttyUSB0
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 """
         path = _write_temp_yaml(yaml_content)
         try:
@@ -173,7 +218,7 @@ cnc:
 serial_port: /dev/ttyUSB0
 cnc:
   homing_strategy: standard
-  total_z_height: 90.0
+  total_z_range: 90.0
 """
         path = _write_temp_yaml(yaml_content)
         try:

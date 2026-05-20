@@ -46,15 +46,12 @@ class Pipette(BaseInstrument):
         offset_x: float = 0.0,
         offset_y: float = 0.0,
         depth: float = 0.0,
-        measurement_height: float = 0.0,
-        safe_approach_height: Optional[float] = None,
         offline: bool = False,
         **kwargs,
     ):
         super().__init__(
             name=name, offset_x=offset_x, offset_y=offset_y,
-            depth=depth, measurement_height=measurement_height,
-            safe_approach_height=safe_approach_height,
+            depth=depth,
             offline=offline,
         )
         if pipette_model not in PIPETTE_MODELS:

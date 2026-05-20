@@ -1,21 +1,30 @@
-# ASMI deck configuration — 96-well plate for indentation.
-# Columns (1-12) increase in X, rows (A-H) decrease in Y.
-# A2 = A1 + one column step in X to establish axis mapping.
+# ASMI deck layout in the CubOS deck-origin frame.
+#
+# Initial values came from measured ASMI calibration data converted into the
+# current deck frame and then adjusted during hardware bring-up:
+#
+#   old A1 = (-51.25, -238.25, 73.0)
+#   new A1 = (400 - 51.25, 300 - 238.25, 100 - 73.0)
+#          = (348.75, 61.75, 27.0)
+#
+# Current physical calibration:
+# - A1 is the first well reference.
+# - A2 shares X with A1 and is one column step higher in Y.
+# - Rows advance toward lower X.
 
 labware:
   plate:
     load_name: sbs_96_wellplate
-    name: asmi_96_well
-    model_name: asmi_96_well
+    name: asmi_96_well_deck_origin
+    model_name: asmi_96_well_deck_origin
     calibration:
       a1:
-        x: -51.25
-        y: -238.25
-        z: 73.0 # well-top Z (positive-down: 50 mm below home)
+        x: 347
+        y: 42
+        z: 30.0 #actual 25
       a2:
-        x: -60.25
-        y: -238.25
-        z: 73.0 # well-top Z (positive-down: 50 mm below home)
-    # Override: ASMI deck orientation walks columns in -x direction.
-    x_offset_mm: -9.0
-    # y_offset_mm inherits the 9.0 default from sbs_96_wellplate.
+        x: 338
+        y: 42.0
+        z: 30.0
+    x_offset: 9.0
+    y_offset: 9.0

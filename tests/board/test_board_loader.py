@@ -5,8 +5,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from board.errors import BoardLoaderError
-from board.loader import load_board_from_yaml, load_board_from_yaml_safe
+from board.loader import (
+    load_board_from_gantry_config,
+    load_board_from_gantry_yaml,
+    load_board_from_yaml,
+    load_board_from_yaml_safe,
+)
 from board.yaml_schema import BoardYamlSchema, InstrumentYamlEntry
+from gantry.loader import load_gantry_from_yaml
 from instruments.asmi.driver import ASMI
 from instruments.filmetrics.driver import Filmetrics
 from instruments.pipette.driver import Pipette
@@ -23,6 +29,12 @@ def _mock_gantry():
 def _write_yaml(tmp_path: Path, content: str) -> Path:
     """Write YAML text to a temp file and return the path."""
     path = tmp_path / "board.yaml"
+    path.write_text(textwrap.dedent(content))
+    return path
+
+
+def _write_gantry_yaml(tmp_path: Path, content: str) -> Path:
+    path = tmp_path / "gantry.yaml"
     path.write_text(textwrap.dedent(content))
     return path
 
@@ -48,7 +60,7 @@ class TestInstrumentYamlEntry:
         assert entry.offset_x == 0.0
         assert entry.offset_y == 0.0
         assert entry.depth == 0.0
-        assert entry.measurement_height == 0.0
+        assert not hasattr(entry, "measurement_height")
 
     def test_missing_vendor_raises(self):
         with pytest.raises(Exception):
@@ -68,6 +80,27 @@ class TestBoardYamlSchema:
         with pytest.raises(Exception):
             BoardYamlSchema.model_validate({})
 
+    def test_allows_grbl_settings_root_key(self):
+        schema = BoardYamlSchema.model_validate({
+            "grbl_settings": {
+                "status_report": 0,
+                "soft_limits": True,
+                "homing_enable": True,
+                "max_travel_x": 306.0,
+            },
+            "instruments": {"a": {"type": "uvvis_ccs", "vendor": "thorlabs"}},
+        })
+        assert schema.grbl_settings is not None
+        assert schema.grbl_settings.soft_limits is True
+        assert schema.grbl_settings.max_travel_x == 306.0
+
+    def test_rejects_unknown_grbl_setting(self):
+        with pytest.raises(Exception):
+            BoardYamlSchema.model_validate({
+                "grbl_settings": {"unknown_setting": 1},
+                "instruments": {"a": {"type": "uvvis_ccs", "vendor": "thorlabs"}},
+            })
+
 
 # --- Loader: valid YAML ------------------------------------------------------
 
@@ -83,7 +116,6 @@ class TestLoadBoardSingleInstrument:
                 offset_x: 15.0
                 offset_y: 0.0
                 depth: 5.0
-                measurement_height: 3.0
         """)
         board = load_board_from_yaml(yaml_path, _mock_gantry())
 
@@ -94,7 +126,6 @@ class TestLoadBoardSingleInstrument:
         assert instr.offset_x == 15.0
         assert instr.offset_y == 0.0
         assert instr.depth == 5.0
-        assert instr.measurement_height == 3.0
 
 
 class TestLoadBoardMultipleInstruments:
@@ -127,81 +158,12 @@ class TestLoadBoardMultipleInstruments:
                 type: filmetrics
                 vendor: kla
                 offset_x: 20.0
-                measurement_height: 1.5
         """)
         board = load_board_from_yaml(yaml_path, _mock_gantry())
 
         instr = board.instruments["film"]
         assert isinstance(instr, Filmetrics)
-        assert instr.measurement_height == 1.5
-
-
-class TestLoadBoardMeasurementHeight:
-
-    def test_measurement_height_passes_through(self, tmp_path):
-        yaml_path = _write_yaml(tmp_path, """\
-            instruments:
-              sensor:
-                type: uvvis_ccs
-                vendor: thorlabs
-                measurement_height: 4.5
-        """)
-        board = load_board_from_yaml(yaml_path, _mock_gantry())
-        assert board.instruments["sensor"].measurement_height == 4.5
-
-    def test_measurement_height_defaults_to_zero(self, tmp_path):
-        yaml_path = _write_yaml(tmp_path, """\
-            instruments:
-              sensor:
-                type: uvvis_ccs
-                vendor: thorlabs
-        """)
-        board = load_board_from_yaml(yaml_path, _mock_gantry())
-        assert board.instruments["sensor"].measurement_height == 0.0
-
-
-class TestLoadBoardSafeApproachHeight:
-
-    def test_safe_approach_height_explicit_is_preserved(self, tmp_path):
-        yaml_path = _write_yaml(tmp_path, """\
-            instruments:
-              pipette:
-                type: pipette
-                vendor: opentrons
-                pipette_model: p300_single_gen2
-                measurement_height: -5.0
-                safe_approach_height: 20.0
-        """)
-        board = load_board_from_yaml(yaml_path, _mock_gantry())
-        assert board.instruments["pipette"].measurement_height == -5.0
-        assert board.instruments["pipette"].safe_approach_height == 20.0
-
-    def test_safe_approach_height_defaults_to_measurement_height(self, tmp_path):
-        """Omitting safe_approach_height is valid and falls back to measurement_height."""
-        yaml_path = _write_yaml(tmp_path, """\
-            instruments:
-              sensor:
-                type: uvvis_ccs
-                vendor: thorlabs
-                measurement_height: 3.0
-        """)
-        board = load_board_from_yaml(yaml_path, _mock_gantry())
-        assert board.instruments["sensor"].measurement_height == 3.0
-        assert board.instruments["sensor"].safe_approach_height == 3.0
-
-    def test_safe_approach_below_measurement_is_rejected(self, tmp_path):
-        """YAML validator catches misconfiguration at parse time."""
-        yaml_path = _write_yaml(tmp_path, """\
-            instruments:
-              pipette:
-                type: pipette
-                vendor: opentrons
-                pipette_model: p300_single_gen2
-                measurement_height: 5.0
-                safe_approach_height: 2.0
-        """)
-        with pytest.raises(Exception, match="safe_approach_height"):
-            load_board_from_yaml(yaml_path, _mock_gantry())
+        assert instr.offset_x == 20.0
 
 
 class TestLoadBoardGantry:
@@ -216,6 +178,103 @@ class TestLoadBoardGantry:
         gantry = _mock_gantry()
         board = load_board_from_yaml(yaml_path, gantry)
         assert board.gantry is gantry
+
+    def test_grbl_settings_are_attached_to_board(self, tmp_path):
+        yaml_path = _write_yaml(tmp_path, """\
+            grbl_settings:
+              status_report: 0
+              soft_limits: true
+              homing_enable: true
+              max_travel_x: 306.0
+            instruments:
+              uvvis:
+                type: uvvis_ccs
+                vendor: thorlabs
+        """)
+        board = load_board_from_yaml(yaml_path, _mock_gantry())
+        assert board.expected_grbl_settings == {
+            "$10": 0.0,
+            "$20": 1.0,
+            "$22": 1.0,
+            "$130": 306.0,
+        }
+
+
+class TestLoadBoardFromGantryConfig:
+
+    def test_loads_instruments_embedded_in_gantry_yaml(self, tmp_path):
+        gantry_path = _write_gantry_yaml(tmp_path, """\
+            serial_port: /dev/ttyUSB0
+            gantry_type: cub_xl
+            cnc:
+              homing_strategy: standard
+              total_z_range: 90.0
+            working_volume:
+              x_min: 0.0
+              x_max: 300.0
+              y_min: 0.0
+              y_max: 200.0
+              z_min: 0.0
+              z_max: 80.0
+            grbl_settings:
+              status_report: 0
+              homing_enable: true
+            instruments:
+              asmi:
+                type: asmi
+                vendor: vernier
+        """)
+        gantry_config = load_gantry_from_yaml(gantry_path)
+        board = load_board_from_gantry_config(
+            gantry_config,
+            _mock_gantry(),
+            mock_mode=True,
+        )
+
+        assert isinstance(board.instruments["asmi"], ASMI)
+        assert board.instruments["asmi"]._offline is True
+        assert board.expected_grbl_settings == {"$10": 0.0, "$22": 1.0}
+
+    def test_loads_directly_from_gantry_yaml(self, tmp_path):
+        gantry_path = _write_gantry_yaml(tmp_path, """\
+            serial_port: /dev/ttyUSB0
+            gantry_type: cub_xl
+            cnc:
+              homing_strategy: standard
+              total_z_range: 90.0
+            working_volume:
+              x_min: 0.0
+              x_max: 300.0
+              y_min: 0.0
+              y_max: 200.0
+              z_min: 0.0
+              z_max: 80.0
+            instruments:
+              uvvis:
+                type: uvvis_ccs
+                vendor: thorlabs
+        """)
+        board = load_board_from_gantry_yaml(gantry_path, _mock_gantry())
+        assert isinstance(board.instruments["uvvis"], UVVisCCS)
+
+    def test_requires_embedded_instruments(self, tmp_path):
+        gantry_path = _write_gantry_yaml(tmp_path, """\
+            serial_port: /dev/ttyUSB0
+            gantry_type: cub_xl
+            cnc:
+              homing_strategy: standard
+              total_z_range: 90.0
+            working_volume:
+              x_min: 0.0
+              x_max: 300.0
+              y_min: 0.0
+              y_max: 200.0
+              z_min: 0.0
+              z_max: 80.0
+        """)
+        gantry_config = load_gantry_from_yaml(gantry_path)
+        with pytest.raises(ValueError, match="instruments"):
+            load_board_from_gantry_config(gantry_config, _mock_gantry())
 
 
 # --- Loader: error cases -----------------------------------------------------

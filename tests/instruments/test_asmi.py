@@ -4,6 +4,7 @@ import unittest
 from unittest.mock import patch
 
 from instruments.asmi.driver import ASMI
+from instruments.asmi.exceptions import ASMICommandError
 from instruments.asmi.models import ASMIStatus, MeasurementResult
 
 
@@ -50,7 +51,7 @@ class TestASMIOffline(unittest.TestCase):
         gantry = Gantry(offline=True)
 
         result = self.asmi.indentation(
-            gantry, z_limit=12.0, measurement_height=10.0, step_size=0.1,
+            gantry, well_z=0.0, measurement_height=10.0, indentation_limit_height=8.0, step_size=0.1,
         )
 
         self.assertIn("measurements", result)
@@ -68,8 +69,9 @@ class TestASMIOffline(unittest.TestCase):
 
         result = self.asmi.indentation(
             gantry,
-            z_limit=12.0,
+            well_z=0.0,
             measurement_height=10.0,
+            indentation_limit_height=8.0,
             step_size=0.1,
             measure_with_return=True,
         )
@@ -85,7 +87,7 @@ class TestASMIOffline(unittest.TestCase):
         gantry = Gantry(offline=True)
 
         result = self.asmi.indentation(
-            gantry, z_limit=12.0, measurement_height=10.0, step_size=0.1,
+            gantry, well_z=0.0, measurement_height=10.0, indentation_limit_height=8.0, step_size=0.1,
         )
 
         self.assertGreater(len(result["measurements"]), 0)
@@ -93,15 +95,17 @@ class TestASMIOffline(unittest.TestCase):
             self.assertEqual(step["direction"], "down")
 
     def test_indentation_offline_return_preserves_ordering_and_monotonicity(self):
-        """All down samples must precede all up samples. Positive-down: descent
-        increases z toward z_limit, return decreases z back to measurement_height."""
+        """All down samples must precede all up samples. Deck-origin +Z-up:
+        descent decreases z toward the deepest plane, return increases z
+        back to the action plane."""
         from gantry.gantry import Gantry
         gantry = Gantry(offline=True)
 
         result = self.asmi.indentation(
             gantry,
-            z_limit=12.0,
+            well_z=0.0,
             measurement_height=10.0,
+            indentation_limit_height=8.0,
             step_size=0.1,
             measure_with_return=True,
         )
@@ -114,44 +118,45 @@ class TestASMIOffline(unittest.TestCase):
 
         down_z = [s["z_mm"] for s in steps if s["direction"] == "down"]
         up_z = [s["z_mm"] for s in steps if s["direction"] == "up"]
-        # Down: each z strictly larger than the previous (gantry descends).
         for prev, curr in zip(down_z, down_z[1:]):
-            self.assertGreater(curr, prev)
-        # Up: each z strictly smaller than the previous (gantry retracts).
-        for prev, curr in zip(up_z, up_z[1:]):
             self.assertLess(curr, prev)
-        # Return terminates at measurement_height (well top), never overshoots.
+        for prev, curr in zip(up_z, up_z[1:]):
+            self.assertGreater(curr, prev)
+        # Return terminates at the action plane (well top), never overshoots.
         self.assertAlmostEqual(up_z[-1], 10.0, places=6)
 
     def test_indentation_offline_return_no_float_drift(self):
-        """Descent must reach z_limit and return must hit measurement_height exactly,
-        even when step_size doesn't divide the range evenly."""
+        """Descent must reach the deepest plane exactly and the return must
+        hit the action plane exactly even when step size doesn't divide
+        the range evenly."""
         from gantry.gantry import Gantry
         gantry = Gantry(offline=True)
 
         # 0.03 does not evenly divide 2.0 (66.67 steps → ceil to 67).
         result = self.asmi.indentation(
             gantry,
-            z_limit=12.0,
+            well_z=0.0,
             measurement_height=10.0,
+            indentation_limit_height=8.0,    # 2 mm of descent
             step_size=0.03,
             measure_with_return=True,
         )
 
         down_z = [s["z_mm"] for s in result["measurements"] if s["direction"] == "down"]
         up_z = [s["z_mm"] for s in result["measurements"] if s["direction"] == "up"]
-        self.assertAlmostEqual(down_z[-1], 12.0, places=6)
+        self.assertAlmostEqual(down_z[-1], 8.0, places=6)
         self.assertAlmostEqual(up_z[-1], 10.0, places=6)
 
     def test_indentation_offline_step_larger_than_span_takes_one_step(self):
-        """When step_size exceeds the span, one clamped step must still occur."""
+        """When step_size exceeds the descent span, one clamped step occurs."""
         from gantry.gantry import Gantry
         gantry = Gantry(offline=True)
 
         result = self.asmi.indentation(
             gantry,
-            z_limit=10.05,
+            well_z=0.0,
             measurement_height=10.0,
+            indentation_limit_height=9.95,   # 0.05 mm of descent
             step_size=0.5,
             measure_with_return=True,
         )
@@ -159,9 +164,61 @@ class TestASMIOffline(unittest.TestCase):
         down_z = [s["z_mm"] for s in result["measurements"] if s["direction"] == "down"]
         up_z = [s["z_mm"] for s in result["measurements"] if s["direction"] == "up"]
         self.assertEqual(len(down_z), 1)
-        self.assertAlmostEqual(down_z[0], 10.05, places=6)
+        self.assertAlmostEqual(down_z[0], 9.95, places=6)
         self.assertEqual(len(up_z), 1)
         self.assertAlmostEqual(up_z[0], 10.0, places=6)
+
+    def test_indentation_limit_height_drives_descent(self):
+        from gantry.gantry import Gantry
+        gantry = Gantry(offline=True)
+
+        result = self.asmi.indentation(
+            gantry,
+            well_z=0.0,
+            measurement_height=10.0,
+            indentation_limit_height=9.8,    # 0.2 mm of descent
+            step_size=0.1,
+        )
+
+        self.assertEqual(result["data_points"], 2)
+        self.assertAlmostEqual(result["measurements"][-1]["z_mm"], 9.8)
+
+    def test_indentation_rejects_non_positive_step_size(self):
+        from gantry.gantry import Gantry
+        gantry = Gantry(offline=True)
+
+        with self.assertRaises(ValueError, msg="step_size"):
+            self.asmi.indentation(
+                gantry, well_z=0.0, measurement_height=10.0, indentation_limit_height=8.0, step_size=0.0,
+            )
+
+    def test_indentation_rejects_indentation_limit_height_above_measurement_height(self):
+        """``indentation_limit_height`` must be ≤ ``measurement_height``:
+        descending through the well surface is fine, but a deepest plane
+        *above* the start plane would mean the descent goes up — meaningless."""
+        from gantry.gantry import Gantry
+        gantry = Gantry(offline=True)
+
+        with self.assertRaises(ValueError, msg="indentation_limit_height"):
+            self.asmi.indentation(
+                gantry, well_z=0.0, measurement_height=10.0,
+                indentation_limit_height=10.5, step_size=0.1,
+            )
+
+    def test_indentation_equal_offsets_is_legal(self):
+        """A zero-descent indentation is the inclusive boundary — the spec
+        is ``indentation_limit_height ≤ measurement_height``. The engine and
+        validator both accept equality, so the driver does too. The motion
+        loop runs zero descent steps and the return loop is a no-op."""
+        from gantry.gantry import Gantry
+        gantry = Gantry(offline=True)
+
+        result = self.asmi.indentation(
+            gantry, well_z=0.0, measurement_height=10.0,
+            indentation_limit_height=10.0, step_size=0.1,
+        )
+
+        assert result["data_points"] == 0
 
 
 class _FakeOnlineGantry:
@@ -188,6 +245,14 @@ class TestASMIOnlineIndentation(unittest.TestCase):
         asmi._offline = False
         return asmi
 
+    def test_move_z_raises_when_gantry_never_goes_idle(self):
+        asmi = ASMI(offline=False, idle_timeout=0.0)
+        gantry = _FakeOnlineGantry(start_z=10.0)
+        gantry.get_status = lambda: "Run"
+
+        with self.assertRaises(ASMICommandError):
+            asmi._move_z(gantry, 0.0, 0.0, 10.1)
+
     def test_online_indentation_with_return_records_both_directions(self):
         asmi = self._make_online_asmi()
         gantry = _FakeOnlineGantry(start_z=10.0)
@@ -196,8 +261,9 @@ class TestASMIOnlineIndentation(unittest.TestCase):
              patch.object(asmi, "get_force_reading", return_value=0.1):
             result = asmi.indentation(
                 gantry,
-                z_limit=10.5,
+                well_z=0.0,
                 measurement_height=10.0,
+                indentation_limit_height=0.5,    # 9.5 mm of descent
                 step_size=0.1,
                 force_limit=100.0,
                 baseline_samples=1,
@@ -220,15 +286,16 @@ class TestASMIOnlineIndentation(unittest.TestCase):
                 pass
 
         gantry = StalledGantry(start_z=10.0)
-        # Prime descent by letting z reach z_limit on the first real move; we
-        # only need _some_ descent measurement to trigger the return block.
+        # Prime descent: first move puts z at the action plane, second move
+        # takes one descent step; we only need _some_ descent sample to
+        # trigger the return block.
         original_move = _FakeOnlineGantry.move_to
         call_count = {"n": 0}
 
         def move_once_then_stall(self, x, y, z):
             call_count["n"] += 1
             if call_count["n"] == 1:
-                original_move(self, x, y, z)  # initial descend to measurement_height
+                original_move(self, x, y, z)  # initial descend to action plane
             elif call_count["n"] == 2:
                 original_move(self, x, y, z)  # one descent step
             # subsequent moves no-op → stall during return
@@ -238,8 +305,9 @@ class TestASMIOnlineIndentation(unittest.TestCase):
              patch.object(asmi, "get_force_reading", return_value=0.0):
             result = asmi.indentation(
                 gantry,
-                z_limit=10.1,
+                well_z=0.0,
                 measurement_height=10.0,
+                indentation_limit_height=0.1,    # 9.9 mm of descent
                 step_size=0.1,
                 force_limit=100.0,
                 baseline_samples=1,

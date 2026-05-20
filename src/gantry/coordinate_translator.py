@@ -1,7 +1,9 @@
-"""Coordinate translation helpers for the gantry boundary.
+"""Coordinate normalization helpers for the gantry boundary.
 
-X/Y use the same sign convention on both sides of the boundary, while Z
-remains inverted between user-facing and machine-facing coordinates.
+CubOS speaks the deck-origin frame at the high-level gantry boundary:
+front-left-bottom origin, +X operator-right, +Y back, +Z up. Controller
+configuration is responsible for making raw GRBL/WPos reports match that
+frame, so this module normalizes values without applying hidden sign flips.
 """
 
 from __future__ import annotations
@@ -9,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import overload
 
-from .gantry_driver.instruments import Coordinates
+from .coordinates import Coordinates
 
 _STATUS_COORD_PATTERN = re.compile(
     r"(?P<label>[WM]Pos:)"
@@ -24,13 +26,6 @@ def _normalize(value: float) -> float:
     if abs(normalized) < 1e-12:
         return 0.0
     return normalized
-
-
-def _negate(value: float) -> float:
-    negated = -float(value)
-    if abs(negated) < 1e-12:
-        return 0.0
-    return negated
 
 
 def _format_like(original_token: str, value: float) -> str:
@@ -57,16 +52,16 @@ def to_user_coordinates(
     y: float | None = None,
     z: float | None = None,
 ) -> tuple[float, float, float] | Coordinates:
-    """Translate machine-space coordinates to user-space coordinates."""
+    """Normalize machine/WPos coordinates into CubOS deck-frame coordinates."""
     if isinstance(x_or_coords, Coordinates):
         return Coordinates(
             _normalize(x_or_coords.x),
             _normalize(x_or_coords.y),
-            _negate(x_or_coords.z),
+            _normalize(x_or_coords.z),
         )
     if y is None or z is None:
         raise TypeError("Expected x, y, z floats when not passing a Coordinates object.")
-    return (_normalize(x_or_coords), _normalize(y), _negate(z))
+    return (_normalize(x_or_coords), _normalize(y), _normalize(z))
 
 
 @overload
@@ -84,16 +79,16 @@ def to_machine_coordinates(
     y: float | None = None,
     z: float | None = None,
 ) -> tuple[float, float, float] | Coordinates:
-    """Translate user-space coordinates to machine-space coordinates."""
+    """Normalize CubOS deck-frame coordinates before sending to the gantry."""
     if isinstance(x_or_coords, Coordinates):
         return Coordinates(
             _normalize(x_or_coords.x),
             _normalize(x_or_coords.y),
-            _negate(x_or_coords.z),
+            _normalize(x_or_coords.z),
         )
     if y is None or z is None:
         raise TypeError("Expected x, y, z floats when not passing a Coordinates object.")
-    return (_normalize(x_or_coords), _normalize(y), _negate(z))
+    return (_normalize(x_or_coords), _normalize(y), _normalize(z))
 
 
 def translate_status_string(status: str) -> str:
@@ -102,7 +97,7 @@ def translate_status_string(status: str) -> str:
     def _replace(match: re.Match[str]) -> str:
         tx = _format_like(match.group("x"), _normalize(float(match.group("x"))))
         ty = _format_like(match.group("y"), _normalize(float(match.group("y"))))
-        tz = _format_like(match.group("z"), _negate(float(match.group("z"))))
+        tz = _format_like(match.group("z"), _normalize(float(match.group("z"))))
         return f"{match.group('label')}{tx},{ty},{tz}"
 
     return _STATUS_COORD_PATTERN.sub(_replace, status)

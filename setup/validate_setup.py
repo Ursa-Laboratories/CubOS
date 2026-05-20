@@ -1,15 +1,16 @@
 """Validate a protocol setup by loading all configs and checking bounds.
 
 Usage:
-    python setup/validate_setup.py <gantry.yaml> <deck.yaml> <board.yaml> <protocol.yaml>
+    python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
 
 Example:
     python setup/validate_setup.py \\
-        configs/gantry/cub_xl.yaml \\
-        configs/deck/mofcat_deck.yaml \\
-        configs/board/mofcat_board.yaml \\
-        configs/protocol/protocol.sample.yaml
+        configs/gantry/cub_xl_asmi.yaml \\
+        configs/deck/asmi_deck.yaml \\
+        configs/protocol/asmi_move_a1.yaml
 """
+
+from __future__ import annotations
 
 import sys
 from dataclasses import dataclass
@@ -19,15 +20,20 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
-from board.loader import load_board_from_yaml
+from board.loader import load_board_from_gantry_config, load_board_from_yaml
 from deck.deck import Deck
 from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
 from deck.loader import load_deck_from_yaml
 from gantry.loader import load_gantry_from_yaml
+from gantry.origin import validate_deck_origin_minima
 from gantry.gantry import Gantry
 from protocol_engine.loader import load_protocol_from_yaml
-from validation.bounds import validate_deck_positions, validate_gantry_positions
+from validation.bounds import (
+    collect_protocol_motion_targets,
+    validate_protocol_motion_bounds,
+)
+from validation.protocol_semantics import validate_protocol_semantics
 
 SEPARATOR = "-" * 60
 
@@ -71,10 +77,16 @@ def _instrument_summary(board) -> list[str]:
 def run_validation(
     gantry_path: str,
     deck_path: str,
-    board_path: str,
-    protocol_path: str,
+    protocol_or_board_path: str,
+    protocol_path: str | None = None,
 ) -> ValidationResult:
     """Run full setup validation and return structured result."""
+    board_path: str | None = None
+    if protocol_path is None:
+        protocol_path = protocol_or_board_path
+    else:
+        board_path = protocol_or_board_path
+
     lines: list[str] = []
 
     def out(text: str = "") -> None:
@@ -89,6 +101,7 @@ def run_validation(
     out("[1/4] Loading gantry config...")
     try:
         gantry_config = load_gantry_from_yaml(gantry_path)
+        validate_deck_origin_minima(gantry_config)
     except Exception as exc:
         out(f"  ERROR: {exc}")
         out()
@@ -99,6 +112,7 @@ def run_validation(
 
     vol = gantry_config.working_volume
     out(f"  OK: {gantry_path}")
+    out(f"  Gantry type: {gantry_config.gantry_type.value}")
     out(f"  Working volume: X[{vol.x_min}, {vol.x_max}]  "
         f"Y[{vol.y_min}, {vol.y_max}]  Z[{vol.z_min}, {vol.z_max}]")
     out(f"  Homing strategy: {gantry_config.homing_strategy}")
@@ -109,7 +123,7 @@ def run_validation(
     try:
         deck = load_deck_from_yaml(
             deck_path,
-            total_z_height=gantry_config.total_z_height,
+            total_z_range=gantry_config.total_z_range,
         )
     except Exception as exc:
         out(f"  ERROR: {exc}")
@@ -125,20 +139,27 @@ def run_validation(
         out(summary_line)
     out()
 
-    # 3. Board
-    out("[3/4] Loading board config...")
+    # 3. Board / instruments
+    out("[3/4] Loading instruments...")
     try:
         offline_gantry = Gantry(offline=True)
-        board = load_board_from_yaml(board_path, offline_gantry, mock_mode=True)
+        if board_path is None:
+            board = load_board_from_gantry_config(
+                gantry_config, offline_gantry, mock_mode=True,
+            )
+            board_source = gantry_path
+        else:
+            board = load_board_from_yaml(board_path, offline_gantry, mock_mode=True)
+            board_source = board_path
     except Exception as exc:
         out(f"  ERROR: {exc}")
         out()
         out(SEPARATOR)
-        out("RESULT: ERROR — could not load board config")
+        out("RESULT: ERROR — could not load instruments")
         out(SEPARATOR)
         return ValidationResult(output="\n".join(lines), passed=False)
 
-    out(f"  OK: {board_path}")
+    out(f"  OK: {board_source}")
     out(f"  Instruments ({len(board.instruments)}):")
     for summary_line in _instrument_summary(board):
         out(summary_line)
@@ -162,66 +183,71 @@ def run_validation(
         out(f"    [{step.index}] {step.command_name}({', '.join(f'{k}={v!r}' for k, v in step.args.items())})")
     out()
 
-    # 5. Deck bounds validation
-    out("Validating deck positions...")
-    deck_violations = validate_deck_positions(gantry_config, deck)
-    if deck_violations:
-        out(f"  FAIL — {len(deck_violations)} violation(s):")
-        for v in deck_violations:
-            out(f"  - {v.labware_key}.{v.position_id}: "
-                f"deck ({v.x}, {v.y}, {v.z}) violates {v.bound_name}={v.bound_value}")
+    # 5. Protocol motion bounds validation
+    out("Validating protocol motion bounds...")
+    motion_targets = collect_protocol_motion_targets(gantry_config, protocol, deck)
+    motion_violations = validate_protocol_motion_bounds(
+        gantry_config, protocol, deck, board,
+    )
+    if motion_violations:
+        out(f"  FAIL — {len(motion_violations)} violation(s):")
+        for v in motion_violations:
+            prefix = (
+                f"{v.instrument_name} -> "
+                if v.coordinate_type == "gantry" and v.instrument_name
+                else ""
+            )
+            out(f"  - {prefix}{v.labware_key}.{v.position_id}: "
+                f"{v.coordinate_type} ({v.x}, {v.y}, {v.z}) "
+                f"violates {v.bound_name}={v.bound_value}")
     else:
-        total_positions = sum(
-            len(deck[k].wells) if isinstance(deck[k], WellPlate) else 1
-            for k in deck
-        )
-        out(f"  OK ({total_positions} positions checked)")
+        out(f"  OK ({len(motion_targets)} protocol target(s) checked)")
     out()
 
-    # 6. Gantry bounds validation
-    out("Validating gantry positions...")
-    gantry_violations = validate_gantry_positions(gantry_config, deck, board)
-    if gantry_violations:
-        out(f"  FAIL — {len(gantry_violations)} violation(s):")
-        for v in gantry_violations:
-            out(f"  - {v.instrument_name} -> {v.labware_key}.{v.position_id}: "
-                f"gantry ({v.x}, {v.y}, {v.z}) violates {v.bound_name}={v.bound_value}")
+    # 6. Protocol semantic validation
+    out("Validating protocol semantics...")
+    semantic_violations = validate_protocol_semantics(
+        protocol, board, deck, gantry_config,
+    )
+    if semantic_violations:
+        out(f"  FAIL — {len(semantic_violations)} violation(s):")
+        for v in semantic_violations:
+            out(f"  - step {v.step_index} ({v.command_name}): {v.message}")
     else:
-        total_positions = sum(
-            len(deck[k].wells) if isinstance(deck[k], WellPlate) else 1
-            for k in deck
-        )
-        out(f"  OK ({total_positions} positions x {len(board.instruments)} instrument(s) checked)")
+        out("  OK")
     out()
 
     # Final result
-    all_violations = deck_violations + gantry_violations
     out(SEPARATOR)
-    if all_violations:
-        out(f"RESULT: FAIL — {len(all_violations)} violation(s) found")
+    if motion_violations or semantic_violations:
+        total = len(motion_violations) + len(semantic_violations)
+        out(f"RESULT: FAIL — {total} violation(s) found")
         out(SEPARATOR)
         return ValidationResult(output="\n".join(lines), passed=False)
 
-    out("RESULT: PASS — all positions within gantry bounds")
+    out("RESULT: PASS — protocol motion targets within gantry bounds")
     out("Protocol is ready to run.")
     out(SEPARATOR)
     return ValidationResult(output="\n".join(lines), passed=True)
 
 
 def main() -> None:
-    if len(sys.argv) != 5:
-        print("Usage: python setup/validate_setup.py <gantry.yaml> <deck.yaml> <board.yaml> <protocol.yaml>")
+    if len(sys.argv) not in (4, 5):
+        print("Usage: python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>")
         print()
         print("Example:")
         print("  python setup/validate_setup.py \\")
-        print("    configs/gantry/cub_xl.yaml \\")
-        print("    configs/deck/mofcat_deck.yaml \\")
-        print("    configs/board/mofcat_board.yaml \\")
-        print("    configs/protocol/protocol.sample.yaml")
+        print("    configs/gantry/cub_xl_asmi.yaml \\")
+        print("    configs/deck/asmi_deck.yaml \\")
+        print("    configs/protocol/asmi_move_a1.yaml")
         sys.exit(1)
 
-    gantry_path, deck_path, board_path, protocol_path = sys.argv[1:5]
-    result = run_validation(gantry_path, deck_path, board_path, protocol_path)
+    if len(sys.argv) == 4:
+        gantry_path, deck_path, protocol_path = sys.argv[1:4]
+        result = run_validation(gantry_path, deck_path, protocol_path)
+    else:
+        gantry_path, deck_path, board_path, protocol_path = sys.argv[1:5]
+        result = run_validation(gantry_path, deck_path, board_path, protocol_path)
     print(result.output)
     if not result.passed:
         sys.exit(1)

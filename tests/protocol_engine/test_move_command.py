@@ -26,7 +26,7 @@ def _mock_context(
 
     board = MagicMock()
     deck = MagicMock()
-    deck.resolve.return_value = coord
+    deck.resolve_coordinate.return_value = coord
 
     return ProtocolContext(
         board=board,
@@ -43,14 +43,14 @@ class TestMoveCommandRouting:
 
     def test_deck_target_uses_move_to_labware(self):
         """Deck target strings route through move_to_labware so
-        safe_approach_height is applied (consistent with measure/aspirate)."""
+        interwell_scan_height is applied (consistent with measure/aspirate)."""
         from protocol_engine.commands.move import move
 
         coord = Coordinate3D(x=10.0, y=20.0, z=75.0)
         ctx = _mock_context(resolve_return=coord)
         move(ctx, instrument="pipette", position="plate_1.A1")
 
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
         ctx.board.move_to_labware.assert_called_once_with("pipette", coord)
         ctx.board.move.assert_not_called()
 
@@ -63,7 +63,7 @@ class TestMoveCommandRouting:
 
         ctx.board.move.assert_called_once_with("pipette", (100.0, 50.0, 30.0))
         ctx.board.move_to_labware.assert_not_called()
-        ctx.deck.resolve.assert_not_called()
+        ctx.deck.resolve_coordinate.assert_not_called()
 
     def test_literal_tuple_uses_raw_move(self):
         from protocol_engine.commands.move import move
@@ -83,7 +83,7 @@ class TestMoveCommandRouting:
 
         ctx.board.move.assert_called_once_with("pipette", (50.0, 50.0, 70.0))
         ctx.board.move_to_labware.assert_not_called()
-        ctx.deck.resolve.assert_not_called()
+        ctx.deck.resolve_coordinate.assert_not_called()
 
     def test_named_position_forwards_travel_z(self):
         from protocol_engine.commands.move import move
@@ -95,7 +95,7 @@ class TestMoveCommandRouting:
             "pipette", (50.0, 50.0, 70.0), travel_z=80.0,
         )
         ctx.board.move_to_labware.assert_not_called()
-        ctx.deck.resolve.assert_not_called()
+        ctx.deck.resolve_coordinate.assert_not_called()
 
     def test_passes_instrument_name_through_deck_path(self):
         from protocol_engine.commands.move import move
@@ -112,7 +112,7 @@ class TestMoveCommandRouting:
         from protocol_engine.commands.move import move
 
         ctx = _mock_context()
-        ctx.deck.resolve.side_effect = KeyError("No labware 'bad' on deck.")
+        ctx.deck.resolve_coordinate.side_effect = KeyError("No labware 'bad' on deck.")
 
         with pytest.raises(KeyError, match="bad"):
             move(ctx, instrument="pipette", position="bad.A1")
@@ -125,7 +125,7 @@ class TestMoveCommandRouting:
         from protocol_engine.errors import ProtocolExecutionError
 
         ctx = _mock_context(positions={"home_position": [0, 0, 80]})
-        ctx.deck.resolve.side_effect = KeyError("Not found")
+        ctx.deck.resolve_coordinate.side_effect = KeyError("Not found")
 
         with pytest.raises(ProtocolExecutionError, match="home_postion"):
             move(ctx, instrument="pipette", position="home_postion")
@@ -166,7 +166,7 @@ protocol:
                 return coord_c9
             raise KeyError(f"No labware for '{target}'")
 
-        deck.resolve.side_effect = resolve_side_effect
+        deck.resolve_coordinate.side_effect = resolve_side_effect
         board = MagicMock()
         ctx = ProtocolContext(board=board, deck=deck)
 
@@ -178,7 +178,7 @@ protocol:
             assert len(protocol) == 2
             protocol.run(ctx)
 
-            assert deck.resolve.call_count == 2
+            assert deck.resolve_coordinate.call_count == 2
             assert board.move_to_labware.call_count == 2
             board.move_to_labware.assert_any_call("pipette", coord_a1)
             board.move_to_labware.assert_any_call("pipette", coord_c9)

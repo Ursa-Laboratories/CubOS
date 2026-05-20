@@ -7,8 +7,11 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
+from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
+from deck.labware.well_plate_holder import WellPlateHolder
 from protocol_engine.errors import ProtocolExecutionError
 from protocol_engine.protocol import ProtocolContext
 
@@ -16,23 +19,28 @@ from protocol_engine.protocol import ProtocolContext
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
+PIPETTE_HEIGHT_MM = 14.10
+
+
 def _mock_context(
     resolve_return: Coordinate3D | None = None,
     has_pipette: bool = True,
+    height: float | None = PIPETTE_HEIGHT_MM,
 ) -> ProtocolContext:
-    coord = resolve_return or Coordinate3D(x=100.0, y=50.0, z=20.0)
+    coord = resolve_return or Coordinate3D(x=100.0, y=50.0, z=PIPETTE_HEIGHT_MM)
 
     board = MagicMock()
     deck = MagicMock()
-    deck.resolve.return_value = coord
+    deck.resolve_coordinate.return_value = coord
+    labware = MagicMock(height=height)
+    deck.__getitem__ = MagicMock(return_value=labware)
 
     if has_pipette:
         pipette = MagicMock()
         pipette.aspirate.return_value = MagicMock(success=True, volume_ul=100.0)
         pipette.dispense.return_value = MagicMock(success=True, volume_ul=100.0)
         pipette.mix.return_value = MagicMock(success=True, volume_ul=50.0, repetitions=3)
-        # measurement_height is added to labware.z to get the descent target.
-        pipette.measurement_height = 0.0
+        # Default: pipette's instrument-config measurement_height is 0 (well surface).
         board.instruments = {"pipette": pipette}
     else:
         board.instruments = {}
@@ -90,7 +98,7 @@ class TestAspirateCommand:
 
         ctx = _mock_context()
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
 
     def test_moves_then_aspirates(self):
         from protocol_engine.commands.pipette import aspirate
@@ -125,18 +133,18 @@ class TestAspirateCommand:
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
         ctx.board.move_to_labware.assert_called_once_with("pipette", coord)
 
-    def test_descends_to_action_z_after_approach(self):
-        """aspirate: descent raw-move must target labware.z - measurement_height."""
+    def test_descends_to_well_bottom_after_approach(self):
+        """aspirate descends to ``height + 0`` (the labware reference Z,
+        i.e. the well bottom). Pipette commands engage at the labware
+        surface — per-command Z offsets aren't surfaced yet."""
         from protocol_engine.commands.pipette import aspirate
 
-        coord = Coordinate3D(x=10.0, y=20.0, z=75.0)
+        coord = Coordinate3D(x=10.0, y=20.0, z=PIPETTE_HEIGHT_MM)
         ctx = _mock_context(resolve_return=coord)
-        # Contact pipette dips 5mm below the labware reference.
-        _get_pipette(ctx).measurement_height = -5.0
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
-        # User-space is positive-down, so descent target =
-        # labware.z - measurement_height = 75 - (-5) = 80.
-        ctx.board.move.assert_called_once_with("pipette", (10.0, 20.0, 80.0))
+        ctx.board.move.assert_called_once_with(
+            "pipette", (10.0, 20.0, PIPETTE_HEIGHT_MM),
+        )
 
     def test_approach_then_descend_then_aspirate(self):
         """Ordering: approach (move_to_labware) -> descent (move) -> aspirate."""
@@ -169,7 +177,7 @@ class TestDispenseCommand:
 
         ctx = _mock_context()
         dispense(ctx, position="plate_1.A1", volume_ul=100.0)
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
 
     def test_moves_then_dispenses(self):
         from protocol_engine.commands.pipette import dispense
@@ -214,7 +222,7 @@ class TestBlowoutCommand:
 
         ctx = _mock_context()
         blowout(ctx, position="plate_1.A1")
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
 
     def test_moves_then_blows_out(self):
         from protocol_engine.commands.pipette import blowout
@@ -259,7 +267,7 @@ class TestMixCommand:
 
         ctx = _mock_context()
         mix(ctx, position="plate_1.A1", volume_ul=50.0)
-        ctx.deck.resolve.assert_called_once_with("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
 
     def test_moves_then_mixes(self):
         from protocol_engine.commands.pipette import mix
@@ -304,7 +312,7 @@ class TestPickUpTipCommand:
 
         ctx = _mock_context()
         pick_up_tip(ctx, position="tiprack_1.A1")
-        ctx.deck.resolve.assert_called_once_with("tiprack_1.A1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("tiprack_1.A1")
 
     def test_moves_then_picks_up(self):
         from protocol_engine.commands.pipette import pick_up_tip
@@ -349,7 +357,7 @@ class TestDropTipCommand:
 
         ctx = _mock_context()
         drop_tip(ctx, position="waste_1")
-        ctx.deck.resolve.assert_called_once_with("waste_1")
+        ctx.deck.resolve_coordinate.assert_called_once_with("waste_1")
 
     def test_moves_then_drops(self):
         from protocol_engine.commands.pipette import drop_tip
@@ -388,7 +396,7 @@ class TestDropTipCommand:
 
 
 def _mock_context_multi_resolve(has_pipette: bool = True) -> ProtocolContext:
-    """Context where deck.resolve returns different coords per position string."""
+    """Context where deck.resolve_coordinate returns different coords per position."""
     board = MagicMock()
     deck = MagicMock()
 
@@ -396,10 +404,14 @@ def _mock_context_multi_resolve(has_pipette: bool = True) -> ProtocolContext:
         "plate_1.A1": Coordinate3D(x=10.0, y=20.0, z=75.0),
         "plate_1.B1": Coordinate3D(x=10.0, y=28.0, z=75.0),
     }
-    deck.resolve.side_effect = lambda pos: coords.get(pos, Coordinate3D(x=0.0, y=0.0, z=0.0))
+    deck.resolve_coordinate.side_effect = (
+        lambda pos: coords.get(pos, Coordinate3D(x=0.0, y=0.0, z=0.0))
+)
 
     if has_pipette:
         pipette = MagicMock()
+        # Real numeric heights so the dispatch finite-number guards pass;
+        # test fixtures elsewhere set realistic values for engagement math.
         pipette.aspirate.return_value = MagicMock(success=True, volume_ul=100.0)
         pipette.dispense.return_value = MagicMock(success=True, volume_ul=100.0)
         board.instruments = {"pipette": pipette}
@@ -421,9 +433,9 @@ class TestTransferCommand:
         ctx = _mock_context_multi_resolve()
         transfer(ctx, source="plate_1.A1", destination="plate_1.B1", volume_ul=100.0)
 
-        ctx.deck.resolve.assert_any_call("plate_1.A1")
-        ctx.deck.resolve.assert_any_call("plate_1.B1")
-        assert ctx.deck.resolve.call_count == 2
+        ctx.deck.resolve_coordinate.assert_any_call("plate_1.A1")
+        ctx.deck.resolve_coordinate.assert_any_call("plate_1.B1")
+        assert ctx.deck.resolve_coordinate.call_count == 2
 
     def test_aspirates_from_source_then_dispenses_to_destination(self):
         from protocol_engine.commands.pipette import transfer
@@ -484,9 +496,9 @@ def _make_2x3_plate() -> WellPlate:
     return WellPlate(
         name="plate_1",
         model_name="test_model",
-        length_mm=127.71,
-        width_mm=85.43,
-        height_mm=14.10,
+        length=127.71,
+        width=85.43,
+        height=14.10,
         rows=2,
         columns=3,
         wells={
@@ -511,7 +523,10 @@ def _serial_transfer_context(
     board = MagicMock()
     deck = MagicMock()
     deck.__getitem__ = MagicMock(return_value=plate)
-    deck.resolve.side_effect = lambda pos: Coordinate3D(x=0.0, y=0.0, z=0.0)
+    deck.resolve_labware = MagicMock(return_value=plate)
+    deck.resolve_coordinate.side_effect = (
+        lambda pos: Coordinate3D(x=0.0, y=0.0, z=0.0)
+    )
 
     if has_pipette:
         pipette = MagicMock()
@@ -525,6 +540,36 @@ def _serial_transfer_context(
         board=board,
         deck=deck,
         logger=logging.getLogger("test_serial_transfer"),
+    )
+
+
+def _serial_transfer_nested_context() -> ProtocolContext:
+    plate = _make_2x3_plate()
+    holder = WellPlateHolder(
+        name="plate_holder",
+        location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+        contained_labware={"plate": plate},
+    )
+    source = Vial(
+        name="vial_1",
+        model_name="standard_vial",
+        height=66.75,
+        diameter=28.0,
+        location=Coordinate3D(x=90.0, y=90.0, z=30.0),
+        capacity_ul=1500.0,
+        working_volume_ul=1200.0,
+    )
+
+    board = MagicMock()
+    pipette = MagicMock()
+    pipette.aspirate.return_value = MagicMock(success=True)
+    pipette.dispense.return_value = MagicMock(success=True)
+    board.instruments = {"pipette": pipette}
+
+    return ProtocolContext(
+        board=board,
+        deck=Deck({"plate_holder": holder, "vial_1": source}),
+        logger=logging.getLogger("test_serial_transfer_nested"),
     )
 
 
@@ -544,12 +589,35 @@ class TestSerialTransferCommand:
         assert pip.dispense.call_count == 3
 
         # Verify resolve was called with the right destination strings
-        resolve_calls = [c.args[0] for c in ctx.deck.resolve.call_args_list]
+        resolve_calls = [c.args[0] for c in ctx.deck.resolve_coordinate.call_args_list]
         # Each transfer resolves source + destination, so 6 calls total
         # Destinations should be plate_1.A1, plate_1.A2, plate_1.A3
         assert "plate_1.A1" in resolve_calls
         assert "plate_1.A2" in resolve_calls
         assert "plate_1.A3" in resolve_calls
+
+    def test_nested_plate_path_transfers_to_each_well_in_order(self):
+        from protocol_engine.commands.pipette import serial_transfer
+
+        ctx = _serial_transfer_nested_context()
+        serial_transfer(
+            ctx, source="vial_1", plate="plate_holder.plate", axis="A",
+            volumes=[10.0, 20.0, 30.0],
+        )
+
+        pip = ctx.board.instruments["pipette"]
+        assert pip.aspirate.call_count == 3
+        assert pip.dispense.call_count == 3
+
+        move_targets = [
+            call_args.args[1]
+            for call_args in ctx.board.move_to_labware.call_args_list
+        ]
+        assert move_targets[1::2] == [
+            Coordinate3D(x=0.0, y=0.0, z=75.0),
+            Coordinate3D(x=10.0, y=0.0, z=75.0),
+            Coordinate3D(x=20.0, y=0.0, z=75.0),
+        ]
 
     def test_column_axis_transfers_to_each_well_in_order(self):
         from protocol_engine.commands.pipette import serial_transfer
@@ -564,7 +632,7 @@ class TestSerialTransferCommand:
         assert pip.aspirate.call_count == 2
         assert pip.dispense.call_count == 2
 
-        resolve_calls = [c.args[0] for c in ctx.deck.resolve.call_args_list]
+        resolve_calls = [c.args[0] for c in ctx.deck.resolve_coordinate.call_args_list]
         assert "plate_1.A2" in resolve_calls
         assert "plate_1.B2" in resolve_calls
 
@@ -603,8 +671,8 @@ class TestSerialTransferCommand:
 
         # Make a 1x3 plate so column "1" has only 1 well (A1)
         plate = WellPlate(
-            name="plate_1", model_name="t", length_mm=100.0,
-            width_mm=80.0, height_mm=10.0, rows=1, columns=3,
+            name="plate_1", model_name="t", length=100.0,
+            width=80.0, height=10.0, rows=1, columns=3,
             wells={
                 "A1": Coordinate3D(x=0.0, y=0.0, z=75.0),
                 "A2": Coordinate3D(x=10.0, y=0.0, z=75.0),
@@ -691,7 +759,7 @@ class TestSerialTransferCommand:
         from protocol_engine.commands.pipette import serial_transfer
 
         ctx = _serial_transfer_context()
-        ctx.deck.__getitem__ = MagicMock(return_value=MagicMock(spec=[]))
+        ctx.deck.resolve_labware = MagicMock(return_value=MagicMock(spec=[]))
 
         with pytest.raises(ProtocolExecutionError, match="WellPlate"):
             serial_transfer(

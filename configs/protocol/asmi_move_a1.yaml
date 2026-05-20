@@ -1,0 +1,12 @@
+# Minimal ASMI A1 move protocol for deck-origin bring-up.
+#
+# Uses a deck target move, so the ASMI TCP travels to plate.A1 at the
+# gantry-configured safe_z. It does not descend to measurement_height
+# or perform indentation.
+
+protocol:
+  - home:
+
+  - move:
+      instrument: asmi
+      position: plate.A1

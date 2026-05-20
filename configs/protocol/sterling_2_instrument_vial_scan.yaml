@@ -1,0 +1,86 @@
+# Sterling two-instrument vial-position scan.
+#
+# Motion-only protocol derived from sterling_vial_scan.yaml. It visits the same
+# high deck-frame Z vial XY positions without descending into vials:
+# - odd-numbered vials use the potentiostat
+# - even-numbered vials use the Opentrons pipette
+#
+# Order preserves the original front/back alternating pattern: 1, 8, 2, 7, 3,
+# 6, 4, 5. Run only after Sterling has been calibrated with both instruments.
+
+positions:
+  # Shared park target chosen to remain in-bounds after Sterling pipette offset compensation.
+  park_position: [223.0, 260.0, 85.0]
+  vial_1_scan: [223.0, 25.0, 40.0]
+  vial_2_scan: [223.0, 58.5, 40.0]
+  vial_3_scan: [223.0, 92.0, 40.0]
+  vial_4_scan: [223.0, 125.5, 40.0]
+  vial_5_scan: [223.0, 159.0, 40.0]
+  vial_6_scan: [223.0, 192.5, 40.0]
+  vial_7_scan: [223.0, 226.0, 40.0]
+  vial_8_scan: [223.0, 259.5, 40.0]
+
+protocol:
+  - home:
+
+  - move:
+      instrument: potentiostat
+      position: park_position
+      travel_z: 85.0
+
+  - move:
+      instrument: pipette
+      position: park_position
+      travel_z: 85.0
+
+  - move:
+      instrument: potentiostat
+      position: vial_1_scan
+      travel_z: 85.0
+
+  - move:
+      instrument: pipette
+      position: vial_8_scan
+      travel_z: 85.0
+
+  - move:
+      instrument: pipette
+      position: vial_2_scan
+      travel_z: 85.0
+
+  - move:
+      instrument: potentiostat
+      position: vial_7_scan
+      travel_z: 85.0
+
+  - move:
+      instrument: potentiostat
+      position: vial_3_scan
+      travel_z: 85.0
+
+  - move:
+      instrument: pipette
+      position: vial_6_scan
+      travel_z: 85.0
+
+  - move:
+      instrument: pipette
+      position: vial_4_scan
+      travel_z: 85.0
+
+  - move:
+      instrument: potentiostat
+      position: vial_5_scan
+      travel_z: 85.0
+
+  - move:
+      instrument: potentiostat
+      position: park_position
+      travel_z: 85.0
+
+  - move:
+      instrument: pipette
+      position: park_position
+      travel_z: 85.0
+
+  - home:
