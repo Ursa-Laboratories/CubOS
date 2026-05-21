@@ -73,6 +73,9 @@ Thorlabs CCS compact spectrometer. Communicates via the TLCCS DLL.
 ### Pipette (`pipette`)
 
 Opentrons pipette controlled via Arduino serial (Pawduino firmware).
+Protocol validation tracks tip pickup/drop state. After `pick_up_tip`, the
+target rack's `tip_length` is added to active pipette depth for gantry bounds.
+Omitted `tip_length` defaults to 59.3 mm for the current Opentrons 300 uL tips.
 
 | Method | Description |
 |--------|-------------|

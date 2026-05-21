@@ -28,6 +28,7 @@ def test_board_move_to_labware_uses_safe_z_above_deck():
     instr.offset_x = 0.0
     instr.offset_y = 0.0
     instr.depth = 0.0
+    instr.effective_depth = 0.0
     gantry = MagicMock()
     board = Board(gantry=gantry, instruments={"probe": instr}, safe_z=20.0)
     labware = MagicMock()

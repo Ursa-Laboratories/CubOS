@@ -156,8 +156,11 @@ protocol commands that consume them:
 - `interwell_scan_height` — required on `scan`. It is the between-wells
   XY-travel offset and must be at or above `measurement_height`.
 
-Pipette commands (aspirate/dispense/etc.) engage at the labware reference
-Z (well bottom, tip top) — i.e. `measurement_height = 0` implicitly.
+Pipette commands default to the labware reference Z (`height = 0`), and
+transfer commands may set separate source/destination heights. Once a tip is
+picked up, validation adds the rack `tip_length` to pipette depth for gantry
+bounds checks. Omitted `tip_length` defaults to 59.3 mm for the current
+Opentrons 300 uL tips.
 - `park_position` is an explicit rest pose (absolute coords, not relative).
 - ASMI `indentation_limit_height` is a *signed* labware-relative offset
   (mm above the well surface; negative = below). It must be at or below

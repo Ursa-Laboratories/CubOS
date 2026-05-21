@@ -8,8 +8,8 @@ agree on the same motion primitives:
 * Engaging commands take ``measurement_height`` as a first-class command
   argument and descend to ``well.z + measurement_height`` (where
   ``well.z`` is the calibrated deck-frame surface Z carried on the
-  resolved coordinate). Pipette commands engage at the labware reference
-  Z (i.e. ``measurement_height = 0``).
+  resolved coordinate). Pipette commands default to the labware reference
+  Z and can take command-specific labware-relative height arguments.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ def _instrument(name: str = "tool"):
         offset_x=0.0,
         offset_y=0.0,
         depth=0.0,
+        effective_depth=0.0,
     )
 
 
@@ -113,9 +114,8 @@ def test_scan_first_well_descends_to_well_z_plus_relative_offset():
     assert move_calls[1].args == ("uvvis", (10.0, 20.0, WELL_Z + 1.0))
 
 
-def test_pipette_aspirate_descends_to_well_bottom():
-    """Pipette commands engage at the labware reference Z
-    (``measurement_height = 0``)."""
+def test_pipette_aspirate_descends_to_labware_reference_by_default():
+    """Pipette commands engage at the labware reference Z by default."""
     from protocol_engine.commands.pipette import aspirate
 
     pipette = _instrument(name="pipette")
@@ -127,6 +127,21 @@ def test_pipette_aspirate_descends_to_well_bottom():
     ctx.board.move_to_labware.assert_called_once()
     ctx.board.move.assert_called_once_with(
         "pipette", (10.0, 20.0, WELL_Z),
+    )
+
+
+def test_pipette_aspirate_height_is_labware_relative():
+    from protocol_engine.commands.pipette import aspirate
+
+    pipette = _instrument(name="pipette")
+    pipette.aspirate = MagicMock(return_value="ok")
+    ctx = _ctx("pipette", pipette)
+
+    aspirate(ctx, position="plate_1.A1", volume_ul=10.0, height=3.0)
+
+    ctx.board.move_to_labware.assert_called_once()
+    ctx.board.move.assert_called_once_with(
+        "pipette", (10.0, 20.0, WELL_Z + 3.0),
     )
 
 
