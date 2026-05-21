@@ -119,7 +119,10 @@ Top-level `a1` is still accepted for backward compatibility, but new deck files 
 - **`tip_rack`** — pipette tip rack. Same calibration pattern as
   `well_plate`; tip positions are derived from `a1`/`a2` + pitch offsets
   rather than listed explicitly. Tracks per-tip occupancy via
-  `tip_present`.
+  `tip_present`. `tip_length` defaults to 59.3 mm for Opentrons 300 uL tips;
+  override it for a measured disposable-tip extension below the bare pipette
+  nozzle. Protocol validation adds it to active pipette depth after
+  `pick_up_tip`.
 - **`vial`** — single vial with a `location`. Referenced by labware key
   (e.g. `vial_1`).
 - **`vial_holder`** — physical rack that seats multiple vials at fixed

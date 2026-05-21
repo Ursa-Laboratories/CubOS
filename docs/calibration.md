@@ -33,6 +33,10 @@ During jog steps:
 - Enter confirms the current calibration step
 - `Q` aborts
 
+If a jog trips a hard limit, CubOS soft-resets and unlocks GRBL, then pulls off
+opposite the failed jog direction. The pull-off retries up to five times before
+aborting and requiring a controller/E-stop reset.
+
 ## Single-Instrument Flow
 
 For a gantry YAML with one mounted instrument, the flow asks you to place a
