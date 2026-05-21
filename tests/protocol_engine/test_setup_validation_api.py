@@ -97,3 +97,105 @@ def test_run_setup_validation_reports_named_position_bounds_errors(tmp_path):
     assert result.stage == "validation"
     assert any("park.location.target" in error for error in result.errors)
     assert "RESULT: FAIL" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Error-stage routing
+# ---------------------------------------------------------------------------
+
+
+def test_run_setup_validation_returns_gantry_stage_on_bad_gantry_yaml(tmp_path):
+    gantry = _write(tmp_path / "gantry.yaml", "not: valid: gantry: yaml: [[[")
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(tmp_path / "protocol.yaml", "protocol: []\n")
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    assert result.passed is False
+    assert result.stage == "gantry"
+    assert "RESULT: ERROR" in result.output
+    assert result.errors
+
+
+def test_run_setup_validation_returns_deck_stage_on_bad_deck_yaml(tmp_path):
+    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML)
+    deck = _write(tmp_path / "deck.yaml", "not: valid: deck: [[[")
+    protocol = _write(tmp_path / "protocol.yaml", "protocol: []\n")
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    assert result.passed is False
+    assert result.stage == "deck"
+    assert "RESULT: ERROR" in result.output
+
+
+def test_run_setup_validation_returns_protocol_stage_on_bad_protocol_yaml(tmp_path):
+    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML)
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(tmp_path / "protocol.yaml", "not: valid: protocol: [[[")
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    assert result.passed is False
+    assert result.stage == "protocol"
+    assert "RESULT: ERROR" in result.output
+
+
+def test_run_setup_validation_returns_gantry_stage_on_missing_gantry_file(tmp_path):
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(tmp_path / "protocol.yaml", "protocol: []\n")
+
+    result = run_setup_validation(tmp_path / "missing.yaml", deck, protocol)
+
+    assert result.passed is False
+    assert result.stage == "gantry"
+    assert "FileNotFoundError" in result.errors[0] or result.errors
+
+
+def test_run_setup_validation_error_message_includes_exception_type(tmp_path):
+    gantry = _write(tmp_path / "gantry.yaml", "not: valid: gantry: yaml: [[[")
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(tmp_path / "protocol.yaml", "protocol: []\n")
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    # Error message must include the exception class name so devs can diagnose
+    # without needing a full traceback.
+    assert any(":" in err for err in result.errors)
+
+
+# ---------------------------------------------------------------------------
+# Validation-engine failure
+# ---------------------------------------------------------------------------
+
+
+def test_run_setup_validation_returns_validation_stage_on_validator_exception(
+    tmp_path, monkeypatch
+):
+    from protocol_engine import setup_validation as sv
+
+    def _raise(*args, **kwargs):
+        raise KeyError("labware_key_missing_from_deck")
+
+    monkeypatch.setattr(sv, "collect_protocol_motion_targets", _raise)
+
+    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML)
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(
+        tmp_path / "protocol.yaml",
+        """\
+        positions:
+          park: [50.0, 50.0, 30.0]
+        protocol:
+          - move:
+              instrument: pipette
+              position: park
+        """,
+    )
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    assert result.passed is False
+    assert result.stage == "validation"
+    assert "RESULT: ERROR" in result.output
+    assert "KeyError" in result.errors[0]

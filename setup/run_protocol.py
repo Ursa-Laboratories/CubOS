@@ -29,9 +29,9 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
-from setup.validate_setup import run_validation
 from gantry import Gantry
 from protocol_engine.setup import setup_protocol
+from protocol_engine.setup_validation import run_validation
 from validation.errors import SetupValidationError
 
 SEPARATOR = "-" * 60

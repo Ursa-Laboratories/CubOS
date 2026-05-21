@@ -183,3 +183,5 @@ PANDA-BEAR/
 !.codex/prompts/
 !.codex/prompts/**
 .pi/
+.codegraph/
+.cursor/

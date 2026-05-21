@@ -179,10 +179,11 @@ PYTHONPATH=src python setup/calibrate_gantry.py \
   --output-gantry configs/gantry/cub_xl_asmi_calibrated.yaml
 ~~~
 
-The wrapper detects whether the gantry has one or multiple mounted instruments
-and chooses the matching guided flow. Multi-instrument calibration asks for the
-left-most reference instrument and lowest instrument, then records
-`offset_x`, `offset_y`, and `depth` against a shared calibration block.
+During calibration jogs, hard-limit alarms use CubOS' reusable limit recovery:
+soft reset, unlock, pull off opposite the failed jog, and retry up to five
+times before aborting.
+
+See the docs for the full operator tutorial:
 
 After calibration, run:
 
@@ -212,6 +213,15 @@ required extra is missing.
 
 ~~~python
 from protocol_engine.setup import setup_protocol
+from protocol_engine.setup_validation import run_setup_validation
+
+validation = run_setup_validation(
+    gantry_path="configs/gantry/cub_xl_asmi.yaml",
+    deck_path="configs/deck/asmi_deck.yaml",
+    protocol_path="configs/protocol/asmi_move_a1.yaml",
+)
+if not validation.passed:
+    raise RuntimeError(validation.output)
 
 protocol, context = setup_protocol(
     gantry_path="configs/gantry/cub_xl_asmi.yaml",

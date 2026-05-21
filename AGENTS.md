@@ -123,6 +123,30 @@ python setup/validate_setup.py configs/gantry/cub_xl_asmi.yaml configs/deck/asmi
 
 Report exact commands and observed results in the PR body.
 
+## Exception Handling Patterns
+
+These rules apply everywhere in `src/` and `setup/`:
+
+**`except Exception` in user-facing pipelines** — always include the exception type name in the error message so developers can diagnose without a full traceback: `f"{type(exc).__name__}: {exc}"`. Add `logging.getLogger(__name__).debug(..., exc_info=True)` for config-load failures; use `logging.exception` for unexpected failures in validators.
+
+**Unguarded validation calls** — any call to a validator, bounds checker, or semantics checker that can raise must be wrapped in a try/except that returns a structured result (or re-raises with a clear message). Unhandled exceptions here dump raw tracebacks to operators instead of structured error results.
+
+**MillConnectionError** — never catch and discard; always re-raise. Tests must explicitly cover the propagation path for every place a hardware exception is caught.
+
+**Broad substring matching** — avoid bare tokens like `"failed"` in status-parsing functions. Name the exact sentinel strings. Before adding a token, verify it does not match unrelated strings in the production status vocabulary.
+
+**Post-jog status probes** — if a probe raises after a successful jog, separate its exception handler from the jog's handler and emit a distinct message. "Alarm detected while jogging X" is wrong if the probe, not the jog, triggered the exception.
+
+## Testing Patterns
+
+**MillConnectionError propagation** — for every `except MillConnectionError: raise` in hardware code, there must be a test that injects a `MillConnectionError` at that call site and asserts it propagates out of the top-level function unchanged.
+
+**Error-stage routing** — for any function that returns a result object with a `stage` field, each distinct stage value must have at least one test that triggers it and asserts `result.stage == "<stage>"`.
+
+**Negative cases for status-matching functions** — parametrize healthy status strings (e.g., `"<Idle|WPos:0,0,0>"`, `None`) alongside positive cases to prevent regressions from broadened token matching.
+
+**Validation-engine failures** — use `monkeypatch` to make validator functions raise and verify the calling pipeline returns a structured error result rather than propagating the raw exception.
+
 ## When to Update This File
 
 Update `AGENTS.md` only when agent retrieval, hardware-safety workflow, or source-of-truth pointers change. Update `README.md` / docs only when public CLI/workflow, YAML schema/config, coordinate/motion/calibration semantics, protocol behavior, or cross-repo interfaces change.

@@ -1,14 +1,13 @@
-"""Structured protocol setup validation.
-
-This module owns the reusable CubOS validation API used by CLI tools and
-dependent apps such as Zoo. It mirrors the offline validation sequence used
-before hardware execution without opening serial ports or moving hardware.
-"""
+"""Reusable offline setup validation for gantry/deck/protocol triples."""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
+
+_log = logging.getLogger(__name__)
 
 from board.loader import load_board_from_gantry_config, load_board_from_yaml
 from deck.deck import Deck
@@ -26,19 +25,25 @@ from validation.bounds import (
 from validation.protocol_semantics import validate_protocol_semantics
 
 SEPARATOR = "-" * 60
+ValidationStage = Literal[
+    "gantry",
+    "deck",
+    "instruments",
+    "protocol",
+    "validation",
+]
 
 
 @dataclass(frozen=True)
 class SetupValidationResult:
-    """Result of running offline protocol setup validation."""
+    """Structured result of offline protocol setup validation."""
 
     output: str
     passed: bool
     errors: tuple[str, ...] = ()
-    stage: str | None = None
+    stage: ValidationStage = "validation"
 
 
-# Backwards-compatible name for older script imports.
 ValidationResult = SetupValidationResult
 
 
@@ -68,17 +73,24 @@ def _instrument_summary(board) -> list[str]:
     return lines
 
 
-def _finish(
+def _error_result(
     lines: list[str],
     *,
-    passed: bool,
-    errors: list[str] | tuple[str, ...] = (),
-    stage: str | None = None,
+    stage: ValidationStage,
+    message: str,
+    result_message: str,
 ) -> SetupValidationResult:
+    lines.extend([
+        f"  ERROR: {message}",
+        "",
+        SEPARATOR,
+        result_message,
+        SEPARATOR,
+    ])
     return SetupValidationResult(
         output="\n".join(lines),
-        passed=passed,
-        errors=tuple(errors),
+        passed=False,
+        errors=(message,),
         stage=stage,
     )
 
@@ -106,19 +118,18 @@ def run_setup_validation(
     out(SEPARATOR)
     out()
 
-    # 1. Gantry
     out("[1/4] Loading gantry config...")
     try:
         gantry_config = load_gantry_from_yaml(gantry_path)
         validate_deck_origin_minima(gantry_config)
     except Exception as exc:
-        message = f"ERROR: {exc}"
-        out(f"  {message}")
-        out()
-        out(SEPARATOR)
-        out("RESULT: ERROR - could not load gantry config")
-        out(SEPARATOR)
-        return _finish(lines, passed=False, errors=[message], stage="gantry")
+        _log.debug("Failed to load gantry config from %s", gantry_path, exc_info=True)
+        return _error_result(
+            lines,
+            stage="gantry",
+            message=f"{type(exc).__name__}: {exc}",
+            result_message="RESULT: ERROR - could not load gantry config",
+        )
 
     vol = gantry_config.working_volume
     out(f"  OK: {gantry_path}")
@@ -130,7 +141,6 @@ def run_setup_validation(
     out(f"  Homing strategy: {gantry_config.homing_strategy}")
     out()
 
-    # 2. Deck
     out("[2/4] Loading deck config...")
     try:
         deck = load_deck_from_yaml(
@@ -138,13 +148,13 @@ def run_setup_validation(
             total_z_range=gantry_config.total_z_range,
         )
     except Exception as exc:
-        message = f"ERROR: {exc}"
-        out(f"  {message}")
-        out()
-        out(SEPARATOR)
-        out("RESULT: ERROR - could not load deck config")
-        out(SEPARATOR)
-        return _finish(lines, passed=False, errors=[message], stage="deck")
+        _log.debug("Failed to load deck config from %s", deck_path, exc_info=True)
+        return _error_result(
+            lines,
+            stage="deck",
+            message=f"{type(exc).__name__}: {exc}",
+            result_message="RESULT: ERROR - could not load deck config",
+        )
 
     out(f"  OK: {deck_path}")
     out(f"  Labware ({len(deck)}):")
@@ -152,7 +162,6 @@ def run_setup_validation(
         out(summary_line)
     out()
 
-    # 3. Board / instruments
     out("[3/4] Loading instruments...")
     try:
         offline_gantry = Gantry(offline=True)
@@ -164,20 +173,16 @@ def run_setup_validation(
             )
             board_source = gantry_path
         else:
-            board = load_board_from_yaml(
-                board_path,
-                offline_gantry,
-                mock_mode=True,
-            )
+            board = load_board_from_yaml(board_path, offline_gantry, mock_mode=True)
             board_source = board_path
     except Exception as exc:
-        message = f"ERROR: {exc}"
-        out(f"  {message}")
-        out()
-        out(SEPARATOR)
-        out("RESULT: ERROR - could not load instruments")
-        out(SEPARATOR)
-        return _finish(lines, passed=False, errors=[message], stage="instruments")
+        _log.debug("Failed to load instruments", exc_info=True)
+        return _error_result(
+            lines,
+            stage="instruments",
+            message=f"{type(exc).__name__}: {exc}",
+            result_message="RESULT: ERROR - could not load instruments",
+        )
 
     out(f"  OK: {board_source}")
     out(f"  Instruments ({len(board.instruments)}):")
@@ -185,85 +190,110 @@ def run_setup_validation(
         out(summary_line)
     out()
 
-    # 4. Protocol
     out("[4/4] Loading protocol...")
     try:
         protocol = load_protocol_from_yaml(protocol_path)
     except Exception as exc:
-        message = f"ERROR: {exc}"
-        out(f"  {message}")
-        out()
-        out(SEPARATOR)
-        out("RESULT: ERROR - could not load protocol")
-        out(SEPARATOR)
-        return _finish(lines, passed=False, errors=[message], stage="protocol")
+        _log.debug("Failed to load protocol from %s", protocol_path, exc_info=True)
+        return _error_result(
+            lines,
+            stage="protocol",
+            message=f"{type(exc).__name__}: {exc}",
+            result_message="RESULT: ERROR - could not load protocol",
+        )
 
     out(f"  OK: {protocol_path}")
     out(f"  Steps: {len(protocol)}")
     for step in protocol.steps:
-        args = ", ".join(f"{k}={v!r}" for k, v in step.args.items())
+        args = ", ".join(f"{key}={value!r}" for key, value in step.args.items())
         out(f"    [{step.index}] {step.command_name}({args})")
     out()
 
-    # 5. Protocol motion bounds validation
-    errors: list[str] = []
     out("Validating protocol motion bounds...")
-    motion_targets = collect_protocol_motion_targets(gantry_config, protocol, deck)
-    motion_violations = validate_protocol_motion_bounds(
-        gantry_config,
-        protocol,
-        deck,
-        board,
-    )
+    try:
+        motion_targets = collect_protocol_motion_targets(gantry_config, protocol, deck)
+        motion_violations = validate_protocol_motion_bounds(
+            gantry_config,
+            protocol,
+            deck,
+            board,
+        )
+    except Exception as exc:
+        _log.exception("Motion bounds validation raised unexpectedly")
+        return _error_result(
+            lines,
+            stage="validation",
+            message=f"{type(exc).__name__}: {exc}",
+            result_message="RESULT: ERROR - validation engine failure",
+        )
+    errors: list[str] = []
     if motion_violations:
         out(f"  FAIL - {len(motion_violations)} violation(s):")
-        for v in motion_violations:
+        for violation in motion_violations:
             prefix = (
-                f"{v.instrument_name} -> "
-                if v.coordinate_type == "gantry" and v.instrument_name
+                f"{violation.instrument_name} -> "
+                if violation.coordinate_type == "gantry" and violation.instrument_name
                 else ""
             )
-            message = (
-                f"{prefix}{v.labware_key}.{v.position_id}: "
-                f"{v.coordinate_type} ({v.x}, {v.y}, {v.z}) "
-                f"violates {v.bound_name}={v.bound_value}"
+            error = (
+                f"{prefix}{violation.labware_key}.{violation.position_id}: "
+                f"{violation.coordinate_type} ({violation.x}, {violation.y}, {violation.z}) "
+                f"violates {violation.bound_name}={violation.bound_value}"
             )
-            errors.append(message)
-            out(f"  - {message}")
+            errors.append(error)
+            out(f"  - {error}")
     else:
         out(f"  OK ({len(motion_targets)} protocol target(s) checked)")
     out()
 
-    # 6. Protocol semantic validation
     out("Validating protocol semantics...")
-    semantic_violations = validate_protocol_semantics(
-        protocol,
-        board,
-        deck,
-        gantry_config,
-    )
+    try:
+        semantic_violations = validate_protocol_semantics(
+            protocol,
+            board,
+            deck,
+            gantry_config,
+        )
+    except Exception as exc:
+        _log.exception("Semantic validation raised unexpectedly")
+        return _error_result(
+            lines,
+            stage="validation",
+            message=f"{type(exc).__name__}: {exc}",
+            result_message="RESULT: ERROR - validation engine failure",
+        )
     if semantic_violations:
         out(f"  FAIL - {len(semantic_violations)} violation(s):")
-        for v in semantic_violations:
-            message = f"step {v.step_index} ({v.command_name}): {v.message}"
-            errors.append(message)
-            out(f"  - {message}")
+        for violation in semantic_violations:
+            error = (
+                f"step {violation.step_index} ({violation.command_name}): "
+                f"{violation.message}"
+            )
+            errors.append(error)
+            out(f"  - {error}")
     else:
         out("  OK")
     out()
 
-    # Final result
     out(SEPARATOR)
-    if motion_violations or semantic_violations:
-        total = len(motion_violations) + len(semantic_violations)
-        out(f"RESULT: FAIL - {total} violation(s) found")
+    if errors:
+        out(f"RESULT: FAIL - {len(errors)} violation(s) found")
         out(SEPARATOR)
-        return _finish(lines, passed=False, errors=errors, stage="validation")
+        return SetupValidationResult(
+            output="\n".join(lines),
+            passed=False,
+            errors=tuple(errors),
+            stage="validation",
+        )
 
     out("RESULT: PASS - protocol motion targets within gantry bounds")
     out("Protocol is ready to run.")
     out(SEPARATOR)
-    return _finish(lines, passed=True)
+    return SetupValidationResult(
+        output="\n".join(lines),
+        passed=True,
+        stage="validation",
+    )
 
 
 def run_validation(
@@ -272,10 +302,18 @@ def run_validation(
     protocol_or_board_path: str | Path,
     protocol_path: str | Path | None = None,
 ) -> SetupValidationResult:
-    """Backward-compatible alias for older callers."""
+    """Backward-compatible alias for ``run_setup_validation``."""
     return run_setup_validation(
         gantry_path,
         deck_path,
         protocol_or_board_path,
         protocol_path,
     )
+
+
+__all__ = [
+    "SetupValidationResult",
+    "ValidationResult",
+    "run_setup_validation",
+    "run_validation",
+]
