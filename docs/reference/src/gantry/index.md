@@ -6,10 +6,15 @@
 
 ## Submodules
 
+- [src.gantry.coordinate_translator](coordinate_translator.md)
+- [src.gantry.coordinates](coordinates.md)
 - [src.gantry.errors](errors.md)
 - [src.gantry.gantry](gantry.md)
 - [src.gantry.gantry_config](gantry_config.md)
 - [src.gantry.gantry_driver](gantry_driver/index.md)
+- [src.gantry.grbl_settings](grbl_settings.md)
 - [src.gantry.loader](loader.md)
+- [src.gantry.machine_geometry](machine_geometry.md)
 - [src.gantry.offline](offline.md)
+- [src.gantry.origin](origin.md)
 - [src.gantry.yaml_schema](yaml_schema.md)

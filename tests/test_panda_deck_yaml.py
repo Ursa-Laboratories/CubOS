@@ -1,4 +1,4 @@
-"""Repository-level checks for the panda deck YAML fixture."""
+"""Checks for the mock panda-like deck YAML fixture."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ from deck import TipRack, VialHolder, WellPlateHolder
 from deck.loader import load_deck_from_yaml
 
 
-def test_repository_panda_deck_yaml_loads_with_expected_reference_points():
-    deck = load_deck_from_yaml("configs/deck/panda_deck.yaml")
+def test_mock_panda_deck_yaml_loads_with_expected_reference_points():
+    deck = load_deck_from_yaml("tests/fixtures/configs/deck/mock_panda_deck.yaml")
 
     assert isinstance(deck["tip_rack_left"], TipRack)
     assert deck.resolve_coordinate("tip_rack_left.A1").x == pytest.approx(168.0)

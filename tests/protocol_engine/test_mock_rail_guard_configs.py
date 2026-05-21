@@ -9,7 +9,7 @@ from setup.validate_setup import run_validation
 
 
 ROOT = Path(__file__).resolve().parents[2]
-CONFIGS = ROOT / "configs"
+FIXTURES = ROOT / "tests/fixtures/configs"
 
 
 def test_validate_setup_home_over_rail_then_low_travel_fails(tmp_path):
@@ -86,7 +86,7 @@ def test_validate_setup_home_over_rail_then_low_travel_fails(tmp_path):
 
     result = run_validation(
         gantry_path,
-        CONFIGS / "deck/sterling_deck.yaml",
+        FIXTURES / "deck/mock_empty_deck.yaml",
         protocol_path,
     )
 

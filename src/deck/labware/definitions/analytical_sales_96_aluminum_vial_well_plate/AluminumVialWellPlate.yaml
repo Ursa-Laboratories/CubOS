@@ -1,0 +1,26 @@
+# WellPlate (deck.labware.well_plate.WellPlate) template derived from the
+# Analytical Sales & Services aluminum vial well plate drawing
+# `101960_rev6f_PUBLIC` (Rev 6F).
+#
+# The source drawing calls out an 8 x 12 grid of 8 mm x 30 mm, 1 mL vials on a
+# 9.0 mm pitch, with a 127.8 mm x 85.5 mm footprint. The 46.2 mm height is the
+# overall "height with vials" from the drawing; it is not a deck-frame Z value.
+#
+# The drawing does not specify inside sample-floor depth, so `well_depth` is
+# intentionally omitted. Override it in deck YAML only after measuring the
+# vial/sample-floor reference you intend to use.
+
+type: well_plate
+name: analytical_sales_96_aluminum_vial_well_plate
+model_name: analytical_sales_101960_rev6f
+rows: 8
+columns: 12
+length: 127.8
+width: 85.5
+height: 46.2
+calibration:
+  a1: { x: 14.4, y: 11.2 }
+  a2: { x: 23.4, y: 11.2 }
+x_offset: 9.0
+y_offset: 9.0
+capacity_ul: 1000.0

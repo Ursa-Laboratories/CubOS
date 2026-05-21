@@ -1,46 +1,29 @@
-# ASMI gantry configuration measured on 2026-04-24 for the deck-origin frame.
-#
-# It encodes the CubOS deck frame:
-# front-left-bottom origin, +X right, +Y back, +Z up, -Z down.
-#
-# Measured with the deck-origin calibration flow:
-# - XY origin set at the front-left lower-reach point.
-# - Z grounded at true bottom contact.
-# - Homed WPos measured as X=399.000, Y=280.000, Z=87.000.
-
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
-
 cnc:
   homing_strategy: standard
   total_z_range: 87.0
   y_axis_motion: head
-  # Absolute deck-frame Z used for inter-labware travel and the entry
-  # approach to the first well of a scan.
   safe_z: 85.0
-
 working_volume:
   x_min: 0.0
-  x_max: 399.0
+  x_max: 386.0
   y_min: 0.0
-  y_max: 280.0
+  y_max: 250.0
   z_min: 0.0
   z_max: 87.0
-
 grbl_settings:
-  # Controller settings for the Cub XL ASMI deck-origin workcell. Re-verify
-  # live settings and recalibrate soft limits before trusting physical motion.
   dir_invert_mask: 1
   status_report: 0
+  soft_limits: true
   homing_enable: true
   homing_dir_mask: 0
   steps_per_mm_x: 400.0
   steps_per_mm_y: 400.0
   steps_per_mm_z: 400.0
-  max_travel_x: 400.0
-  max_travel_y: 300.0
-  max_travel_z: 100.0
-
+  max_travel_x: 386.0
+  max_travel_y: 250.0
+  max_travel_z: 87.0
 instruments:
   asmi:
     type: asmi
@@ -48,7 +31,6 @@ instruments:
     offset_x: 0.0
     offset_y: 0.0
     depth: 0.0
-    # Labware-relative motion heights (`measurement_height`,
-    # `interwell_scan_height`) live on the protocol command, not here.
     force_threshold: -50
-    sensor_channels: [1]
+    sensor_channels:
+    - 1
