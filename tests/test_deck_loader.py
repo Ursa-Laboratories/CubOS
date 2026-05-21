@@ -1444,6 +1444,39 @@ labware:
         Path(path).unlink(missing_ok=True)
 
 
+def test_load_name_analytical_sales_aluminum_vial_well_plate():
+    """The Analytical Sales aluminum vial plate definition loads from the registry."""
+    yaml_str = """
+labware:
+  vial_plate:
+    load_name: analytical_sales_96_aluminum_vial_well_plate
+    calibration:
+      a1: { x: 10.0, y: 20.0, z: 30.0 }
+      a2: { x: 19.0, y: 20.0, z: 30.0 }
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_str)
+        path = f.name
+    try:
+        deck = load_deck_from_yaml(path)
+        plate = deck["vial_plate"]
+        assert isinstance(plate, WellPlate)
+        assert plate.name == "vial_plate"
+        assert plate.model_name == "analytical_sales_101960_rev6f"
+        assert plate.rows == 8
+        assert plate.columns == 12
+        assert plate.length == pytest.approx(127.8)
+        assert plate.width == pytest.approx(85.5)
+        assert plate.height == pytest.approx(46.2)
+        assert plate.capacity_ul == pytest.approx(1000.0)
+        assert plate.well_depth is None
+        assert plate.get_well_center("A1") == Coordinate3D(x=10.0, y=20.0, z=30.0)
+        assert plate.get_well_center("A2") == Coordinate3D(x=19.0, y=20.0, z=30.0)
+        assert plate.get_well_center("H12") == Coordinate3D(x=109.0, y=-43.0, z=30.0)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 def test_load_name_sbs_96_wellplate_well_depth_user_override_wins():
     """Deck-level `well_depth` overrides the registry default.
 

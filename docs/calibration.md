@@ -33,12 +33,23 @@ During jog steps:
 - Enter confirms the current calibration step
 - `Q` aborts
 
+If a jog trips a hard limit, CubOS soft-resets and unlocks GRBL, then pulls off
+opposite the failed jog direction. The pull-off retries up to five times before
+aborting and requiring a controller/E-stop reset.
+
 ## Single-Instrument Flow
 
 For a gantry YAML with one mounted instrument, the flow asks you to place a
 calibration block at the front-left origin point and jog the instrument
-tip/probe to touch the block top. It assigns X/Y/Z at that same physical pose,
-with Z set to the calibration block height.
+tip/probe to touch the block top. It assigns X/Y at that physical pose, reads
+the block-touch WPos Z as the remaining downward travel to WPos 0, and preserves
+the gantry YAML's seeded `cnc.total_z_range` as the calculated Z travel.
+
+The calibrated YAML keeps `cnc.total_z_range` unchanged, writes
+`working_volume.z_min: 0.0`, writes `working_volume.z_max` from
+`cnc.total_z_range`, and programs `max_travel_z` from that same seeded range.
+The block height is used to report the inferred lowest reachable height above
+the physical deck, for example `35 mm block - WPos Z 20 mm = 15 mm`.
 
 ## Multi-Instrument Flow
 
@@ -46,7 +57,8 @@ For a gantry YAML with multiple mounted instruments, the flow asks you to pick
 the left-most/reference instrument and the lowest instrument by number. It sets
 the shared deck frame, asks for the calibration block height, then records each
 instrument against the same physical block point to compute `offset_x`,
-`offset_y`, and `depth`.
+`offset_y`, and `depth`. The calibrated YAML still preserves the seeded
+`cnc.total_z_range` and uses it for `working_volume.z_max` and `max_travel_z`.
 
 ## After Calibration
 

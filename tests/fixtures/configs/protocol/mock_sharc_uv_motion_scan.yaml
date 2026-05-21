@@ -1,0 +1,7 @@
+protocol:
+  - scan:
+      plate: plate_holder.plate
+      instrument: uv_curing
+      method: health_check
+      measurement_height: 1.0
+      interwell_scan_height: 5.0

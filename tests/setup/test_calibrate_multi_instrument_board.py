@@ -405,7 +405,7 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
     assert isinstance(result, MultiInstrumentCalibrationResult)
     assert result.xy_origin_verification == (0.0, 0.0, 0.0)
     assert result.z_origin_verification == (199.0, 149.5, 12.5)
-    assert result.measured_working_volume == (398.0, 299.0, 96.0)
+    assert result.measured_working_volume == (398.0, 299.0, 100.0)
     assert result.instrument_calibrations["left_probe"] == {
         "offset_x": 0.0,
         "offset_y": 0.0,
@@ -438,13 +438,47 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
         "y_min": 0.0,
         "y_max": 299.0,
         "z_min": 0.0,
-        "z_max": 96.0,
+        "z_max": 100.0,
     }
-    assert written["cnc"]["total_z_range"] == 96.0
+    assert written["cnc"]["total_z_range"] == 100.0
     assert written["grbl_settings"]["max_travel_x"] == 398.0
     assert written["grbl_settings"]["max_travel_y"] == 299.0
-    assert written["grbl_settings"]["max_travel_z"] == 96.0
+    assert written["grbl_settings"]["max_travel_z"] == 100.0
     assert "measurement_height" not in written["instruments"]["camera"]
     assert written["instruments"]["camera"]["offset_x"] == -15.0
     assert written["instruments"]["camera"]["offset_y"] == -7.0
     assert written["instruments"]["camera"]["depth"] == 6.0
+
+
+def test_multi_instrument_calibration_raises_if_cnc_total_z_range_missing(tmp_path):
+    path = tmp_path / "gantry.yaml"
+    path.write_text(
+        """\
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+cnc:
+  homing_strategy: standard
+  y_axis_motion: head
+working_volume:
+  x_min: 0.0
+  x_max: 400.0
+  y_min: 0.0
+  y_max: 300.0
+  z_min: 0.0
+  z_max: 100.0
+instruments:
+  left_probe:
+    type: asmi
+    vendor: vernier
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    offline: true
+""",
+        encoding="utf-8",
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="cnc.total_z_range"):
+        run_multi_instrument_calibration(path, dry_run=True)

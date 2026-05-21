@@ -1,0 +1,16 @@
+labware:
+  plate_1:
+    load_name: sbs_96_wellplate
+    name: mock_filmetrics_96_well_plate
+    model_name: mock_filmetrics_96_well_plate
+    calibration:
+      a1:
+        x: 270.0
+        y: 140.0
+        z: 70.0
+      a2:
+        x: 270.0
+        y: 131.0
+        z: 70.0
+    x_offset: 9.0
+    y_offset: 9.0

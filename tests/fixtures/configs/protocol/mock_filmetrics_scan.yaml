@@ -1,0 +1,7 @@
+protocol:
+  - scan:
+      plate: plate_1
+      instrument: filmetrics
+      method: measure
+      measurement_height: 10.0
+      interwell_scan_height: 10.0

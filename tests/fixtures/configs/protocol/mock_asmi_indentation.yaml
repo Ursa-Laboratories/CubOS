@@ -1,0 +1,25 @@
+positions:
+  park_position: [360.0, 260.0, 85.0]
+
+protocol:
+  - home:
+
+  - scan:
+      plate: plate
+      instrument: asmi
+      method: indentation
+      measurement_height: -1.0
+      interwell_scan_height: 8.0
+      indentation_limit_height: -5.0
+      method_kwargs:
+        step_size: 0.1
+        force_limit: 10.0
+        baseline_samples: 10
+        measure_with_return: false
+
+  - move:
+      instrument: asmi
+      position: park_position
+      travel_z: 85.0
+
+  - home:

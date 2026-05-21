@@ -12,7 +12,7 @@ SOURCE_ROOTS = [
     REPO_ROOT / "src",
     REPO_ROOT / "data",
 ]
-EXCLUDED_PARTS = {"asmi"}
+EXCLUDED_PARTS: set[str] = set()
 
 
 def iter_python_modules() -> list[tuple[str, Path, Path, bool]]:
