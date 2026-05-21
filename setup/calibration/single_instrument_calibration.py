@@ -7,9 +7,7 @@ Internal implementation used by the sole user-facing entrypoint:
 from __future__ import annotations
 
 import copy
-import logging
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -25,6 +23,11 @@ from gantry.errors import (  # noqa: E402
     CommandExecutionError,
     MillConnectionError,
     StatusReturnError,
+)
+from gantry.limit_recovery import (  # noqa: E402
+    looks_like_limit_alarm as _looks_like_limit_alarm,
+    probe_for_limit_status_after_jog as _probe_for_limit_status_after_jog,
+    recover_from_limit_alarm as _recover_from_limit_alarm,
 )
 from gantry.origin import (  # noqa: E402
     DeckOriginCalibrationPlan,
@@ -450,21 +453,6 @@ def _set_serial_timeout_if_available(
         setter(timeout_s)
 
 
-def _looks_like_limit_alarm(exc: Exception) -> bool:
-    message = str(exc).lower()
-    return any(
-        token in message
-        for token in (
-            "alarm",
-            "check limits",
-            "hard limit",
-            "limit",
-            "pn:",
-            "error:9",
-        )
-    )
-
-
 def _looks_like_soft_limit_jog_rejection(exc: Exception) -> bool:
     message = str(exc).lower()
     return any(
@@ -536,177 +524,6 @@ def _restore_soft_limits_after_origin_jog(
             "Cannot restore GRBL soft limits because this gantry object has no "
             "setting writer."
         )
-
-
-def _opposite_pull_off_delta(
-    delta: dict[str, float],
-    pull_off_mm: float,
-) -> dict[str, float]:
-    pull_off = {"x": 0.0, "y": 0.0, "z": 0.0}
-    for axis, value in delta.items():
-        if value == 0:
-            continue
-        if value > 0:
-            pull_off[axis] = -pull_off_mm
-        else:
-            pull_off[axis] = pull_off_mm
-    return pull_off
-
-
-def _soft_reset_and_unlock_after_limit_alarm(
-    gantry: Gantry,
-    *,
-    output: Callable[[str], None],
-) -> None:
-    reset_and_unlock = getattr(gantry, "reset_and_unlock", None)
-    if not callable(reset_and_unlock):
-        raise CommandExecutionError(
-            "Limit recovery requires gantry.reset_and_unlock() so GRBL gets "
-            "a soft reset (Ctrl-X) before $X unlock."
-        )
-    try:
-        output("Soft-resetting GRBL, then unlocking before pull-off.")
-        reset_and_unlock()
-    except MillConnectionError:
-        raise
-    except (CommandExecutionError, StatusReturnError) as exc:
-        output(f"Soft reset/unlock during limit recovery failed: {exc}")
-        output("Use the controller/E-stop reset path before continuing.")
-        raise
-
-
-def _raise_if_limit_status(status: str) -> None:
-    lower_status = status.lower()
-    if "alarm" in lower_status:
-        raise StatusReturnError(f"Alarm in status: {status}")
-    # GRBL reports active limit pins as Pn:X, Pn:Y, Pn:Z (possibly combined).
-    # Treat that as a limit condition during manual calibration so the operator
-    # gets an immediate pull-off instead of discovering it on the next jog.
-    if "pn:" in lower_status:
-        pin_text = lower_status.split("pn:", 1)[1].split("|", 1)[0].split(">", 1)[0]
-        if any(axis in pin_text for axis in ("x", "y", "z")):
-            raise StatusReturnError(f"Limit pin active in status: {status}")
-
-
-def _probe_for_limit_status_after_jog(gantry: Gantry) -> None:
-    get_status = getattr(gantry, "get_status", None)
-    if not callable(get_status):
-        return
-    time.sleep(0.05)
-    _raise_if_limit_status(str(get_status()))
-
-
-def _read_limit_recovery_status(gantry: Gantry) -> str | None:
-    """Read status during limit-alarm recovery, tolerating expected GRBL errors.
-
-    Only :class:`StatusReturnError` / :class:`MillConnectionError` are caught
-    — those are the GRBL-side failures that can legitimately occur while the
-    controller is in alarm. Anything else is a programming bug and must
-    surface, not be silently turned into "no further pull-off needed".
-    """
-    get_status = getattr(gantry, "get_status", None)
-    if not callable(get_status):
-        return None
-    try:
-        return str(get_status())
-    except (StatusReturnError, MillConnectionError) as exc:
-        logging.getLogger(__name__).warning(
-            "Status read failed during limit recovery; assuming further pull-off may be needed: %s",
-            exc,
-        )
-        return None
-
-
-def _needs_another_limit_pull_off(status: str | None) -> bool:
-    if status is None:
-        return False
-    lower = status.lower()
-    return any(
-        token in lower
-        for token in (
-            "alarm",
-            "reset to continue",
-            "hard limit",
-            "limit",
-            "pn:",
-            "statusqueryfailed",
-            "failed",
-        )
-    )
-
-
-def _recover_from_limit_alarm(
-    gantry: Gantry,
-    delta: dict[str, float],
-    *,
-    pull_off_mm: float,
-    feed_rate: float,
-    output: Callable[[str], None],
-) -> dict[str, float] | None:
-    effective_pull_off_mm = max(5.0, float(pull_off_mm))
-    pull_off = _opposite_pull_off_delta(delta, effective_pull_off_mm)
-    failed_direction = ", ".join(
-        f"{axis.upper()}{value:+g} mm" for axis, value in delta.items() if value
-    ) or "unknown direction"
-    pull_off_direction = ", ".join(
-        f"{axis.upper()}{value:+g} mm" for axis, value in pull_off.items() if value
-    ) or "unknown direction"
-    output(
-        "Limit alarm detected while jogging "
-        f"{failed_direction}. Soft-resetting/unlocking GRBL and pulling off "
-        f"{pull_off_direction} at {feed_rate:g} mm/min."
-    )
-    try:
-        gantry.jog_cancel()
-    except MillConnectionError:
-        raise
-    except (CommandExecutionError, StatusReturnError) as exc:
-        output(f"Jog cancel during recovery failed: {exc}")
-        output("Aborting calibration; use E-stop and rerun before continuing.")
-        raise
-
-    max_pull_off_attempts = 5
-    output(
-        f"Attempting limit pull-off up to {max_pull_off_attempts} times; "
-        "soft-resetting/unlocking between attempts."
-    )
-    for attempt in range(1, max_pull_off_attempts + 1):
-        _soft_reset_and_unlock_after_limit_alarm(gantry, output=output)
-        try:
-            gantry.jog(feed_rate=feed_rate, **pull_off)
-        except MillConnectionError:
-            raise
-        except (CommandExecutionError, StatusReturnError) as exc:
-            if attempt >= max_pull_off_attempts:
-                output(f"Limit pull-off failed after {max_pull_off_attempts} attempts: {exc}")
-                output("Aborting calibration; gantry position is unknown.")
-                raise
-            output(
-                f"Limit pull-off attempt {attempt}/{max_pull_off_attempts} did not clear; retrying."
-            )
-            continue
-
-        status = _read_limit_recovery_status(gantry)
-        if not _needs_another_limit_pull_off(status):
-            break
-        if attempt >= max_pull_off_attempts:
-            output(
-                "Pull-off jog still left the controller in a limit/alarm state "
-                f"after {max_pull_off_attempts} attempts. Use E-stop/power reset "
-                "and manually clear the switch before continuing."
-            )
-            raise StatusReturnError(
-                "Limit pull-off did not clear the alarm after repeated attempts."
-            )
-        output(
-            f"Limit pull-off attempt {attempt}/{max_pull_off_attempts} did not clear; retrying."
-        )
-    output(
-        "Pulled off the limit switch. Skipping immediate WPos readback because "
-        "GRBL may not report coordinates reliably right after a limit reset; "
-        "position readback will resume on the next operator confirmation."
-    )
-    return None
 
 
 def _interactive_jog_to_reference(
@@ -817,13 +634,14 @@ def _interactive_jog_to_reference(
                 output("Aborting calibration; gantry position is unknown.")
                 raise
             else:
-                coords = _recover_from_limit_alarm(
+                _recover_from_limit_alarm(
                     gantry,
                     delta,
                     pull_off_mm=limit_pull_off_mm,
                     feed_rate=feed_rate,
                     output=output,
                 )
+                coords = None
         if coords is None:
             continue
         output(

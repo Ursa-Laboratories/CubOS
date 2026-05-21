@@ -184,6 +184,10 @@ then sets WPos Z to the calibration block height from the lowest instrument,
 then records each instrument's `offset_x`, `offset_y`, and `depth` from the
 shared block point.
 
+During calibration jogs, hard-limit alarms use CubOS' reusable limit recovery:
+soft reset, unlock, pull off opposite the failed jog, and retry up to five
+times before aborting.
+
 See the docs for the full operator tutorial:
 
 ```text
@@ -227,6 +231,15 @@ Programmatic setup:
 
 ```python
 from protocol_engine.setup import setup_protocol
+from protocol_engine.setup_validation import run_setup_validation
+
+validation = run_setup_validation(
+    gantry_path="configs/gantry/cub_xl_asmi.yaml",
+    deck_path="configs/deck/asmi_deck.yaml",
+    protocol_path="configs/protocol/asmi_move_a1.yaml",
+)
+if not validation.passed:
+    raise RuntimeError(validation.output)
 
 protocol, context = setup_protocol(
     gantry_path="configs/gantry/cub_xl_asmi.yaml",
