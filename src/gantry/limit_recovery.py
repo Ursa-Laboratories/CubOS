@@ -134,7 +134,8 @@ def needs_another_limit_pull_off(status: str | None) -> bool:
             "limit",
             "pn:",
             "statusqueryfailed",
-            "failed",
+            # "failed" intentionally omitted: already covered by "statusqueryfailed"
+            # and too broad — matches unrelated GRBL status strings.
         )
     )
 
@@ -234,5 +235,3 @@ def recover_from_limit_alarm(
         output(
             f"Limit pull-off attempt {attempt}/{max_pull_off_attempts} did not clear; retrying."
         )
-
-    raise StatusReturnError("Limit pull-off did not complete.")

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from gantry.errors import CommandExecutionError, StatusReturnError
+from gantry.errors import CommandExecutionError, MillConnectionError, StatusReturnError
 from gantry.limit_recovery import (
     looks_like_limit_alarm,
+    needs_another_limit_pull_off,
     recover_from_limit_alarm,
 )
 
@@ -191,3 +192,150 @@ def test_recover_from_limit_alarm_retries_failed_pull_off_jog_until_success():
 )
 def test_looks_like_limit_alarm_covers_grbl_alarm_text(text: str):
     assert looks_like_limit_alarm(text) is True
+
+
+# ---------------------------------------------------------------------------
+# MillConnectionError propagation
+# ---------------------------------------------------------------------------
+
+
+def test_mill_connection_error_from_jog_cancel_propagates():
+    class FailingJogCancel(_RecoveringGantry):
+        def jog_cancel(self) -> None:
+            raise MillConnectionError("serial disconnected")
+
+    gantry = FailingJogCancel()
+    with pytest.raises(MillConnectionError, match="serial disconnected"):
+        recover_from_limit_alarm(
+            gantry,
+            {"x": 1.0, "y": 0.0, "z": 0.0},
+            pull_off_mm=5.0,
+            feed_rate=2000.0,
+            output=lambda _: None,
+        )
+
+
+def test_mill_connection_error_from_pull_off_jog_propagates():
+    class FailingJog(_RecoveringGantry):
+        def jog(self, x=0, y=0, z=0, feed_rate=2000) -> None:
+            raise MillConnectionError("serial disconnected during pull-off")
+
+    gantry = FailingJog()
+    with pytest.raises(MillConnectionError, match="serial disconnected"):
+        recover_from_limit_alarm(
+            gantry,
+            {"x": 0.0, "y": 1.0, "z": 0.0},
+            pull_off_mm=5.0,
+            feed_rate=2000.0,
+            output=lambda _: None,
+        )
+
+
+def test_mill_connection_error_from_reset_and_unlock_propagates():
+    class FailingReset(_RecoveringGantry):
+        def reset_and_unlock(self) -> None:
+            raise MillConnectionError("serial disconnected during reset")
+
+    gantry = FailingReset()
+    with pytest.raises(MillConnectionError, match="serial disconnected"):
+        recover_from_limit_alarm(
+            gantry,
+            {"x": 0.0, "y": 0.0, "z": -1.0},
+            pull_off_mm=5.0,
+            feed_rate=2000.0,
+            output=lambda _: None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# jog_cancel and reset_and_unlock failure paths
+# ---------------------------------------------------------------------------
+
+
+def test_jog_cancel_command_execution_error_propagates():
+    messages: list[str] = []
+
+    class FailingJogCancel(_RecoveringGantry):
+        def jog_cancel(self) -> None:
+            raise CommandExecutionError("ALARM:1")
+
+    gantry = FailingJogCancel()
+    with pytest.raises(CommandExecutionError):
+        recover_from_limit_alarm(
+            gantry,
+            {"x": 1.0, "y": 0.0, "z": 0.0},
+            pull_off_mm=5.0,
+            feed_rate=2000.0,
+            output=messages.append,
+        )
+
+    assert any("Aborting" in m for m in messages)
+    assert not any(m for m in messages if "Attempting limit pull-off" in m)
+
+
+def test_reset_and_unlock_failure_propagates_before_retry():
+    messages: list[str] = []
+
+    class FailingReset(_RecoveringGantry):
+        def reset_and_unlock(self) -> None:
+            raise CommandExecutionError("reset failed")
+
+    gantry = FailingReset()
+    with pytest.raises(CommandExecutionError, match="reset failed"):
+        recover_from_limit_alarm(
+            gantry,
+            {"x": 0.0, "y": -1.0, "z": 0.0},
+            pull_off_mm=5.0,
+            feed_rate=2000.0,
+            output=messages.append,
+        )
+
+    assert any("E-stop" in m for m in messages)
+    assert gantry.calls.count(("jog_cancel",)) == 1
+    # jog should never have been reached
+    assert not any(c[0] == "jog" for c in gantry.calls)
+
+
+def test_missing_reset_and_unlock_raises_command_execution_error():
+    class NoResetGantry:
+        calls: list[tuple] = []
+
+        def jog_cancel(self) -> None:
+            self.calls.append(("jog_cancel",))
+
+        def get_status(self) -> str:
+            return "Idle"
+
+    gantry = NoResetGantry()
+    with pytest.raises(CommandExecutionError, match="reset_and_unlock"):
+        recover_from_limit_alarm(
+            gantry,
+            {"x": 1.0, "y": 0.0, "z": 0.0},
+            pull_off_mm=5.0,
+            feed_rate=2000.0,
+            output=lambda _: None,
+        )
+
+
+# ---------------------------------------------------------------------------
+# needs_another_limit_pull_off negative cases
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        "<Idle|WPos:0,0,0>",
+        "<Run|WPos:10,5,3>",
+        "Ok",
+        None,
+    ],
+)
+def test_needs_another_limit_pull_off_false_for_healthy_status(status: str | None):
+    assert needs_another_limit_pull_off(status) is False
+
+
+def test_needs_another_limit_pull_off_does_not_match_bare_failed_word():
+    # "failed" alone must not trigger a pull-off; only "statusqueryfailed" should.
+    assert needs_another_limit_pull_off("some-operation-failed") is False
+    assert needs_another_limit_pull_off("StatusQueryFailed: connection lost") is True

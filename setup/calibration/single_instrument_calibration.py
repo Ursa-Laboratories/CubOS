@@ -650,7 +650,6 @@ def _interactive_jog_to_reference(
         try:
             gantry.jog(feed_rate=feed_rate, **delta)
             coords = gantry.get_coordinates()
-            _probe_for_limit_status_after_jog(gantry)
         except MillConnectionError:
             raise
         except (CommandExecutionError, StatusReturnError) as exc:
@@ -682,6 +681,35 @@ def _interactive_jog_to_reference(
                     output=output,
                 )
                 coords = None
+
+        # Probe runs only when the jog succeeded and coords were obtained.
+        # Separated so a probe-detected alarm produces a distinct message — the alarm
+        # may predate the jog, so calling it "detected while jogging" would mislead.
+        if coords is not None:
+            try:
+                _probe_for_limit_status_after_jog(gantry)
+            except MillConnectionError:
+                raise
+            except (CommandExecutionError, StatusReturnError) as probe_exc:
+                if _looks_like_limit_alarm(probe_exc):
+                    output(
+                        "Post-jog status probe detected a limit/alarm state "
+                        "(the alarm may predate this jog). "
+                        "Initiating pull-off opposite the last jog direction."
+                    )
+                    _recover_from_limit_alarm(
+                        gantry,
+                        delta,
+                        pull_off_mm=limit_pull_off_mm,
+                        feed_rate=feed_rate,
+                        output=output,
+                    )
+                    coords = None
+                else:
+                    output(f"Post-jog status probe failed: {probe_exc}")
+                    output("Aborting calibration; gantry position is unknown.")
+                    raise
+
         if coords is None:
             continue
         output(

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+_log = logging.getLogger(__name__)
 
 from board.loader import load_board_from_gantry_config, load_board_from_yaml
 from deck.deck import Deck
@@ -120,10 +123,11 @@ def run_setup_validation(
         gantry_config = load_gantry_from_yaml(gantry_path)
         validate_deck_origin_minima(gantry_config)
     except Exception as exc:
+        _log.debug("Failed to load gantry config from %s", gantry_path, exc_info=True)
         return _error_result(
             lines,
             stage="gantry",
-            message=str(exc),
+            message=f"{type(exc).__name__}: {exc}",
             result_message="RESULT: ERROR - could not load gantry config",
         )
 
@@ -144,10 +148,11 @@ def run_setup_validation(
             total_z_range=gantry_config.total_z_range,
         )
     except Exception as exc:
+        _log.debug("Failed to load deck config from %s", deck_path, exc_info=True)
         return _error_result(
             lines,
             stage="deck",
-            message=str(exc),
+            message=f"{type(exc).__name__}: {exc}",
             result_message="RESULT: ERROR - could not load deck config",
         )
 
@@ -171,10 +176,11 @@ def run_setup_validation(
             board = load_board_from_yaml(board_path, offline_gantry, mock_mode=True)
             board_source = board_path
     except Exception as exc:
+        _log.debug("Failed to load instruments", exc_info=True)
         return _error_result(
             lines,
             stage="instruments",
-            message=str(exc),
+            message=f"{type(exc).__name__}: {exc}",
             result_message="RESULT: ERROR - could not load instruments",
         )
 
@@ -188,10 +194,11 @@ def run_setup_validation(
     try:
         protocol = load_protocol_from_yaml(protocol_path)
     except Exception as exc:
+        _log.debug("Failed to load protocol from %s", protocol_path, exc_info=True)
         return _error_result(
             lines,
             stage="protocol",
-            message=str(exc),
+            message=f"{type(exc).__name__}: {exc}",
             result_message="RESULT: ERROR - could not load protocol",
         )
 
@@ -203,13 +210,22 @@ def run_setup_validation(
     out()
 
     out("Validating protocol motion bounds...")
-    motion_targets = collect_protocol_motion_targets(gantry_config, protocol, deck)
-    motion_violations = validate_protocol_motion_bounds(
-        gantry_config,
-        protocol,
-        deck,
-        board,
-    )
+    try:
+        motion_targets = collect_protocol_motion_targets(gantry_config, protocol, deck)
+        motion_violations = validate_protocol_motion_bounds(
+            gantry_config,
+            protocol,
+            deck,
+            board,
+        )
+    except Exception as exc:
+        _log.exception("Motion bounds validation raised unexpectedly")
+        return _error_result(
+            lines,
+            stage="validation",
+            message=f"{type(exc).__name__}: {exc}",
+            result_message="RESULT: ERROR - validation engine failure",
+        )
     errors: list[str] = []
     if motion_violations:
         out(f"  FAIL - {len(motion_violations)} violation(s):")
@@ -231,12 +247,21 @@ def run_setup_validation(
     out()
 
     out("Validating protocol semantics...")
-    semantic_violations = validate_protocol_semantics(
-        protocol,
-        board,
-        deck,
-        gantry_config,
-    )
+    try:
+        semantic_violations = validate_protocol_semantics(
+            protocol,
+            board,
+            deck,
+            gantry_config,
+        )
+    except Exception as exc:
+        _log.exception("Semantic validation raised unexpectedly")
+        return _error_result(
+            lines,
+            stage="validation",
+            message=f"{type(exc).__name__}: {exc}",
+            result_message="RESULT: ERROR - validation engine failure",
+        )
     if semantic_violations:
         out(f"  FAIL - {len(semantic_violations)} violation(s):")
         for violation in semantic_violations:
