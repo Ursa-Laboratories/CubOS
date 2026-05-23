@@ -146,12 +146,13 @@ def _print_end_summary(
     if isinstance(result, DeckOriginCalibrationResult):
         x_max, y_max, z_max = result.measured_working_volume
         output(f"Calibrated working volume: X 0..{x_max:.3f}, Y 0..{y_max:.3f}, Z {result.z_min_mm:.3f}..{z_max:.3f} mm")
-        output(f"Seeded calculated Z range preserved: {result.calculated_z_range_mm:.3f} mm")
+        output(f"Factory Z travel safety bound preserved: {result.factory_z_travel_mm:.3f} mm")
         if result.block_height_mm is not None and result.block_touch_wpos_z_mm is not None:
             output(
-                "Block touch lower-reach inference: "
+                "Block touch home-to-block inference: "
                 f"block={result.block_height_mm:.3f} mm, "
                 f"touch WPos Z={result.block_touch_wpos_z_mm:.3f} mm, "
+                f"travel={result.home_to_block_travel_mm:.3f} mm, "
                 f"lowest reachable height above deck={result.reachable_z_min_mm:.3f} mm"
             )
         if result.grbl_max_travel is not None:

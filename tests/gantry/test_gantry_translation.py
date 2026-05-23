@@ -10,7 +10,7 @@ from gantry.gantry import Gantry
 
 def _config() -> dict:
     return {
-        "cnc": {"homing_strategy": "standard", "total_z_range": 90.0},
+        "cnc": {"homing_strategy": "standard", "factory_z_travel_mm": 90.0},
         "working_volume": {
             "x_min": 0.0,
             "x_max": 300.0,
@@ -115,6 +115,6 @@ def test_unlock_delegates_to_mill_unlock(mock_mill_cls) -> None:
     mock_mill_cls.return_value.unlock.assert_called_once()
 
 
-def test_total_z_range_property_from_config() -> None:
+def test_factory_z_travel_mm_property_from_config() -> None:
     gantry = Gantry(config=_config(), offline=True)
-    assert gantry.total_z_range == 90.0
+    assert gantry.factory_z_travel_mm == 90.0

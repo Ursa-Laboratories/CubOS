@@ -12,7 +12,7 @@ def _valid_gantry_dict() -> dict:
     return {
         "serial_port": "/dev/cu.usbserial-2130",
         "gantry_type": "cub_xl",
-        "cnc": {"homing_strategy": "standard", "total_z_range": 90.0},
+        "cnc": {"homing_strategy": "standard", "factory_z_travel_mm": 90.0},
         "working_volume": {
             "x_min": 0.0,
             "x_max": 300.0,
@@ -33,7 +33,7 @@ class TestGantryYamlSchema:
         assert schema.serial_port == "/dev/cu.usbserial-2130"
         assert schema.gantry_type == "cub_xl"
         assert schema.cnc.homing_strategy == "standard"
-        assert schema.cnc.total_z_range == 90.0
+        assert schema.cnc.factory_z_travel_mm == 90.0
         assert schema.working_volume.x_min == 0.0
         assert schema.working_volume.x_max == 300.0
         assert schema.working_volume.y_min == 0.0
@@ -123,22 +123,45 @@ class TestGantryYamlSchema:
         with pytest.raises(ValidationError, match="x_min"):
             GantryYamlSchema.model_validate(data)
 
-    def test_missing_total_z_range_raises(self):
+    def test_missing_factory_z_travel_mm_raises(self):
         data = _valid_gantry_dict()
-        del data["cnc"]["total_z_range"]
-        with pytest.raises(ValidationError, match="total_z_range"):
+        del data["cnc"]["factory_z_travel_mm"]
+        with pytest.raises(ValidationError, match="factory_z_travel_mm"):
             GantryYamlSchema.model_validate(data)
 
-    def test_total_z_range_must_be_positive(self):
+    def test_factory_z_travel_mm_must_be_positive(self):
         data = _valid_gantry_dict()
-        data["cnc"]["total_z_range"] = 0.0
-        with pytest.raises(ValidationError, match="total_z_range"):
+        data["cnc"]["factory_z_travel_mm"] = 0.0
+        with pytest.raises(ValidationError, match="factory_z_travel_mm"):
             GantryYamlSchema.model_validate(data)
 
-    def test_total_z_range_must_cover_working_z_max(self):
+    def test_factory_z_travel_mm_must_cover_working_z_span(self):
         data = _valid_gantry_dict()
-        data["cnc"]["total_z_range"] = 79.9
-        with pytest.raises(ValidationError, match="total_z_range"):
+        data["cnc"]["factory_z_travel_mm"] = 79.9
+        with pytest.raises(ValidationError, match="factory_z_travel_mm"):
+            GantryYamlSchema.model_validate(data)
+
+    def test_factory_z_travel_allows_offset_deck_frame_z_max(self):
+        data = _valid_gantry_dict()
+        data["cnc"]["factory_z_travel_mm"] = 110.0
+        data["working_volume"]["z_min"] = 25.0
+        data["working_volume"]["z_max"] = 135.0
+        schema = GantryYamlSchema.model_validate(data)
+
+        assert schema.working_volume.z_min == 25.0
+        assert schema.working_volume.z_max == 135.0
+
+    def test_calibration_block_height_is_optional_and_parsed(self):
+        data = _valid_gantry_dict()
+        data["cnc"]["calibration_block_height_mm"] = 35.0
+        schema = GantryYamlSchema.model_validate(data)
+
+        assert schema.cnc.calibration_block_height_mm == 35.0
+
+    def test_calibration_block_height_must_be_positive(self):
+        data = _valid_gantry_dict()
+        data["cnc"]["calibration_block_height_mm"] = 0.0
+        with pytest.raises(ValidationError, match="calibration_block_height_mm"):
             GantryYamlSchema.model_validate(data)
 
     def test_safe_z_is_optional_and_parsed(self):

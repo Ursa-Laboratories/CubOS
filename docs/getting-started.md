@@ -62,7 +62,9 @@ To write a calibrated copy, provide `--output-gantry`.
 The calibration script counts mounted instruments in the gantry YAML and chooses
 the single- or multi-instrument flow. Single-instrument calibration uses a
 calibration block at the front-left origin point, assigns X/Y at that physical
-pose, and preserves the seeded `cnc.total_z_range` as the calibrated Z travel.
+pose, and preserves `cnc.factory_z_travel_mm` only as the out-of-box Z travel
+safety bound. Calibrated Z bounds come from the measured home-to-block travel
+and final homed readback.
 Multi-instrument calibration uses a shared block point to compute per-instrument
 `offset_x`, `offset_y`, and `depth`.
 
