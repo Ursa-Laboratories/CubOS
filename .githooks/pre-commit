@@ -1,0 +1,20 @@
+#!/bin/sh
+set -u
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+workspace_dir=$(CDPATH= cd -- "$repo_root/.." && pwd)
+context_dir=${URSA_CONTEXT_DIR:-"$workspace_dir/Ursa_Context"}
+guard="$context_dir/tools/ursa_doc_guard.py"
+
+if [ ! -f "$guard" ]; then
+  printf '%s\n' "Ursa_Context doc guard not found: $guard" >&2
+  printf '%s\n' "Clone Ursa_Context next to this repo or set URSA_CONTEXT_DIR=/path/to/Ursa_Context." >&2
+  printf '%s\n' "For a truly docs-neutral commit, bypass explicitly with URSA_DOC_GUARD_ALLOW_NO_DOCS=1." >&2
+  if [ -n "${URSA_DOC_GUARD_ALLOW_NO_DOCS:-}" ]; then
+    exit 0
+  fi
+  exit 1
+fi
+
+exec python3 "$guard" pre-commit
+

@@ -1,0 +1,18 @@
+#!/bin/sh
+set -u
+
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
+workspace_dir=$(CDPATH= cd -- "$repo_root/.." && pwd)
+context_dir=${URSA_CONTEXT_DIR:-"$workspace_dir/Ursa_Context"}
+guard="$context_dir/tools/ursa_doc_guard.py"
+
+if [ ! -f "$guard" ]; then
+  printf '%s\n' "Ursa_Context warning: doc guard not found: $guard" >&2
+  exit 0
+fi
+
+python3 "$guard" record || {
+  printf '%s\n' "Ursa_Context warning: failed to record commit context." >&2
+  exit 0
+}
+
