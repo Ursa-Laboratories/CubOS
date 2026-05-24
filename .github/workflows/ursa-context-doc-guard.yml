@@ -3,6 +3,7 @@ name: Ursa Context Documentation Guard
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
 
 permissions:
   contents: read
@@ -22,8 +23,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          base="${{ github.event.pull_request.base.sha }}"
-          head="${{ github.event.pull_request.head.sha }}"
+          event_name="${{ github.event_name }}"
+          if [ "$event_name" = "pull_request" ]; then
+            base="${{ github.event.pull_request.base.sha }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            default_branch="${{ github.event.repository.default_branch }}"
+            git fetch --no-tags origin "$default_branch"
+            base=$(git merge-base "origin/$default_branch" HEAD)
+            head="${{ github.sha }}"
+          fi
           changed_files=$(git diff --name-only --diff-filter=ACMRTD "${base}...${head}")
 
           docs_changed=0
@@ -70,4 +79,3 @@ jobs:
           fi
 
           echo "Documentation guard passed."
-
