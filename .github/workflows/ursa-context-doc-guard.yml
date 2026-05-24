@@ -1,0 +1,73 @@
+name: Ursa Context Documentation Guard
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  docs-guard:
+    name: Require docs for source/config changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check documentation coverage
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          changed_files=$(git diff --name-only --diff-filter=ACMRTD "${base}...${head}")
+
+          docs_changed=0
+          impactful=()
+
+          while IFS= read -r path; do
+            [ -n "$path" ] || continue
+
+            case "$path" in
+              README.md|AGENTS.md|CLAUDE.md|CHANGELOG.md|CONTRIBUTING.md|docs/*|documentation/*|progress/*)
+                docs_changed=1
+                continue
+                ;;
+              .git/*|.mypy_cache/*|.pytest_cache/*|.ruff_cache/*|.venv/*|build/*|dist/*|node_modules/*|coverage/*|htmlcov/*|tests/*|test/*|*/tests/*|*/test/*|package-lock.json|pnpm-lock.yaml|poetry.lock|uv.lock)
+                continue
+                ;;
+            esac
+
+            filename="${path##*/}"
+            ext=""
+            if [[ "$filename" == *.* ]]; then
+              ext=".${filename##*.}"
+            fi
+
+            case "$ext" in
+              .cfg|.cjs|.css|.env|.go|.h|.html|.ini|.js|.json|.jsx|.mjs|.py|.rs|.scad|.sh|.sql|.toml|.ts|.tsx|.yaml|.yml)
+                impactful+=("$path")
+                ;;
+              "")
+                if [[ "$path" != */* ]]; then
+                  impactful+=("$path")
+                fi
+                ;;
+            esac
+          done <<< "$changed_files"
+
+          if (( ${#impactful[@]} > 0 )) && (( docs_changed == 0 )); then
+            echo "::error::Source/config changes require a repo documentation update."
+            printf 'Impactful paths:\n'
+            printf '  - %s\n' "${impactful[@]}"
+            printf '\nAdd or update README.md, AGENTS.md, docs/**, documentation/**, or progress/** in this PR.\n'
+            printf 'This CI check cannot see local Ursa_Context edits; include repo-local docs for remote enforcement.\n'
+            exit 1
+          fi
+
+          echo "Documentation guard passed."
+
