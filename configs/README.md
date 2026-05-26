@@ -69,6 +69,12 @@ PYTHONPATH=src python setup/validate_setup.py \
   `protocol/filmetrics_scan.yaml`, `protocol/sharc_uv_curing_scan.yaml`,
   `protocol/sharc_uv_motion_scan.yaml`.
 
+Offline-only fixtures live under `sim/` so they are not mistaken for measured
+hardware setups. `sim/pipette_tip_transfer/` contains the gantry, deck, and
+protocol triple used by `digital-sim` to replay pipette tip pickup, attached-tip
+height, transfer, blowout, drop-tip, and home behavior without touching
+hardware.
+
 ## Height Semantics
 
 `measurement_height` and `interwell_scan_height` are **labware-relative
@@ -89,9 +95,14 @@ sanity check, not for motion math.
 - gantry `safe_z`: absolute deck-frame Z used for inter-labware travel
   (the only absolute Z in the engagement path)
 
-Pipette commands engage at the labware reference Z (well bottom, tip
-top) — `measurement_height = 0` implicitly. Unrecognized scan fields are
-rejected at protocol-load time by the command's Pydantic schema.
+Pipette commands default to the labware reference Z (`height = 0`), but
+liquid-handling commands may set `height`, or `source_height` /
+`destination_height` for transfers. `pick_up_tip` must target a `tip_rack`
+slot; when `tip_length` is omitted, CubOS defaults to 59.3 mm for the current
+Opentrons 300 uL tips. Validation adds that extension to active pipette depth
+for safe_z and action-Z bounds until `drop_tip`.
+Unrecognized scan fields are rejected at protocol-load time by the command's
+Pydantic schema.
 
 `scan.plate` can target a top-level `WellPlate` or a nested holder path such
 as `plate_holder.plate`. The SHARC UV config uses this nested form.
