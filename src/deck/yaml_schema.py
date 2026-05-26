@@ -7,6 +7,7 @@ from typing import Annotated, Dict, Literal, Optional, Union
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+
 class _YamlPoint3D(BaseModel):
     model_config = ConfigDict(extra="forbid")
     x: float
@@ -240,6 +241,7 @@ class TipRackYamlEntry(_BaseHolderYamlEntry):
     columns: int = Field(..., gt=0)
     pickup_z: float = Field(..., gt=0)
     drop_z: Optional[float] = Field(default=None, gt=0)
+    tip_length: float = Field(..., gt=0)
     calibration: _YamlCalibrationPoints
     x_offset: float = Field(..., gt=0)
     y_offset: float = Field(..., gt=0)

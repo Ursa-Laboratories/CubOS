@@ -66,6 +66,16 @@ class BaseInstrument(ABC):
     def calibrate(self) -> None:
         pass
 
+    @property
+    def effective_depth(self) -> float:
+        """Currently active depth from the gantry head to the tool tip.
+
+        Defaults to the static ``depth``. Subclasses override when a
+        runtime attachment (e.g. a disposable pipette tip) extends the
+        tool below the bare nozzle.
+        """
+        return self.depth
+
     def handle_error(self, error: Exception, context: str = "") -> None:
         msg = f"Error in {self.name}{f' ({context})' if context else ''}: {str(error)}"
         self.logger.error(msg)

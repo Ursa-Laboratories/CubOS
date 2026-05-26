@@ -1,3 +1,4 @@
+import math
 import threading
 import time
 from typing import Optional
@@ -66,6 +67,7 @@ class Pipette(BaseInstrument):
         self._serial: Optional[serial.Serial] = None
         self._lock = threading.Lock()
         self._has_tip = False
+        self._attached_tip_extension = 0.0
         self._position_mm = 0.0
         self._is_homed = False
         self._is_primed = False
@@ -73,6 +75,30 @@ class Pipette(BaseInstrument):
     @property
     def config(self) -> PipetteConfig:
         return self._config
+
+    @property
+    def attached_tip_extension(self) -> float:
+        return self._attached_tip_extension
+
+    @property
+    def effective_depth(self) -> float:
+        return self.depth + self._attached_tip_extension
+
+    def set_attached_tip_extension(self, extension_mm: float) -> None:
+        if (
+            isinstance(extension_mm, bool)
+            or not isinstance(extension_mm, (int, float))
+            or not math.isfinite(float(extension_mm))
+            or float(extension_mm) < 0.0
+        ):
+            raise PipetteConfigError(
+                f"attached tip extension must be a non-negative finite number, "
+                f"got {extension_mm!r}."
+            )
+        self._attached_tip_extension = float(extension_mm)
+
+    def clear_attached_tip_extension(self) -> None:
+        self._attached_tip_extension = 0.0
 
     # ── BaseInstrument interface ──────────────────────────────────────────
 
@@ -194,6 +220,7 @@ class Pipette(BaseInstrument):
         if not self._offline:
             self._send_command(_CMD_MOVE_TO, self._config.drop_tip_position, speed)
         self._has_tip = False
+        self.clear_attached_tip_extension()
         self._position_mm = self._config.drop_tip_position
 
     def get_status(self) -> PipetteStatus:

@@ -108,6 +108,35 @@ instruments:
     offset_x: 0.0
     offset_y: 0.0
     depth: 0.0
+```
+
+Included examples:
+
+| Config | System |
+|--------|--------|
+| `configs/gantry/cub_xl_asmi.yaml` | Cub-XL + ASMI |
+| `configs/gantry/cub_filmetrics.yaml` | Cub + Filmetrics |
+| `configs/gantry/cub_xl_sterling.yaml` | Sterling ASMI |
+
+### 2. Deck (`configs/deck/*.yaml`)
+
+Defines physical labware on the deck. Well plates use two-point calibration
+(`calibration.a1` + `calibration.a2`); vials use a single fixed location.
+Holder fixtures are also supported for collision-aware deck modeling and future
+nesting workflows: `tip_holder`, `tip_disposal`, `well_plate_holder`, and
+`vial_holder`. Exact-position `tip_rack` entries are also supported for pipette
+pickup targets. Tip racks default `tip_length` to 59.3 mm for the current
+Opentrons 300 uL tips so validation can account for the attached disposable tip
+as active pipette depth after `pick_up_tip`; override it if measured hardware
+differs.
+
+Holders can define nested contained labware so holder seat
+height or holder-specific plate surface height contributes directly to
+experiment Z generation. At runtime, all labware expose shared base-level
+`geometry` metadata; for current deck models this is represented as a bounding
+box.
+
+```yaml
 ~~~
 
 `gantry_type` selects built-in machine-family validation. For `cub_xl`,
@@ -152,6 +181,51 @@ protocol:
   - move:
       instrument: asmi
       position: plate.A1
+```
+
+Available protocol commands include `home`, `move`, `scan`, `measure`,
+`pause`, and the pipette command set.
+
+Protocol motion notes:
+
+- `positions:` entries such as `park_position` are protocol named positions,
+  not deck labware.
+- Deck targets can refer to top-level labware (`plate.A1`) or nested holder
+  labware (`plate_holder.plate.A1`). `scan.plate` accepts a top-level or
+  nested target that resolves to a `WellPlate`.
+- `move` accepts optional `travel_z` for named/literal XYZ targets. That forces
+  a retract-first transit: move Z to `travel_z`, travel in XY at that Z, then
+  finish at the target position.
+- Scan and measure take labware-relative heights as first-class command
+  arguments: `scan` requires both `measurement_height` (action plane)
+  and `interwell_scan_height` (between-wells XY-travel plane, must be at
+  or above the action plane); `measure` requires `measurement_height`.
+  Both are mm above the well/labware calibrated surface Z (negative = below).
+  Pipette commands default to the labware reference Z, but liquid-handling
+  steps can specify `height`, or `source_height` / `destination_height` for
+  transfers. Validation requires tip pickup before liquid handling and adds
+  the attached tip length to pipette safe_z/action bounds.
+- The first well of a scan and inter-labware travel use the gantry's
+  absolute `cnc.safe_z` (default `working_volume.z_max`).
+- Legacy names `entry_travel_z`, `entry_travel_height`,
+  `interwell_travel_height`, and ASMI `z_limit` are rejected before motion.
+
+ASMI-specific note:
+
+- `ASMI.indentation()` begins at the resolved action plane
+  (`well.z + measurement_height`) and descends to the absolute Z
+  `well.z + indentation_limit_height`. The deepest plane is signed and
+  must be at or below `measurement_height`.
+
+## Setup and Execution
+
+Install dependencies:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
 ~~~
 
 Common commands include `home`, `move`, `scan`, `measure`, `pause`,
