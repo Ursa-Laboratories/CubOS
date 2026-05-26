@@ -1,0 +1,40 @@
+# Sample Cub XL gantry config in the CubOS deck-origin frame.
+# Copy this into BU-Configs or a local config directory before editing for hardware.
+
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+
+cnc:
+  homing_strategy: standard
+  total_z_range: 110.0
+  y_axis_motion: head
+  safe_z: 105.0
+
+working_volume:
+  x_min: 0.0
+  x_max: 386.0
+  y_min: 0.0
+  y_max: 250.5
+  z_min: 0.0
+  z_max: 110.0
+
+grbl_settings:
+  status_report: 0
+  soft_limits: true
+  homing_enable: true
+  homing_pull_off: 10.0
+  max_travel_x: 396.0
+  max_travel_y: 260.5
+  max_travel_z: 120.0
+
+instruments:
+  asmi:
+    type: asmi
+    vendor: vernier
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    force_threshold: -50
+    sensor_channels:
+      - 1

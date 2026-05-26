@@ -147,8 +147,16 @@ cython_debug/
 *.db-wal
 *.db-shm
 
-# Operator/lab configs live in sibling BU-Configs repo.
-configs/
+# Operator/lab configs live in sibling BU-Configs repo. Keep sample defaults.
+configs/*
+!configs/README.md
+!configs/gantry/
+!configs/deck/
+!configs/protocol/
+configs/gantry/*
+configs/deck/*
+configs/protocol/*
+!configs/**/*.sample.yaml
 
 # OS X
 .DS_Store
