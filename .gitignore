@@ -147,6 +147,9 @@ cython_debug/
 *.db-wal
 *.db-shm
 
+# Operator/lab configs live in sibling BU-Configs repo.
+configs/
+
 # OS X
 .DS_Store
 
