@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any, Dict, Optional
 
@@ -17,11 +18,50 @@ from .errors import (
     MillConnectionError,
     StatusReturnError,
 )
-from .origin import format_set_work_position_command
+from .origin import (
+    calculate_deck_origin_z_calibration,
+    format_set_work_position_command,
+)
 
 _STATUS_RE = re.compile(r"<([^|>]+)")
 
 logger = logging.getLogger(__name__)
+
+
+def _round_mm(value: float) -> float:
+    return round(float(value), 3)
+
+
+def _validate_homing_pull_off_mm(value: Any) -> float:
+    try:
+        pull_off = float(value)
+    except (TypeError, ValueError) as exc:
+        raise MillConnectionError(
+            "Cannot finalize deck-origin calibration because GRBL $27 "
+            f"homing pull-off is not numeric: {value!r}."
+        ) from exc
+    if not math.isfinite(pull_off) or pull_off < 0:
+        raise MillConnectionError(
+            "Cannot finalize deck-origin calibration because GRBL $27 "
+            f"homing pull-off must be finite and non-negative; got {value!r}."
+        )
+    return _round_mm(pull_off)
+
+
+def _validate_status_report(value: Any) -> float:
+    try:
+        status_report = float(value)
+    except (TypeError, ValueError) as exc:
+        raise MillConnectionError(
+            "Cannot configure calibration GRBL settings because $10 "
+            f"status report is not numeric: {value!r}."
+        ) from exc
+    if not math.isfinite(status_report):
+        raise MillConnectionError(
+            "Cannot configure calibration GRBL settings because $10 "
+            f"status report must be finite; got {value!r}."
+        )
+    return status_report
 
 
 class Gantry:
@@ -504,6 +544,34 @@ class Gantry:
         """Enable or disable GRBL soft limits through Gantry semantics."""
         self.set_grbl_setting("$20", 1 if enabled else 0)
 
+    def homing_pull_off_mm(self) -> float:
+        """Return GRBL $27 homing pull-off in millimeters."""
+        if self._offline:
+            settings = {}
+            if isinstance(self.config, dict):
+                raw_settings = self.config.get("grbl_settings") or {}
+                if isinstance(raw_settings, dict):
+                    settings = raw_settings
+            raw = settings.get("$27", settings.get("27", settings.get("homing_pull_off")))
+            return _validate_homing_pull_off_mm(0.0 if raw is None else raw)
+
+        settings = self.read_grbl_settings()
+        raw = settings.get("$27", settings.get("27"))
+        if raw is None:
+            raise MillConnectionError(
+                "Cannot finalize deck-origin calibration because live GRBL "
+                "$27 homing pull-off is missing."
+            )
+        return _validate_homing_pull_off_mm(raw)
+
+    def _configured_grbl_setting(self, field_name: str) -> Any:
+        """Return a configured GRBL setting by schema field name, if present."""
+        if isinstance(self.config, dict):
+            raw_settings = self.config.get("grbl_settings") or {}
+            if isinstance(raw_settings, dict):
+                return raw_settings.get(field_name)
+        return None
+
     def query_raw_status(self) -> str:
         """Return one raw GRBL status string for diagnostics/recovery."""
         if self._offline:
@@ -517,6 +585,8 @@ class Gantry:
         max_travel_x: float,
         max_travel_y: float,
         max_travel_z: float,
+        status_report: float | int | None = None,
+        homing_pull_off: float | None = None,
         tolerance_mm: float = 0.001,
     ) -> None:
         """Program GRBL soft limits from calibrated travel spans."""
@@ -535,12 +605,21 @@ class Gantry:
                 "Cannot configure soft limits with non-positive travel spans: "
                 + ", ".join(invalid)
             )
+        expected_reporting: Dict[str, float] = {}
+        if status_report is not None:
+            expected_reporting["$10"] = _validate_status_report(status_report)
+        if homing_pull_off is not None:
+            expected_reporting["$27"] = _validate_homing_pull_off_mm(homing_pull_off)
         if self._offline:
             return
 
         # Disable soft limits while changing travel extents, then re-enable.
+        reporting_written: list[str] = []
         soft_limits_disabled = False
         try:
+            for code, value in expected_reporting.items():
+                self.set_grbl_setting(code, value)
+                reporting_written.append(code)
             self.set_grbl_setting("$20", 0)
             soft_limits_disabled = True
             self.set_grbl_setting("$130", max_travel_x)
@@ -550,6 +629,12 @@ class Gantry:
             self.set_grbl_setting("$20", 1)
             soft_limits_disabled = False
         except Exception as exc:
+            if reporting_written:
+                logger.warning(
+                    "configure_soft_limits_from_spans failed; settings already "
+                    "written to controller that were not rolled back: %s",
+                    ", ".join(reporting_written),
+                )
             if soft_limits_disabled:
                 try:
                     self.set_grbl_setting("$20", 1)
@@ -569,6 +654,7 @@ class Gantry:
             "$131": float(max_travel_y),
             "$132": float(max_travel_z),
         }
+        expected.update(expected_reporting)
         misses = []
         for code, expected_value in expected.items():
             live_raw = live.get(code)
@@ -581,6 +667,150 @@ class Gantry:
             raise MillConnectionError(
                 "GRBL soft-limit settings did not verify: " + "; ".join(misses)
             )
+
+    def finalize_deck_origin_calibration(
+        self,
+        *,
+        home_z: float,
+        block_touch_z: float,
+        block_height: float,
+        total_z_range: float,
+        status_report: float | int | None = 0,
+        homing_pull_off: float | None = None,
+        tolerance_mm: float = 0.001,
+    ) -> Dict[str, Any]:
+        """Finalize single-instrument deck-origin calibration on the controller.
+
+        The current physical pose must already have been assigned to deck-origin
+        X=0, Y=0, Z=block_height. This method measures the homed top pose,
+        programs GRBL travel spans, re-homes against the new span, then assigns
+        that top pose to the calibrated deck-frame maxima so G54 and soft limits
+        agree.
+        """
+        z_calibration = calculate_deck_origin_z_calibration(
+            home_z=home_z,
+            block_touch_z=block_touch_z,
+            block_height=block_height,
+            total_z_range=total_z_range,
+            tolerance_mm=tolerance_mm,
+        )
+        configured_pull_off = (
+            homing_pull_off
+            if homing_pull_off is not None
+            else self._configured_grbl_setting("homing_pull_off")
+        )
+        if self._offline:
+            homing_pull_off_mm = _validate_homing_pull_off_mm(
+                0.0 if configured_pull_off is None else configured_pull_off
+            )
+        else:
+            if configured_pull_off is None:
+                homing_pull_off_mm = self.homing_pull_off_mm()
+            else:
+                homing_pull_off_mm = _validate_homing_pull_off_mm(configured_pull_off)
+            if status_report is not None:
+                self.set_grbl_setting("$10", _validate_status_report(status_report))
+            if configured_pull_off is not None:
+                self.set_grbl_setting("$27", homing_pull_off_mm)
+
+        if self._offline:
+            measured = dict(self._offline_coords)
+            measured_volume = {
+                "x": _round_mm(float(measured.get("x", 0.0))),
+                "y": _round_mm(float(measured.get("y", 0.0))),
+                "z": z_calibration.z_max,
+            }
+            max_travel = {
+                "x": _round_mm(measured_volume["x"] + homing_pull_off_mm),
+                "y": _round_mm(measured_volume["y"] + homing_pull_off_mm),
+                "z": _round_mm(
+                    z_calibration.max_travel_z + homing_pull_off_mm
+                ),
+            }
+            self._offline_coords = {
+                "x": measured_volume["x"],
+                "y": measured_volume["y"],
+                "z": measured_volume["z"],
+            }
+            return {
+                "measured_volume": measured_volume,
+                "z_calibration": z_calibration.as_dict(),
+                "max_travel": max_travel,
+                "homing_pull_off_mm": homing_pull_off_mm,
+                "position": dict(self._offline_coords),
+            }
+
+        self.home()
+        measured = self.get_coordinates()
+        expected_z_max = z_calibration.z_max
+        if abs(float(measured["z"]) - expected_z_max) > tolerance_mm:
+            raise MillConnectionError(
+                "Homed Z after assigning the block origin did not match the "
+                "calculated calibrated Z maximum: "
+                f"got {float(measured['z']):g}, expected {expected_z_max:g}."
+            )
+
+        measured_volume = {
+            "x": _round_mm(float(measured["x"])),
+            "y": _round_mm(float(measured["y"])),
+            "z": z_calibration.z_max,
+        }
+        usable_spans = {
+            "x": measured_volume["x"],
+            "y": measured_volume["y"],
+            "z": z_calibration.max_travel_z,
+        }
+        invalid = [
+            f"{axis}={value:g}"
+            for axis, value in usable_spans.items()
+            if float(value) <= tolerance_mm
+        ]
+        if invalid:
+            raise ValueError(
+                "Cannot finalize calibration with non-positive usable travel spans: "
+                + ", ".join(invalid)
+            )
+        max_travel = {
+            "x": _round_mm(measured_volume["x"] + homing_pull_off_mm),
+            "y": _round_mm(measured_volume["y"] + homing_pull_off_mm),
+            "z": _round_mm(
+                z_calibration.max_travel_z + homing_pull_off_mm
+            ),
+        }
+
+        self.configure_soft_limits_from_spans(
+            max_travel_x=max_travel["x"],
+            max_travel_y=max_travel["y"],
+            max_travel_z=max_travel["z"],
+            status_report=status_report,
+            homing_pull_off=homing_pull_off_mm,
+            tolerance_mm=tolerance_mm,
+        )
+        try:
+            self.home()
+        except Exception as exc:
+            raise MillConnectionError(
+                "Deck-origin calibration: soft limits programmed successfully but "
+                "final re-home failed. GRBL travel spans are updated but G54 work "
+                "coordinates have not been assigned — home manually and re-run "
+                f"calibration to complete: {exc}"
+            ) from exc
+        self.activate_work_coordinate_system("G54")
+        self.clear_g92_offsets()
+        self.set_work_coordinates(
+            x=measured_volume["x"],
+            y=measured_volume["y"],
+            z=z_calibration.z_max,
+        )
+        final_position = self.get_coordinates()
+
+        return {
+            "measured_volume": measured_volume,
+            "z_calibration": z_calibration.as_dict(),
+            "max_travel": max_travel,
+            "homing_pull_off_mm": homing_pull_off_mm,
+            "position": final_position,
+        }
 
     def _homing_strategy(self) -> str:
         """Extract the configured homing strategy from dict or dataclass config."""

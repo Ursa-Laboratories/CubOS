@@ -60,6 +60,10 @@ grbl_settings:
   status_report: 0
   homing_enable: true
   homing_dir_mask: 0
+  homing_pull_off: 10.0
+  max_travel_x: 409.0
+  max_travel_y: 290.0
+  max_travel_z: 97.0
 
 instruments:
   asmi:
@@ -121,18 +125,30 @@ Use [Calibrate Deck Origin](calibration.md) to measure the physical working
 volume. The calibration script records the first homed Z, jogs to the
 front-left block/reference point, sets X/Y with `G10 L20 P1 X0 Y0`, sets the
 block touch to `cnc.calibration_block_height_mm`, then re-homes to measure
-X/Y bounds and the real deck-frame `z_max`.
+X/Y bounds and the real deck-frame `z_max`. It sets GRBL `$10=0` so runtime
+status reports WPos and writes the configured `$27` homing pull-off when
+present.
 
 Example A: with `factory_z_travel_mm: 110.0`, a 35 mm block, and 50 mm of
 home-to-block travel, the remaining factory travel below the block is 60 mm.
 The tool can reach deck bottom, so calibration writes `z_min: 0.0`,
-`z_max: 85.0`, and `max_travel_z: 85.0`.
+`z_max: 85.0`, and `max_travel_z: 85.0` plus `$27`.
 
 Example B: with the same factory travel and block height but 100 mm of
 home-to-block travel, only 10 mm remains below the block. The tool cannot
 reach deck bottom, so calibration writes `z_min: 25.0`, uses the final homed
 readback for `z_max` (135.0 in the nominal case), and writes
-`max_travel_z: 110.0`.
+`max_travel_z: 110.0` plus `$27`.
+
+Do not mix the two ranges:
+
+- `working_volume` is usable deck/WPos space after homing pull-off.
+- `grbl_settings.max_travel_x/y/z` mirrors GRBL `$130/$131/$132` and includes
+  the `$27` pull-off reserve.
+
+If homed WPos Z is `91` and `$27=10`, save `working_volume.z_max: 91` and
+`grbl_settings.max_travel_z: 101`. The extra 10 mm is controller reserve, not
+usable WPos.
 
 Multi-instrument setups need per-instrument lower-reach limits and inactive-tool
 collision checks instead of one global lower reach for every tool.

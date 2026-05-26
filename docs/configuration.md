@@ -49,6 +49,14 @@ working_volume:
   z_min: 0.0
   z_max: 87.0
 
+grbl_settings:
+  status_report: 0
+  homing_enable: true
+  homing_pull_off: 10.0
+  max_travel_x: 409.0
+  max_travel_y: 290.0
+  max_travel_z: 97.0
+
 instruments:
   asmi:
     type: asmi
@@ -83,8 +91,11 @@ volume values on real hardware. Seed `cnc.factory_z_travel_mm` with the
 out-of-box gantry Z travel and `cnc.calibration_block_height_mm` with the block
 height before calibration. Calibration preserves the factory travel as a safety
 bound; calibrated Z bounds and GRBL `max_travel_z` come from the measured
-home-to-block travel and final homed readback. Use [Gantry Bring-Up](admin/gantry-bring-up.md)
-first if controller direction, homing, or WPos reporting is unknown.
+home-to-block travel and final homed readback. `working_volume` is usable
+deck/WPos space; GRBL `max_travel_*` is controller soft-limit space and
+includes the `$27` `homing_pull_off` reserve. Use
+[Gantry Bring-Up](admin/gantry-bring-up.md) first if controller direction,
+homing, pull-off, or WPos reporting is unknown.
 
 ## Deck Config
 

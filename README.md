@@ -94,6 +94,14 @@ working_volume:
   z_min: 0.0
   z_max: 87.0
 
+grbl_settings:
+  status_report: 0
+  homing_enable: true
+  homing_pull_off: 10.0
+  max_travel_x: 409.0
+  max_travel_y: 290.0
+  max_travel_z: 97.0
+
 instruments:
   asmi:
     type: asmi
@@ -258,7 +266,14 @@ During calibration jogs, hard-limit alarms use CubOS' reusable limit recovery:
 soft reset, unlock, pull off opposite the failed jog, and retry up to five
 times before aborting.
 
-See the docs for the full operator tutorial:
+Calibration keeps `working_volume` as the usable deck/WPos range after homing
+pull-off. GRBL `$130/$131/$132` and YAML `grbl_settings.max_travel_*` are
+controller soft-limit spans, so they include the per-machine `$27`
+`homing_pull_off` reserve. Example: if homed WPos Z is `91` and `$27=10`, the
+calibrated YAML should keep `working_volume.z_max: 91` and save
+`grbl_settings.max_travel_z: 101`.
+
+See `docs/calibration.md` for the full operator tutorial.
 
 After calibration, run:
 

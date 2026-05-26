@@ -7,6 +7,7 @@ from gantry.errors import (
     MillConnectionError,
     StatusReturnError,
 )
+from gantry.coordinates import Coordinates
 from gantry.gantry import Gantry
 
 
@@ -374,8 +375,10 @@ class TestGantry(unittest.TestCase):
     def test_configure_soft_limits_writes_and_verifies_settings(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
         mock_mill.read_grbl_settings.return_value = {
+            "$10": "0",
             "$20": "1",
             "$22": "1",
+            "$27": "10.000",
             "$130": "306.000",
             "$131": "306.000",
             "$132": "113.000",
@@ -385,10 +388,14 @@ class TestGantry(unittest.TestCase):
             max_travel_x=306.0,
             max_travel_y=306.0,
             max_travel_z=113.0,
+            status_report=0,
+            homing_pull_off=10.0,
         )
         self.assertEqual(
             mock_mill.set_grbl_setting.call_args_list,
             [
+                unittest.mock.call("10", "0"),
+                unittest.mock.call("27", "10"),
                 unittest.mock.call("20", "0"),
                 unittest.mock.call("130", "306"),
                 unittest.mock.call("131", "306"),
@@ -410,11 +417,15 @@ class TestGantry(unittest.TestCase):
         ]
         gantry = Gantry(config=self.config)
 
+        # No pre-writes: explicit None ensures side_effect ordering stays stable
+        # regardless of future default changes for status_report/homing_pull_off.
         with self.assertRaises(CommandExecutionError):
             gantry.configure_soft_limits_from_spans(
                 max_travel_x=306.0,
                 max_travel_y=306.0,
                 max_travel_z=113.0,
+                status_report=None,
+                homing_pull_off=None,
             )
 
         self.assertEqual(
@@ -425,6 +436,205 @@ class TestGantry(unittest.TestCase):
                 unittest.mock.call("20", "1"),
             ],
         )
+
+
+class TestGantryFinalizeDeckOriginCalibration(unittest.TestCase):
+    def setUp(self):
+        self.config = {"serial_port": "/dev/tty.usbserial"}
+
+    @patch("gantry.gantry.Mill")
+    def test_finalize_programs_controller_spans_with_homing_pull_off(
+        self, mock_mill_cls
+    ):
+        mock_mill = mock_mill_cls.return_value
+        mock_mill.read_grbl_settings.side_effect = [
+            {"$27": "10.000"},
+            {
+                "$10": "0",
+                "$20": "1",
+                "$22": "1",
+                "$27": "10.000",
+                "$130": "396.000",
+                "$131": "260.500",
+                "$132": "101.000",
+            },
+        ]
+        mock_mill.current_coordinates.side_effect = [
+            Coordinates(386.0, 250.5, 91.0),
+            Coordinates(386.0, 250.5, 91.0),
+        ]
+
+        gantry = Gantry(config=self.config)
+        result = gantry.finalize_deck_origin_calibration(
+            home_z=91.0,
+            block_touch_z=10.0,
+            block_height=10.0,
+            total_z_range=100.0,
+        )
+
+        self.assertEqual(
+            result["measured_volume"],
+            {"x": 386.0, "y": 250.5, "z": 91.0},
+        )
+        self.assertEqual(
+            result["max_travel"],
+            {"x": 396.0, "y": 260.5, "z": 101.0},
+        )
+        self.assertEqual(result["homing_pull_off_mm"], 10.0)
+        self.assertEqual(mock_mill.home.call_count, 2)
+        mock_mill.execute_command.assert_any_call(
+            "G10 L20 P1 X386 Y250.5 Z91"
+        )
+        self.assertEqual(
+            mock_mill.set_grbl_setting.call_args_list,
+            [
+                unittest.mock.call("10", "0"),
+                unittest.mock.call("10", "0"),
+                unittest.mock.call("27", "10"),
+                unittest.mock.call("20", "0"),
+                unittest.mock.call("130", "396"),
+                unittest.mock.call("131", "260.5"),
+                unittest.mock.call("132", "101"),
+                unittest.mock.call("22", "1"),
+                unittest.mock.call("20", "1"),
+            ],
+        )
+
+    @patch("gantry.gantry.Mill")
+    def test_finalize_adds_pull_off_to_usable_z_span_scenarios(
+        self, mock_mill_cls
+    ):
+        scenarios = [
+            {
+                "name": "reachable bottom",
+                "home_z": 110.0,
+                "block_touch_z": 60.0,
+                "block_height": 35.0,
+                "total_z_range": 110.0,
+                "homed_z": 85.0,
+                "z_min": 0.0,
+                "z_max": 85.0,
+                "max_travel_z": 95.0,
+            },
+            {
+                "name": "unreachable bottom",
+                "home_z": 110.0,
+                "block_touch_z": 10.0,
+                "block_height": 35.0,
+                "total_z_range": 110.0,
+                "homed_z": 135.0,
+                "z_min": 25.0,
+                "z_max": 135.0,
+                "max_travel_z": 120.0,
+            },
+        ]
+        for scenario in scenarios:
+            with self.subTest(scenario["name"]):
+                mock_mill = mock_mill_cls.return_value
+                mock_mill.reset_mock()
+                mock_mill.read_grbl_settings.side_effect = [
+                    {"$27": "10.000"},
+                    {
+                        "$10": "0",
+                        "$20": "1",
+                        "$22": "1",
+                        "$27": "10.000",
+                        "$130": "408.000",
+                        "$131": "309.000",
+                        "$132": str(scenario["max_travel_z"]),
+                    },
+                ]
+                mock_mill.current_coordinates.side_effect = [
+                    Coordinates(398.0, 299.0, scenario["homed_z"]),
+                    Coordinates(398.0, 299.0, scenario["homed_z"]),
+                ]
+
+                gantry = Gantry(config=self.config)
+                result = gantry.finalize_deck_origin_calibration(
+                    home_z=scenario["home_z"],
+                    block_touch_z=scenario["block_touch_z"],
+                    block_height=scenario["block_height"],
+                    total_z_range=scenario["total_z_range"],
+                )
+
+                self.assertEqual(
+                    result["z_calibration"]["z_min"],
+                    scenario["z_min"],
+                )
+                self.assertEqual(
+                    result["z_calibration"]["z_max"],
+                    scenario["z_max"],
+                )
+                self.assertEqual(
+                    result["max_travel"]["z"],
+                    scenario["max_travel_z"],
+                )
+                self.assertEqual(result["measured_volume"]["z"], scenario["z_max"])
+
+    @patch("gantry.gantry.Mill")
+    def test_finalize_fails_when_live_homing_pull_off_is_missing_or_invalid(
+        self, mock_mill_cls
+    ):
+        for settings in ({}, {"$27": "nan"}, {"$27": "-1"}, {"$27": "bad"}):
+            with self.subTest(settings=settings):
+                mock_mill = mock_mill_cls.return_value
+                mock_mill.reset_mock()
+                mock_mill.read_grbl_settings.return_value = settings
+
+                gantry = Gantry(config=self.config)
+                with self.assertRaisesRegex(MillConnectionError, r"\$27"):
+                    gantry.finalize_deck_origin_calibration(
+                        home_z=91.0,
+                        block_touch_z=10.0,
+                        block_height=10.0,
+                        total_z_range=100.0,
+                    )
+
+                mock_mill.home.assert_not_called()
+                mock_mill.set_grbl_setting.assert_not_called()
+
+
+    @patch("gantry.gantry.Mill")
+    def test_finalize_raises_mill_connection_error_when_homed_z_mismatches_expected(
+        self, mock_mill_cls
+    ):
+        mock_mill = mock_mill_cls.return_value
+        mock_mill.read_grbl_settings.return_value = {"$27": "10.000"}
+        # z=92.5 but expected z_max=91.0 — exceeds tolerance_mm=0.001
+        mock_mill.current_coordinates.return_value = Coordinates(386.0, 250.5, 92.5)
+
+        gantry = Gantry(config=self.config)
+        with self.assertRaises(MillConnectionError):
+            gantry.finalize_deck_origin_calibration(
+                home_z=91.0,
+                block_touch_z=10.0,
+                block_height=10.0,
+                total_z_range=100.0,
+            )
+
+        # Travel spans must not have been programmed
+        programmed = [c[0][0] for c in mock_mill.set_grbl_setting.call_args_list]
+        self.assertNotIn("130", programmed)
+        self.assertNotIn("131", programmed)
+        self.assertNotIn("132", programmed)
+
+    @patch("gantry.gantry.Mill")
+    def test_finalize_raises_value_error_when_usable_span_is_non_positive(
+        self, mock_mill_cls
+    ):
+        mock_mill = mock_mill_cls.return_value
+        mock_mill.read_grbl_settings.return_value = {"$27": "10.000"}
+        # x=0.0 → usable x span is 0.0 ≤ tolerance_mm, so ValueError
+        mock_mill.current_coordinates.return_value = Coordinates(0.0, 250.5, 91.0)
+
+        gantry = Gantry(config=self.config)
+        with self.assertRaisesRegex(ValueError, "non-positive"):
+            gantry.finalize_deck_origin_calibration(
+                home_z=91.0,
+                block_touch_z=10.0,
+                block_height=10.0,
+                total_z_range=100.0,
+            )
 
 
 class TestGrblSettingsValidation(unittest.TestCase):

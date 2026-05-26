@@ -8,6 +8,7 @@ from gantry.errors import CommandExecutionError, MillConnectionError, StatusRetu
 from gantry.limit_recovery import (
     looks_like_limit_alarm,
     needs_another_limit_pull_off,
+    opposite_pull_off_delta,
     recover_from_limit_alarm,
 )
 
@@ -339,3 +340,67 @@ def test_needs_another_limit_pull_off_does_not_match_bare_failed_word():
     # "failed" alone must not trigger a pull-off; only "statusqueryfailed" should.
     assert needs_another_limit_pull_off("some-operation-failed") is False
     assert needs_another_limit_pull_off("StatusQueryFailed: connection lost") is True
+
+
+# ---------------------------------------------------------------------------
+# recover_from_limit_alarm — invalid arguments
+# ---------------------------------------------------------------------------
+
+
+def test_recover_from_limit_alarm_raises_value_error_for_zero_attempts():
+    with pytest.raises(ValueError, match="max_pull_off_attempts"):
+        recover_from_limit_alarm(
+            _RecoveringGantry(),
+            {"x": 1.0, "y": 0.0, "z": 0.0},
+            pull_off_mm=5.0,
+            feed_rate=2000.0,
+            output=lambda _: None,
+            max_pull_off_attempts=0,
+        )
+
+
+def test_recover_from_limit_alarm_raises_value_error_for_negative_attempts():
+    with pytest.raises(ValueError, match="max_pull_off_attempts"):
+        recover_from_limit_alarm(
+            _RecoveringGantry(),
+            {"x": 1.0, "y": 0.0, "z": 0.0},
+            pull_off_mm=5.0,
+            feed_rate=2000.0,
+            output=lambda _: None,
+            max_pull_off_attempts=-1,
+        )
+
+
+# ---------------------------------------------------------------------------
+# opposite_pull_off_delta
+# ---------------------------------------------------------------------------
+
+
+def test_opposite_pull_off_delta_returns_no_op_for_all_zero_delta():
+    result = opposite_pull_off_delta({"x": 0.0, "y": 0.0, "z": 0.0}, pull_off_mm=5.0)
+    assert result == {"x": 0.0, "y": 0.0, "z": 0.0}
+
+
+def test_opposite_pull_off_delta_covers_xy_simultaneous_case():
+    result = opposite_pull_off_delta({"x": 1.0, "y": -0.5, "z": 0.0}, pull_off_mm=5.0)
+    assert result["x"] == -5.0
+    assert result["y"] == 5.0
+    assert result["z"] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# looks_like_limit_alarm — false-positive guard
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "<Idle|WPos:0,0,0>",
+        "<Run|MPos:10,5,3>",
+        "ok",
+        "Jog",
+    ],
+)
+def test_looks_like_limit_alarm_false_for_non_alarm_strings(text: str):
+    assert looks_like_limit_alarm(text) is False

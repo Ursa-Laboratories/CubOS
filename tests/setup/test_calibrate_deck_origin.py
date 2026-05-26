@@ -49,6 +49,7 @@ class _FakeGantry:
         self.calls: list[tuple] = []
         self.coords = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.home_count = 0
+        self.homing_pull_off = 0.0
         _FakeGantry.instance = self
 
     def connect(self) -> None:
@@ -119,6 +120,15 @@ class _FakeGantry:
     def set_serial_timeout(self, timeout: float) -> None:
         self.calls.append(("set_serial_timeout", timeout))
 
+    def set_grbl_setting(self, setting: str, value: float) -> None:
+        self.calls.append(("set_grbl_setting", setting, value))
+        if setting in {"$27", "27"}:
+            self.homing_pull_off = float(value)
+
+    def homing_pull_off_mm(self) -> float:
+        self.calls.append(("homing_pull_off_mm",))
+        return self.homing_pull_off
+
     def set_expected_grbl_settings(
         self,
         settings: dict[str, float] | None,
@@ -133,6 +143,8 @@ class _FakeGantry:
         max_travel_x: float,
         max_travel_y: float,
         max_travel_z: float,
+        status_report: float | int | None = None,
+        homing_pull_off: float | None = None,
         tolerance_mm: float = 0.001,
     ) -> None:
         self.calls.append(
@@ -141,6 +153,8 @@ class _FakeGantry:
                 max_travel_x,
                 max_travel_y,
                 max_travel_z,
+                status_report,
+                homing_pull_off,
                 tolerance_mm,
             )
         )
@@ -264,6 +278,7 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
     assert result.plan.origin_wpos == (0.0, 0.0, 0.0)
     assert _FakeGantry.instance.calls == [
         ("connect",),
+        ("set_grbl_setting", "$10", 0),
         ("set_serial_timeout", 10.0),
         ("home",),
         ("set_serial_timeout", 1.0),
@@ -285,7 +300,8 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
         ("home",),
         ("set_serial_timeout", 1.0),
         ("get_coordinates",),
-        ("configure_soft_limits_from_spans", 398.5, 299.25, 96.75, 0.25),
+        ("homing_pull_off_mm",),
+        ("configure_soft_limits_from_spans", 398.5, 299.25, 96.75, 0, 0.0, 0.25),
         ("set_serial_timeout", 0.05),
         ("disconnect",),
     ]
@@ -387,6 +403,7 @@ working_volume:
   z_max: 100.0
 grbl_settings:
   dir_invert_mask: 1
+  homing_pull_off: 10.0
   steps_per_mm_x: 400.0
 instruments:
   asmi:
@@ -409,17 +426,19 @@ instruments:
     )
 
     assert isinstance(result, DeckOriginCalibrationResult)
+    assert result.grbl_max_travel == (408.5, 309.25, 106.75)
     output_text = "\n".join(messages)
     assert "Full gantry YAML to copy/paste:" in output_text
     assert "dir_invert_mask: 1" in output_text
+    assert "homing_pull_off: 10.0" in output_text
     assert "steps_per_mm_x: 400.0" in output_text
     assert "soft_limits: true" in output_text
     assert "homing_enable: true" in output_text
-    assert "max_travel_x: 398.5" in output_text
-    assert "max_travel_y: 299.25" in output_text
+    assert "max_travel_x: 408.5" in output_text
+    assert "max_travel_y: 309.25" in output_text
     assert "factory_z_travel_mm: 100.0" in output_text
     assert "z_max: 96.75" in output_text
-    assert "max_travel_z: 96.75" in output_text
+    assert "max_travel_z: 106.75" in output_text
     assert "instruments:" in output_text
     assert _FakeGantry.instance.calls[0] == ("connect",)
 
