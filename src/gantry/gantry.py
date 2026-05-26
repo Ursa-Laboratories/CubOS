@@ -614,10 +614,12 @@ class Gantry:
             return
 
         # Disable soft limits while changing travel extents, then re-enable.
+        reporting_written: list[str] = []
         soft_limits_disabled = False
         try:
             for code, value in expected_reporting.items():
                 self.set_grbl_setting(code, value)
+                reporting_written.append(code)
             self.set_grbl_setting("$20", 0)
             soft_limits_disabled = True
             self.set_grbl_setting("$130", max_travel_x)
@@ -627,6 +629,12 @@ class Gantry:
             self.set_grbl_setting("$20", 1)
             soft_limits_disabled = False
         except Exception as exc:
+            if reporting_written:
+                logger.warning(
+                    "configure_soft_limits_from_spans failed; settings already "
+                    "written to controller that were not rolled back: %s",
+                    ", ".join(reporting_written),
+                )
             if soft_limits_disabled:
                 try:
                     self.set_grbl_setting("$20", 1)
@@ -778,7 +786,15 @@ class Gantry:
             homing_pull_off=homing_pull_off_mm,
             tolerance_mm=tolerance_mm,
         )
-        self.home()
+        try:
+            self.home()
+        except Exception as exc:
+            raise MillConnectionError(
+                "Deck-origin calibration: soft limits programmed successfully but "
+                "final re-home failed. GRBL travel spans are updated but G54 work "
+                "coordinates have not been assigned — home manually and re-run "
+                f"calibration to complete: {exc}"
+            ) from exc
         self.activate_work_coordinate_system("G54")
         self.clear_g92_offsets()
         self.set_work_coordinates(

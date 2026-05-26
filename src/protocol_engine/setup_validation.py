@@ -123,7 +123,7 @@ def run_setup_validation(
         gantry_config = load_gantry_from_yaml(gantry_path)
         validate_deck_origin_minima(gantry_config)
     except Exception as exc:
-        _log.debug("Failed to load gantry config from %s", gantry_path, exc_info=True)
+        _log.error("Failed to load gantry config from %s", gantry_path, exc_info=True)
         return _error_result(
             lines,
             stage="gantry",
@@ -148,7 +148,7 @@ def run_setup_validation(
             total_z_range=gantry_config.total_z_range,
         )
     except Exception as exc:
-        _log.debug("Failed to load deck config from %s", deck_path, exc_info=True)
+        _log.error("Failed to load deck config from %s", deck_path, exc_info=True)
         return _error_result(
             lines,
             stage="deck",
@@ -176,7 +176,7 @@ def run_setup_validation(
             board = load_board_from_yaml(board_path, offline_gantry, mock_mode=True)
             board_source = board_path
     except Exception as exc:
-        _log.debug("Failed to load instruments", exc_info=True)
+        _log.error("Failed to load instruments", exc_info=True)
         return _error_result(
             lines,
             stage="instruments",
@@ -184,7 +184,7 @@ def run_setup_validation(
             result_message="RESULT: ERROR - could not load instruments",
         )
 
-    out(f"  OK: {board_source}")
+    out(f"  OK: {board_source} (offline/mock — hardware not contacted)")
     out(f"  Instruments ({len(board.instruments)}):")
     for summary_line in _instrument_summary(board):
         out(summary_line)
@@ -194,7 +194,7 @@ def run_setup_validation(
     try:
         protocol = load_protocol_from_yaml(protocol_path)
     except Exception as exc:
-        _log.debug("Failed to load protocol from %s", protocol_path, exc_info=True)
+        _log.error("Failed to load protocol from %s", protocol_path, exc_info=True)
         return _error_result(
             lines,
             stage="protocol",

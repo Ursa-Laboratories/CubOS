@@ -417,11 +417,15 @@ class TestGantry(unittest.TestCase):
         ]
         gantry = Gantry(config=self.config)
 
+        # No pre-writes: explicit None ensures side_effect ordering stays stable
+        # regardless of future default changes for status_report/homing_pull_off.
         with self.assertRaises(CommandExecutionError):
             gantry.configure_soft_limits_from_spans(
                 max_travel_x=306.0,
                 max_travel_y=306.0,
                 max_travel_z=113.0,
+                status_report=None,
+                homing_pull_off=None,
             )
 
         self.assertEqual(
@@ -588,6 +592,49 @@ class TestGantryFinalizeDeckOriginCalibration(unittest.TestCase):
 
                 mock_mill.home.assert_not_called()
                 mock_mill.set_grbl_setting.assert_not_called()
+
+
+    @patch("gantry.gantry.Mill")
+    def test_finalize_raises_mill_connection_error_when_homed_z_mismatches_expected(
+        self, mock_mill_cls
+    ):
+        mock_mill = mock_mill_cls.return_value
+        mock_mill.read_grbl_settings.return_value = {"$27": "10.000"}
+        # z=92.5 but expected z_max=91.0 — exceeds tolerance_mm=0.001
+        mock_mill.current_coordinates.return_value = Coordinates(386.0, 250.5, 92.5)
+
+        gantry = Gantry(config=self.config)
+        with self.assertRaises(MillConnectionError):
+            gantry.finalize_deck_origin_calibration(
+                home_z=91.0,
+                block_touch_z=10.0,
+                block_height=10.0,
+                total_z_range=100.0,
+            )
+
+        # Travel spans must not have been programmed
+        programmed = [c[0][0] for c in mock_mill.set_grbl_setting.call_args_list]
+        self.assertNotIn("130", programmed)
+        self.assertNotIn("131", programmed)
+        self.assertNotIn("132", programmed)
+
+    @patch("gantry.gantry.Mill")
+    def test_finalize_raises_value_error_when_usable_span_is_non_positive(
+        self, mock_mill_cls
+    ):
+        mock_mill = mock_mill_cls.return_value
+        mock_mill.read_grbl_settings.return_value = {"$27": "10.000"}
+        # x=0.0 → usable x span is 0.0 ≤ tolerance_mm, so ValueError
+        mock_mill.current_coordinates.return_value = Coordinates(0.0, 250.5, 91.0)
+
+        gantry = Gantry(config=self.config)
+        with self.assertRaisesRegex(ValueError, "non-positive"):
+            gantry.finalize_deck_origin_calibration(
+                home_z=91.0,
+                block_touch_z=10.0,
+                block_height=10.0,
+                total_z_range=100.0,
+            )
 
 
 class TestGrblSettingsValidation(unittest.TestCase):

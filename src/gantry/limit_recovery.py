@@ -67,9 +67,18 @@ def raise_if_limit_status(status: str) -> None:
 
 
 def probe_for_limit_status_after_jog(gantry: Any, *, delay_s: float = 0.05) -> None:
-    """Check status shortly after a jog to catch controllers that alarm late."""
+    """Check status shortly after a jog to catch controllers that alarm late.
+
+    Unlike read_limit_recovery_status, this does NOT catch MillConnectionError —
+    a connection drop after a jog is a fatal condition that should abort the
+    calling operation, not trigger a retry.
+    """
     get_status = getattr(gantry, "get_status", None)
     if not callable(get_status):
+        logging.getLogger(__name__).warning(
+            "probe_for_limit_status_after_jog: gantry has no get_status method; "
+            "post-jog limit probe skipped — late limit alarms will not be detected"
+        )
         return
     if delay_s > 0:
         time.sleep(delay_s)
@@ -150,6 +159,10 @@ def recover_from_limit_alarm(
     max_pull_off_attempts: int = 5,
 ) -> LimitRecoveryResult:
     """Clear a GRBL limit alarm and pull off opposite the failed jog vector."""
+    if max_pull_off_attempts <= 0:
+        raise ValueError(
+            f"max_pull_off_attempts must be > 0; got {max_pull_off_attempts}"
+        )
     effective_pull_off_mm = max(5.0, float(pull_off_mm))
     normalized_delta = {
         "x": float(delta.get("x", 0.0)),

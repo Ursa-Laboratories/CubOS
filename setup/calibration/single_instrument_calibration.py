@@ -220,7 +220,12 @@ def _configured_homing_pull_off(raw_config: dict[str, Any]) -> float | None:
     value = settings.get("homing_pull_off")
     if value is None:
         return None
-    pull_off = _round_mm(float(value))
+    try:
+        pull_off = _round_mm(float(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"grbl_settings.homing_pull_off must be numeric; got {value!r}"
+        ) from exc
     if pull_off < 0:
         raise ValueError("grbl_settings.homing_pull_off must be non-negative.")
     return pull_off
@@ -233,7 +238,13 @@ def _apply_calibration_grbl_baseline(
     output: Callable[[str], None],
 ) -> None:
     output("Setting GRBL WPos reporting ($10=0) before calibration homing...")
-    gantry.set_grbl_setting("$10", 0)
+    try:
+        gantry.set_grbl_setting("$10", 0)
+    except (CommandExecutionError, StatusReturnError) as exc:
+        raise RuntimeError(
+            "Failed to set GRBL WPos reporting mode ($10=0) before calibration. "
+            f"Calibration cannot proceed safely without WPos coordinates: {exc}"
+        ) from exc
     homing_pull_off = _configured_homing_pull_off(raw_config)
     if homing_pull_off is not None:
         output(
