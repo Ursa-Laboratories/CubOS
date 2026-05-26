@@ -11,6 +11,7 @@ def test_tip_rack_exposes_shared_bounding_box_geometry():
         columns=2,
         pickup_z=191.0,
         drop_z=174.8,
+        tip_length=59.3,
         tips={
             "A1": Coordinate3D(x=111.9, y=2.7, z=191.0),
             "A2": Coordinate3D(x=111.9, y=11.2, z=191.0),

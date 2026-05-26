@@ -72,6 +72,8 @@ Use this file when:
 | `breakpoint` | Debug pause with user prompt |
 
 `dispense` exists as an internal helper used by `transfer`, but it is not currently registered as a YAML protocol command.
+Pipette liquid commands require a preceding `pick_up_tip`; validation tracks
+the attached tip through `drop_tip`.
 
 ## Position Values
 
@@ -108,8 +110,13 @@ command arguments:
   at or below `measurement_height`. Legacy `indentation_limit` (sign-agnostic
   magnitude) and `z_limit` are rejected.
 
-Pipette commands (aspirate/dispense/etc.) engage at the labware reference
-Z (well bottom, tip top) — i.e. `measurement_height = 0` implicitly.
+Pipette commands engage at the resolved labware coordinate by default
+(`height = 0`, e.g. a well coordinate or tip pickup point). `aspirate`, `mix`, and
+`blowout` accept `height`; `transfer` and `serial_transfer` accept
+`source_height` and `destination_height`. After `pick_up_tip`, validation
+adds the rack's `tip_length` to the pipette's active depth for safe_z and
+action-Z bounds checks until `drop_tip` clears it. Omitted `tip_length`
+defaults to 59.3 mm for the current Opentrons 300 uL tips.
 Inter-labware travel and the first-well entry of a scan use the gantry's
 absolute `safe_z`, not these labware-relative fields.
 

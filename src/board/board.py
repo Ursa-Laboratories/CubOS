@@ -70,11 +70,12 @@ class Board:
             raise ValueError(
                 f"non-finite travel_z={travel_z} for instrument {instr.name!r}."
             )
+        depth = self._effective_depth(instr)
         gantry_x = x - instr.offset_x
         gantry_y = y - instr.offset_y
-        gantry_z = z + instr.depth
+        gantry_z = z + depth
         gantry_travel_z = (
-            travel_z + instr.depth if travel_z is not None else None
+            travel_z + depth if travel_z is not None else None
         )
         self.logger.info(
             "Moving %s to (%.3f, %.3f, %.3f) → gantry (%.3f, %.3f, %.3f)",
@@ -122,6 +123,21 @@ class Board:
                 raise ValueError(
                     f"non-finite {label}={value} for instrument {instr_name!r}."
                 )
+
+    @staticmethod
+    def _effective_depth(instr: BaseInstrument) -> float:
+        """Read ``instr.effective_depth`` and guard the value as finite.
+
+        ``BaseInstrument`` defines a default that returns ``depth``; only
+        instruments with runtime-mutable geometry (e.g. ``Pipette`` with an
+        attached disposable tip) need to override it.
+        """
+        depth = instr.effective_depth
+        if not isinstance(depth, (int, float)) or not math.isfinite(depth):
+            raise ValueError(
+                f"non-finite effective_depth={depth!r} for instrument {instr.name!r}."
+            )
+        return float(depth)
 
     def object_position(
         self, obj: str | BaseInstrument | Any,

@@ -1120,6 +1120,7 @@ labware:
     width: 5.0
     height: 40.0
     pickup_z: 30.0
+    tip_length: 59.3
     calibration:
       a1:
         x: 10.0
@@ -1139,6 +1140,7 @@ labware:
     rows: 1
     columns: 2
     pickup_z: 30.0
+    tip_length: 59.3
     calibration:
       a1:
         x: 10.0
@@ -1182,6 +1184,7 @@ class TestTipRackDimensionForwarding:
             assert rack.width == pytest.approx(1.0)
             # height auto-derives to 1.0 when drop_z is not provided
             assert rack.height == pytest.approx(1.0)
+            assert rack.tip_length == pytest.approx(59.3)
         finally:
             Path(path).unlink(missing_ok=True)
 
