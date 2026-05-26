@@ -60,6 +60,10 @@ grbl_settings:
   status_report: 0
   homing_enable: true
   homing_dir_mask: 0
+  homing_pull_off: 10.0
+  max_travel_x: 409.0
+  max_travel_y: 290.0
+  max_travel_z: 97.0
 
 instruments:
   asmi:
@@ -91,7 +95,8 @@ rail is valid only when the instrument point is above the built-in rail height.
 `total_z_range` is required and must be greater than zero. It is the seeded
 calculated vertical travel range for the gantry family/workcell and is not
 rewritten by calibration. Calibration uses it to set `working_volume.z_max`
-and GRBL `$132` / `max_travel_z`. Deck labware deck-frame Z values come from
+and the usable part of GRBL `$132` / `max_travel_z`. Deck labware deck-frame Z
+values come from
 calibration anchors only — `calibration.a1.z` (plates / holders / tip racks)
 or `location.z` (vials / holders). The labware `height` field is the
 *physical outer dimension* (rim → underside) and is not a Z shorthand;
@@ -118,15 +123,28 @@ Protocol setup requires:
 
 Use [Calibrate Deck Origin](calibration.md) to measure the physical working
 volume. The calibration script jogs to the front-left block/reference point,
-sets X/Y with `G10 L20 P1 X0 Y0`, preserves the seeded `cnc.total_z_range`,
-then re-homes to measure X/Y bounds. For the single-instrument block flow, the
-block-touch WPos Z becomes the remaining travel above WPos 0, so the calibrated
-working volume uses `z_min: 0.0` and `z_max: cnc.total_z_range`.
+sets X/Y with `G10 L20 P1 X0 Y0`, sets GRBL `$10=0` so runtime status reports
+WPos, writes the configured `$27` homing pull-off when present, preserves the
+seeded `cnc.total_z_range`, then re-homes to measure X/Y bounds. For the
+single-instrument block flow, the block-touch WPos Z becomes the remaining
+travel above WPos 0, so the calibrated working volume uses `z_min: 0.0` and
+`z_max: cnc.total_z_range`.
 
 Example: a Cub XL seeded with `total_z_range: 110.0` touches a 35 mm block at
 WPos Z=20. The lowest reachable point is inferred as 15 mm above the physical
 deck (`35 - 20`), but the calibrated WPos lower bound remains `z_min: 0.0`,
-`z_max: 110.0`, and `max_travel_z: 110.0`.
+`z_max: 110.0`. If `$27=10`, the controller soft-limit span is
+`max_travel_z: 120.0`.
+
+Do not mix the two ranges:
+
+- `working_volume` is usable deck/WPos space after homing pull-off.
+- `grbl_settings.max_travel_x/y/z` mirrors GRBL `$130/$131/$132` and includes
+  the `$27` pull-off reserve.
+
+If homed WPos Z is `91` and `$27=10`, save `working_volume.z_max: 91` and
+`grbl_settings.max_travel_z: 101`. The extra 10 mm is controller reserve, not
+usable WPos.
 
 Multi-instrument setups need per-instrument lower-reach limits and inactive-tool
 collision checks instead of one global lower reach for every tool.

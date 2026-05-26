@@ -47,6 +47,14 @@ working_volume:
   z_min: 0.0
   z_max: 87.0
 
+grbl_settings:
+  status_report: 0
+  homing_enable: true
+  homing_pull_off: 10.0
+  max_travel_x: 409.0
+  max_travel_y: 290.0
+  max_travel_z: 97.0
+
 instruments:
   asmi:
     type: asmi
@@ -79,8 +87,10 @@ is not configured in YAML.
 Run [Calibrate Deck Origin](calibration.md) before trusting measured working
 volume values on real hardware. Seed `cnc.total_z_range` with the calculated
 gantry Z travel before calibration; calibration preserves that value and uses it
-for calibrated Z bounds and GRBL `max_travel_z`. Use [Gantry Bring-Up](admin/gantry-bring-up.md)
-first if controller direction, homing, or WPos reporting is unknown.
+for calibrated Z bounds. `working_volume` is usable deck/WPos space; GRBL
+`max_travel_*` is controller soft-limit space and includes the `$27`
+`homing_pull_off` reserve. Use [Gantry Bring-Up](admin/gantry-bring-up.md)
+first if controller direction, homing, pull-off, or WPos reporting is unknown.
 
 ## Deck Config
 

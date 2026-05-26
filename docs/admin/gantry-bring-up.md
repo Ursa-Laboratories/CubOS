@@ -34,6 +34,7 @@ Record at least:
 
 - `$3` direction invert mask
 - `$10` status report mode
+- `$27` homing pull-off distance
 - `$23` homing direction invert mask
 - homing enable and hard/soft limit settings
 - raw status line showing WPos or MPos
@@ -64,6 +65,9 @@ capture WCO behavior before debugging CubOS. GRBL defines the relationship as:
 MPos = WPos + WCO
 ```
 
+Deck-origin calibration depends on WPos. If calibration reads MPos, the
+homing pull-off reserve and WCO can be mistaken for usable deck travel.
+
 ## Homing Direction
 
 Run homing only when the tool is clear of fixtures, stock, samples, and cables.
@@ -92,6 +96,23 @@ $23=3
 
 Run `$H` again after each `$23` change. Stop if any axis heads toward a hard
 collision.
+
+## Homing Pull-Off
+
+Record the machine's `$27` homing pull-off and save it in gantry YAML as
+`grbl_settings.homing_pull_off`.
+
+```text
+$27=10
+```
+
+Calibration writes the configured `$27` before homing and adds that distance to
+GRBL `$130/$131/$132` soft-limit spans. The pull-off reserve is outside the
+usable deck WPos range: if homed WPos Z is `91` and `$27=10`, the deck
+`working_volume.z_max` is `91`, while controller `max_travel_z` is `101`.
+
+Changing `$27` without recalculating max travel can make the controller soft
+limits too small or too large.
 
 ## Jog Direction
 
@@ -127,6 +148,7 @@ grbl_settings:
   status_report: 0
   homing_enable: true
   homing_dir_mask: 3
+  homing_pull_off: 10.0
 ```
 
 Use the exact values measured on the machine, not these example values.

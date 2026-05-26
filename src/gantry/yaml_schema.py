@@ -42,6 +42,8 @@ class CncYaml(BaseModel):
 
     homing_strategy: Literal["standard"]
     total_z_range: float
+    factory_z_travel_mm: Optional[float] = None
+    calibration_block_height_mm: Optional[float] = None
     y_axis_motion: Literal["head", "bed"] = "head"
     safe_z: Optional[float] = None
 
@@ -49,6 +51,13 @@ class CncYaml(BaseModel):
     def _validate_total_z_range_positive(self) -> "CncYaml":
         if self.total_z_range <= 0:
             raise ValueError("total_z_range must be > 0.")
+        if self.factory_z_travel_mm is not None and self.factory_z_travel_mm <= 0:
+            raise ValueError("factory_z_travel_mm must be > 0.")
+        if (
+            self.calibration_block_height_mm is not None
+            and self.calibration_block_height_mm <= 0
+        ):
+            raise ValueError("calibration_block_height_mm must be > 0.")
         return self
 
 

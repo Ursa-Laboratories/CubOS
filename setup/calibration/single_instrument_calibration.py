@@ -118,14 +118,19 @@ def _calculate_grbl_max_travel(
     z_min_mm: float,
     tolerance_mm: float,
     z_span_mm: float | None = None,
+    homing_pull_off_mm: float = 0.0,
 ) -> dict[str, float]:
-    x_span = _round_mm(float(measured_coords["x"]))
-    y_span = _round_mm(float(measured_coords["y"]))
+    pull_off = _round_mm(float(homing_pull_off_mm))
+    if pull_off < 0:
+        raise RuntimeError("GRBL homing pull-off must be non-negative.")
+    x_span = _round_mm(float(measured_coords["x"]) + pull_off)
+    y_span = _round_mm(float(measured_coords["y"]) + pull_off)
     z_span = (
         _round_mm(z_span_mm)
         if z_span_mm is not None
         else _round_mm(float(measured_coords["z"]) - float(z_min_mm))
     )
+    z_span = _round_mm(z_span + pull_off)
     spans = {
         "max_travel_x": x_span,
         "max_travel_y": y_span,
@@ -166,6 +171,7 @@ def _updated_gantry_yaml_text(
     z_min_mm: float,
     z_max_mm: float,
     max_travel: dict[str, float] | None = None,
+    homing_pull_off_mm: float | None = None,
 ) -> str:
     updated = copy.deepcopy(raw_config)
     updated["working_volume"] = {
@@ -180,6 +186,7 @@ def _updated_gantry_yaml_text(
         updated["grbl_settings"] = _build_gantry_grbl_settings(
             gantry_raw=raw_config,
             max_travel=max_travel,
+            homing_pull_off_mm=homing_pull_off_mm,
         )
     return yaml.safe_dump(updated, sort_keys=False)
 
@@ -188,6 +195,7 @@ def _build_gantry_grbl_settings(
     *,
     gantry_raw: dict[str, Any],
     max_travel: dict[str, float],
+    homing_pull_off_mm: float | None = None,
 ) -> dict[str, Any]:
     settings = dict(gantry_raw.get("grbl_settings") or {})
     settings.update(
@@ -200,7 +208,39 @@ def _build_gantry_grbl_settings(
             "max_travel_z": max_travel["max_travel_z"],
         }
     )
+    if homing_pull_off_mm is not None:
+        settings["homing_pull_off"] = homing_pull_off_mm
     return settings
+
+
+def _configured_homing_pull_off(raw_config: dict[str, Any]) -> float | None:
+    settings = raw_config.get("grbl_settings") or {}
+    if not isinstance(settings, dict):
+        return None
+    value = settings.get("homing_pull_off")
+    if value is None:
+        return None
+    pull_off = _round_mm(float(value))
+    if pull_off < 0:
+        raise ValueError("grbl_settings.homing_pull_off must be non-negative.")
+    return pull_off
+
+
+def _apply_calibration_grbl_baseline(
+    gantry: Gantry,
+    raw_config: dict[str, Any],
+    *,
+    output: Callable[[str], None],
+) -> None:
+    output("Setting GRBL WPos reporting ($10=0) before calibration homing...")
+    gantry.set_grbl_setting("$10", 0)
+    homing_pull_off = _configured_homing_pull_off(raw_config)
+    if homing_pull_off is not None:
+        output(
+            f"Setting GRBL homing pull-off ($27={homing_pull_off:g}) "
+            "before calibration homing..."
+        )
+        gantry.set_grbl_setting("$27", homing_pull_off)
 
 
 def _print_yaml_block(
@@ -828,6 +868,7 @@ def run_calibration(
         output("Connecting to gantry...")
         gantry.connect()
 
+        _apply_calibration_grbl_baseline(gantry, raw_config, output=output)
         output("Homing to normalized back-right-top corner...")
         _set_serial_timeout_if_available(gantry, homing_serial_timeout_s)
         gantry.home()
@@ -957,6 +998,7 @@ def run_calibration(
         gantry.home()
         _set_serial_timeout_if_available(gantry, jog_serial_timeout_s)
         measured_coords = gantry.get_coordinates()
+        homing_pull_off_mm = gantry.homing_pull_off_mm()
         _assert_positive_measured_volume(
             measured_coords,
             tolerance_mm=tolerance_mm,
@@ -966,6 +1008,7 @@ def run_calibration(
             z_min_mm=z_min_mm,
             tolerance_mm=tolerance_mm,
             z_span_mm=calculated_z_range_mm,
+            homing_pull_off_mm=homing_pull_off_mm,
         )
         if skip_soft_limit_config:
             output("Skipping GRBL soft-limit programming by request.")
@@ -974,6 +1017,8 @@ def run_calibration(
                 max_travel_x=max_travel["max_travel_x"],
                 max_travel_y=max_travel["max_travel_y"],
                 max_travel_z=max_travel["max_travel_z"],
+                status_report=0,
+                homing_pull_off=homing_pull_off_mm,
                 tolerance_mm=tolerance_mm,
             )
 
@@ -996,6 +1041,7 @@ def run_calibration(
             z_min_mm=z_min_mm,
             z_max_mm=z_max_mm,
             max_travel=max_travel,
+            homing_pull_off_mm=homing_pull_off_mm,
         )
         _print_yaml_block(
             title="Full gantry YAML to copy/paste:",

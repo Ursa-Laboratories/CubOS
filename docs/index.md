@@ -37,7 +37,8 @@ PYTHONPATH=src python setup/validate_setup.py \
 
 - [Getting Started](getting-started.md) for installation and first commands
 - [Configuration](configuration.md) for the three YAML surfaces
-- [Calibrate Deck Origin](calibration.md) for the operator calibration flow
+- [Calibrate Deck Origin](calibration.md) for the operator calibration flow,
+  including WPos/MPos and GRBL homing pull-off soft-limit semantics
 - [Protocol](protocol.md) for how protocol execution is assembled and validated
 - [Data](data.md) for persistence and analysis helpers
 - [Gantry Bring-Up](admin/gantry-bring-up.md) for controller direction,

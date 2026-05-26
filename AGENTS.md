@@ -95,6 +95,14 @@ python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
 - `setup/calibration/multi_instrument_calibration.py` — internal multi-instrument flow.
 - Detailed operator steps and offset math live in `docs/calibration.md`.
 
+Calibration soft-limit rule: `working_volume` is the usable deck/WPos range
+after homing pull-off. GRBL `$130/$131/$132` and YAML
+`grbl_settings.max_travel_*` are controller spans and must include the `$27`
+homing pull-off reserve. Calibration sets `$10=0` for WPos status reporting,
+writes the per-machine `grbl_settings.homing_pull_off` (`$27`) before homing
+when configured, and saves/programs max travel as usable span plus pull-off.
+Do not treat the pull-off reserve as usable WPos.
+
 ## Setup Scripts
 
 - `setup/validate_setup.py` — offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
