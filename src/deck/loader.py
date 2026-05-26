@@ -199,9 +199,9 @@ def _build_holder_slots(
 
 def _build_tip_rack(
     entry: TipRackYamlEntry,
-    total_z_range: float | None,
+    factory_z_travel_mm: float | None,
 ) -> TipRack:
-    del total_z_range
+    del factory_z_travel_mm
     # Derive every tip pickup position from the two-point calibration and
     # pitch offsets, mirroring how well plates derive their wells.
     tips = _derive_wells_from_calibration(entry, resolved_z=entry.pickup_z)
@@ -322,7 +322,7 @@ def _derive_wells_from_calibration(
 
 def _build_well_plate(
     entry: WellPlateYamlEntry,
-    total_z_range: float | None,
+    factory_z_travel_mm: float | None,
 ) -> WellPlate:
     resolved_z = _resolve_user_z(
         entry.a1_point.z,
@@ -339,7 +339,7 @@ def _build_well_plate(
 
 def _build_vial(
     entry: VialYamlEntry,
-    total_z_range: float | None,
+    factory_z_travel_mm: float | None,
 ) -> Vial:
     resolved_z = _resolve_user_z(
         entry.location.z,
@@ -352,7 +352,7 @@ def _build_vial(
 
 def _build_holder(
     entry: _BaseHolderYamlEntry,
-    total_z_range: float | None,
+    factory_z_travel_mm: float | None,
     *,
     model_class: Type[Labware],
 ) -> Labware:
@@ -444,21 +444,21 @@ def _build_nested_well_plate(
     )
 
 
-def _build_deck_from_raw(raw: dict[str, Any], *, total_z_range: float | None = None) -> Deck:
+def _build_deck_from_raw(raw: dict[str, Any], *, factory_z_travel_mm: float | None = None) -> Deck:
     raw = _resolve_load_names(raw)
     schema = DeckYamlSchema.model_validate(raw)
     labware: Dict[str, Labware] = {}
     for name, entry in schema.labware.items():
         if isinstance(entry, WellPlateYamlEntry):
-            labware[name] = _build_well_plate(entry, total_z_range=total_z_range)
+            labware[name] = _build_well_plate(entry, factory_z_travel_mm=factory_z_travel_mm)
         elif isinstance(entry, VialYamlEntry):
-            labware[name] = _build_vial(entry, total_z_range=total_z_range)
+            labware[name] = _build_vial(entry, factory_z_travel_mm=factory_z_travel_mm)
         elif isinstance(entry, TipRackYamlEntry):
-            labware[name] = _build_tip_rack(entry, total_z_range=total_z_range)
+            labware[name] = _build_tip_rack(entry, factory_z_travel_mm=factory_z_travel_mm)
         elif isinstance(entry, TipDisposalYamlEntry):
             labware[name] = _build_holder(
                 entry,
-                total_z_range=total_z_range,
+                factory_z_travel_mm=factory_z_travel_mm,
                 model_class=TipDisposal,
             )
         elif isinstance(entry, WallYamlEntry):
@@ -478,13 +478,13 @@ def _build_deck_from_raw(raw: dict[str, Any], *, total_z_range: float | None = N
         elif isinstance(entry, WellPlateHolderYamlEntry):
             labware[name] = _build_holder(
                 entry,
-                total_z_range=total_z_range,
+                factory_z_travel_mm=factory_z_travel_mm,
                 model_class=WellPlateHolder,
             )
         elif isinstance(entry, VialHolderYamlEntry):
             labware[name] = _build_holder(
                 entry,
-                total_z_range=total_z_range,
+                factory_z_travel_mm=factory_z_travel_mm,
                 model_class=VialHolder,
             )
         else:
@@ -494,7 +494,7 @@ def _build_deck_from_raw(raw: dict[str, Any], *, total_z_range: float | None = N
 
 def load_deck_from_yaml(
     path: str | Path,
-    total_z_range: float | None = None,
+    factory_z_travel_mm: float | None = None,
 ) -> Deck:
     """
     Load a deck YAML file and return a Deck containing all labware.
@@ -504,12 +504,12 @@ def load_deck_from_yaml(
         raw = yaml.safe_load(handle)
     if raw is None:
         raw = {}
-    return _build_deck_from_raw(raw, total_z_range=total_z_range)
+    return _build_deck_from_raw(raw, factory_z_travel_mm=factory_z_travel_mm)
 
 
 def load_deck_from_yaml_safe(
     path: str | Path,
-    total_z_range: float | None = None,
+    factory_z_travel_mm: float | None = None,
 ) -> Deck:
     """
     Load deck YAML with user-friendly exception formatting.
@@ -519,6 +519,6 @@ def load_deck_from_yaml_safe(
     """
     resolved_path = Path(path)
     try:
-        return load_deck_from_yaml(resolved_path, total_z_range=total_z_range)
+        return load_deck_from_yaml(resolved_path, factory_z_travel_mm=factory_z_travel_mm)
     except Exception as exc:
         raise DeckLoaderError(_format_loader_exception(resolved_path, exc)) from exc

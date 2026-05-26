@@ -133,7 +133,7 @@ labware:
         f.write(yaml)
         path = f.name
     try:
-        result = load_deck_from_yaml(path, total_z_range=80.0)
+        result = load_deck_from_yaml(path, factory_z_travel_mm=80.0)
         vial = result["vial_1"]
         assert vial.location.z == pytest.approx(30.0)
     finally:
@@ -164,7 +164,7 @@ labware:
         f.write(yaml)
         path = f.name
     try:
-        result = load_deck_from_yaml(path, total_z_range=80.0)
+        result = load_deck_from_yaml(path, factory_z_travel_mm=80.0)
         plate = result["plate_1"]
         assert plate.get_well_center("A1").z == pytest.approx(15.0)
         assert plate.get_well_center("B2").z == pytest.approx(15.0)
@@ -172,7 +172,7 @@ labware:
         Path(path).unlink(missing_ok=True)
 
 
-def test_raw_z_works_without_total_z_range() -> None:
+def test_raw_z_works_without_factory_z_travel_mm() -> None:
     yaml = """
 labware:
   vial_1:
@@ -199,7 +199,7 @@ labware:
         Path(path).unlink(missing_ok=True)
 
 
-def test_explicit_z_does_not_require_total_z_range() -> None:
+def test_explicit_z_does_not_require_factory_z_travel_mm() -> None:
     yaml = """
 labware:
   vial_1:

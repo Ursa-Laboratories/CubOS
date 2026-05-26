@@ -37,7 +37,7 @@ def _gantry(
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_range=z_max,
+        factory_z_travel_mm=z_max,
         working_volume=WorkingVolume(
             x_min=0.0,
             x_max=x_max,
