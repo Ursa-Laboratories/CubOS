@@ -19,7 +19,8 @@ Gantry YAML defines:
 - serial port
 - gantry type (`cub` or `cub_xl`)
 - CNC homing strategy
-- seeded calculated Z travel range (`cnc.total_z_range`)
+- out-of-box Z travel safety range (`cnc.factory_z_travel_mm`)
+- calibration block height (`cnc.calibration_block_height_mm`)
 - Y-axis motion mode
 - working volume
 - optional absolute `safe_z` plane (inter-labware travel)
@@ -33,7 +34,8 @@ serial_port: /dev/cu.usbserial-140
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_range: 87.0
+  factory_z_travel_mm: 110.0
+  calibration_block_height_mm: 35.0
   y_axis_motion: head
   # Absolute deck-frame Z used for inter-labware travel and the entry
   # approach to the first well of a scan. Defaults to working_volume.z_max.
@@ -85,12 +87,15 @@ segment would hit the fixed right X-max rail. The rail is not deck labware and
 is not configured in YAML.
 
 Run [Calibrate Deck Origin](calibration.md) before trusting measured working
-volume values on real hardware. Seed `cnc.total_z_range` with the calculated
-gantry Z travel before calibration; calibration preserves that value and uses it
-for calibrated Z bounds. `working_volume` is usable deck/WPos space; GRBL
-`max_travel_*` is controller soft-limit space and includes the `$27`
-`homing_pull_off` reserve. Use [Gantry Bring-Up](admin/gantry-bring-up.md)
-first if controller direction, homing, pull-off, or WPos reporting is unknown.
+volume values on real hardware. Seed `cnc.factory_z_travel_mm` with the
+out-of-box gantry Z travel and `cnc.calibration_block_height_mm` with the block
+height before calibration. Calibration preserves the factory travel as a safety
+bound; calibrated Z bounds and GRBL `max_travel_z` come from the measured
+home-to-block travel and final homed readback. `working_volume` is usable
+deck/WPos space; GRBL `max_travel_*` is controller soft-limit space and
+includes the `$27` `homing_pull_off` reserve. Use
+[Gantry Bring-Up](admin/gantry-bring-up.md) first if controller direction,
+homing, pull-off, or WPos reporting is unknown.
 
 ## Deck Config
 

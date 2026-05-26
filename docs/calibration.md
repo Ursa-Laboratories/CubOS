@@ -75,15 +75,14 @@ recompute `max_travel_*` after changing a machine's homing pull-off.
 For a gantry YAML with one mounted instrument, the flow asks you to place a
 calibration block at the front-left origin point and jog the instrument
 tip/probe to touch the block top. It assigns X/Y at that physical pose, reads
-the block-touch WPos Z as the remaining downward travel to WPos 0, and preserves
-the gantry YAML's seeded `cnc.total_z_range` as the calculated Z travel.
+the first homed Z and block-touch Z, then sets the block touch to
+`cnc.calibration_block_height_mm`.
 
-The calibrated YAML keeps `cnc.total_z_range` unchanged, writes
-`working_volume.z_min: 0.0`, writes `working_volume.z_max` from
-`cnc.total_z_range`, and programs `max_travel_z` as that usable range plus
-the machine's `$27` homing pull-off.
-The block height is used to report the inferred lowest reachable height above
-the physical deck, for example `35 mm block - WPos Z 20 mm = 15 mm`.
+The calibrated YAML keeps `cnc.factory_z_travel_mm` unchanged as the
+out-of-box safety travel. It writes `working_volume.z_max` from the final homed
+readback, uses the factory travel only to decide whether deck bottom is safely
+reachable, and programs `max_travel_z` as `z_max - z_min` plus the machine's
+`$27` homing pull-off reserve.
 
 ## Multi-Instrument Flow
 
@@ -91,10 +90,10 @@ For a gantry YAML with multiple mounted instruments, the flow asks you to pick
 the left-most/reference instrument and the lowest instrument by number. It sets
 the shared deck frame, asks for the calibration block height, then records each
 instrument against the same physical block point to compute `offset_x`,
-`offset_y`, and `depth`. The calibrated YAML still preserves the seeded
-`cnc.total_z_range` and uses it for `working_volume.z_max`. Controller
-`max_travel_*` values add the same `$27` pull-off reserve used by the
-single-instrument flow.
+`offset_y`, and `depth`. The calibrated YAML still preserves
+`cnc.factory_z_travel_mm`; calibrated Z bounds come from the block touch and
+final homed readback. Controller `max_travel_*` values add the same `$27`
+pull-off reserve used by the single-instrument flow.
 
 ## After Calibration
 

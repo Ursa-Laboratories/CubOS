@@ -145,7 +145,7 @@ def run_setup_validation(
     try:
         deck = load_deck_from_yaml(
             deck_path,
-            total_z_range=gantry_config.total_z_range,
+            factory_z_travel_mm=gantry_config.factory_z_travel_mm,
         )
     except Exception as exc:
         _log.error("Failed to load deck config from %s", deck_path, exc_info=True)

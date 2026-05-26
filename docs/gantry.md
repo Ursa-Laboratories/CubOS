@@ -41,7 +41,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_range: 87.0
+  factory_z_travel_mm: 87.0
   y_axis_motion: head
   # Absolute deck-frame Z used for inter-labware travel and the entry
   # approach to the first well of a scan. Defaults to working_volume.z_max.
@@ -92,11 +92,11 @@ rail is valid only when the instrument point is above the built-in rail height.
 
 `homing_strategy` must be `standard`, which runs GRBL `$H`.
 
-`total_z_range` is required and must be greater than zero. It is the seeded
-calculated vertical travel range for the gantry family/workcell and is not
-rewritten by calibration. Calibration uses it to set `working_volume.z_max`
-and the usable part of GRBL `$132` / `max_travel_z`. Deck labware deck-frame Z
-values come from
+`factory_z_travel_mm` is required and must be greater than zero. It is the
+out-of-box vertical travel range for the gantry family/workcell and is not
+rewritten by calibration. Calibration uses it only to decide whether a mounted
+instrument can safely reach deck bottom; calibrated `working_volume.z_max`
+comes from the final homed WPos readback. Deck labware deck-frame Z values come from
 calibration anchors only — `calibration.a1.z` (plates / holders / tip racks)
 or `location.z` (vials / holders). The labware `height` field is the
 *physical outer dimension* (rim → underside) and is not a Z shorthand;
@@ -122,19 +122,23 @@ Protocol setup requires:
 - non-negative `z_min`
 
 Use [Calibrate Deck Origin](calibration.md) to measure the physical working
-volume. The calibration script jogs to the front-left block/reference point,
-sets X/Y with `G10 L20 P1 X0 Y0`, sets GRBL `$10=0` so runtime status reports
-WPos, writes the configured `$27` homing pull-off when present, preserves the
-seeded `cnc.total_z_range`, then re-homes to measure X/Y bounds. For the
-single-instrument block flow, the block-touch WPos Z becomes the remaining
-travel above WPos 0, so the calibrated working volume uses `z_min: 0.0` and
-`z_max: cnc.total_z_range`.
+volume. The calibration script records the first homed Z, jogs to the
+front-left block/reference point, sets X/Y with `G10 L20 P1 X0 Y0`, sets the
+block touch to `cnc.calibration_block_height_mm`, then re-homes to measure
+X/Y bounds and the real deck-frame `z_max`. It sets GRBL `$10=0` so runtime
+status reports WPos and writes the configured `$27` homing pull-off when
+present.
 
-Example: a Cub XL seeded with `total_z_range: 110.0` touches a 35 mm block at
-WPos Z=20. The lowest reachable point is inferred as 15 mm above the physical
-deck (`35 - 20`), but the calibrated WPos lower bound remains `z_min: 0.0`,
-`z_max: 110.0`. If `$27=10`, the controller soft-limit span is
-`max_travel_z: 120.0`.
+Example A: with `factory_z_travel_mm: 110.0`, a 35 mm block, and 50 mm of
+home-to-block travel, the remaining factory travel below the block is 60 mm.
+The tool can reach deck bottom, so calibration writes `z_min: 0.0`,
+`z_max: 85.0`, and `max_travel_z: 85.0` plus `$27`.
+
+Example B: with the same factory travel and block height but 100 mm of
+home-to-block travel, only 10 mm remains below the block. The tool cannot
+reach deck bottom, so calibration writes `z_min: 25.0`, uses the final homed
+readback for `z_max` (135.0 in the nominal case), and writes
+`max_travel_z: 110.0` plus `$27`.
 
 Do not mix the two ranges:
 

@@ -82,7 +82,8 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_range: 87.0
+  factory_z_travel_mm: 110.0
+  calibration_block_height_mm: 35.0
   safe_z: 85.0
 
 working_volume:

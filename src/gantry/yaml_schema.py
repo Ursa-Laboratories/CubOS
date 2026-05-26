@@ -41,17 +41,14 @@ class CncYaml(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     homing_strategy: Literal["standard"]
-    total_z_range: float
-    factory_z_travel_mm: Optional[float] = None
+    factory_z_travel_mm: float
     calibration_block_height_mm: Optional[float] = None
     y_axis_motion: Literal["head", "bed"] = "head"
     safe_z: Optional[float] = None
 
     @model_validator(mode="after")
-    def _validate_total_z_range_positive(self) -> "CncYaml":
-        if self.total_z_range <= 0:
-            raise ValueError("total_z_range must be > 0.")
-        if self.factory_z_travel_mm is not None and self.factory_z_travel_mm <= 0:
+    def _validate_cnc_z_values(self) -> "CncYaml":
+        if self.factory_z_travel_mm <= 0:
             raise ValueError("factory_z_travel_mm must be > 0.")
         if (
             self.calibration_block_height_mm is not None
@@ -78,10 +75,12 @@ class GantryYamlSchema(BaseModel):
     instruments: Dict[str, InstrumentYamlEntry] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_total_z_range_covers_working_z(self) -> "GantryYamlSchema":
-        if self.cnc.total_z_range < self.working_volume.z_max:
+    def _validate_factory_z_travel_covers_working_z_span(self) -> "GantryYamlSchema":
+        z_span = self.working_volume.z_max - self.working_volume.z_min
+        if self.cnc.factory_z_travel_mm < z_span:
             raise ValueError(
-                "cnc.total_z_range must be >= working_volume.z_max."
+                "cnc.factory_z_travel_mm must be >= "
+                "(working_volume.z_max - working_volume.z_min)."
             )
         return self
 
