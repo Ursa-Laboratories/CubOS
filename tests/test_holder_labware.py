@@ -316,8 +316,8 @@ labware:
 
         assert isinstance(holder, WellPlateHolder)
         assert holder.name == "plate_holder"
-        assert holder.length == pytest.approx(127.76)
-        assert holder.width == pytest.approx(85.47)
+        assert holder.length == pytest.approx(85.47)
+        assert holder.width == pytest.approx(127.76)
         assert holder.height == pytest.approx(80.0)
         assert holder.labware_seat_height_from_bottom == pytest.approx(75.15)
         assert holder.well_plate_surface_height_from_bottom == pytest.approx(89.5)

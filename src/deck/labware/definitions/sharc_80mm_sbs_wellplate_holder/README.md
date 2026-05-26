@@ -3,7 +3,7 @@
 Reusable definition for the SHARC UV 80 mm holder that seats an SBS-format
 well plate.
 
-- Holder footprint: 127.76 x 85.47 mm
+- Holder deck-frame footprint: 85.47 mm X x 127.76 mm Y in the SHARC UV layout
 - Holder body height: 80.0 mm
 - Physical support/seat plane: 75.15 mm above holder bottom
 - Nested plate surface/rim reference: 89.5 mm above holder bottom
