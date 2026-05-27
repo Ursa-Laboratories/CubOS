@@ -145,6 +145,7 @@ class _FakeGantry:
         max_travel_z: float,
         status_report: float | int | None = None,
         homing_pull_off: float | None = None,
+        hard_limits: float | int | bool | None = None,
         tolerance_mm: float = 0.001,
     ) -> None:
         self.calls.append(
@@ -155,6 +156,7 @@ class _FakeGantry:
                 max_travel_z,
                 status_report,
                 homing_pull_off,
+                hard_limits,
                 tolerance_mm,
             )
         )
@@ -301,7 +303,7 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
         ("set_serial_timeout", 1.0),
         ("get_coordinates",),
         ("homing_pull_off_mm",),
-        ("configure_soft_limits_from_spans", 398.5, 299.25, 96.75, 0, 0.0, 0.25),
+        ("configure_soft_limits_from_spans", 398.5, 299.25, 96.75, 0, 0.0, None, 0.25),
         ("set_serial_timeout", 0.05),
         ("disconnect",),
     ]

@@ -166,6 +166,7 @@ class _FakeGantry:
         max_travel_z: float,
         status_report: float | int | None = None,
         homing_pull_off: float | None = None,
+        hard_limits: float | int | bool | None = None,
         tolerance_mm: float = 0.001,
     ) -> None:
         self.calls.append(
@@ -176,6 +177,7 @@ class _FakeGantry:
                 max_travel_z,
                 status_report,
                 homing_pull_off,
+                hard_limits,
                 tolerance_mm,
             )
         )
