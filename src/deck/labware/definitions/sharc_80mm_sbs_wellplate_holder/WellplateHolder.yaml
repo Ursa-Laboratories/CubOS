@@ -3,12 +3,15 @@
 # `height` is the physical holder body height. The nested plate's calibrated
 # surface/rim Z is higher than the holder body because the seated SBS plate adds
 # 14.35 mm above the 75.15 mm support plane.
+# `length`/`width` are the deck-frame X/Y footprint for the SHARC UV layout:
+# rows advance in +X across the short SBS axis, columns advance in +Y across the
+# long SBS axis.
 
 type: well_plate_holder
 name: sharc_80mm_sbs_wellplate_holder
 model_name: sharc_80mm_sbs_wellplate_holder
-length: 127.76
-width: 85.47
+length: 85.47
+width: 127.76
 height: 80.0
 labware_support_height: 75.15
 labware_seat_height_from_bottom: 75.15

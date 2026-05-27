@@ -5,9 +5,9 @@ Usage:
 
 Example:
     python setup/run_protocol.py \\
-        configs/gantry/cub_xl_asmi.yaml \\
-        configs/deck/asmi_deck.yaml \\
-        configs/protocol/asmi_move_a1.yaml
+        ../BU-Configs/configs/gantry/cub_xl_asmi.yaml \\
+        ../BU-Configs/configs/deck/asmi_deck.yaml \\
+        ../BU-Configs/configs/protocol/asmi_move_a1.yaml
 
 Steps:
     1. Validate all configs and bounds (offline, no hardware)
@@ -43,9 +43,9 @@ def main() -> None:
         print()
         print("Example:")
         print("  python setup/run_protocol.py \\")
-        print("    configs/gantry/cub_xl_asmi.yaml \\")
-        print("    configs/deck/asmi_deck.yaml \\")
-        print("    configs/protocol/asmi_move_a1.yaml")
+        print("    ../BU-Configs/configs/gantry/cub_xl_asmi.yaml \\")
+        print("    ../BU-Configs/configs/deck/asmi_deck.yaml \\")
+        print("    ../BU-Configs/configs/protocol/asmi_move_a1.yaml")
         sys.exit(1)
 
     board_path = None

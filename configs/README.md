@@ -15,6 +15,12 @@ deck frame. GRBL homing direction, raw MPos, WCO, and controller setting
 details are admin/setup concerns documented in
 `docs/admin/gantry-bring-up.md`.
 
+`working_volume` is the usable deck/WPos range after homing pull-off. GRBL
+`$130/$131/$132` and YAML `grbl_settings.max_travel_*` are controller
+soft-limit spans and include `grbl_settings.homing_pull_off` (`$27`). A
+machine with homed WPos `Z=91` and `$27=10` should save
+`working_volume.z_max: 91` and `grbl_settings.max_travel_z: 101`.
+
 ## Directory Layout
 
 ```text
@@ -108,6 +114,6 @@ you need the same 96-well motion path without issuing UV cure commands.
 
 Offline setup validation is useful for schema, bounds, and protocol semantics,
 but it does not prove safe real motion. Before running any hardware protocol,
-verify GRBL `$3`, `$10`, `$20`, `$22`, `$23`, `$130`, `$131`, and `$132`, home
-to the expected back-right-top corner, jog each positive axis, and run
-`setup/calibrate_gantry.py` for the active machine/TCP.
+verify GRBL `$3`, `$10`, `$20`, `$22`, `$23`, `$27`, `$130`, `$131`, and
+`$132`, home to the expected back-right-top corner, jog each positive axis, and
+run `setup/calibrate_gantry.py` for the active machine/TCP.

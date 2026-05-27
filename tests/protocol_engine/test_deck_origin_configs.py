@@ -28,7 +28,7 @@ def test_mock_asmi_config_generates_deck_origin_scan_waypoints():
     )
     deck = load_deck_from_yaml(
         FIXTURES / "deck/mock_asmi_deck.yaml",
-        total_z_range=gantry_config.total_z_range,
+        factory_z_travel_mm=gantry_config.factory_z_travel_mm,
     )
     mock_gantry = MagicMock()
     mock_gantry.get_coordinates.return_value = {"x": 0.0, "y": 0.0, "z": 85.0}
@@ -122,7 +122,7 @@ def test_mock_panda_deck_origin_layout_and_placeholders_parse():
     )
     deck = load_deck_from_yaml(
         FIXTURES / "deck/mock_panda_deck.yaml",
-        total_z_range=gantry_config.total_z_range,
+        factory_z_travel_mm=gantry_config.factory_z_travel_mm,
     )
     plate = deck.resolve_coordinate("well_plate_holder.plate.A1")
     plate_a2 = deck.resolve_coordinate("well_plate_holder.plate.A2")
@@ -147,7 +147,7 @@ def test_mock_filmetrics_deck_origin_config_validates_setup():
     protocol_path = FIXTURES / "protocol/mock_filmetrics_scan.yaml"
 
     gantry_config = load_gantry_from_yaml(gantry_path)
-    deck = load_deck_from_yaml(deck_path, total_z_range=gantry_config.total_z_range)
+    deck = load_deck_from_yaml(deck_path, factory_z_travel_mm=gantry_config.factory_z_travel_mm)
     board = load_board_from_gantry_config(
         gantry_config, MagicMock(), mock_mode=True,
     )

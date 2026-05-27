@@ -67,9 +67,10 @@ class GantryConfig:
     serial_port: str
     gantry_type: GantryType
     homing_strategy: HomingStrategy
-    total_z_range: float
+    factory_z_travel_mm: float
     working_volume: WorkingVolume
     y_axis_motion: YAxisMotion = YAxisMotion.HEAD
+    calibration_block_height_mm: Optional[float] = None
     safe_z: Optional[float] = None
     expected_grbl_settings: Optional[Dict[str, float]] = field(default=None)
     instruments: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -81,9 +82,17 @@ class GantryConfig:
             raise ValueError(
                 f"Unsupported gantry_type {self.gantry_type!r}."
             ) from exc
-        if self.total_z_range <= 0:
+        if self.factory_z_travel_mm <= 0:
             raise ValueError(
-                f"total_z_range ({self.total_z_range}) must be > 0"
+                f"factory_z_travel_mm ({self.factory_z_travel_mm}) must be > 0"
+            )
+        if (
+            self.calibration_block_height_mm is not None
+            and self.calibration_block_height_mm <= 0
+        ):
+            raise ValueError(
+                "calibration_block_height_mm "
+                f"({self.calibration_block_height_mm}) must be > 0"
             )
         if self.safe_z is not None:
             if not (

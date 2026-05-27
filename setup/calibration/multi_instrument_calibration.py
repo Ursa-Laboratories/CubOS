@@ -24,7 +24,12 @@ from gantry import Gantry, load_gantry_from_yaml  # noqa: E402
 from gantry.origin import validate_deck_origin_minima  # noqa: E402
 from setup.calibration.single_instrument_calibration import (  # noqa: E402
     _assert_near_xyz,
+    _apply_calibration_grbl_baseline,
+    _calculate_block_z_calibration,
     _calculate_grbl_max_travel,
+    _calibration_block_height_mm,
+    _factory_z_travel_mm,
+    _configured_grbl_setting,
     _interactive_jog_to_reference,
     _load_raw_config,
     _maybe_write_gantry_yaml,
@@ -32,7 +37,6 @@ from setup.calibration.single_instrument_calibration import (  # noqa: E402
     _restore_soft_limits_after_origin_jog,
     _round_mm,
     _set_serial_timeout_if_available,
-    _calculated_z_range,
     _temporarily_disable_soft_limits_for_origin_jog,
 )
 from setup.keyboard_input import flush_stdin, read_keypress_batch  # noqa: E402
@@ -123,15 +127,22 @@ def compute_relative_instrument_calibrations(
 def _build_grbl_settings(
     raw_config: dict[str, Any],
     max_travel: dict[str, float],
+    homing_pull_off_mm: float | None = None,
 ) -> dict[str, Any]:
-    return {
-        "status_report": 0,
-        "soft_limits": True,
-        "homing_enable": True,
-        "max_travel_x": max_travel["max_travel_x"],
-        "max_travel_y": max_travel["max_travel_y"],
-        "max_travel_z": max_travel["max_travel_z"],
-    }
+    settings = dict(raw_config.get("grbl_settings") or {})
+    settings.update(
+        {
+            "status_report": 0,
+            "soft_limits": True,
+            "homing_enable": True,
+            "max_travel_x": max_travel["max_travel_x"],
+            "max_travel_y": max_travel["max_travel_y"],
+            "max_travel_z": max_travel["max_travel_z"],
+        }
+    )
+    if homing_pull_off_mm is not None:
+        settings["homing_pull_off"] = homing_pull_off_mm
+    return settings
 
 
 def _updated_yaml_text(
@@ -140,7 +151,9 @@ def _updated_yaml_text(
     measured_coords: dict[str, float],
     instrument_calibrations: dict[str, dict[str, float]],
     max_travel: dict[str, float],
-    calculated_z_range_mm: float,
+    z_min_mm: float,
+    z_max_mm: float,
+    homing_pull_off_mm: float | None = None,
 ) -> str:
     updated = copy.deepcopy(raw_config)
     updated["working_volume"] = {
@@ -148,10 +161,14 @@ def _updated_yaml_text(
         "x_max": _round_mm(measured_coords["x"]),
         "y_min": 0.0,
         "y_max": _round_mm(measured_coords["y"]),
-        "z_min": 0.0,
-        "z_max": calculated_z_range_mm,
+        "z_min": _round_mm(z_min_mm),
+        "z_max": _round_mm(z_max_mm),
     }
-    updated["grbl_settings"] = _build_grbl_settings(raw_config, max_travel)
+    updated["grbl_settings"] = _build_grbl_settings(
+        raw_config,
+        max_travel,
+        homing_pull_off_mm=homing_pull_off_mm,
+    )
 
     instruments = updated.setdefault("instruments", {})
     for name, calibration in instrument_calibrations.items():
@@ -327,7 +344,11 @@ def run_multi_instrument_calibration(
     gantry_config = load_gantry_from_yaml(gantry_path)
     validate_deck_origin_minima(gantry_config)
     raw_config = _load_raw_config(gantry_path)
-    calculated_z_range_mm = _calculated_z_range(raw_config)
+    factory_z_travel_mm = _factory_z_travel_mm(raw_config)
+    z_reference_height = _calibration_block_height_mm(
+        raw_config,
+        explicit_block_height_mm=None,
+    )
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     available_instruments = _instrument_names(raw_config)
@@ -398,6 +419,7 @@ def run_multi_instrument_calibration(
         output("Connecting to gantry...")
         gantry.connect()
 
+        _apply_calibration_grbl_baseline(gantry, raw_config, output=output)
         output("Homing to normalized BRT corner...")
         _set_serial_timeout_if_available(gantry, homing_serial_timeout_s)
         _home_with_serial_reconnect(gantry, output=output)
@@ -486,9 +508,13 @@ def run_multi_instrument_calibration(
             initial_step_mm=jog_step_mm,
             limit_pull_off_mm=5.0,
         )
-        z_reference_height = _prompt_z_reference_height(
-            input_reader=input_reader,
-            output=output,
+        block_touch_coords = dict(gantry.get_coordinates())
+        block_z_calibration = _calculate_block_z_calibration(
+            initial_home_z_mm=float(xy_bounds_coords["z"]),
+            block_touch_wpos_z_mm=float(block_touch_coords["z"]),
+            block_height_mm=z_reference_height,
+            factory_z_travel_mm=factory_z_travel_mm,
+            tolerance_mm=tolerance_mm,
         )
         output(
             f"Setting current physical pose to WPos Z={z_reference_height:g} only..."
@@ -570,11 +596,16 @@ def run_multi_instrument_calibration(
         _home_with_serial_reconnect(gantry, output=output)
         _set_serial_timeout_if_available(gantry, jog_serial_timeout_s)
         measured_coords = dict(gantry.get_coordinates())
+        homing_pull_off_mm = gantry.homing_pull_off_mm()
+        z_min_mm = block_z_calibration.z_min_mm
+        z_max_mm = _round_mm(float(measured_coords["z"]))
+        z_span_mm = _round_mm(z_max_mm - z_min_mm)
         max_travel = _calculate_grbl_max_travel(
             measured_coords,
-            z_min_mm=0.0,
+            z_min_mm=z_min_mm,
             tolerance_mm=tolerance_mm,
-            z_span_mm=calculated_z_range_mm,
+            z_span_mm=z_span_mm,
+            homing_pull_off_mm=homing_pull_off_mm,
         )
         if skip_soft_limit_config:
             output("Skipping GRBL soft-limit programming by request.")
@@ -583,6 +614,9 @@ def run_multi_instrument_calibration(
                 max_travel_x=max_travel["max_travel_x"],
                 max_travel_y=max_travel["max_travel_y"],
                 max_travel_z=max_travel["max_travel_z"],
+                status_report=0,
+                homing_pull_off=homing_pull_off_mm,
+                hard_limits=_configured_grbl_setting(raw_config, "hard_limits"),
                 tolerance_mm=tolerance_mm,
             )
             restore_soft_limits_after_calibration = False
@@ -609,7 +643,9 @@ def run_multi_instrument_calibration(
             measured_coords=measured_coords,
             instrument_calibrations=instrument_calibrations,
             max_travel=max_travel,
-            calculated_z_range_mm=calculated_z_range_mm,
+            z_min_mm=z_min_mm,
+            z_max_mm=z_max_mm,
+            homing_pull_off_mm=homing_pull_off_mm,
         )
         _print_yaml_block(
             title="Full calibrated multi-instrument gantry YAML to copy/paste:",
@@ -628,7 +664,7 @@ def run_multi_instrument_calibration(
             measured_working_volume=(
                 float(measured_coords["x"]),
                 float(measured_coords["y"]),
-                calculated_z_range_mm,
+                z_max_mm,
             ),
             xy_bounds_after_origin=_coords_tuple(xy_bounds_coords),
             xy_origin_verification=_coords_tuple(xy_origin_coords),

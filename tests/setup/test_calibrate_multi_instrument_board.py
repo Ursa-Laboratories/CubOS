@@ -21,7 +21,8 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_range: 100.0
+  factory_z_travel_mm: 100.0
+  calibration_block_height_mm: 12.5
   y_axis_motion: head
 working_volume:
   x_min: 0.0
@@ -34,6 +35,7 @@ grbl_settings:
   status_report: 0
   soft_limits: true
   homing_enable: true
+  homing_pull_off: 10.0
   max_travel_x: 400.0
   max_travel_y: 300.0
   max_travel_z: 100.0
@@ -66,6 +68,7 @@ class _FakeGantry:
         self.calls: list[tuple] = []
         self.coords = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.home_count = 0
+        self.homing_pull_off = 0.0
         _FakeGantry.instance = self
 
     def connect(self) -> None:
@@ -139,6 +142,15 @@ class _FakeGantry:
     def set_serial_timeout(self, timeout: float) -> None:
         self.calls.append(("set_serial_timeout", timeout))
 
+    def set_grbl_setting(self, setting: str, value: float) -> None:
+        self.calls.append(("set_grbl_setting", setting, value))
+        if setting in {"$27", "27"}:
+            self.homing_pull_off = float(value)
+
+    def homing_pull_off_mm(self) -> float:
+        self.calls.append(("homing_pull_off_mm",))
+        return self.homing_pull_off
+
     def soft_limits_enabled(self) -> bool | None:
         self.calls.append(("soft_limits_enabled",))
         return False
@@ -152,6 +164,9 @@ class _FakeGantry:
         max_travel_x: float,
         max_travel_y: float,
         max_travel_z: float,
+        status_report: float | int | None = None,
+        homing_pull_off: float | None = None,
+        hard_limits: float | int | bool | None = None,
         tolerance_mm: float = 0.001,
     ) -> None:
         self.calls.append(
@@ -160,6 +175,9 @@ class _FakeGantry:
                 max_travel_x,
                 max_travel_y,
                 max_travel_z,
+                status_report,
+                homing_pull_off,
+                hard_limits,
                 tolerance_mm,
             )
         )
@@ -281,12 +299,13 @@ def test_multi_instrument_calibration_reconnects_once_if_serial_drops_during_hom
         output=messages.append,
         input_reader=lambda _prompt: "12.5",
         gantry_factory=_SerialDropOnFirstHomeFakeGantry,
-        key_reader=_key_reader(
-            [
-                ("\r", 1),
-                ("\r", 1),
-                ("\r", 1),
-            ]
+            key_reader=_key_reader(
+                [
+                    ("\r", 1),
+                    ("Z", 1),
+                    ("\r", 1),
+                    ("\r", 1),
+                ]
         ),
         stdin_flusher=lambda: None,
     )
@@ -312,12 +331,13 @@ def test_multi_instrument_calibration_disables_stale_soft_limits_during_jogs(tmp
         output=messages.append,
         input_reader=lambda _prompt: "12.5",
         gantry_factory=_SoftLimitEnabledFakeGantry,
-        key_reader=_key_reader(
-            [
-                ("\r", 1),
-                ("\r", 1),
-                ("\r", 1),
-            ]
+            key_reader=_key_reader(
+                [
+                    ("\r", 1),
+                    ("Z", 1),
+                    ("\r", 1),
+                    ("\r", 1),
+                ]
         ),
         stdin_flusher=lambda: None,
     )
@@ -373,7 +393,7 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
     path = _write_multi_gantry(tmp_path / "gantry.yaml")
     out_path = tmp_path / "calibrated.yaml"
     messages: list[str] = []
-    inputs = iter(["12.5", "y"])
+    inputs = iter(["y"])
 
     result = run_multi_instrument_calibration(
         path,
@@ -405,7 +425,8 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
     assert isinstance(result, MultiInstrumentCalibrationResult)
     assert result.xy_origin_verification == (0.0, 0.0, 0.0)
     assert result.z_origin_verification == (199.0, 149.5, 12.5)
-    assert result.measured_working_volume == (398.0, 299.0, 100.0)
+    assert result.measured_working_volume == (398.0, 299.0, 96.0)
+    assert result.grbl_max_travel == (408.0, 309.0, 106.0)
     assert result.instrument_calibrations["left_probe"] == {
         "offset_x": 0.0,
         "offset_y": 0.0,
@@ -438,19 +459,21 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
         "y_min": 0.0,
         "y_max": 299.0,
         "z_min": 0.0,
-        "z_max": 100.0,
+        "z_max": 96.0,
     }
-    assert written["cnc"]["total_z_range"] == 100.0
-    assert written["grbl_settings"]["max_travel_x"] == 398.0
-    assert written["grbl_settings"]["max_travel_y"] == 299.0
-    assert written["grbl_settings"]["max_travel_z"] == 100.0
+    assert written["cnc"]["factory_z_travel_mm"] == 100.0
+    assert written["cnc"]["calibration_block_height_mm"] == 12.5
+    assert written["grbl_settings"]["homing_pull_off"] == 10.0
+    assert written["grbl_settings"]["max_travel_x"] == 408.0
+    assert written["grbl_settings"]["max_travel_y"] == 309.0
+    assert written["grbl_settings"]["max_travel_z"] == 106.0
     assert "measurement_height" not in written["instruments"]["camera"]
     assert written["instruments"]["camera"]["offset_x"] == -15.0
     assert written["instruments"]["camera"]["offset_y"] == -7.0
     assert written["instruments"]["camera"]["depth"] == 6.0
 
 
-def test_multi_instrument_calibration_raises_if_cnc_total_z_range_missing(tmp_path):
+def test_multi_instrument_calibration_raises_if_cnc_factory_z_travel_mm_missing(tmp_path):
     path = tmp_path / "gantry.yaml"
     path.write_text(
         """\
@@ -480,5 +503,5 @@ instruments:
 
     import pytest
 
-    with pytest.raises(ValueError, match="cnc.total_z_range"):
+    with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
         run_multi_instrument_calibration(path, dry_run=True)

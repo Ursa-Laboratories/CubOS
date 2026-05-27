@@ -25,7 +25,7 @@ def _make_gantry() -> GantryConfig:
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_range=90.0,
+        factory_z_travel_mm=90.0,
         working_volume=WorkingVolume(
             x_min=0.0,
             x_max=300.0,
@@ -162,7 +162,7 @@ labware:
         path = handle.name
 
     try:
-        deck = load_deck_from_yaml(path, total_z_range=90.0)
+        deck = load_deck_from_yaml(path, factory_z_travel_mm=90.0)
         assert isinstance(deck["waste"], TipDisposal)
         assert isinstance(deck["slide_holder"], WellPlateHolder)
         assert isinstance(deck["vial_holder"], VialHolder)
@@ -316,8 +316,8 @@ labware:
 
         assert isinstance(holder, WellPlateHolder)
         assert holder.name == "plate_holder"
-        assert holder.length == pytest.approx(127.76)
-        assert holder.width == pytest.approx(85.47)
+        assert holder.length == pytest.approx(85.47)
+        assert holder.width == pytest.approx(127.76)
         assert holder.height == pytest.approx(80.0)
         assert holder.labware_seat_height_from_bottom == pytest.approx(75.15)
         assert holder.well_plate_surface_height_from_bottom == pytest.approx(89.5)

@@ -66,9 +66,18 @@ def build_connection_report(
     return "\n".join(lines)
 
 
-def _load_gantry_config(gantry_name: str) -> dict[str, Any]:
-    """Load a gantry YAML config by name from configs/gantry/."""
-    config_path = project_root / "configs" / "gantry" / f"{gantry_name}.yaml"
+def _default_config_dir() -> Path:
+    """Return the sibling BU-Configs tree when this workspace has it."""
+    sibling_config_dir = project_root.parent / "BU-Configs" / "configs"
+    if sibling_config_dir.exists():
+        return sibling_config_dir
+    return project_root / "configs"
+
+
+def _load_gantry_config(gantry_name: str, *, config_dir: Path | None = None) -> dict[str, Any]:
+    """Load a gantry YAML config by name from a config root."""
+    config_root = config_dir or _default_config_dir()
+    config_path = config_root / "gantry" / f"{gantry_name}.yaml"
     if not config_path.exists():
         raise FileNotFoundError(f"Gantry config not found: {config_path}")
 
@@ -76,9 +85,14 @@ def _load_gantry_config(gantry_name: str) -> dict[str, Any]:
         return yaml.safe_load(handle) or {}
 
 
-def _collect_connection_info(gantry_name: str, port: str | None) -> str:
+def _collect_connection_info(
+    gantry_name: str,
+    port: str | None,
+    *,
+    config_dir: Path | None = None,
+) -> str:
     """Connect to the gantry and return a formatted diagnostic report."""
-    config = _load_gantry_config(gantry_name)
+    config = _load_gantry_config(gantry_name, config_dir=config_dir)
     report_port = port or config.get("serial_port", "<auto-scan>")
     gantry = Gantry(config=config)
 
@@ -114,7 +128,16 @@ def main() -> None:
     parser.add_argument(
         "--gantry",
         default="cub_xl",
-        help="Gantry config name in configs/gantry/ without the .yaml suffix.",
+        help="Gantry config name in <config-dir>/gantry/ without the .yaml suffix.",
+    )
+    parser.add_argument(
+        "--config-dir",
+        type=Path,
+        default=None,
+        help=(
+            "Config root containing gantry/deck/protocol directories. "
+            "Defaults to ../BU-Configs/configs when present."
+        ),
     )
     parser.add_argument(
         "--port",
@@ -124,7 +147,7 @@ def main() -> None:
     args = parser.parse_args()
 
     try:
-        print(_collect_connection_info(args.gantry, args.port))
+        print(_collect_connection_info(args.gantry, args.port, config_dir=args.config_dir))
     except Exception as exc:
         print(f"Connection test failed: {exc}", file=sys.stderr)
         sys.exit(1)

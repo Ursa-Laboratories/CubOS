@@ -16,7 +16,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_range: 90.0
+  factory_z_travel_mm: 90.0
 working_volume:
   x_min: 0.0
   x_max: 300.0
@@ -199,3 +199,71 @@ def test_run_setup_validation_returns_validation_stage_on_validator_exception(
     assert result.stage == "validation"
     assert "RESULT: ERROR" in result.output
     assert "KeyError" in result.errors[0]
+
+
+def test_run_setup_validation_returns_instruments_stage_on_instrument_load_error(
+    tmp_path, monkeypatch
+):
+    from protocol_engine import setup_validation as sv
+
+    monkeypatch.setattr(
+        sv,
+        "load_board_from_gantry_config",
+        lambda *a, **kw: (_ for _ in ()).throw(ValueError("unknown instrument type: foo")),
+    )
+
+    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML)
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(tmp_path / "protocol.yaml", "protocol: []\n")
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    assert result.passed is False
+    assert result.stage == "instruments"
+    assert "RESULT: ERROR" in result.output
+    assert result.errors
+
+
+def test_run_setup_validation_reports_semantic_violations(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+    from protocol_engine import setup_validation as sv
+
+    monkeypatch.setattr(
+        sv,
+        "validate_protocol_semantics",
+        lambda *a, **kw: [
+            SimpleNamespace(step_index=0, command_name="move", message="missing instrument")
+        ],
+    )
+
+    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML)
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(
+        tmp_path / "protocol.yaml",
+        """\
+        positions:
+          park: [50.0, 50.0, 30.0]
+        protocol:
+          - move:
+              instrument: pipette
+              position: park
+        """,
+    )
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    assert result.passed is False
+    assert result.stage == "validation"
+    assert any("missing instrument" in error for error in result.errors)
+
+
+def test_run_validation_alias_delegates_to_run_setup_validation(tmp_path):
+    from protocol_engine.setup_validation import run_validation
+
+    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML)
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(tmp_path / "protocol.yaml", "protocol: []\n")
+
+    result = run_validation(gantry, deck, protocol)
+
+    assert result.passed is True

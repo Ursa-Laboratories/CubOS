@@ -31,14 +31,14 @@ def _make_gantry(
     y_max: float = 200.0,
     z_min: float = 0.0,
     z_max: float = 80.0,
-    total_z_range: float = 90.0,
+    factory_z_travel_mm: float = 90.0,
     safe_z: float | None = None,
 ) -> GantryConfig:
     return GantryConfig(
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_range=total_z_range,
+        factory_z_travel_mm=factory_z_travel_mm,
         working_volume=WorkingVolume(
             x_min=x_min, x_max=x_max,
             y_min=y_min, y_max=y_max,
@@ -439,7 +439,7 @@ class TestValidateProtocolMotionBounds:
         assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
 
     def test_holder_base_is_ignored_when_protocol_targets_nested_labware(self):
-        gantry = _make_gantry(z_min=80.0, z_max=101.5, total_z_range=101.5,
+        gantry = _make_gantry(z_min=80.0, z_max=101.5, factory_z_travel_mm=101.5,
                               safe_z=101.5)
         plate = _make_plate(a1_x=15.0, a1_y=17.0, a1_z=89.5)
         holder = WellPlateHolder(

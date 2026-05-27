@@ -44,11 +44,13 @@ class DeckOriginCalibrationResult:
     xy_origin_verification: tuple[float, float, float]
     z_reference_verification: tuple[float, float, float]
     z_min_mm: float
-    calculated_z_range_mm: float
+    factory_z_travel_mm: float
     z_reference_mode: str
     reachable_z_min_mm: float | None
     block_height_mm: float | None
     block_touch_wpos_z_mm: float | None
+    home_to_block_travel_mm: float | None
+    can_reach_deck_bottom: bool | None
     grbl_max_travel: tuple[float, float, float] | None
     instrument_name: str | None
     plan: DeckOriginCalibrationPlan
@@ -62,6 +64,26 @@ class DeckOriginCalibrationResult:
     def reference_surface_z_mm(self) -> float:
         """Deprecated alias for the one-instrument lower Z assignment."""
         return self.z_min_mm
+
+    @property
+    def calculated_z_range_mm(self) -> float:
+        """Deprecated alias for the configured factory Z travel span."""
+        return self.factory_z_travel_mm
+
+
+@dataclass(frozen=True)
+class BlockZCalibration:
+    """Deck-frame Z bounds inferred from home-to-block travel."""
+
+    block_height_mm: float
+    factory_z_travel_mm: float
+    initial_home_z_mm: float
+    block_touch_wpos_z_mm: float
+    home_to_block_travel_mm: float
+    remaining_below_block_mm: float
+    can_reach_deck_bottom: bool
+    z_min_mm: float
+    expected_home_z_mm: float
 
 
 KeyReader = Callable[[], tuple[str, int]]
@@ -96,20 +118,105 @@ def _round_mm(value: float) -> float:
     return round(float(value), 3)
 
 
-def _calculated_z_range(raw_config: dict[str, Any]) -> float:
+def _factory_z_travel_mm(raw_config: dict[str, Any]) -> float:
     cnc = raw_config.get("cnc")
-    if not isinstance(cnc, dict) or "total_z_range" not in cnc:
+    if not isinstance(cnc, dict) or "factory_z_travel_mm" not in cnc:
         raise ValueError(
-            "Gantry YAML must seed cnc.total_z_range before calibration; "
-            "calibration preserves that calculated Z range."
+            "Gantry YAML must seed cnc.factory_z_travel_mm before calibration; "
+            "calibration uses it only to decide whether deck bottom is reachable."
         )
     try:
-        value = float(cnc["total_z_range"])
+        value = float(cnc["factory_z_travel_mm"])
     except (TypeError, ValueError) as exc:
-        raise ValueError("cnc.total_z_range must be numeric.") from exc
+        raise ValueError("cnc.factory_z_travel_mm must be numeric.") from exc
     if value <= 0:
-        raise ValueError("cnc.total_z_range must be > 0.")
+        raise ValueError("cnc.factory_z_travel_mm must be > 0.")
     return _round_mm(value)
+
+
+def _calculated_z_range(raw_config: dict[str, Any]) -> float:
+    """Deprecated helper name retained for older callers."""
+    return _factory_z_travel_mm(raw_config)
+
+
+def _calibration_block_height_mm(
+    raw_config: dict[str, Any],
+    *,
+    explicit_block_height_mm: float | None,
+) -> float:
+    if explicit_block_height_mm is not None:
+        value = float(explicit_block_height_mm)
+    else:
+        cnc = raw_config.get("cnc")
+        if not isinstance(cnc, dict) or "calibration_block_height_mm" not in cnc:
+            raise ValueError(
+                "Gantry YAML must define cnc.calibration_block_height_mm "
+                "for block Z calibration."
+            )
+        try:
+            value = float(cnc["calibration_block_height_mm"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "cnc.calibration_block_height_mm must be numeric."
+            ) from exc
+    if value <= 0:
+        raise ValueError("cnc.calibration_block_height_mm must be > 0.")
+    return _round_mm(value)
+
+
+def _calculate_block_z_calibration(
+    *,
+    initial_home_z_mm: float,
+    block_touch_wpos_z_mm: float,
+    block_height_mm: float,
+    factory_z_travel_mm: float,
+    tolerance_mm: float,
+) -> BlockZCalibration:
+    for label, value in (
+        ("initial home Z", initial_home_z_mm),
+        ("block touch WPos Z", block_touch_wpos_z_mm),
+        ("block height", block_height_mm),
+        ("factory Z travel", factory_z_travel_mm),
+    ):
+        if not isinstance(value, (int, float)):
+            raise RuntimeError(f"{label} must be numeric.")
+    if block_height_mm <= 0:
+        raise ValueError("block height must be > 0 in block mode.")
+    if factory_z_travel_mm <= 0:
+        raise ValueError("factory_z_travel_mm must be > 0.")
+
+    travel_to_block = _round_mm(initial_home_z_mm - block_touch_wpos_z_mm)
+    if travel_to_block <= tolerance_mm:
+        raise RuntimeError(
+            "Block touch must be below the initial homed Z position: "
+            f"home={initial_home_z_mm:.4f}, touch={block_touch_wpos_z_mm:.4f}."
+        )
+    if travel_to_block > factory_z_travel_mm + tolerance_mm:
+        raise RuntimeError(
+            "Home-to-block travel exceeds the configured factory Z travel: "
+            f"travel={travel_to_block:.4f}, "
+            f"factory_z_travel_mm={factory_z_travel_mm:.4f}."
+        )
+
+    remaining_below_block = _round_mm(factory_z_travel_mm - travel_to_block)
+    can_reach_deck_bottom = remaining_below_block + tolerance_mm >= block_height_mm
+    z_min_mm = (
+        0.0
+        if can_reach_deck_bottom
+        else _round_mm(block_height_mm - remaining_below_block)
+    )
+    expected_home_z_mm = _round_mm(block_height_mm + travel_to_block)
+    return BlockZCalibration(
+        block_height_mm=_round_mm(block_height_mm),
+        factory_z_travel_mm=_round_mm(factory_z_travel_mm),
+        initial_home_z_mm=_round_mm(initial_home_z_mm),
+        block_touch_wpos_z_mm=_round_mm(block_touch_wpos_z_mm),
+        home_to_block_travel_mm=travel_to_block,
+        remaining_below_block_mm=remaining_below_block,
+        can_reach_deck_bottom=can_reach_deck_bottom,
+        z_min_mm=z_min_mm,
+        expected_home_z_mm=expected_home_z_mm,
+    )
 
 
 def _calculate_grbl_max_travel(
@@ -118,14 +225,19 @@ def _calculate_grbl_max_travel(
     z_min_mm: float,
     tolerance_mm: float,
     z_span_mm: float | None = None,
+    homing_pull_off_mm: float = 0.0,
 ) -> dict[str, float]:
-    x_span = _round_mm(float(measured_coords["x"]))
-    y_span = _round_mm(float(measured_coords["y"]))
+    pull_off = _round_mm(float(homing_pull_off_mm))
+    if pull_off < 0:
+        raise RuntimeError("GRBL homing pull-off must be non-negative.")
+    x_span = _round_mm(float(measured_coords["x"]) + pull_off)
+    y_span = _round_mm(float(measured_coords["y"]) + pull_off)
     z_span = (
         _round_mm(z_span_mm)
         if z_span_mm is not None
         else _round_mm(float(measured_coords["z"]) - float(z_min_mm))
     )
+    z_span = _round_mm(z_span + pull_off)
     spans = {
         "max_travel_x": x_span,
         "max_travel_y": y_span,
@@ -166,6 +278,7 @@ def _updated_gantry_yaml_text(
     z_min_mm: float,
     z_max_mm: float,
     max_travel: dict[str, float] | None = None,
+    homing_pull_off_mm: float | None = None,
 ) -> str:
     updated = copy.deepcopy(raw_config)
     updated["working_volume"] = {
@@ -180,6 +293,7 @@ def _updated_gantry_yaml_text(
         updated["grbl_settings"] = _build_gantry_grbl_settings(
             gantry_raw=raw_config,
             max_travel=max_travel,
+            homing_pull_off_mm=homing_pull_off_mm,
         )
     return yaml.safe_dump(updated, sort_keys=False)
 
@@ -188,6 +302,7 @@ def _build_gantry_grbl_settings(
     *,
     gantry_raw: dict[str, Any],
     max_travel: dict[str, float],
+    homing_pull_off_mm: float | None = None,
 ) -> dict[str, Any]:
     settings = dict(gantry_raw.get("grbl_settings") or {})
     settings.update(
@@ -200,7 +315,57 @@ def _build_gantry_grbl_settings(
             "max_travel_z": max_travel["max_travel_z"],
         }
     )
+    if homing_pull_off_mm is not None:
+        settings["homing_pull_off"] = homing_pull_off_mm
     return settings
+
+
+def _configured_homing_pull_off(raw_config: dict[str, Any]) -> float | None:
+    settings = raw_config.get("grbl_settings") or {}
+    if not isinstance(settings, dict):
+        return None
+    value = settings.get("homing_pull_off")
+    if value is None:
+        return None
+    try:
+        pull_off = _round_mm(float(value))
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"grbl_settings.homing_pull_off must be numeric; got {value!r}"
+        ) from exc
+    if pull_off < 0:
+        raise ValueError("grbl_settings.homing_pull_off must be non-negative.")
+    return pull_off
+
+
+def _configured_grbl_setting(raw_config: dict[str, Any], field_name: str) -> Any:
+    settings = raw_config.get("grbl_settings") or {}
+    if not isinstance(settings, dict):
+        return None
+    return settings.get(field_name)
+
+
+def _apply_calibration_grbl_baseline(
+    gantry: Gantry,
+    raw_config: dict[str, Any],
+    *,
+    output: Callable[[str], None],
+) -> None:
+    output("Setting GRBL WPos reporting ($10=0) before calibration homing...")
+    try:
+        gantry.set_grbl_setting("$10", 0)
+    except (CommandExecutionError, StatusReturnError) as exc:
+        raise RuntimeError(
+            "Failed to set GRBL WPos reporting mode ($10=0) before calibration. "
+            f"Calibration cannot proceed safely without WPos coordinates: {exc}"
+        ) from exc
+    homing_pull_off = _configured_homing_pull_off(raw_config)
+    if homing_pull_off is not None:
+        output(
+            f"Setting GRBL homing pull-off ($27={homing_pull_off:g}) "
+            "before calibration homing..."
+        )
+        gantry.set_grbl_setting("$27", homing_pull_off)
 
 
 def _print_yaml_block(
@@ -309,12 +474,16 @@ def _print_config_patch(
     z_reference_coords: dict[str, float],
     z_min_mm: float,
     z_max_mm: float,
-    calculated_z_range_mm: float,
+    factory_z_travel_mm: float,
     z_reference_mode: str,
     instrument_name: str | None,
     block_height_mm: float | None,
     block_touch_wpos_z_mm: float | None,
     reachable_z_min_mm: float | None,
+    home_to_block_travel_mm: float | None,
+    remaining_below_block_mm: float | None,
+    can_reach_deck_bottom: bool | None,
+    expected_home_z_mm: float | None,
     output: Callable[[str], None],
 ) -> None:
     x_max, y_max, measured_home_z = _coords_tuple(coords)
@@ -323,7 +492,7 @@ def _print_config_patch(
     output(f"  X: 0.000 to {x_max:.3f} mm")
     output(f"  Y: 0.000 to {y_max:.3f} mm")
     output(f"  Z: {z_min_mm:.3f} to {z_max_mm:.3f} mm")
-    output(f"  Seeded calculated Z range: {calculated_z_range_mm:.3f} mm")
+    output(f"  Factory Z travel safety bound: {factory_z_travel_mm:.3f} mm")
     output(f"  Homed Z readback after calibration: {measured_home_z:.3f} mm")
     output("")
     output("Update the gantry YAML working_volume to:")
@@ -335,8 +504,8 @@ def _print_config_patch(
     output(f"    z_min: {z_min_mm:.3f}")
     output(f"    z_max: {z_max_mm:.3f}")
     output("")
-    output("Keep the seeded cnc.total_z_range unchanged:")
-    output(f"  total_z_range: {calculated_z_range_mm:.3f}")
+    output("Keep the out-of-box cnc.factory_z_travel_mm unchanged:")
+    output(f"  factory_z_travel_mm: {factory_z_travel_mm:.3f}")
     output("")
     output("Z reference point after XY origining:")
     output(
@@ -348,12 +517,23 @@ def _print_config_patch(
     output(f"  mode: {z_reference_mode}")
     if block_height_mm is not None and block_touch_wpos_z_mm is not None:
         output("")
-        output("Calibration block lower-reach calculation:")
+        output("Calibration block home-to-block calculation:")
         output(f"  block_height: {block_height_mm:.3f} mm")
         output(f"  block_touch_wpos_z: {block_touch_wpos_z_mm:.3f} mm")
+        if home_to_block_travel_mm is not None:
+            output(f"  home_to_block_travel: {home_to_block_travel_mm:.3f} mm")
+        if remaining_below_block_mm is not None:
+            output(
+                "  remaining_factory_travel_below_block: "
+                f"{remaining_below_block_mm:.3f} mm"
+            )
+        if can_reach_deck_bottom is not None:
+            output(f"  can_reach_deck_bottom: {str(can_reach_deck_bottom).lower()}")
+        if expected_home_z_mm is not None:
+            output(f"  expected_home_z_from_block: {expected_home_z_mm:.3f} mm")
         if reachable_z_min_mm is not None:
             output(
-                "  inferred_lowest_reachable_height_above_deck: "
+                "  lowest_reachable_height_above_deck: "
                 f"{reachable_z_min_mm:.3f} mm"
             )
     if reachable_z_min_mm is not None and reachable_z_min_mm > 0:
@@ -390,8 +570,8 @@ def _print_dry_run(
         output(f"  {command}")
     output("")
     output(
-        "The seeded gantry YAML cnc.total_z_range will be preserved and used "
-        "as calibrated Z travel."
+        "The gantry YAML cnc.factory_z_travel_mm is preserved as an out-of-box "
+        "safety bound; calibrated Z max comes from the homed readback."
     )
 
 
@@ -775,7 +955,7 @@ def run_calibration(
     gantry_path = gantry_path.resolve()
     gantry_config = load_gantry_from_yaml(gantry_path)
     raw_config = _load_raw_config(gantry_path)
-    calculated_z_range_mm = _calculated_z_range(raw_config)
+    factory_z_travel_mm = _factory_z_travel_mm(raw_config)
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     plan = build_deck_origin_calibration_plan(gantry_config)
@@ -828,6 +1008,7 @@ def run_calibration(
         output("Connecting to gantry...")
         gantry.connect()
 
+        _apply_calibration_grbl_baseline(gantry, raw_config, output=output)
         output("Homing to normalized back-right-top corner...")
         _set_serial_timeout_if_available(gantry, homing_serial_timeout_s)
         gantry.home()
@@ -838,6 +1019,10 @@ def run_calibration(
         gantry.activate_work_coordinate_system("G54")
         output("Clearing transient G92 offsets before origin calibration...")
         gantry.clear_g92_offsets()
+        initial_home_z_mm: float | None = None
+        if z_reference_mode in ("prompt", "block"):
+            initial_home_coords = dict(gantry.get_coordinates())
+            initial_home_z_mm = float(initial_home_coords["z"])
         stdin_flusher()
 
         restore_soft_limits_after_origin_jog = (
@@ -881,6 +1066,10 @@ def run_calibration(
             )
         block_height_mm: float | None = None
         block_touch_wpos_z_mm: float | None = None
+        home_to_block_travel_mm: float | None = None
+        remaining_below_block_mm: float | None = None
+        can_reach_deck_bottom: bool | None = None
+        expected_home_z_mm: float | None = None
         if z_reference_mode == "bottom":
             if tip_gap_mm is not None and tip_gap_mm != 0:
                 raise ValueError("Bottom Z mode cannot use a non-zero tip gap.")
@@ -888,36 +1077,29 @@ def run_calibration(
             z_reference_wpos_mm = z_min_mm
             reachable_z_min_mm = z_min_mm
         elif z_reference_mode == "block":
-            if tip_gap_mm is None:
-                tip_gap_mm = _prompt_block_height(
-                    input_reader=input_reader,
-                    output=output,
-                )
-            if tip_gap_mm <= 0:
-                raise ValueError("block height must be > 0 in block mode.")
-            block_height_mm = float(tip_gap_mm)
+            block_height_mm = _calibration_block_height_mm(
+                raw_config,
+                explicit_block_height_mm=tip_gap_mm,
+            )
             block_touch_wpos_z_mm = float(xy_origin_coords["z"])
-            if block_touch_wpos_z_mm <= tolerance_mm:
+            if initial_home_z_mm is None:
                 raise RuntimeError(
-                    "Block touch WPos Z must be positive so calibration can "
-                    "place the lower reachable Z at WPos 0. "
-                    f"Got Z={block_touch_wpos_z_mm:.4f}."
+                    "Initial homed Z was not recorded before block calibration."
                 )
-            if block_touch_wpos_z_mm > calculated_z_range_mm + tolerance_mm:
-                raise RuntimeError(
-                    "Block touch WPos Z exceeds the seeded calculated Z range: "
-                    f"touch={block_touch_wpos_z_mm:.4f}, "
-                    f"total_z_range={calculated_z_range_mm:.4f}."
-                )
-            z_min_mm = 0.0
-            z_reference_wpos_mm = block_touch_wpos_z_mm
-            reachable_z_min_mm = _round_mm(block_height_mm - block_touch_wpos_z_mm)
-            if reachable_z_min_mm < 0:
-                raise RuntimeError(
-                    f"block_touch_wpos_z ({block_touch_wpos_z_mm:.4f} mm) exceeds "
-                    f"block_height ({block_height_mm:.4f} mm); "
-                    "verify the calibration block height and re-run."
-                )
+            block_calibration = _calculate_block_z_calibration(
+                initial_home_z_mm=initial_home_z_mm,
+                block_touch_wpos_z_mm=block_touch_wpos_z_mm,
+                block_height_mm=block_height_mm,
+                factory_z_travel_mm=factory_z_travel_mm,
+                tolerance_mm=tolerance_mm,
+            )
+            z_min_mm = block_calibration.z_min_mm
+            z_reference_wpos_mm = block_height_mm
+            reachable_z_min_mm = block_calibration.z_min_mm
+            home_to_block_travel_mm = block_calibration.home_to_block_travel_mm
+            remaining_below_block_mm = block_calibration.remaining_below_block_mm
+            can_reach_deck_bottom = block_calibration.can_reach_deck_bottom
+            expected_home_z_mm = block_calibration.expected_home_z_mm
         elif z_reference_mode == "ruler-gap":
             if tip_gap_mm is None:
                 tip_gap_mm = _prompt_tip_gap_mm(
@@ -934,9 +1116,6 @@ def run_calibration(
                 f"Unrecognised z_reference_mode after resolution: {z_reference_mode!r}. "
                 "Expected one of: bottom, block, ruler-gap."
             )
-
-        z_max_mm = _round_mm(z_min_mm + calculated_z_range_mm)
-
         output(f"Setting current physical pose to WPos Z={z_reference_wpos_mm:g}...")
         gantry.set_work_coordinates(z=z_reference_wpos_mm)
         z_reference_coords = dict(gantry.get_coordinates())
@@ -957,15 +1136,19 @@ def run_calibration(
         gantry.home()
         _set_serial_timeout_if_available(gantry, jog_serial_timeout_s)
         measured_coords = gantry.get_coordinates()
+        homing_pull_off_mm = gantry.homing_pull_off_mm()
         _assert_positive_measured_volume(
             measured_coords,
             tolerance_mm=tolerance_mm,
         )
+        z_max_mm = _round_mm(float(measured_coords["z"]))
+        z_span_mm = _round_mm(z_max_mm - z_min_mm)
         max_travel = _calculate_grbl_max_travel(
             measured_coords,
             z_min_mm=z_min_mm,
             tolerance_mm=tolerance_mm,
-            z_span_mm=calculated_z_range_mm,
+            z_span_mm=z_span_mm,
+            homing_pull_off_mm=homing_pull_off_mm,
         )
         if skip_soft_limit_config:
             output("Skipping GRBL soft-limit programming by request.")
@@ -974,6 +1157,9 @@ def run_calibration(
                 max_travel_x=max_travel["max_travel_x"],
                 max_travel_y=max_travel["max_travel_y"],
                 max_travel_z=max_travel["max_travel_z"],
+                status_report=0,
+                homing_pull_off=homing_pull_off_mm,
+                hard_limits=_configured_grbl_setting(raw_config, "hard_limits"),
                 tolerance_mm=tolerance_mm,
             )
 
@@ -982,12 +1168,16 @@ def run_calibration(
             z_reference_coords=z_reference_coords,
             z_min_mm=z_min_mm,
             z_max_mm=z_max_mm,
-            calculated_z_range_mm=calculated_z_range_mm,
+            factory_z_travel_mm=factory_z_travel_mm,
             z_reference_mode=z_reference_mode,
             instrument_name=instrument_name,
             block_height_mm=block_height_mm,
             block_touch_wpos_z_mm=block_touch_wpos_z_mm,
             reachable_z_min_mm=reachable_z_min_mm,
+            home_to_block_travel_mm=home_to_block_travel_mm,
+            remaining_below_block_mm=remaining_below_block_mm,
+            can_reach_deck_bottom=can_reach_deck_bottom,
+            expected_home_z_mm=expected_home_z_mm,
             output=output,
         )
         gantry_yaml_text = _updated_gantry_yaml_text(
@@ -996,6 +1186,7 @@ def run_calibration(
             z_min_mm=z_min_mm,
             z_max_mm=z_max_mm,
             max_travel=max_travel,
+            homing_pull_off_mm=homing_pull_off_mm,
         )
         _print_yaml_block(
             title="Full gantry YAML to copy/paste:",
@@ -1019,11 +1210,13 @@ def run_calibration(
             xy_origin_verification=_coords_tuple(xy_origin_coords),
             z_reference_verification=_coords_tuple(z_reference_coords),
             z_min_mm=z_min_mm,
-            calculated_z_range_mm=calculated_z_range_mm,
+            factory_z_travel_mm=factory_z_travel_mm,
             z_reference_mode=z_reference_mode,
             reachable_z_min_mm=reachable_z_min_mm,
             block_height_mm=block_height_mm,
             block_touch_wpos_z_mm=block_touch_wpos_z_mm,
+            home_to_block_travel_mm=home_to_block_travel_mm,
+            can_reach_deck_bottom=can_reach_deck_bottom,
             grbl_max_travel=(
                 max_travel["max_travel_x"],
                 max_travel["max_travel_y"],

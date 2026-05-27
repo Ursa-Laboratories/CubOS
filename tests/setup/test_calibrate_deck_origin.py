@@ -12,6 +12,7 @@ from gantry.errors import (
 )
 from setup.calibration.single_instrument_calibration import (
     DeckOriginCalibrationResult,
+    _calculate_block_z_calibration,
     _calculated_z_range,
     run_calibration,
 )
@@ -24,7 +25,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_range: 100.0
+  factory_z_travel_mm: 100.0
   y_axis_motion: head
   safe_z: 85.0
 working_volume:
@@ -48,6 +49,7 @@ class _FakeGantry:
         self.calls: list[tuple] = []
         self.coords = {"x": 0.0, "y": 0.0, "z": 0.0}
         self.home_count = 0
+        self.homing_pull_off = 0.0
         _FakeGantry.instance = self
 
     def connect(self) -> None:
@@ -118,6 +120,15 @@ class _FakeGantry:
     def set_serial_timeout(self, timeout: float) -> None:
         self.calls.append(("set_serial_timeout", timeout))
 
+    def set_grbl_setting(self, setting: str, value: float) -> None:
+        self.calls.append(("set_grbl_setting", setting, value))
+        if setting in {"$27", "27"}:
+            self.homing_pull_off = float(value)
+
+    def homing_pull_off_mm(self) -> float:
+        self.calls.append(("homing_pull_off_mm",))
+        return self.homing_pull_off
+
     def set_expected_grbl_settings(
         self,
         settings: dict[str, float] | None,
@@ -132,6 +143,9 @@ class _FakeGantry:
         max_travel_x: float,
         max_travel_y: float,
         max_travel_z: float,
+        status_report: float | int | None = None,
+        homing_pull_off: float | None = None,
+        hard_limits: float | int | bool | None = None,
         tolerance_mm: float = 0.001,
     ) -> None:
         self.calls.append(
@@ -140,6 +154,9 @@ class _FakeGantry:
                 max_travel_x,
                 max_travel_y,
                 max_travel_z,
+                status_report,
+                homing_pull_off,
+                hard_limits,
                 tolerance_mm,
             )
         )
@@ -258,11 +275,12 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
     assert result.z_min_mm == 0.0
     assert result.calculated_z_range_mm == 100.0
     assert result.reachable_z_min_mm == 0.0
-    assert result.measured_working_volume == (398.5, 299.25, 100.0)
-    assert result.grbl_max_travel == (398.5, 299.25, 100.0)
+    assert result.measured_working_volume == (398.5, 299.25, 96.75)
+    assert result.grbl_max_travel == (398.5, 299.25, 96.75)
     assert result.plan.origin_wpos == (0.0, 0.0, 0.0)
     assert _FakeGantry.instance.calls == [
         ("connect",),
+        ("set_grbl_setting", "$10", 0),
         ("set_serial_timeout", 10.0),
         ("home",),
         ("set_serial_timeout", 1.0),
@@ -284,7 +302,8 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
         ("home",),
         ("set_serial_timeout", 1.0),
         ("get_coordinates",),
-        ("configure_soft_limits_from_spans", 398.5, 299.25, 100.0, 0.25),
+        ("homing_pull_off_mm",),
+        ("configure_soft_limits_from_spans", 398.5, 299.25, 96.75, 0, 0.0, None, 0.25),
         ("set_serial_timeout", 0.05),
         ("disconnect",),
     ]
@@ -293,7 +312,7 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
     assert any("Calibrated working volume" in message for message in messages)
 
 
-def test_run_calibration_block_mode_uses_seeded_calculated_z_range(tmp_path):
+def test_run_calibration_block_mode_uses_home_to_block_travel(tmp_path):
     path = _write_gantry(tmp_path / "gantry.yaml")
     messages: list[str] = []
 
@@ -303,7 +322,7 @@ def test_run_calibration_block_mode_uses_seeded_calculated_z_range(tmp_path):
         gantry_factory=_FakeGantry,
         key_reader=_key_reader(
             [
-                ("X", 20),
+                ("Z", 50),
                 ("\r", 1),
             ]
         ),
@@ -313,20 +332,22 @@ def test_run_calibration_block_mode_uses_seeded_calculated_z_range(tmp_path):
     )
 
     assert isinstance(result, DeckOriginCalibrationResult)
-    assert result.xy_origin_verification == (0.0, 0.0, 20.0)
-    assert result.z_reference_verification == (0.0, 0.0, 20.0)
+    assert result.xy_origin_verification == (0.0, 0.0, -50.0)
+    assert result.z_reference_verification == (0.0, 0.0, 35.0)
     assert result.z_min_mm == 0.0
     assert result.calculated_z_range_mm == 100.0
-    assert result.reachable_z_min_mm == 15.0
+    assert result.reachable_z_min_mm == 0.0
     assert result.block_height_mm == 35.0
-    assert result.block_touch_wpos_z_mm == 20.0
-    assert result.measured_working_volume == (398.5, 299.25, 100.0)
-    assert result.grbl_max_travel == (398.5, 299.25, 100.0)
-    assert ("set_work_coordinates", None, None, 20.0) in _FakeGantry.instance.calls
+    assert result.block_touch_wpos_z_mm == -50.0
+    assert result.home_to_block_travel_mm == 50.0
+    assert result.can_reach_deck_bottom is True
+    assert result.measured_working_volume == (398.5, 299.25, 96.75)
+    assert result.grbl_max_travel == (398.5, 299.25, 96.75)
+    assert ("set_work_coordinates", None, None, 35.0) in _FakeGantry.instance.calls
     assert any("block_height: 35.000" in message for message in messages)
-    assert any("block_touch_wpos_z: 20.000" in message for message in messages)
+    assert any("block_touch_wpos_z: -50.000" in message for message in messages)
     assert any(
-        "inferred_lowest_reachable_height_above_deck: 15.000" in message
+        "home_to_block_travel: 50.000" in message
         for message in messages
     )
 
@@ -355,8 +376,8 @@ def test_run_calibration_records_ruler_gap_but_sets_z_min_to_wpos_zero(tmp_path)
     assert result.z_min_mm == 0.0
     assert result.calculated_z_range_mm == 100.0
     assert result.reachable_z_min_mm == 43.0
-    assert result.measured_working_volume == (398.5, 299.25, 100.0)
-    assert result.grbl_max_travel == (398.5, 299.25, 100.0)
+    assert result.measured_working_volume == (398.5, 299.25, 96.75)
+    assert result.grbl_max_travel == (398.5, 299.25, 96.75)
     assert ("set_work_coordinates", 0.0, 0.0, None) in _FakeGantry.instance.calls
     assert ("set_work_coordinates", None, None, 0.0) in _FakeGantry.instance.calls
     assert any("WPos Z=0" in message for message in messages)
@@ -372,7 +393,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_range: 100.0
+  factory_z_travel_mm: 100.0
   y_axis_motion: head
   safe_z: 85.0
 working_volume:
@@ -384,6 +405,7 @@ working_volume:
   z_max: 100.0
 grbl_settings:
   dir_invert_mask: 1
+  homing_pull_off: 10.0
   steps_per_mm_x: 400.0
 instruments:
   asmi:
@@ -406,17 +428,19 @@ instruments:
     )
 
     assert isinstance(result, DeckOriginCalibrationResult)
+    assert result.grbl_max_travel == (408.5, 309.25, 106.75)
     output_text = "\n".join(messages)
     assert "Full gantry YAML to copy/paste:" in output_text
     assert "dir_invert_mask: 1" in output_text
+    assert "homing_pull_off: 10.0" in output_text
     assert "steps_per_mm_x: 400.0" in output_text
     assert "soft_limits: true" in output_text
     assert "homing_enable: true" in output_text
-    assert "max_travel_x: 398.5" in output_text
-    assert "max_travel_y: 299.25" in output_text
-    assert "total_z_range: 100.0" in output_text
-    assert "z_max: 100.0" in output_text
-    assert "max_travel_z: 100.0" in output_text
+    assert "max_travel_x: 408.5" in output_text
+    assert "max_travel_y: 309.25" in output_text
+    assert "factory_z_travel_mm: 100.0" in output_text
+    assert "z_max: 96.75" in output_text
+    assert "max_travel_z: 106.75" in output_text
     assert "instruments:" in output_text
     assert _FakeGantry.instance.calls[0] == ("connect",)
 
@@ -440,9 +464,9 @@ def test_run_calibration_can_prompt_and_write_gantry_yaml(tmp_path):
     written = output_path.read_text(encoding="utf-8")
     assert "grbl_settings:" in written
     assert "soft_limits: true" in written
-    assert "total_z_range: 100.0" in written
-    assert "z_max: 100.0" in written
-    assert "max_travel_z: 100.0" in written
+    assert "factory_z_travel_mm: 100.0" in written
+    assert "z_max: 96.75" in written
+    assert "max_travel_z: 96.75" in written
 
 
 def test_run_calibration_prompts_for_tip_gap_when_omitted(tmp_path):
@@ -728,8 +752,8 @@ def test_dry_run_prints_commands_without_connecting(tmp_path):
     assert "  $22=1" in messages
     assert "  $20=1" in messages
     assert (
-        "The seeded gantry YAML cnc.total_z_range will be preserved and used "
-        "as calibrated Z travel."
+        "The gantry YAML cnc.factory_z_travel_mm is preserved as an out-of-box "
+        "safety bound; calibrated Z max comes from the homed readback."
     ) in messages
 
 
@@ -775,55 +799,72 @@ def test_rejects_legacy_negative_space_config(tmp_path):
 
 
 def test_calculated_z_range_returns_value():
-    assert _calculated_z_range({"cnc": {"total_z_range": 87.0}}) == 87.0
+    assert _calculated_z_range({"cnc": {"factory_z_travel_mm": 87.0}}) == 87.0
 
 
 def test_calculated_z_range_raises_if_cnc_key_missing():
-    with pytest.raises(ValueError, match="cnc.total_z_range"):
+    with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
         _calculated_z_range({})
 
 
-def test_calculated_z_range_raises_if_total_z_range_key_missing():
-    with pytest.raises(ValueError, match="cnc.total_z_range"):
+def test_calculated_z_range_raises_if_factory_z_travel_mm_key_missing():
+    with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
         _calculated_z_range({"cnc": {"homing_strategy": "standard"}})
 
 
 def test_calculated_z_range_raises_if_cnc_not_a_dict():
-    with pytest.raises(ValueError, match="cnc.total_z_range"):
+    with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
         _calculated_z_range({"cnc": "standard"})
 
 
 def test_calculated_z_range_raises_if_non_numeric():
     with pytest.raises(ValueError, match="numeric"):
-        _calculated_z_range({"cnc": {"total_z_range": "not-a-number"}})
+        _calculated_z_range({"cnc": {"factory_z_travel_mm": "not-a-number"}})
 
 
 def test_calculated_z_range_raises_if_zero():
     with pytest.raises(ValueError, match="> 0"):
-        _calculated_z_range({"cnc": {"total_z_range": 0.0}})
+        _calculated_z_range({"cnc": {"factory_z_travel_mm": 0.0}})
 
 
 def test_calculated_z_range_raises_if_negative():
     with pytest.raises(ValueError, match="> 0"):
-        _calculated_z_range({"cnc": {"total_z_range": -5.0}})
+        _calculated_z_range({"cnc": {"factory_z_travel_mm": -5.0}})
 
 
 # --- block mode guard tests ---
 
 
-def test_block_mode_raises_if_touch_at_or_below_tolerance(tmp_path):
-    path = _write_gantry(tmp_path / "gantry.yaml")
+def test_block_z_calculation_scenario_a_reaches_deck_bottom():
+    result = _calculate_block_z_calibration(
+        initial_home_z_mm=110.0,
+        block_touch_wpos_z_mm=60.0,
+        block_height_mm=35.0,
+        factory_z_travel_mm=110.0,
+        tolerance_mm=0.25,
+    )
 
-    with pytest.raises(RuntimeError, match="Block touch WPos Z must be positive"):
-        run_calibration(
-            path,
-            output=lambda _: None,
-            gantry_factory=_FakeGantry,
-            key_reader=_key_reader([("\r", 1)]),
-            stdin_flusher=lambda: None,
-            tip_gap_mm=35.0,
-            z_reference_mode="block",
-        )
+    assert result.home_to_block_travel_mm == 50.0
+    assert result.remaining_below_block_mm == 60.0
+    assert result.can_reach_deck_bottom is True
+    assert result.z_min_mm == 0.0
+    assert result.expected_home_z_mm == 85.0
+
+
+def test_block_z_calculation_scenario_b_cannot_reach_deck_bottom():
+    result = _calculate_block_z_calibration(
+        initial_home_z_mm=110.0,
+        block_touch_wpos_z_mm=10.0,
+        block_height_mm=35.0,
+        factory_z_travel_mm=110.0,
+        tolerance_mm=0.25,
+    )
+
+    assert result.home_to_block_travel_mm == 100.0
+    assert result.remaining_below_block_mm == 10.0
+    assert result.can_reach_deck_bottom is False
+    assert result.z_min_mm == 25.0
+    assert result.expected_home_z_mm == 135.0
 
 
 def _write_gantry_small_z(path):
@@ -833,7 +874,7 @@ serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
-  total_z_range: 15.0
+  factory_z_travel_mm: 15.0
   y_axis_motion: head
   safe_z: 12.0
 working_volume:
@@ -849,31 +890,12 @@ working_volume:
     return path
 
 
-def test_block_mode_raises_if_touch_exceeds_calculated_z_range(tmp_path):
-    path = _write_gantry_small_z(tmp_path / "gantry.yaml")
-
-    with pytest.raises(RuntimeError, match="Block touch WPos Z exceeds"):
-        run_calibration(
-            path,
-            output=lambda _: None,
-            gantry_factory=_FakeGantry,
-            key_reader=_key_reader([("X", 20), ("\r", 1)]),
-            stdin_flusher=lambda: None,
-            tip_gap_mm=10.0,
-            z_reference_mode="block",
-        )
-
-
-def test_block_mode_raises_if_reachable_z_min_is_negative(tmp_path):
-    path = _write_gantry(tmp_path / "gantry.yaml")
-
-    with pytest.raises(RuntimeError, match="block_touch_wpos_z.*exceeds.*block_height"):
-        run_calibration(
-            path,
-            output=lambda _: None,
-            gantry_factory=_FakeGantry,
-            key_reader=_key_reader([("X", 30), ("\r", 1)]),
-            stdin_flusher=lambda: None,
-            tip_gap_mm=20.0,
-            z_reference_mode="block",
+def test_block_z_calculation_raises_if_travel_exceeds_factory_range():
+    with pytest.raises(RuntimeError, match="exceeds the configured factory Z travel"):
+        _calculate_block_z_calibration(
+            initial_home_z_mm=110.0,
+            block_touch_wpos_z_mm=-10.0,
+            block_height_mm=35.0,
+            factory_z_travel_mm=100.0,
+            tolerance_mm=0.25,
         )

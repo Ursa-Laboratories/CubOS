@@ -24,7 +24,7 @@ def _gantry(safe_z: float = 85.0) -> GantryConfig:
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_range=100.0,
+        factory_z_travel_mm=100.0,
         working_volume=WorkingVolume(
             x_min=0.0, x_max=400.0,
             y_min=0.0, y_max=300.0,
@@ -103,7 +103,7 @@ def test_scan_passes_when_safe_z_unconfigured():
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
         homing_strategy=HomingStrategy.STANDARD,
-        total_z_range=100.0,
+        factory_z_travel_mm=100.0,
         working_volume=WorkingVolume(
             x_min=0.0, x_max=400.0,
             y_min=0.0, y_max=300.0,
