@@ -587,6 +587,7 @@ class Gantry:
         max_travel_z: float,
         status_report: float | int | None = None,
         homing_pull_off: float | None = None,
+        hard_limits: float | int | bool | None = None,
         tolerance_mm: float = 0.001,
     ) -> None:
         """Program GRBL soft limits from calibrated travel spans."""
@@ -605,11 +606,18 @@ class Gantry:
                 "Cannot configure soft limits with non-positive travel spans: "
                 + ", ".join(invalid)
             )
-        expected_reporting: Dict[str, float] = {}
+        expected_reporting: Dict[str, Any] = {}
         if status_report is not None:
             expected_reporting["$10"] = _validate_status_report(status_report)
         if homing_pull_off is not None:
             expected_reporting["$27"] = _validate_homing_pull_off_mm(homing_pull_off)
+        configured_hard_limits = (
+            hard_limits
+            if hard_limits is not None
+            else self._configured_grbl_setting("hard_limits")
+        )
+        if configured_hard_limits is not None:
+            expected_reporting["$21"] = configured_hard_limits
         if self._offline:
             return
 
@@ -677,6 +685,7 @@ class Gantry:
         total_z_range: float,
         status_report: float | int | None = 0,
         homing_pull_off: float | None = None,
+        hard_limits: float | int | bool | None = None,
         tolerance_mm: float = 0.001,
     ) -> Dict[str, Any]:
         """Finalize single-instrument deck-origin calibration on the controller.
@@ -784,17 +793,9 @@ class Gantry:
             max_travel_z=max_travel["z"],
             status_report=status_report,
             homing_pull_off=homing_pull_off_mm,
+            hard_limits=hard_limits,
             tolerance_mm=tolerance_mm,
         )
-        try:
-            self.home()
-        except Exception as exc:
-            raise MillConnectionError(
-                "Deck-origin calibration: soft limits programmed successfully but "
-                "final re-home failed. GRBL travel spans are updated but G54 work "
-                "coordinates have not been assigned — home manually and re-run "
-                f"calibration to complete: {exc}"
-            ) from exc
         self.activate_work_coordinate_system("G54")
         self.clear_g92_offsets()
         self.set_work_coordinates(

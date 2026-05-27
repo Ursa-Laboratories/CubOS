@@ -377,6 +377,7 @@ class TestGantry(unittest.TestCase):
         mock_mill.read_grbl_settings.return_value = {
             "$10": "0",
             "$20": "1",
+            "$21": "1",
             "$22": "1",
             "$27": "10.000",
             "$130": "306.000",
@@ -390,12 +391,14 @@ class TestGantry(unittest.TestCase):
             max_travel_z=113.0,
             status_report=0,
             homing_pull_off=10.0,
+            hard_limits=True,
         )
         self.assertEqual(
             mock_mill.set_grbl_setting.call_args_list,
             [
                 unittest.mock.call("10", "0"),
                 unittest.mock.call("27", "10"),
+                unittest.mock.call("21", "1"),
                 unittest.mock.call("20", "0"),
                 unittest.mock.call("130", "306"),
                 unittest.mock.call("131", "306"),
@@ -452,6 +455,7 @@ class TestGantryFinalizeDeckOriginCalibration(unittest.TestCase):
             {
                 "$10": "0",
                 "$20": "1",
+                "$21": "1",
                 "$22": "1",
                 "$27": "10.000",
                 "$130": "396.000",
@@ -470,6 +474,7 @@ class TestGantryFinalizeDeckOriginCalibration(unittest.TestCase):
             block_touch_z=10.0,
             block_height=10.0,
             total_z_range=100.0,
+            hard_limits=True,
         )
 
         self.assertEqual(
@@ -481,7 +486,7 @@ class TestGantryFinalizeDeckOriginCalibration(unittest.TestCase):
             {"x": 396.0, "y": 260.5, "z": 101.0},
         )
         self.assertEqual(result["homing_pull_off_mm"], 10.0)
-        self.assertEqual(mock_mill.home.call_count, 2)
+        self.assertEqual(mock_mill.home.call_count, 1)
         mock_mill.execute_command.assert_any_call(
             "G10 L20 P1 X386 Y250.5 Z91"
         )
@@ -491,6 +496,7 @@ class TestGantryFinalizeDeckOriginCalibration(unittest.TestCase):
                 unittest.mock.call("10", "0"),
                 unittest.mock.call("10", "0"),
                 unittest.mock.call("27", "10"),
+                unittest.mock.call("21", "1"),
                 unittest.mock.call("20", "0"),
                 unittest.mock.call("130", "396"),
                 unittest.mock.call("131", "260.5"),

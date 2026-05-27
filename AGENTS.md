@@ -84,9 +84,16 @@ Do not treat the pull-off reserve as usable WPos.
 - `setup/keyboard_input.py` — single-keypress reader (Unix `tty`/`termios`).
 `scan.plate` may target either a top-level `WellPlate` key or a nested holder path such as `plate_holder.plate`, as long as that path resolves to a `WellPlate`.
 
-## Debugging Mode
+## Hardware Iteration Mode
 
-If the user is actively debugging, prioritize fast diagnosis over the TDD loop. Do not add or run unit tests during the debugging cycle unless asked or until the bug is fixed. Temporary instrumentation is OK if tagged and removed before finalizing.
+Covers two situations where TDD is deferred:
+
+- **Debugging**: fast diagnosis of an existing bug — skip tests until the fix is confirmed, then add a regression test.
+- **Iterative hardware testing**: small changes (calibration, GRBL params, YAML tweaks, motion adjustments) where physical validation must come before tests are meaningful.
+
+In both cases: make the minimal targeted change, mark deferred work `# TODO(iter): test` or `# TODO(iter): doc`, and sweep those tags at close-out. Temporary instrumentation is OK if tagged and removed before finalizing.
+
+See root `AGENTS.md` for the full Development Modes definition.
 
 ## Progress Notes
 

@@ -338,6 +338,13 @@ def _configured_homing_pull_off(raw_config: dict[str, Any]) -> float | None:
     return pull_off
 
 
+def _configured_grbl_setting(raw_config: dict[str, Any], field_name: str) -> Any:
+    settings = raw_config.get("grbl_settings") or {}
+    if not isinstance(settings, dict):
+        return None
+    return settings.get(field_name)
+
+
 def _apply_calibration_grbl_baseline(
     gantry: Gantry,
     raw_config: dict[str, Any],
@@ -1152,6 +1159,7 @@ def run_calibration(
                 max_travel_z=max_travel["max_travel_z"],
                 status_report=0,
                 homing_pull_off=homing_pull_off_mm,
+                hard_limits=_configured_grbl_setting(raw_config, "hard_limits"),
                 tolerance_mm=tolerance_mm,
             )
 
