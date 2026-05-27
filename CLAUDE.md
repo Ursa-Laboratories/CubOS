@@ -1,6 +1,6 @@
 Read `AGENTS.md` first. It is the source of truth for retrieval, hardware-safety handoff order, progress notes, and validation gates.
 
-Use TDD for implementation unless `AGENTS.md` debugging mode applies. Keep code clean, run focused tests as you work, and delete temporary files before finalizing.
+In **TDD Mode** (planning sessions, new features, cross-repo interface changes): write tests alongside implementation and update docs as you go. In **Hardware Iteration Mode** (small changes under active hardware testing): defer tests and docs to close-out, mark deferred work with `# TODO(iter)`. See root `AGENTS.md` for full mode definitions.
 
 In planning mode, ask follow-up questions and wait for plan review before executing.
 

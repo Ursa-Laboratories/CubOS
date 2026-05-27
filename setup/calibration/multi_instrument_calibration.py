@@ -29,6 +29,7 @@ from setup.calibration.single_instrument_calibration import (  # noqa: E402
     _calculate_grbl_max_travel,
     _calibration_block_height_mm,
     _factory_z_travel_mm,
+    _configured_grbl_setting,
     _interactive_jog_to_reference,
     _load_raw_config,
     _maybe_write_gantry_yaml,
@@ -615,6 +616,7 @@ def run_multi_instrument_calibration(
                 max_travel_z=max_travel["max_travel_z"],
                 status_report=0,
                 homing_pull_off=homing_pull_off_mm,
+                hard_limits=_configured_grbl_setting(raw_config, "hard_limits"),
                 tolerance_mm=tolerance_mm,
             )
             restore_soft_limits_after_calibration = False
