@@ -31,6 +31,7 @@ docs = [
 where = ["src", "."]
 include = ["board", "board.*", "data", "data.*", "deck", "deck.*",
            "gantry", "gantry.*", "instruments", "instruments.*",
+           "cubos", "cubos.*",
            "protocol_engine", "protocol_engine.*", "validation", "validation.*"]
 
 [tool.setuptools.package-data]

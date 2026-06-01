@@ -2,6 +2,15 @@
 
 Protocols are ordered YAML step lists that compile into an executable `Protocol` object. At runtime, each step resolves to a registered command handler and executes against a shared `ProtocolContext`.
 
+The same compiled `Protocol` object can also be authored directly in Python:
+
+    from cubos.protocols.asmi import move_a1_protocol
+
+    protocol = move_a1_protocol()
+
+The example modules under `cubos.protocols` mirror representative files in
+`configs/protocol/` while using CubOS imports instead of YAML.
+
 ## Core Flow
 
 1. Load protocol YAML.
