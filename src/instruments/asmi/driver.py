@@ -263,65 +263,25 @@ class ASMI(BaseInstrument):
     ) -> dict:
         """Perform step-by-step indentation at the current XY position.
 
-        Coordinate convention (deck-origin, +Z up). All three Z-related
-        parameters mirror the protocol-layer YAML convention:
-
-        * ``measurement_height`` and ``indentation_limit_height`` are
-          *labware-relative* offsets (mm above the well surface; +above,
-          -below) — the same values the user supplies on the YAML scan
-          command.
-        * ``well_z`` is the absolute deck-frame Z of the well surface,
-          injected by the engine from the calibration anchor. The
-          driver computes ``action_z = well_z + measurement_height`` and
-          ``target_z = well_z + indentation_limit_height``.
-
-        Each "down" step DECREASES z by ``step_size``.
-
-        The scan command positions the gantry at the well before calling
-        this method. Indentation then:
-        1. Lowers to ``well_z + measurement_height`` (descend to start of indent).
-        2. Takes baseline force readings.
-        3. Steps z toward ``well_z + indentation_limit_height``, reading force
-           at each step.
-        4. Stops on ``force_limit`` or ``indentation_limit_height``, whichever
-           fires first.
-
-        Args:
-            gantry:                   Gantry instance for Z movement.
-            measurement_height:       Labware-relative offset for the action
-                                      plane (mm above the well surface; +above,
-                                      -below).
-            indentation_limit_height: Labware-relative offset for the deepest
-                                      descent plane. Must be ≤ ``measurement_height``;
-                                      equality is legal (zero-descent indentation
-                                      collects baseline samples and returns).
-            well_z:                   Absolute deck-frame Z of the well surface
-                                      (engine-injected from the calibration anchor).
-            step_size:                Z increment per step in mm (positive).
-            force_limit:              Stop when corrected force exceeds this in N.
-            baseline_samples:         Number of baseline force readings.
-            measure_with_return:
-                                      If True, after descent step Z back up to
-                                      the action plane and record each upward
-                                      sample. Every sample is tagged with
-                                      ``direction`` ("down" on descent, "up" on
-                                      return).
-
-        Returns:
-            Dict with keys: measurements, baseline_avg, baseline_std,
-            force_exceeded, data_points, measure_with_return. Every entry in
-            ``measurements`` includes a ``direction`` field.
+        Z inputs are labware-relative offsets resolved against ``well_z``.
+        Descent decreases deck-frame Z; optional return samples increase Z
+        back to the action plane. Every measurement is tagged with direction.
         """
-        _step_size = step_size if step_size is not None else self._step_size
-        _force_limit = force_limit if force_limit is not None else self._force_limit
-        _baseline_samples = baseline_samples if baseline_samples is not None else self._baseline_samples
-
+        _step_size, _force_limit, _baseline_samples = (
+            self._resolve_indentation_settings(
+                step_size=step_size,
+                force_limit=force_limit,
+                baseline_samples=baseline_samples,
+            )
+        )
         self._validate_indentation_parameters(
             measurement_height, indentation_limit_height, _step_size,
         )
-
-        action_z = well_z + measurement_height
-        target_z = well_z + indentation_limit_height
+        action_z, target_z = self._resolve_indentation_z_targets(
+            well_z=well_z,
+            measurement_height=measurement_height,
+            indentation_limit_height=indentation_limit_height,
+        )
 
         if self._offline:
             return self._offline_indentation(
@@ -332,53 +292,177 @@ class ASMI(BaseInstrument):
                 measure_with_return=measure_with_return,
             )
 
+        cur_x, cur_y = self._move_to_indentation_start(
+            gantry,
+            action_z=action_z,
+        )
+        baseline_avg, baseline_std = self._collect_indentation_baseline(
+            baseline_samples=_baseline_samples,
+        )
+        measurements, force_exceeded = self._run_indentation_descent(
+            gantry,
+            cur_x=cur_x,
+            cur_y=cur_y,
+            action_z=action_z,
+            target_z=target_z,
+            step_size=_step_size,
+            force_limit=_force_limit,
+            baseline_avg=baseline_avg,
+        )
+
+        if measure_with_return and measurements:
+            self._run_indentation_return(
+                gantry,
+                cur_x=cur_x,
+                cur_y=cur_y,
+                action_z=action_z,
+                target_z=target_z,
+                step_size=_step_size,
+                baseline_avg=baseline_avg,
+                measurements=measurements,
+            )
+
+        return self._indentation_result(
+            measurements=measurements,
+            baseline_avg=baseline_avg,
+            baseline_std=baseline_std,
+            force_exceeded=force_exceeded,
+            measure_with_return=measure_with_return,
+        )
+
+    def _resolve_indentation_settings(
+        self,
+        *,
+        step_size: float | None,
+        force_limit: float | None,
+        baseline_samples: int | None,
+    ) -> tuple[float, float, int]:
+        resolved_step_size = step_size if step_size is not None else self._step_size
+        resolved_force_limit = (
+            force_limit if force_limit is not None else self._force_limit
+        )
+        resolved_baseline_samples = (
+            baseline_samples
+            if baseline_samples is not None
+            else self._baseline_samples
+        )
+        return resolved_step_size, resolved_force_limit, resolved_baseline_samples
+
+    @staticmethod
+    def _resolve_indentation_z_targets(
+        *,
+        well_z: float,
+        measurement_height: float,
+        indentation_limit_height: float,
+    ) -> tuple[float, float]:
+        action_z = well_z + measurement_height
+        target_z = well_z + indentation_limit_height
+        return action_z, target_z
+
+    def _move_to_indentation_start(
+        self,
+        gantry,
+        *,
+        action_z: float,
+    ) -> tuple[float, float]:
         coords = gantry.get_coordinates()
         cur_x, cur_y = coords["x"], coords["y"]
-
         self._move_z(gantry, cur_x, cur_y, action_z)
+        return cur_x, cur_y
 
+    def _collect_indentation_baseline(
+        self,
+        *,
+        baseline_samples: int,
+    ) -> tuple[float, float]:
         baseline_avg, baseline_std = self.get_baseline_force(
-            samples=_baseline_samples
+            samples=baseline_samples
         )
         self.logger.info(
             "Baseline: %.3f +/- %.3f N", baseline_avg, baseline_std
         )
+        return baseline_avg, baseline_std
 
-        measurements = []
+    @staticmethod
+    def _measurement_point(
+        *,
+        z_mm: float,
+        raw_force_n: float,
+        corrected_force_n: float,
+        direction: str,
+    ) -> dict:
+        return {
+            "timestamp": time.time(),
+            "z_mm": z_mm,
+            "raw_force_n": raw_force_n,
+            "corrected_force_n": corrected_force_n,
+            "direction": direction,
+        }
+
+    def _record_force_at_z(
+        self,
+        *,
+        z_mm: float,
+        baseline_avg: float,
+        direction: str,
+    ) -> tuple[dict, float, float]:
+        force = self.get_force_reading()
+        corrected = force - baseline_avg
+        return (
+            self._measurement_point(
+                z_mm=z_mm,
+                raw_force_n=force,
+                corrected_force_n=corrected,
+                direction=direction,
+            ),
+            force,
+            corrected,
+        )
+
+    def _run_indentation_descent(
+        self,
+        gantry,
+        *,
+        cur_x: float,
+        cur_y: float,
+        action_z: float,
+        target_z: float,
+        step_size: float,
+        force_limit: float,
+        baseline_avg: float,
+    ) -> tuple[list[dict], bool]:
+        measurements: list[dict] = []
         force_exceeded = False
-        max_steps = _step_count_bound(action_z, target_z, _step_size)
+        max_steps = _step_count_bound(action_z, target_z, step_size)
 
-        # Descent: deck-origin +Z-up, so each step DECREASES z toward the deck.
+        # Deck-origin +Z-up: descent decreases Z toward the deck.
         for _ in range(max_steps):
             coords = gantry.get_coordinates()
             current_z = coords["z"]
             if current_z <= target_z:
                 self.logger.info("Reached target_z %.3f mm", target_z)
                 break
-            next_z = max(current_z - _step_size, target_z)
-            self._move_z(gantry, cur_x, cur_y, next_z)
 
+            next_z = max(current_z - step_size, target_z)
+            self._move_z(gantry, cur_x, cur_y, next_z)
             coords = gantry.get_coordinates()
-            force = self.get_force_reading()
-            corrected = force - baseline_avg
-            measurements.append({
-                "timestamp": time.time(),
-                "z_mm": coords["z"],
-                "raw_force_n": force,
-                "corrected_force_n": corrected,
-                "direction": "down",
-            })
+            point, force, corrected = self._record_force_at_z(
+                z_mm=coords["z"],
+                baseline_avg=baseline_avg,
+                direction="down",
+            )
+            measurements.append(point)
 
             if len(measurements) % 10 == 0:
                 self.logger.info(
                     "Step #%d: Z=%.3f mm, F=%.3f N, dF=%.3f N",
-                    len(measurements), coords["z"], force, corrected,
+                    len(measurements), point["z_mm"], force, corrected,
                 )
 
-            if abs(corrected) > _force_limit:
+            if abs(corrected) > force_limit:
                 self.logger.info(
                     "Force limit exceeded: %.3f N > %.1f N",
-                    corrected, _force_limit,
+                    corrected, force_limit,
                 )
                 force_exceeded = True
                 break
@@ -388,44 +472,64 @@ class ASMI(BaseInstrument):
                 max_steps, target_z,
             )
 
-        if measure_with_return and measurements:
-            self.logger.info(
-                "Starting return sweep (%d descent samples collected)",
-                len(measurements),
-            )
-            return_cap = _step_count_bound(action_z, target_z, _step_size)
-            # Return: walk z back up to action_z by INCREASING z each step.
-            for _ in range(return_cap):
-                coords = gantry.get_coordinates()
-                current_z = coords["z"]
-                if current_z >= action_z:
-                    break
-                next_z = min(current_z + _step_size, action_z)
-                self._move_z(gantry, cur_x, cur_y, next_z)
-                coords = gantry.get_coordinates()
-                # Break if the gantry did not retract — prevents infinite loop
-                # on stalled axis. get_coordinates reflects the real position.
-                if coords["z"] <= current_z:
-                    self.logger.warning(
-                        "Return sweep aborted: gantry Z did not retract (%.3f)",
-                        current_z,
-                    )
-                    break
-                force = self.get_force_reading()
-                corrected = force - baseline_avg
-                measurements.append({
-                    "timestamp": time.time(),
-                    "z_mm": coords["z"],
-                    "raw_force_n": force,
-                    "corrected_force_n": corrected,
-                    "direction": "up",
-                })
-            else:
-                self.logger.warning(
-                    "Return sweep hit iteration cap %d before reaching action_z %.3f",
-                    return_cap, action_z,
-                )
+        return measurements, force_exceeded
 
+    def _run_indentation_return(
+        self,
+        gantry,
+        *,
+        cur_x: float,
+        cur_y: float,
+        action_z: float,
+        target_z: float,
+        step_size: float,
+        baseline_avg: float,
+        measurements: list[dict],
+    ) -> None:
+        self.logger.info(
+            "Starting return sweep (%d descent samples collected)",
+            len(measurements),
+        )
+        return_cap = _step_count_bound(action_z, target_z, step_size)
+
+        # Deck-origin +Z-up: return increases Z back to the action plane.
+        for _ in range(return_cap):
+            coords = gantry.get_coordinates()
+            current_z = coords["z"]
+            if current_z >= action_z:
+                break
+
+            next_z = min(current_z + step_size, action_z)
+            self._move_z(gantry, cur_x, cur_y, next_z)
+            coords = gantry.get_coordinates()
+            if coords["z"] <= current_z:
+                self.logger.warning(
+                    "Return sweep aborted: gantry Z did not retract (%.3f)",
+                    current_z,
+                )
+                break
+
+            point, _, _ = self._record_force_at_z(
+                z_mm=coords["z"],
+                baseline_avg=baseline_avg,
+                direction="up",
+            )
+            measurements.append(point)
+        else:
+            self.logger.warning(
+                "Return sweep hit iteration cap %d before reaching action_z %.3f",
+                return_cap, action_z,
+            )
+
+    @staticmethod
+    def _indentation_result(
+        *,
+        measurements: list[dict],
+        baseline_avg: float,
+        baseline_std: float,
+        force_exceeded: bool,
+        measure_with_return: bool,
+    ) -> dict:
         return {
             "measurements": measurements,
             "baseline_avg": baseline_avg,
