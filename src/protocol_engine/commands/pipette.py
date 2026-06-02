@@ -19,7 +19,7 @@ from ._movement import engage_at_labware
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 
 def _get_pipette(context: ProtocolContext):

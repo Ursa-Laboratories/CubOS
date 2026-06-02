@@ -104,7 +104,7 @@ protocols:
 PYTHONPATH=src python setup/validate_setup.py \
   configs/gantry/<calibrated>.yaml \
   configs/deck/<deck>.yaml \
-  configs/protocol/<protocol>.yaml
+  configs/protocol/<instrument-or-workflow>/<protocol>.yaml
 ```
 
 Calibration can move hardware, change work coordinates, and program soft-limit

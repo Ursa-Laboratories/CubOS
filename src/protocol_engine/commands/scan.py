@@ -18,7 +18,7 @@ from ._dispatch import inject_runtime_args
 from ._movement import _assert_finite_number
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 logger = logging.getLogger(__name__)
 

@@ -1,12 +1,12 @@
 # Protocol
 
-Protocols are ordered YAML step lists that compile into an executable `Protocol` object. At runtime, each step resolves to a registered command handler and executes against a shared `ProtocolContext`.
+Protocols are ordered YAML step lists that compile into an executable `Protocol` object. At runtime, each step resolves to a registered command handler and executes against a shared `ProtocolContext` from `protocol_engine.runtime`.
 
 ## Core Flow
 
 1. Load protocol YAML.
 2. Validate the schema and command arguments.
-3. Compile each step into a `ProtocolStep`.
+3. Compile each step into a `ProtocolStep` from `protocol_engine.runtime`.
 4. Inject a `ProtocolContext` containing the instrumented gantry, deck, logger, and optional persistence objects.
 5. Run the steps sequentially.
 

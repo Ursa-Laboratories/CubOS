@@ -9,7 +9,8 @@ import tempfile
 import pytest
 
 from gantry.gantry_config import GantryConfig
-from protocol_engine.protocol import Protocol, ProtocolContext
+from protocol_engine.protocol import Protocol
+from protocol_engine.runtime import ProtocolContext
 from protocol_engine.registry import CommandRegistry
 from protocol_engine.setup import setup_protocol
 from validation.errors import SetupValidationError

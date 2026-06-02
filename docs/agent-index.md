@@ -29,10 +29,10 @@ After schema/config changes: focused tests, then `setup/validate_setup.py` for a
 
 ## Protocol engine / setup validation
 
-- `src/protocol_engine/yaml_schema.py`, `loader.py`, `setup.py`.
+- `src/protocol_engine/yaml_schema.py`, `loader.py`, `runtime.py`, `setup.py`.
 - `src/protocol_engine/commands/` - command behavior.
 - `setup/validate_setup.py` - end-to-end offline validation.
-- `configs/protocol/`.
+- `configs/protocol/<instrument-or-workflow>/`.
 - Tests: `tests/protocol_engine/`.
 
 ## Instruments

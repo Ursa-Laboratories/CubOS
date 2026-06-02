@@ -28,7 +28,7 @@ from typing import Any, Callable, Dict, TYPE_CHECKING
 from ..errors import ProtocolExecutionError
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 
 def _assert_finite(value: Any, name: str) -> None:

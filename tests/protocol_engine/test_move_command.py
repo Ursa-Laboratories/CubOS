@@ -11,7 +11,7 @@ import pytest
 
 from deck.labware.labware import Coordinate3D
 from protocol_engine.loader import load_protocol_from_yaml
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -13,7 +13,7 @@ from gantry.instrument_loader import load_instrumented_gantry_from_config
 from gantry.loader import load_gantry_from_yaml
 from protocol_engine.commands.scan import scan
 from protocol_engine.loader import load_protocol_from_yaml
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 from protocol_engine.setup import setup_protocol
 from validation.protocol_semantics import validate_protocol_semantics
 

@@ -50,7 +50,7 @@ Validate an example setup without moving hardware:
 PYTHONPATH=src python setup/validate_setup.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_move_a1.yaml
+  configs/protocol/asmi/move_a1.yaml
 ~~~
 
 Run a protocol after calibration and hardware checks:
@@ -59,7 +59,7 @@ Run a protocol after calibration and hardware checks:
 PYTHONPATH=src python setup/run_protocol.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_move_a1.yaml
+  configs/protocol/asmi/move_a1.yaml
 ~~~
 
 ## Configuration Files
@@ -70,7 +70,7 @@ A runnable experiment is defined by three YAML files:
 configs/
   gantry/      # machine envelope, serial port, homing, instruments
   deck/        # labware placement, holder nesting, calibration anchors
-  protocol/    # ordered experiment steps
+  protocol/    # ordered experiment steps grouped by instrument/workflow
 ~~~
 
 ### Gantry
@@ -308,7 +308,7 @@ from protocol_engine.setup_validation import run_setup_validation
 validation = run_setup_validation(
     gantry_path="configs/gantry/cub_xl_asmi.yaml",
     deck_path="configs/deck/asmi_deck.yaml",
-    protocol_path="configs/protocol/asmi_move_a1.yaml",
+    protocol_path="configs/protocol/asmi/move_a1.yaml",
 )
 if not validation.passed:
     raise RuntimeError(validation.output)
@@ -316,7 +316,7 @@ if not validation.passed:
 protocol, context = setup_protocol(
     gantry_path="configs/gantry/cub_xl_asmi.yaml",
     deck_path="configs/deck/asmi_deck.yaml",
-    protocol_path="configs/protocol/asmi_move_a1.yaml",
+    protocol_path="configs/protocol/asmi/move_a1.yaml",
     mock_mode=True,
 )
 
@@ -345,7 +345,7 @@ For focused hardware-adjacent changes, validate the affected setup explicitly:
 PYTHONPATH=src python setup/validate_setup.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_indentation.yaml
+  configs/protocol/asmi/indentation.yaml
 ~~~
 
 ## Documentation

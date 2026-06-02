@@ -21,7 +21,7 @@ from unittest.mock import MagicMock
 from gantry.instrument_mount import InstrumentedGantry
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # Calibrated deck-frame surface Z (the well coordinate's z). This is the

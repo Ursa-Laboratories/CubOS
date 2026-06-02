@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from ..registry import protocol_command
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 
 @protocol_command("pause")

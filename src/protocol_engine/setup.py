@@ -15,7 +15,8 @@ from gantry.instrument_mount import InstrumentedGantry
 from gantry.loader import load_gantry_from_yaml_safe
 from gantry.origin import validate_deck_origin_minima
 from protocol_engine.loader import load_protocol_from_yaml_safe
-from protocol_engine.protocol import Protocol, ProtocolContext
+from protocol_engine.protocol import Protocol
+from protocol_engine.runtime import ProtocolContext
 from validation.bounds import validate_protocol_motion_bounds
 from validation.errors import ProtocolSemanticValidationError, SetupValidationError
 from validation.protocol_semantics import validate_protocol_semantics

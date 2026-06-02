@@ -6,7 +6,7 @@ from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 
 @protocol_command("move")

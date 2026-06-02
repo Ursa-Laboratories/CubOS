@@ -11,7 +11,7 @@ from ._dispatch import inject_runtime_args
 from ._movement import engage_at_labware
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 
 @protocol_command("measure")

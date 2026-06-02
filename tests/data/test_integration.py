@@ -14,7 +14,7 @@ from instruments.base_instrument import BaseInstrument
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.commands.pipette import transfer
 from protocol_engine.commands.scan import scan
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

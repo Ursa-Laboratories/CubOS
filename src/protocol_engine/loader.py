@@ -45,8 +45,9 @@ _LEGACY_TOP_LEVEL_HINTS: dict[str, str] = {
 from . import commands as _commands  # noqa: F401
 
 from .errors import ProtocolLoaderError
-from .protocol import Protocol, ProtocolStep
+from .protocol import Protocol
 from .registry import CommandRegistry
+from .runtime import ProtocolStep
 from .yaml_schema import ProtocolYamlSchema
 
 

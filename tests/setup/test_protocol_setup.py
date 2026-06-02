@@ -13,7 +13,8 @@ from gantry.errors import GantryLoaderError
 from gantry.gantry_config import GantryConfig
 from gantry.instrument_mount import InstrumentedGantry
 from protocol_engine.errors import ProtocolLoaderError
-from protocol_engine.protocol import Protocol, ProtocolContext
+from protocol_engine.protocol import Protocol
+from protocol_engine.runtime import ProtocolContext
 from protocol_engine.registry import CommandRegistry
 from protocol_engine.setup import run_protocol, setup_protocol
 from validation.errors import SetupValidationError

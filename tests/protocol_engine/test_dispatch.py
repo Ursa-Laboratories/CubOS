@@ -16,7 +16,7 @@ import pytest
 from instruments.base_instrument import BaseInstrument
 from protocol_engine.commands._dispatch import inject_runtime_args
 from protocol_engine.errors import ProtocolExecutionError
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 class _ClosedLoopInstrument(BaseInstrument):

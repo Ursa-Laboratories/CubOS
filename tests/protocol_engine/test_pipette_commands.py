@@ -14,7 +14,7 @@ from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
 from deck.labware.well_plate_holder import WellPlateHolder
 from protocol_engine.errors import ProtocolExecutionError
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

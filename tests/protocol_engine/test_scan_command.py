@@ -26,7 +26,7 @@ from instruments.base_instrument import BaseInstrument
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.errors import ProtocolExecutionError
 from protocol_engine.measurements import InstrumentMeasurement
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 HEIGHT_MM = 14.10

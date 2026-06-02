@@ -6,7 +6,7 @@ import logging
 from unittest.mock import MagicMock
 
 from data.data_store import DataStore
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 class TestProtocolContextDataStore:

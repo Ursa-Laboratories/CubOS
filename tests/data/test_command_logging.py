@@ -14,7 +14,7 @@ from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
 from instruments.base_instrument import BaseInstrument
 from instruments.uvvis_ccs.models import UVVisSpectrum
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

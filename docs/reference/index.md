@@ -90,6 +90,7 @@ Narrative operator guidance belongs in the manual docs pages; code-level details
 - [src.protocol_engine.measurements](src/protocol_engine/measurements.md)
 - [src.protocol_engine.protocol](src/protocol_engine/protocol.md)
 - [src.protocol_engine.registry](src/protocol_engine/registry.md)
+- [src.protocol_engine.runtime](src/protocol_engine/runtime.md)
 - [src.protocol_engine.scan_args](src/protocol_engine/scan_args.md)
 - [src.protocol_engine.setup](src/protocol_engine/setup.md)
 - [src.protocol_engine.yaml_schema](src/protocol_engine/yaml_schema.md)

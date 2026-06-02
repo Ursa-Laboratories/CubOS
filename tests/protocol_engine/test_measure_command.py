@@ -8,7 +8,7 @@ from deck.labware.labware import Coordinate3D
 from instruments.base_instrument import BaseInstrument
 from protocol_engine.commands.measure import measure
 from protocol_engine.errors import ProtocolExecutionError
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 HEIGHT_MM = 14.10
