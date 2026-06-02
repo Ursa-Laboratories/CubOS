@@ -6,7 +6,6 @@ Internal implementation used by the sole user-facing entrypoint:
 
 from __future__ import annotations
 
-import argparse
 import copy
 import sys
 import time
@@ -321,7 +320,6 @@ def run_multi_instrument_calibration(
     *,
     reference_instrument: str | None = None,
     lowest_instrument: str | None = None,
-    artifact_xyz: tuple[float, float, float] | None = None,
     instruments_to_calibrate: Sequence[str] | None = None,
     dry_run: bool = False,
     tolerance_mm: float = 0.25,
@@ -367,11 +365,6 @@ def run_multi_instrument_calibration(
         input_reader=input_reader,
         output=output,
     )
-    if artifact_xyz is not None:
-        output(
-            "Ignoring deprecated artifact_xyz/--artifact-* input: the block point "
-            "no longer needs known deck-frame coordinates."
-        )
     instruments = tuple(instruments_to_calibrate or available_instruments)
     names_to_validate = [reference_instrument, *instruments]
     if lowest_instrument is not None:
@@ -726,39 +719,3 @@ def _prompt_instrument_name(
         if confirm in {"y", "yes"}:
             return selected
         output("Selection cancelled; pick the numbered tool again.")
-
-
-def _prompt_float(
-    prompt: str,
-    *,
-    input_reader: Callable[[str], str],
-    output: Callable[[str], None],
-) -> float:
-    while True:
-        raw = input_reader(prompt).strip()
-        try:
-            return float(raw)
-        except ValueError:
-            output("Enter a numeric value in millimeters.")
-
-
-def _prompt_artifact_xyz(
-    *,
-    input_reader: Callable[[str], str],
-    output: Callable[[str], None],
-) -> tuple[float, float, float]:
-    output("Enter the known deck-frame artifact/block point in millimeters.")
-    return (
-        _prompt_float("Artifact X mm: ", input_reader=input_reader, output=output),
-        _prompt_float("Artifact Y mm: ", input_reader=input_reader, output=output),
-        _prompt_float("Artifact Z mm: ", input_reader=input_reader, output=output),
-    )
-
-
-def _artifact_xyz_from_args(args: argparse.Namespace) -> tuple[float, float, float] | None:
-    supplied = [args.artifact_x is not None, args.artifact_y is not None, args.artifact_z is not None]
-    if not any(supplied):
-        return None
-    if not all(supplied):
-        raise ValueError("Supply all of --artifact-x, --artifact-y, and --artifact-z, or none.")
-    return (float(args.artifact_x), float(args.artifact_y), float(args.artifact_z))

@@ -105,9 +105,7 @@ def _finite_field_violation(
     return None
 
 
-def _resolved_safe_z(gantry: GantryConfig | None) -> float | None:
-    if gantry is None:
-        return None
+def _resolved_safe_z(gantry: GantryConfig) -> float:
     return gantry.resolved_safe_z
 
 
@@ -182,16 +180,13 @@ def _validate_machine_structure_point(
     *,
     step_index: int,
     command_name: str,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     label: str,
     instrument: str,
     x: float,
     y: float,
     z: float,
 ) -> list[ProtocolSemanticViolation]:
-    if gantry is None:
-        return []
-
     violations: list[ProtocolSemanticViolation] = []
     for box in fixed_structures_for_gantry(gantry):
         if box.contains(x, y, z):
@@ -208,15 +203,12 @@ def _validate_machine_structure_segment(
     *,
     step_index: int,
     command_name: str,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     label: str,
     instrument: str,
     start: Point3D,
     end: Point3D,
 ) -> list[ProtocolSemanticViolation]:
-    if gantry is None:
-        return []
-
     violations: list[ProtocolSemanticViolation] = []
     for box in fixed_structures_for_gantry(gantry):
         if _segment_intersects_box(start, end, box):
@@ -253,7 +245,7 @@ def _validate_known_transit(
     *,
     step_index: int,
     command_name: str,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     label: str,
     instrument: str,
     current: Point3D | None,
@@ -294,14 +286,10 @@ def _validate_home_waypoints(
     *,
     step_index: int,
     instrumented_gantry: InstrumentedGantry,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     current_poses: dict[str, Point3D],
     instrument_tip_extensions: dict[str, float] | None = None,
 ) -> list[ProtocolSemanticViolation]:
-    if gantry is None:
-        current_poses.clear()
-        return []
-
     violations: list[ProtocolSemanticViolation] = []
     instrument_tip_extensions = instrument_tip_extensions or {}
     for instrument_name, instrument in instrumented_gantry.instruments.items():
@@ -328,7 +316,7 @@ def _validate_gantry_waypoint(
     *,
     step_index: int,
     command_name: str,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     label: str,
     instrument: str,
     instrumented_gantry: InstrumentedGantry,
@@ -337,7 +325,7 @@ def _validate_gantry_waypoint(
     z: float,
     tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
-    if gantry is None or instrument not in instrumented_gantry.instruments:
+    if instrument not in instrumented_gantry.instruments:
         return []
 
     gx, gy, gz = _gantry_xyz_for_tip(
@@ -377,7 +365,7 @@ def _validate_below_safe_z(
     command_name: str,
     label: str,
     z: float | None,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
 ) -> list[ProtocolSemanticViolation]:
     """Verify that absolute Z *z* is at or below ``safe_z`` (the ceiling)."""
     safe_z = _resolved_safe_z(gantry)
@@ -413,7 +401,7 @@ def _validate_pipette_engage(
     tip_extension: float,
     instrumented_gantry: InstrumentedGantry,
     deck: Deck,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     current_poses: dict[str, Point3D],
 ) -> tuple[list[ProtocolSemanticViolation], Point3D | None]:
     violations: list[ProtocolSemanticViolation] = []
@@ -500,7 +488,7 @@ def _validate_scan_points(
     plate: str,
     instrument: str,
     instrumented_gantry: InstrumentedGantry,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     wells: list[tuple[str, Any]],
     action_abs: float,
     approach_abs: float,
@@ -554,7 +542,7 @@ def _validate_scan_segments(
     step_index: int,
     plate: str,
     instrument: str,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     wells: list[tuple[str, Any]],
     current: Point3D | None,
     action_abs: float,
@@ -635,7 +623,7 @@ def _validate_scan_command(
     args: dict[str, Any],
     instrumented_gantry: InstrumentedGantry,
     deck: Deck,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     current_poses: dict[str, Point3D],
     pipette_tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
@@ -791,7 +779,7 @@ def _validate_measure_command(
     args: dict[str, Any],
     instrumented_gantry: InstrumentedGantry,
     deck: Deck,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     current_poses: dict[str, Point3D],
     pipette_tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
@@ -892,7 +880,7 @@ def _validate_move_waypoints(
     protocol: Protocol,
     instrumented_gantry: InstrumentedGantry,
     deck: Deck,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     current_poses: dict[str, Point3D],
     pipette_tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
@@ -1085,7 +1073,7 @@ def _validate_pipette_command(
     args: dict[str, Any],
     instrumented_gantry: InstrumentedGantry,
     deck: Deck,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
     current_poses: dict[str, Point3D],
     tip_state: PipetteTipState,
 ) -> tuple[list[ProtocolSemanticViolation], PipetteTipState]:
@@ -1282,7 +1270,7 @@ def _validate_asmi_indentation(
     relative_action: float,
     normalized: NormalizedScanArguments,
     instrumented_gantry: InstrumentedGantry,
-    gantry: GantryConfig | None,
+    gantry: GantryConfig,
 ) -> list[ProtocolSemanticViolation]:
     """Bounds-check ASMI indentation against the working volume.
 
@@ -1316,7 +1304,7 @@ def _validate_asmi_indentation(
             f"ASMI step_size must be positive, got {step_size}.",
         ))
 
-    if indentation_limit_height is None or gantry is None:
+    if indentation_limit_height is None:
         return violations
     finite_violation = _finite_field_violation(
         step_index, "scan", "indentation_limit_height", indentation_limit_height,
@@ -1341,7 +1329,7 @@ def validate_protocol_semantics(
     protocol: Protocol,
     instrumented_gantry: InstrumentedGantry,
     deck: Deck,
-    gantry: GantryConfig | None = None,
+    gantry: GantryConfig,
 ) -> list[ProtocolSemanticViolation]:
     """Return protocol semantic violations that static bounds checks miss."""
     violations: list[ProtocolSemanticViolation] = []

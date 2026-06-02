@@ -42,8 +42,6 @@ class WellPlateYamlEntry(BaseModel):
     # geometry and skirt thickness. External analysis consumers compute the
     # sample-floor Z as the deck-frame rim Z minus this depth.
     well_depth: Optional[float] = Field(default=None, gt=0)
-    # Backward compatibility: top-level A1 is accepted but deprecated.
-    a1: Optional[_YamlPoint3D] = None
     calibration: _YamlCalibrationPoints
     x_offset: float = Field(..., gt=0)
     y_offset: float = Field(..., gt=0)
@@ -53,10 +51,10 @@ class WellPlateYamlEntry(BaseModel):
 
     @property
     def a1_point(self) -> _YamlPoint3D:
-        """Return canonical A1 point, preferring calibration.a1."""
-        a1 = self.calibration.a1 or self.a1
+        """Return canonical A1 point."""
+        a1 = self.calibration.a1
         if a1 is None:
-            raise ValueError("Calibration must define `a1` (prefer `calibration.a1`).")
+            raise ValueError("Calibration must define `calibration.a1`.")
         return a1
 
     @model_validator(mode="after")
@@ -291,9 +289,7 @@ class WallYamlEntry(BaseModel):
 class WellPlateHolderYamlEntry(_BaseHolderYamlEntry):
     type: Literal["well_plate_holder"] = "well_plate_holder"
     model_name: str = "SlideHolder_Top"
-    well_plate_surface_height_from_bottom: Optional[float] = Field(
-        default=None, gt=0,
-    )
+    well_plate_surface_height_from_bottom: float = Field(default=5.0, gt=0)
     well_plate: Optional[NestedWellPlateYamlEntry] = None
 
     @model_validator(mode="after")

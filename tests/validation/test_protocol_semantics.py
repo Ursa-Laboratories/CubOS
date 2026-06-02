@@ -292,7 +292,7 @@ def test_legacy_scan_travel_names_are_semantic_violations():
         "step_size": 0.01,
     }))
 
-    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
 
     assert any("interwell_travel_height" in v.message for v in violations)
 
@@ -303,7 +303,7 @@ def test_scan_missing_measurement_height_violates():
     args.pop("measurement_height")
     protocol = _protocol(args)
 
-    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
 
     assert any("measurement_height" in v.message for v in violations)
 
@@ -313,7 +313,7 @@ def test_scan_non_finite_measurement_height_names_field(bad_value):
     instrumented_gantry, deck = _board_and_deck()
     protocol = _protocol(_scan_args(measurement_height=bad_value))
 
-    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
 
     assert any(
         "measurement_height must be a finite number" in v.message
@@ -326,7 +326,7 @@ def test_scan_non_finite_interwell_scan_height_names_field(bad_value):
     instrumented_gantry, deck = _board_and_deck()
     protocol = _protocol(_scan_args(interwell_scan_height=bad_value))
 
-    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
 
     assert any(
         "interwell_scan_height must be a finite number" in v.message
@@ -341,7 +341,7 @@ def test_measure_non_finite_measurement_height_names_field(bad_value):
         _measure_args(measurement_height=bad_value), command_name="measure",
     )
 
-    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
 
     assert any(
         "measurement_height must be a finite number" in v.message
@@ -355,7 +355,7 @@ def test_scan_missing_interwell_scan_height_violates():
     args.pop("interwell_scan_height")
     protocol = _protocol(args)
 
-    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
 
     assert any("interwell_scan_height" in v.message for v in violations)
 
@@ -366,7 +366,7 @@ def test_legacy_asmi_z_limit_is_semantic_violation():
         "z_limit": 70.0, "step_size": 0.01,
     }))
 
-    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
 
     assert any("`z_limit` is no longer supported" in v.message for v in violations)
 
@@ -377,7 +377,7 @@ def test_measure_missing_measurement_height_violates():
     args.pop("measurement_height")
     protocol = _protocol(args, command_name="measure")
 
-    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
 
     assert any("measurement_height" in v.message for v in violations)
 
@@ -480,13 +480,6 @@ def test_move_to_unknown_named_position_emits_violation():
     violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("cannot be resolved" in v.message for v in violations), violations
-
-
-def test_move_without_gantry_config_skips_bound_check():
-    """Default-None gantry preserves backward compatibility with older callers."""
-    instrumented_gantry, deck = _board_and_deck()
-    protocol = _move_step(position=(9999.0, 9999.0, 9999.0))
-    assert validate_protocol_semantics(protocol, instrumented_gantry, deck) == []
 
 
 # ─── working-volume bound checks for `scan` ──────────────────────────────────
