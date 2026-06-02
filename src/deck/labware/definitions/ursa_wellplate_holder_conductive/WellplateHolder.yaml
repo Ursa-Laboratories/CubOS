@@ -13,3 +13,4 @@ width: 155.0
 height: 14.8
 labware_support_height: 10.0
 labware_seat_height_from_bottom: 5.0
+well_plate_surface_height_from_bottom: 5.0

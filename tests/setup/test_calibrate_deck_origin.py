@@ -13,7 +13,7 @@ from gantry.errors import (
 from setup.calibration.single_instrument_calibration import (
     DeckOriginCalibrationResult,
     _calculate_block_z_calibration,
-    _calculated_z_range,
+    _factory_z_travel_mm,
     run_calibration,
 )
 
@@ -271,9 +271,8 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
     assert isinstance(result, DeckOriginCalibrationResult)
     assert result.xy_origin_verification == (0.0, 0.0, -3.0)
     assert result.z_reference_verification == (0.0, 0.0, 0.0)
-    assert result.reference_verification == (0.0, 0.0, 0.0)
     assert result.z_min_mm == 0.0
-    assert result.calculated_z_range_mm == 100.0
+    assert result.factory_z_travel_mm == 100.0
     assert result.reachable_z_min_mm == 0.0
     assert result.measured_working_volume == (398.5, 299.25, 96.75)
     assert result.grbl_max_travel == (398.5, 299.25, 96.75)
@@ -335,7 +334,7 @@ def test_run_calibration_block_mode_uses_home_to_block_travel(tmp_path):
     assert result.xy_origin_verification == (0.0, 0.0, -50.0)
     assert result.z_reference_verification == (0.0, 0.0, 35.0)
     assert result.z_min_mm == 0.0
-    assert result.calculated_z_range_mm == 100.0
+    assert result.factory_z_travel_mm == 100.0
     assert result.reachable_z_min_mm == 0.0
     assert result.block_height_mm == 35.0
     assert result.block_touch_wpos_z_mm == -50.0
@@ -374,7 +373,7 @@ def test_run_calibration_records_ruler_gap_but_sets_z_min_to_wpos_zero(tmp_path)
     assert result.xy_origin_verification == (0.0, 0.0, 0.0)
     assert result.z_reference_verification == (0.0, 0.0, 0.0)
     assert result.z_min_mm == 0.0
-    assert result.calculated_z_range_mm == 100.0
+    assert result.factory_z_travel_mm == 100.0
     assert result.reachable_z_min_mm == 43.0
     assert result.measured_working_volume == (398.5, 299.25, 96.75)
     assert result.grbl_max_travel == (398.5, 299.25, 96.75)
@@ -512,7 +511,6 @@ def test_run_calibration_prompt_mode_can_ground_z_on_bottom_contact(tmp_path):
         stdin_flusher=lambda: None,
         tip_gap_mm=None,
         z_reference_mode="prompt",
-        measure_reachable_z_min=None,
     )
 
     assert isinstance(result, DeckOriginCalibrationResult)
@@ -547,7 +545,6 @@ def test_run_calibration_prompt_mode_uses_ruler_gap_when_not_touching(tmp_path):
         stdin_flusher=lambda: None,
         tip_gap_mm=None,
         z_reference_mode="prompt",
-        measure_reachable_z_min=None,
         instrument_name="asmi",
     )
 
@@ -561,34 +558,6 @@ def test_run_calibration_prompt_mode_uses_ruler_gap_when_not_touching(tmp_path):
         "Deck-to-TCP gap in mm: ",
     ]
     assert any("asmi_reachable_z_min: 14.500" in message for message in messages)
-
-
-def test_run_calibration_deprecated_reach_flag_does_not_add_extra_jog(tmp_path):
-    path = _write_gantry(tmp_path / "gantry.yaml")
-    messages: list[str] = []
-
-    result = run_calibration(
-        path,
-        output=messages.append,
-        gantry_factory=_FakeGantry,
-        key_reader=_key_reader(
-            [
-                ("\r", 1),  # confirm X/Y origin
-            ]
-        ),
-        stdin_flusher=lambda: None,
-        tip_gap_mm=43.0,
-        z_reference_mode="ruler-gap",
-        measure_reachable_z_min=True,
-    )
-
-    assert isinstance(result, DeckOriginCalibrationResult)
-    assert result.xy_origin_verification == (0.0, 0.0, 0.0)
-    assert result.z_reference_verification == (0.0, 0.0, 0.0)
-    assert result.reachable_z_min_mm == pytest.approx(43.0)
-    assert ("jog", 0.0, 0.0, -10.0, 2500.0) not in _FakeGantry.instance.calls
-    assert any("deprecated" in message.lower() for message in messages)
-    assert any("reference_tcp_reachable_z_min: 43.000" in message for message in messages)
 
 
 def test_run_calibration_recovers_from_limit_alarm_during_jog(tmp_path):
@@ -795,41 +764,41 @@ def test_rejects_legacy_negative_space_config(tmp_path):
         run_calibration(path, dry_run=True)
 
 
-# --- _calculated_z_range unit tests ---
+# --- _factory_z_travel_mm unit tests ---
 
 
-def test_calculated_z_range_returns_value():
-    assert _calculated_z_range({"cnc": {"factory_z_travel_mm": 87.0}}) == 87.0
+def test_factory_z_travel_mm_returns_value():
+    assert _factory_z_travel_mm({"cnc": {"factory_z_travel_mm": 87.0}}) == 87.0
 
 
-def test_calculated_z_range_raises_if_cnc_key_missing():
+def test_factory_z_travel_mm_raises_if_cnc_key_missing():
     with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
-        _calculated_z_range({})
+        _factory_z_travel_mm({})
 
 
-def test_calculated_z_range_raises_if_factory_z_travel_mm_key_missing():
+def test_factory_z_travel_mm_raises_if_factory_z_travel_mm_key_missing():
     with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
-        _calculated_z_range({"cnc": {"homing_strategy": "standard"}})
+        _factory_z_travel_mm({"cnc": {"homing_strategy": "standard"}})
 
 
-def test_calculated_z_range_raises_if_cnc_not_a_dict():
+def test_factory_z_travel_mm_raises_if_cnc_not_a_dict():
     with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
-        _calculated_z_range({"cnc": "standard"})
+        _factory_z_travel_mm({"cnc": "standard"})
 
 
-def test_calculated_z_range_raises_if_non_numeric():
+def test_factory_z_travel_mm_raises_if_non_numeric():
     with pytest.raises(ValueError, match="numeric"):
-        _calculated_z_range({"cnc": {"factory_z_travel_mm": "not-a-number"}})
+        _factory_z_travel_mm({"cnc": {"factory_z_travel_mm": "not-a-number"}})
 
 
-def test_calculated_z_range_raises_if_zero():
+def test_factory_z_travel_mm_raises_if_zero():
     with pytest.raises(ValueError, match="> 0"):
-        _calculated_z_range({"cnc": {"factory_z_travel_mm": 0.0}})
+        _factory_z_travel_mm({"cnc": {"factory_z_travel_mm": 0.0}})
 
 
-def test_calculated_z_range_raises_if_negative():
+def test_factory_z_travel_mm_raises_if_negative():
     with pytest.raises(ValueError, match="> 0"):
-        _calculated_z_range({"cnc": {"factory_z_travel_mm": -5.0}})
+        _factory_z_travel_mm({"cnc": {"factory_z_travel_mm": -5.0}})
 
 
 # --- block mode guard tests ---

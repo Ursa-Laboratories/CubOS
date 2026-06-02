@@ -11,7 +11,7 @@ from ._dispatch import inject_runtime_args
 from ._movement import engage_at_labware
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 
 @protocol_command("measure")
@@ -42,12 +42,12 @@ def measure(
     Lets ``measure`` drive a single-well indentation without iterating
     a plate.
     """
-    if instrument not in context.board.instruments:
+    if instrument not in context.gantry.instruments:
         raise ProtocolExecutionError(
             f"Unknown instrument '{instrument}'. "
-            f"Available: {', '.join(sorted(context.board.instruments.keys()))}"
+            f"Available: {', '.join(sorted(context.gantry.instruments.keys()))}"
         )
-    instr = context.board.instruments[instrument]
+    instr = context.gantry.instruments[instrument]
 
     if not hasattr(instr, method):
         raise ProtocolExecutionError(

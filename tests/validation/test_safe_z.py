@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from board.board import Board
+from gantry.instrument_mount import InstrumentedGantry
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
@@ -51,13 +51,13 @@ def _deck() -> Deck:
     })
 
 
-def _board() -> Board:
+def _board() -> InstrumentedGantry:
     instrument = MagicMock()
     instrument.name = "asmi"
     instrument.offset_x = 0.0
     instrument.offset_y = 0.0
     instrument.depth = 0.0
-    return Board(gantry=MagicMock(), instruments={"asmi": instrument})
+    return InstrumentedGantry(controller=MagicMock(), instruments={"asmi": instrument})
 
 
 def _scan(interwell_scan_height: float, measurement_height: float = -1.0) -> Protocol:

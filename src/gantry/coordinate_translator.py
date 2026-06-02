@@ -3,7 +3,7 @@
 CubOS speaks the deck-origin frame at the high-level gantry boundary:
 front-left-bottom origin, +X operator-right, +Y back, +Z up. Controller
 configuration is responsible for making raw GRBL/WPos reports match that
-frame, so this module normalizes values without applying hidden sign flips.
+frame, so outgoing values are normalized without applying hidden sign flips.
 """
 
 from __future__ import annotations
@@ -35,33 +35,6 @@ def _format_like(original_token: str, value: float) -> str:
     if float(value).is_integer():
         return str(int(value))
     return f"{value:g}"
-
-
-@overload
-def to_user_coordinates(x: float, y: float, z: float) -> tuple[float, float, float]:
-    ...
-
-
-@overload
-def to_user_coordinates(coords: Coordinates) -> Coordinates:
-    ...
-
-
-def to_user_coordinates(
-    x_or_coords: float | Coordinates,
-    y: float | None = None,
-    z: float | None = None,
-) -> tuple[float, float, float] | Coordinates:
-    """Normalize machine/WPos coordinates into CubOS deck-frame coordinates."""
-    if isinstance(x_or_coords, Coordinates):
-        return Coordinates(
-            _normalize(x_or_coords.x),
-            _normalize(x_or_coords.y),
-            _normalize(x_or_coords.z),
-        )
-    if y is None or z is None:
-        raise TypeError("Expected x, y, z floats when not passing a Coordinates object.")
-    return (_normalize(x_or_coords), _normalize(y), _normalize(z))
 
 
 @overload

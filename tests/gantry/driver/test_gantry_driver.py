@@ -40,7 +40,7 @@ class TestCNCDriverLogic(unittest.TestCase):
         self.assertIsNone(mpos_pattern.search(invalid_status))
 
     def test_mill_motion_api_has_no_driver_level_instrument_offsets(self):
-        """Board owns instrument offsets; Mill only receives machine coordinates."""
+        """InstrumentedGantry owns instrument offsets; Mill only receives machine coordinates."""
         signature = inspect.signature(Mill.move_to)
         self.assertNotIn("instrument", signature.parameters)
 

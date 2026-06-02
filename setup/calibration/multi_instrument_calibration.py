@@ -6,7 +6,6 @@ Internal implementation used by the sole user-facing entrypoint:
 
 from __future__ import annotations
 
-import argparse
 import copy
 import sys
 import time
@@ -47,7 +46,7 @@ KeyReader = Callable[[], tuple[str, int]]
 
 @dataclass(frozen=True)
 class MultiInstrumentCalibrationResult:
-    """Result of a multi-instrument board calibration run."""
+    """Result of a multi-instrument gantry calibration run."""
 
     measured_working_volume: tuple[float, float, float]
     xy_bounds_after_origin: tuple[float, float, float]
@@ -93,7 +92,7 @@ def compute_relative_instrument_calibrations(
     instrument defines zero XY offset, and the lowest instrument defines zero
     depth after the Z-reference step. For every other instrument, touching the
     same physical block point gives the relative WPos deltas needed by
-    Board.move() semantics:
+    InstrumentedGantry.move() semantics:
         offset_i = offset_ref + gantry_ref - gantry_i
         depth_i = depth_lowest + gantry_i_z - gantry_lowest_z
     with offset_ref=(0, 0) and depth_lowest=0 in this calibration flow.
@@ -321,7 +320,6 @@ def run_multi_instrument_calibration(
     *,
     reference_instrument: str | None = None,
     lowest_instrument: str | None = None,
-    artifact_xyz: tuple[float, float, float] | None = None,
     instruments_to_calibrate: Sequence[str] | None = None,
     dry_run: bool = False,
     tolerance_mm: float = 0.25,
@@ -354,11 +352,11 @@ def run_multi_instrument_calibration(
     available_instruments = _instrument_names(raw_config)
     output(f"Loaded deck-origin gantry config: {gantry_path}")
     output("Calibration overview:")
-    output("  This guided routine creates the shared CubOS deck frame for the whole instrument board.")
+    output("  This guided routine creates the shared CubOS deck frame for all mounted instruments.")
     output("  Step 1 sets the system origin: place the origin block/artifact in the front-left")
     output("  corner, then jog the first/left-most tool's active tip/probe point over the X mark.")
     output("  The script sets only G54 WPos X=0 and Y=0 there; Z is set later after the full")
-    output("  instrument board is attached and the lowest mounted tool touches the reference point.")
+    output("  mounted instruments are attached and the lowest mounted tool touches the reference point.")
     output("")
     reference_instrument = reference_instrument or _prompt_instrument_name(
         "Pick the number for the first/left-most tool for front-left origin",
@@ -367,11 +365,6 @@ def run_multi_instrument_calibration(
         input_reader=input_reader,
         output=output,
     )
-    if artifact_xyz is not None:
-        output(
-            "Ignoring deprecated artifact_xyz/--artifact-* input: the block point "
-            "no longer needs known deck-frame coordinates."
-        )
     instruments = tuple(instruments_to_calibrate or available_instruments)
     names_to_validate = [reference_instrument, *instruments]
     if lowest_instrument is not None:
@@ -400,7 +393,7 @@ def run_multi_instrument_calibration(
     output("  - Keep E-stop reachable; calibration can move mounted tools and changes G54 WPos.")
     output(f"  - First/left-most tool for front-left origin: {reference_instrument}")
     if lowest_instrument is None:
-        output("  - The lowest mounted tool will be selected later, after the full board is attached/verified.")
+        output("  - The lowest mounted tool will be selected later, after all mounted instruments are attached/verified.")
     else:
         output(f"  - Lowest mounted tool for Z/reference point: {lowest_instrument}")
     output(
@@ -477,7 +470,7 @@ def run_multi_instrument_calibration(
             label="lowest-instrument Z calibration",
         )
         output(
-            "Attach/verify the full instrument board at the deck XY center before setting Z."
+            "Attach/verify all mounted instruments at the deck XY center before setting Z."
         )
         if lowest_instrument is None:
             lowest_instrument = _prompt_instrument_name(
@@ -726,39 +719,3 @@ def _prompt_instrument_name(
         if confirm in {"y", "yes"}:
             return selected
         output("Selection cancelled; pick the numbered tool again.")
-
-
-def _prompt_float(
-    prompt: str,
-    *,
-    input_reader: Callable[[str], str],
-    output: Callable[[str], None],
-) -> float:
-    while True:
-        raw = input_reader(prompt).strip()
-        try:
-            return float(raw)
-        except ValueError:
-            output("Enter a numeric value in millimeters.")
-
-
-def _prompt_artifact_xyz(
-    *,
-    input_reader: Callable[[str], str],
-    output: Callable[[str], None],
-) -> tuple[float, float, float]:
-    output("Enter the known deck-frame artifact/block point in millimeters.")
-    return (
-        _prompt_float("Artifact X mm: ", input_reader=input_reader, output=output),
-        _prompt_float("Artifact Y mm: ", input_reader=input_reader, output=output),
-        _prompt_float("Artifact Z mm: ", input_reader=input_reader, output=output),
-    )
-
-
-def _artifact_xyz_from_args(args: argparse.Namespace) -> tuple[float, float, float] | None:
-    supplied = [args.artifact_x is not None, args.artifact_y is not None, args.artifact_z is not None]
-    if not any(supplied):
-        return None
-    if not all(supplied):
-        raise ValueError("Supply all of --artifact-x, --artifact-y, and --artifact-z, or none.")
-    return (float(args.artifact_x), float(args.artifact_y), float(args.artifact_z))

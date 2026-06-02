@@ -9,7 +9,7 @@ describe the machine, the deck layout, and the step sequence.
 configs/
   gantry/     # Machine envelope, serial port, homing strategy, instruments
   deck/       # Labware placement and calibration
-  protocol/   # Ordered protocol steps
+  protocol/   # Ordered protocol steps grouped by instrument/workflow
 ```
 
 ## Gantry Config

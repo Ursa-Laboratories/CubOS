@@ -9,7 +9,6 @@ from typing import Any, List, Tuple
 
 logger = logging.getLogger(__name__)
 
-from board.board import Board
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.tip_rack import (
@@ -18,6 +17,7 @@ from deck.labware.tip_rack import (
 )
 from deck.labware.well_plate import WellPlate
 from gantry.gantry_config import GantryConfig, WorkingVolume
+from gantry.instrument_mount import InstrumentedGantry
 from protocol_engine.protocol import Protocol
 
 from .errors import BoundsViolation
@@ -541,13 +541,13 @@ def validate_protocol_motion_bounds(
     gantry: GantryConfig,
     protocol: Protocol,
     deck: Deck,
-    board: Board,
+    instrumented_gantry: InstrumentedGantry,
 ) -> list[BoundsViolation]:
     """Validate gantry positions for only the points this protocol can command."""
     violations: list[BoundsViolation] = []
     volume = gantry.working_volume
     for target in collect_protocol_motion_targets(gantry, protocol, deck):
-        instrument = board.instruments.get(target.instrument_name)
+        instrument = instrumented_gantry.instruments.get(target.instrument_name)
         if instrument is None:
             continue
         gx = target.x - instrument.offset_x
@@ -593,11 +593,11 @@ def validate_deck_positions(
 
 
 def validate_gantry_positions(
-    gantry: GantryConfig, deck: Deck, board: Board,
+    gantry: GantryConfig, deck: Deck, instrumented_gantry: InstrumentedGantry,
 ) -> List[BoundsViolation]:
     """For each instrument and deck position, compute gantry bounds.
 
-    Gantry formula (from board.py Board.move), all in user-facing coordinates:
+    Gantry formula (from InstrumentedGantry.move), all in user-facing coordinates:
         gantry_x = position_x - instrument.offset_x
         gantry_y = position_y - instrument.offset_y
         gantry_z = position_z + instrument.depth
@@ -606,7 +606,7 @@ def validate_gantry_positions(
     """
     violations: List[BoundsViolation] = []
     volume = gantry.working_volume
-    for instr_name, instrument in board.instruments.items():
+    for instr_name, instrument in instrumented_gantry.instruments.items():
         for lw_key, pos_id, x, y, z in _get_all_positions(deck):
             gx = x - instrument.offset_x
             gy = y - instrument.offset_y

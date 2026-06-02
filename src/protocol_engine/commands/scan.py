@@ -18,7 +18,7 @@ from ._dispatch import inject_runtime_args
 from ._movement import _assert_finite_number
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +55,9 @@ def scan(
       ``ref_z + measurement_height`` → act.
 
     Args:
-        context:              Runtime context (board, deck, logger).
+        context:              Runtime context (instrumented gantry, deck, logger).
         plate:                Deck key of the well plate.
-        instrument:           Name of the instrument registered on the board.
+        instrument:           Name of the instrument registered on the gantry.
         method:               Method on the instrument to call per well.
         measurement_height:   Required labware-relative offset for the
                               action plane (mm above the well-surface Z;
@@ -90,12 +90,12 @@ def scan(
             f"{type(plate_obj).__name__}."
         )
 
-    if instrument not in context.board.instruments:
+    if instrument not in context.gantry.instruments:
         raise ProtocolExecutionError(
             f"Unknown instrument '{instrument}'. "
-            f"Available: {', '.join(sorted(context.board.instruments.keys()))}"
+            f"Available: {', '.join(sorted(context.gantry.instruments.keys()))}"
         )
-    instr = context.board.instruments[instrument]
+    instr = context.gantry.instruments[instrument]
 
     if not hasattr(instr, method):
         raise ProtocolExecutionError(
@@ -150,13 +150,13 @@ def scan(
 
         well = plate_obj.get_well_center(well_id)
         if i == 0:
-            context.board.move_to_labware(instrument, well)
-            context.board.move(instrument, (well.x, well.y, approach_z))
+            context.gantry.move_to_labware(instrument, well)
+            context.gantry.move(instrument, (well.x, well.y, approach_z))
         else:
-            context.board.move(
+            context.gantry.move(
                 instrument, (well.x, well.y, approach_z), travel_z=approach_z,
             )
-        context.board.move(instrument, (well.x, well.y, action_z))
+        context.gantry.move(instrument, (well.x, well.y, action_z))
 
         # Use the shared dispatch helper so closed-loop methods get the
         # same gantry-injection + None-gantry guard + finite-number guard
@@ -195,7 +195,7 @@ def scan(
 
     if sorted_wells:
         last_well = plate_obj.get_well_center(sorted_wells[-1])
-        context.board.move(
+        context.gantry.move(
             instrument, (last_well.x, last_well.y, approach_z),
             travel_z=approach_z,
         )

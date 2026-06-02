@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from board.board import Board
+from gantry.instrument_mount import InstrumentedGantry
 from gantry.gantry import Gantry
 
 
@@ -30,12 +30,12 @@ def test_board_move_to_labware_uses_safe_z_above_deck():
     instr.depth = 0.0
     instr.effective_depth = 0.0
     gantry = MagicMock()
-    board = Board(gantry=gantry, instruments={"probe": instr}, safe_z=20.0)
+    instrumented_gantry = InstrumentedGantry(controller=gantry, instruments={"probe": instr}, safe_z=20.0)
     labware = MagicMock()
     labware.x = 1.0
     labware.y = 2.0
     labware.z = 0.0
 
-    board.move_to_labware("probe", labware)
+    instrumented_gantry.move_to_labware("probe", labware)
 
     gantry.move_to.assert_called_once_with(1.0, 2.0, 20.0, travel_z=20.0)

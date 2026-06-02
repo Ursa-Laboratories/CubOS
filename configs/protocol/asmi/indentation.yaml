@@ -9,7 +9,7 @@
 positions:
   # High park pose near the back-right/home side, intentionally below the
   # physical max Z but high enough to clear the Y rail in the side view.
-  park_position: [360.0, 260.0, 85.0]
+  park_position: [360.0, 250.0, 85.0]
 
 protocol:
   - home:

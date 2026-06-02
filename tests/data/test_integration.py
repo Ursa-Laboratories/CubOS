@@ -14,7 +14,7 @@ from instruments.base_instrument import BaseInstrument
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.commands.pipette import transfer
 from protocol_engine.commands.scan import scan
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -103,7 +103,7 @@ class TestFullProtocolWithDataStore:
         store.register_labware(cid, "reagent_vial", vial)
 
         ctx = ProtocolContext(
-            board=board,
+            gantry=board,
             deck=deck,
             logger=logging.getLogger("integration"),
             data_store=store,
@@ -181,7 +181,7 @@ class TestFullProtocolWithoutDataStore:
         deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
 
         ctx = ProtocolContext(
-            board=board,
+            gantry=board,
             deck=deck,
             logger=logging.getLogger("integration_no_store"),
         )

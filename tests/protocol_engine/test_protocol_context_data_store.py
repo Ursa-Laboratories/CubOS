@@ -6,14 +6,14 @@ import logging
 from unittest.mock import MagicMock
 
 from data.data_store import DataStore
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 class TestProtocolContextDataStore:
 
     def test_defaults_to_none(self):
         ctx = ProtocolContext(
-            board=MagicMock(),
+            gantry=MagicMock(),
             deck=MagicMock(),
         )
         assert ctx.data_store is None
@@ -23,7 +23,7 @@ class TestProtocolContextDataStore:
         store = DataStore(db_path=":memory:")
         cid = store.create_campaign(description="test")
         ctx = ProtocolContext(
-            board=MagicMock(),
+            gantry=MagicMock(),
             deck=MagicMock(),
             data_store=store,
             campaign_id=cid,
@@ -34,10 +34,10 @@ class TestProtocolContextDataStore:
 
     def test_no_errors_without_data_store(self):
         ctx = ProtocolContext(
-            board=MagicMock(),
+            gantry=MagicMock(),
             deck=MagicMock(),
             logger=logging.getLogger("test"),
         )
-        assert ctx.board is not None
+        assert ctx.gantry is not None
         assert ctx.deck is not None
         assert ctx.data_store is None

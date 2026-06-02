@@ -7,8 +7,7 @@ Use this map after reading `AGENTS.md`. Read the smallest relevant set of files 
 Read before changing motion, coordinates, bounds, homing, or scan/protocol movement.
 - `src/gantry/gantry.py`, `gantry_config.py`, `origin.py` - frame, working volume, deck-origin calibration.
 - `src/gantry/machine_geometry.py` - built-in fixed-structure AABBs per gantry family, including the `cub_xl` right-rail guard. Not user-authored YAML; consumed by setup validation.
-- `src/gantry/coordinate_translator.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `offline.py`.
-- `src/board/board.py`, `src/board/loader.py` - instrument offsets and labware movement.
+- `src/gantry/coordinate_translator.py`, `instrument_mount.py`, `instrument_loader.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `calibration_utils.py`, `offline.py` - gantry boundary, mounted instrument offsets, GRBL calibration utilities, and labware movement.
 - `src/validation/bounds.py`, `src/validation/protocol_semantics.py` - offline safety checks, including fixed-structure rail collision.
 - Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
 
@@ -24,16 +23,18 @@ Setup bounds validation checks the concrete motion targets implied by the loaded
 - `src/deck/loader.py` - load-name expansion, calibration, derived wells, nested labware.
 - `src/deck/labware/`, `src/deck/labware/definitions/`.
 - `configs/deck/`.
-- Tests: `tests/test_deck_loader.py`, `tests/test_holder_labware.py`, `tests/test_panda_deck_yaml.py`.
+- Tests: `tests/deck/test_deck_loader.py`,
+  `tests/deck/test_holder_labware.py`, `tests/deck/test_panda_deck_yaml.py`.
 
 After schema/config changes: focused tests, then `setup/validate_setup.py` for affected real triples.
 
 ## Protocol engine / setup validation
 
-- `src/protocol_engine/yaml_schema.py`, `loader.py`, `setup.py`.
+- `src/protocol_engine/yaml_schema.py`, `loader.py`, `runtime.py`, `setup.py`,
+  `setup_validator.py`.
 - `src/protocol_engine/commands/` - command behavior.
 - `setup/validate_setup.py` - end-to-end offline validation.
-- `configs/protocol/`.
+- `configs/protocol/<instrument-or-workflow>/`.
 - Tests: `tests/protocol_engine/`.
 
 ## Instruments
