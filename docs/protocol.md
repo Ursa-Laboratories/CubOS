@@ -16,7 +16,7 @@ Representative example:
 
 ```yaml
 positions:
-  park_position: [360.0, 260.0, 85.0]
+  park_position: [360.0, 250.0, 85.0]
 
 protocol:
   # Home the gantry without redefining calibrated deck-origin WPos

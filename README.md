@@ -175,7 +175,7 @@ Protocol config defines the ordered experiment steps:
 
 ~~~yaml
 positions:
-  park_position: [360.0, 260.0, 85.0]
+  park_position: [360.0, 250.0, 85.0]
 
 protocol:
   - home:
