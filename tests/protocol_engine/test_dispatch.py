@@ -46,11 +46,11 @@ class _ClosedLoopInstrument(BaseInstrument):
 
 
 def _ctx(gantry: object | None = ...) -> ProtocolContext:
-    """Build a minimal ProtocolContext with a configurable board.gantry."""
-    board = MagicMock()
-    board.gantry = object() if gantry is ... else gantry
+    """Build a minimal ProtocolContext with a configurable gantry controller."""
+    instrumented_gantry = MagicMock()
+    instrumented_gantry.controller = object() if gantry is ... else gantry
     deck = MagicMock()
-    return ProtocolContext(board=board, deck=deck)
+    return ProtocolContext(gantry=instrumented_gantry, deck=deck)
 
 
 # ── Gantry injection ──────────────────────────────────────────────────────

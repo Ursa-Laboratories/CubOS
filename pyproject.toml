@@ -29,7 +29,7 @@ docs = [
 
 [tool.setuptools.packages.find]
 where = ["src", "."]
-include = ["board", "board.*", "data", "data.*", "deck", "deck.*",
+include = ["data", "data.*", "deck", "deck.*",
            "gantry", "gantry.*", "instruments", "instruments.*",
            "protocol_engine", "protocol_engine.*", "validation", "validation.*"]
 

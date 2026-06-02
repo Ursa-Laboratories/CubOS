@@ -121,9 +121,9 @@ class TestEndToEndSetup:
 
             assert isinstance(protocol, Protocol)
             assert isinstance(context, ProtocolContext)
-            assert isinstance(context.gantry, GantryConfig)
+            assert isinstance(context.gantry_config, GantryConfig)
             assert len(protocol) == 2
-            assert "pipette" in context.board.instruments
+            assert "pipette" in context.gantry.instruments
             assert "plate_1" in context.deck
             assert "waste_vial" in context.deck
         finally:

@@ -9,11 +9,11 @@ CubOS uses a +Z-up deck frame and labware-relative action heights.
   that use them (``measure`` and ``scan`` for ``measurement_height``,
   ``scan`` for ``interwell_scan_height``). Instruments do not carry them.
 * Inter-labware travel uses the gantry's absolute ``safe_z``, exposed on
-  ``Board.safe_z``.
+  ``InstrumentedGantry.safe_z``.
 
 There is no inter-labware helper. Callers compose the motion explicitly:
-``board.move_to_labware`` (travels at ``safe_z``) followed by
-``board.move`` to descend to the per-labware action plane.
+``context.gantry.move_to_labware`` (travels at ``safe_z``) followed by
+``context.gantry.move`` to descend to the per-labware action plane.
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def engage_at_labware(
         source=f"command '{command_label}'",
     )
     try:
-        context.board.instruments[instrument]
+        context.gantry.instruments[instrument]
     except KeyError as exc:
         raise ValueError(
             f"{command_label}: unknown instrument '{instrument}'."
@@ -94,6 +94,6 @@ def engage_at_labware(
         ) from exc
     x, y, well_z = unpack_xyz(coord)
     action_z = well_z + measurement_height
-    context.board.move_to_labware(instrument, coord)
-    context.board.move(instrument, (x, y, action_z))
+    context.gantry.move_to_labware(instrument, coord)
+    context.gantry.move(instrument, (x, y, action_z))
     return well_z, action_z

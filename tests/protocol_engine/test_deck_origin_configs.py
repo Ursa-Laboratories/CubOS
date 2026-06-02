@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from board.loader import load_board_from_gantry_config
 from deck.loader import load_deck_from_yaml
+from gantry.instrument_loader import load_instrumented_gantry_from_config
 from gantry.loader import load_gantry_from_yaml
 from protocol_engine.commands.scan import scan
 from protocol_engine.loader import load_protocol_from_yaml
@@ -32,7 +32,7 @@ def test_mock_asmi_config_generates_deck_origin_scan_waypoints():
     )
     mock_gantry = MagicMock()
     mock_gantry.get_coordinates.return_value = {"x": 0.0, "y": 0.0, "z": 85.0}
-    board = load_board_from_gantry_config(
+    instrumented_gantry = load_instrumented_gantry_from_config(
         gantry_config, mock_gantry, mock_mode=True,
     )
     indentation_calls = []
@@ -54,19 +54,21 @@ def test_mock_asmi_config_generates_deck_origin_scan_waypoints():
         })
         return {"ok": True}
 
-    board.instruments["asmi"].indentation = fake_indentation
+    instrumented_gantry.instruments["asmi"].indentation = fake_indentation
     protocol = load_protocol_from_yaml(
         FIXTURES / "protocol/mock_asmi_indentation.yaml"
     )
 
     scan_step = next(step for step in protocol.steps if step.command_name == "scan")
-    assert validate_protocol_semantics(protocol, board, deck, gantry_config) == []
+    assert validate_protocol_semantics(
+        protocol, instrumented_gantry, deck, gantry_config,
+    ) == []
 
     ctx = ProtocolContext(
-        board=board,
+        gantry=instrumented_gantry,
         deck=deck,
         positions=protocol.positions,
-        gantry=gantry_config,
+        gantry_config=gantry_config,
         logger=logging.getLogger("test_asmi_config"),
     )
     scan(ctx, **scan_step.args)
@@ -76,7 +78,7 @@ def test_mock_asmi_config_generates_deck_origin_scan_waypoints():
     second_well = deck["plate"].get_well_center("A2")
     last_well = deck["plate"].get_well_center("H12")
     plate_obj = deck["plate"]
-    instr = board.instruments["asmi"]
+    instr = instrumented_gantry.instruments["asmi"]
     safe_z = gantry_config.resolved_safe_z
     interwell_scan_height = scan_step.args["interwell_scan_height"]
     measurement_height = scan_step.args["measurement_height"]
@@ -148,7 +150,7 @@ def test_mock_filmetrics_deck_origin_config_validates_setup():
 
     gantry_config = load_gantry_from_yaml(gantry_path)
     deck = load_deck_from_yaml(deck_path, factory_z_travel_mm=gantry_config.factory_z_travel_mm)
-    board = load_board_from_gantry_config(
+    instrumented_gantry = load_instrumented_gantry_from_config(
         gantry_config, MagicMock(), mock_mode=True,
     )
     protocol = load_protocol_from_yaml(protocol_path)
@@ -166,7 +168,9 @@ def test_mock_filmetrics_deck_origin_config_validates_setup():
     # (from the SBS96 definition).
     assert a1.z == pytest.approx(70.0)
     assert plate.height == pytest.approx(14.35)
-    assert validate_protocol_semantics(protocol, board, deck, gantry_config) == []
+    assert validate_protocol_semantics(
+        protocol, instrumented_gantry, deck, gantry_config,
+    ) == []
 
     setup_protocol(
         gantry_path,
@@ -182,7 +186,7 @@ def test_sharc_motion_scan_config_does_not_call_uv_cure():
         FIXTURES / "deck/mock_nested_plate_deck.yaml",
         FIXTURES / "protocol/mock_sharc_uv_motion_scan.yaml",
     )
-    uv = context.board.instruments["uv_curing"]
+    uv = context.gantry.instruments["uv_curing"]
     uv.cure = MagicMock(side_effect=AssertionError("cure should not be called"))
     uv.health_check = MagicMock(return_value=True)
 
@@ -199,7 +203,7 @@ def test_sterling_candidate_validates_with_park_protocol():
         FIXTURES / "deck/mock_sterling_deck.yaml",
         FIXTURES / "protocol/mock_sterling_park.yaml",
     )
-    assert context.board.instruments["potentiostat"]._offline is True
+    assert context.gantry.instruments["potentiostat"]._offline is True
 
 
 def test_sterling_vial_scan_visits_vials_in_alternating_order():
@@ -227,4 +231,4 @@ def test_sterling_vial_scan_visits_vials_in_alternating_order():
         "vial_5_scan",
         "park_position",
     ]
-    assert context.board.instruments["potentiostat"]._offline is True
+    assert context.gantry.instruments["potentiostat"]._offline is True

@@ -54,7 +54,7 @@ def _mock_ctx_with_well(well_z=14.10):
     deck = MagicMock()
     deck.resolve_coordinate.return_value = Coordinate3D(x=10.0, y=20.0, z=well_z)
     ctx = MagicMock()
-    ctx.board = board
+    ctx.gantry = board
     ctx.deck = deck
     return ctx, instr
 
@@ -69,8 +69,8 @@ class TestEngageAtLabware:
         )
         assert well_z == pytest.approx(14.10)
         assert action_z == pytest.approx(16.10)
-        ctx.board.move_to_labware.assert_called_once()
-        ctx.board.move.assert_called_once_with("sensor", (10.0, 20.0, 16.10))
+        ctx.gantry.move_to_labware.assert_called_once()
+        ctx.gantry.move.assert_called_once_with("sensor", (10.0, 20.0, 16.10))
 
     def test_negative_offset_descends_below_surface(self):
         ctx, _ = _mock_ctx_with_well(well_z=14.10)

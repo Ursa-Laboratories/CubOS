@@ -9,12 +9,12 @@ from typing import Literal
 
 _log = logging.getLogger(__name__)
 
-from board.loader import load_board_from_gantry_config, load_board_from_yaml
 from deck.deck import Deck
 from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
 from deck.loader import load_deck_from_yaml
 from gantry.gantry import Gantry
+from gantry.instrument_loader import load_instrumented_gantry_from_config
 from gantry.loader import load_gantry_from_yaml
 from gantry.origin import validate_deck_origin_minima
 from protocol_engine.loader import load_protocol_from_yaml
@@ -43,10 +43,6 @@ class SetupValidationResult:
     errors: tuple[str, ...] = ()
     stage: ValidationStage = "validation"
 
-
-ValidationResult = SetupValidationResult
-
-
 def _labware_summary(deck: Deck) -> list[str]:
     """Return one-line summaries for each piece of labware."""
     lines = []
@@ -62,10 +58,10 @@ def _labware_summary(deck: Deck) -> list[str]:
     return lines
 
 
-def _instrument_summary(board) -> list[str]:
+def _instrument_summary(instrumented_gantry) -> list[str]:
     """Return one-line summaries for each instrument."""
     lines = []
-    for name, instr in board.instruments.items():
+    for name, instr in instrumented_gantry.instruments.items():
         lines.append(
             f"    {name}: offset=({instr.offset_x}, {instr.offset_y}), "
             f"depth={instr.depth}"
@@ -98,16 +94,9 @@ def _error_result(
 def run_setup_validation(
     gantry_path: str | Path,
     deck_path: str | Path,
-    protocol_or_board_path: str | Path,
-    protocol_path: str | Path | None = None,
+    protocol_path: str | Path,
 ) -> SetupValidationResult:
     """Run full offline setup validation and return a structured result."""
-    board_path: str | Path | None = None
-    if protocol_path is None:
-        protocol_path = protocol_or_board_path
-    else:
-        board_path = protocol_or_board_path
-
     lines: list[str] = []
 
     def out(text: str = "") -> None:
@@ -165,16 +154,11 @@ def run_setup_validation(
     out("[3/4] Loading instruments...")
     try:
         offline_gantry = Gantry(offline=True)
-        if board_path is None:
-            board = load_board_from_gantry_config(
-                gantry_config,
-                offline_gantry,
-                mock_mode=True,
-            )
-            board_source = gantry_path
-        else:
-            board = load_board_from_yaml(board_path, offline_gantry, mock_mode=True)
-            board_source = board_path
+        instrumented_gantry = load_instrumented_gantry_from_config(
+            gantry_config,
+            offline_gantry,
+            mock_mode=True,
+        )
     except Exception as exc:
         _log.error("Failed to load instruments", exc_info=True)
         return _error_result(
@@ -184,9 +168,9 @@ def run_setup_validation(
             result_message="RESULT: ERROR - could not load instruments",
         )
 
-    out(f"  OK: {board_source} (offline/mock — hardware not contacted)")
-    out(f"  Instruments ({len(board.instruments)}):")
-    for summary_line in _instrument_summary(board):
+    out(f"  OK: {gantry_path} (offline/mock - hardware not contacted)")
+    out(f"  Instruments ({len(instrumented_gantry.instruments)}):")
+    for summary_line in _instrument_summary(instrumented_gantry):
         out(summary_line)
     out()
 
@@ -216,7 +200,7 @@ def run_setup_validation(
             gantry_config,
             protocol,
             deck,
-            board,
+            instrumented_gantry,
         )
     except Exception as exc:
         _log.exception("Motion bounds validation raised unexpectedly")
@@ -250,7 +234,7 @@ def run_setup_validation(
     try:
         semantic_violations = validate_protocol_semantics(
             protocol,
-            board,
+            instrumented_gantry,
             deck,
             gantry_config,
         )
@@ -294,26 +278,7 @@ def run_setup_validation(
         passed=True,
         stage="validation",
     )
-
-
-def run_validation(
-    gantry_path: str | Path,
-    deck_path: str | Path,
-    protocol_or_board_path: str | Path,
-    protocol_path: str | Path | None = None,
-) -> SetupValidationResult:
-    """Backward-compatible alias for ``run_setup_validation``."""
-    return run_setup_validation(
-        gantry_path,
-        deck_path,
-        protocol_or_board_path,
-        protocol_path,
-    )
-
-
 __all__ = [
     "SetupValidationResult",
-    "ValidationResult",
     "run_setup_validation",
-    "run_validation",
 ]

@@ -24,12 +24,12 @@ if TYPE_CHECKING:
 
 def _get_pipette(context: ProtocolContext):
     """Return the pipette instrument or raise ProtocolExecutionError."""
-    if "pipette" not in context.board.instruments:
+    if "pipette" not in context.gantry.instruments:
         raise ProtocolExecutionError(
-            "No pipette registered on the board. "
-            "Add one via Board(instruments={'pipette': ...})"
+            "No pipette registered on the gantry. "
+            "Add one under the gantry YAML top-level `instruments` key."
         )
-    return context.board.instruments["pipette"]
+    return context.gantry.instruments["pipette"]
 
 
 def _engage(

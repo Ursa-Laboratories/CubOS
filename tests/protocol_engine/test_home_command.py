@@ -17,8 +17,8 @@ from protocol_engine.commands.home import home
 def _context(gantry_config: GantryConfig | None):
     gantry = MagicMock()
     return SimpleNamespace(
-        board=SimpleNamespace(gantry=gantry),
-        gantry=gantry_config,
+        gantry=SimpleNamespace(controller=gantry),
+        gantry_config=gantry_config,
         logger=MagicMock(),
     ), gantry
 

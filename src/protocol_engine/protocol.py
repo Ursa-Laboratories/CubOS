@@ -9,7 +9,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 from deck.deck import Deck
 
-from board.board import Board
+from gantry.instrument_mount import InstrumentedGantry
 from gantry.gantry_config import GantryConfig
 
 
@@ -17,15 +17,15 @@ from gantry.gantry_config import GantryConfig
 class ProtocolContext:
     """Runtime context injected into every command handler.
 
-    Provides access to the Board (gantry + instruments) and the Deck
+    Provides access to the instrumented gantry and the Deck
     (labware target resolution).  Optionally carries a DataStore for
     persisting measurements and a campaign_id for the current run.
     """
 
-    board: Board
+    gantry: InstrumentedGantry
     deck: Deck
     positions: Dict[str, Any] = field(default_factory=dict)
-    gantry: Optional[GantryConfig] = None
+    gantry_config: Optional[GantryConfig] = None
     logger: logging.Logger = field(
         default_factory=lambda: logging.getLogger("protocol"),
     )
@@ -59,7 +59,7 @@ class Protocol:
     Usage from YAML::
 
         protocol = load_protocol_from_yaml("my_protocol.yaml")
-        context = ProtocolContext(board=board, deck=deck)
+        context = ProtocolContext(gantry=gantry, deck=deck)
         protocol.run(context)
 
     Usage from pure Python (no YAML)::

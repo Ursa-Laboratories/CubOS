@@ -55,7 +55,7 @@ def inject_runtime_args(
     """Return a fresh kwargs dict with runtime-injected args added.
 
     Injects when the method's signature declares the parameter:
-      * ``gantry`` — from ``context.board.gantry``.
+      * ``gantry`` — from ``context.gantry.controller``.
       * ``well_z`` — absolute deck-frame Z of the labware surface
         (engine-resolved from the calibration anchor).
       * ``measurement_height`` — labware-relative action plane offset
@@ -76,7 +76,7 @@ def inject_runtime_args(
     Raises:
         ProtocolExecutionError: if any injected value is not a finite
             number, if the method declares ``gantry`` but
-            ``context.board.gantry`` is None, if a method requires a
+            ``context.gantry.controller`` is None, if a method requires a
             relative offset that wasn't supplied, or if a relative offset
             was supplied to a method that doesn't declare one (silently
             dropping a depth bound on a misconfigured scan would be
@@ -91,13 +91,13 @@ def inject_runtime_args(
     kwargs: Dict[str, Any] = dict(method_kwargs)
     sig = inspect.signature(callable_method)
     if "gantry" in sig.parameters:
-        if context.board.gantry is None:
+        if context.gantry.controller is None:
             raise ProtocolExecutionError(
                 f"Method {callable_method.__qualname__!r} declares a `gantry` "
-                "parameter but `context.board.gantry` is None. Closed-loop "
+                "parameter but `context.gantry.controller` is None. Closed-loop "
                 "methods need an attached gantry."
             )
-        kwargs["gantry"] = context.board.gantry
+        kwargs["gantry"] = context.gantry.controller
     if "well_z" in sig.parameters:
         kwargs["well_z"] = well_z
 

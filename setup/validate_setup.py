@@ -21,14 +21,12 @@ sys.path.insert(0, str(project_root / "src"))
 
 from protocol_engine.setup_validation import (  # noqa: E402
     SetupValidationResult,
-    ValidationResult,
     run_setup_validation,
-    run_validation,
 )
 
 
 def main() -> None:
-    if len(sys.argv) not in (4, 5):
+    if len(sys.argv) != 4:
         print("Usage: python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>")
         print()
         print("Example:")
@@ -38,12 +36,8 @@ def main() -> None:
         print("    ../BU-Configs/configs/protocol/asmi_move_a1.yaml")
         sys.exit(1)
 
-    if len(sys.argv) == 4:
-        gantry_path, deck_path, protocol_path = sys.argv[1:4]
-        result = run_setup_validation(gantry_path, deck_path, protocol_path)
-    else:
-        gantry_path, deck_path, board_path, protocol_path = sys.argv[1:5]
-        result = run_setup_validation(gantry_path, deck_path, board_path, protocol_path)
+    gantry_path, deck_path, protocol_path = sys.argv[1:4]
+    result = run_setup_validation(gantry_path, deck_path, protocol_path)
     print(result.output)
     if not result.passed:
         sys.exit(1)
@@ -51,9 +45,7 @@ def main() -> None:
 
 __all__ = [
     "SetupValidationResult",
-    "ValidationResult",
     "run_setup_validation",
-    "run_validation",
 ]
 
 

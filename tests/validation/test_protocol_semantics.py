@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from board.board import Board
+from gantry.instrument_mount import InstrumentedGantry
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
@@ -81,12 +81,12 @@ def _gantry_config(
 
 
 def _board_and_deck(instrument=None):
-    board = Board(
-        gantry=MagicMock(),
+    instrumented_gantry = InstrumentedGantry(
+        controller=MagicMock(),
         instruments={"asmi": instrument or _instrument("asmi")},
     )
     deck = Deck({"plate": _plate()})
-    return board, deck
+    return instrumented_gantry, deck
 
 
 def _scan_args(
@@ -133,20 +133,20 @@ def _move_step(*, position, instrument: str = "asmi", travel_z: float | None = N
 
 def test_asmi_indentation_within_z_bounds_passes():
     """Indentation deepest abs Z = ref_z + indentation_limit_height."""
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config(z_max=100.0)
     protocol = _protocol(_scan_args(indentation_limit_height=-5.0))
 
-    assert validate_protocol_semantics(protocol, board, deck, gantry) == []
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
 
 
 def test_asmi_indentation_below_z_min_violates():
     """ref_z=14.10 + indentation_limit_height=-20.0 = -5.90 < z_min=0."""
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config(z_max=100.0)
     protocol = _protocol(_scan_args(indentation_limit_height=-20.0))
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("indentation deepest" in v.message for v in violations)
 
@@ -170,8 +170,8 @@ def test_asmi_indentation_depth_uses_well_z_not_plate_height():
         capacity_ul=200.0,
         working_volume_ul=150.0,
     )
-    board = Board(
-        gantry=MagicMock(),
+    instrumented_gantry = InstrumentedGantry(
+        controller=MagicMock(),
         instruments={"asmi": _instrument("asmi")},
     )
     deck = Deck({"plate": plate})
@@ -184,13 +184,13 @@ def test_asmi_indentation_depth_uses_well_z_not_plate_height():
     ok_protocol = _protocol(_scan_args(
         measurement_height=-1.0, indentation_limit_height=-69.5,
     ))
-    assert validate_protocol_semantics(ok_protocol, board, deck, gantry) == []
+    assert validate_protocol_semantics(ok_protocol, instrumented_gantry, deck, gantry) == []
 
     # Push deepest below z_min using well.z=70 reference: -71 → 70-71 = -1.
     bad_protocol = _protocol(_scan_args(
         measurement_height=-1.0, indentation_limit_height=-71.0,
     ))
-    violations = validate_protocol_semantics(bad_protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(bad_protocol, instrumented_gantry, deck, gantry)
     assert any("indentation deepest" in v.message for v in violations)
 
 
@@ -200,11 +200,11 @@ def test_asmi_indentation_non_finite_indentation_limit_height_violates(bad_value
     violation rather than silently bypassing the depth bound. NaN
     comparisons are False, so without an explicit finite gate the
     ``deepest_abs < z_min`` check would silently no-op."""
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config(z_max=100.0)
     protocol = _protocol(_scan_args(indentation_limit_height=bad_value))
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any(
         "indentation_limit_height must be a finite number" in v.message
@@ -215,11 +215,11 @@ def test_asmi_indentation_non_finite_indentation_limit_height_violates(bad_value
 def test_asmi_indentation_depth_bound_matches_by_instrument_type_not_name():
     """A user-named ASMI (e.g. 'force_sensor') still triggers the
     depth-bound check — the validator matches on the driver type, not
-    the instrument key in the board config. This is the only thing
+    the instrument key in the instrumented_gantry config. This is the only thing
     protecting against driving the gantry through the deck on a
     misconfigured ASMI scan."""
     instrument = _instrument(name="force_sensor")
-    board = Board(gantry=MagicMock(), instruments={"force_sensor": instrument})
+    instrumented_gantry = InstrumentedGantry(controller=MagicMock(), instruments={"force_sensor": instrument})
     deck = Deck({"plate": _plate()})
     gantry = _gantry_config(z_max=100.0)
 
@@ -233,7 +233,7 @@ def test_asmi_indentation_depth_bound_matches_by_instrument_type_not_name():
         "method_kwargs": {"step_size": 0.01},
     })
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("indentation deepest" in v.message for v in violations)
 
@@ -241,13 +241,13 @@ def test_asmi_indentation_depth_bound_matches_by_instrument_type_not_name():
 def test_indentation_limit_height_above_measurement_violates():
     """indentation_limit_height must be at or below measurement_height —
     the descent has to go down."""
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config(z_max=100.0)
     protocol = _protocol(_scan_args(
         measurement_height=-1.0, indentation_limit_height=2.0,
     ))
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any(
         "indentation_limit_height" in v.message and "above" in v.message
@@ -256,64 +256,64 @@ def test_indentation_limit_height_above_measurement_violates():
 
 
 def test_scan_safe_approach_below_measurement_violates():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config()
     protocol = _protocol(
         _scan_args(measurement_height=2.0, interwell_scan_height=1.0),
     )
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("approach must be at or above" in v.message for v in violations)
 
 
 def test_scan_approach_above_safe_z_violates():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config(z_max=100.0, safe_z=20.0)
     protocol = _protocol(_scan_args())
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("safe_z" in v.message for v in violations)
 
 
 def test_valid_asmi_scan_semantics_pass():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config(z_max=100.0, safe_z=85.0)
     protocol = _protocol(_scan_args(indentation_limit_height=-5.0))
 
-    assert validate_protocol_semantics(protocol, board, deck, gantry) == []
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
 
 
 def test_legacy_scan_travel_names_are_semantic_violations():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     protocol = _protocol(_scan_args(method_kwargs={
         "interwell_travel_height": 70.0,
         "step_size": 0.01,
     }))
 
-    violations = validate_protocol_semantics(protocol, board, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
 
     assert any("interwell_travel_height" in v.message for v in violations)
 
 
 def test_scan_missing_measurement_height_violates():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     args = _scan_args()
     args.pop("measurement_height")
     protocol = _protocol(args)
 
-    violations = validate_protocol_semantics(protocol, board, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
 
     assert any("measurement_height" in v.message for v in violations)
 
 
 @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), True, "1.0"])
 def test_scan_non_finite_measurement_height_names_field(bad_value):
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     protocol = _protocol(_scan_args(measurement_height=bad_value))
 
-    violations = validate_protocol_semantics(protocol, board, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
 
     assert any(
         "measurement_height must be a finite number" in v.message
@@ -323,10 +323,10 @@ def test_scan_non_finite_measurement_height_names_field(bad_value):
 
 @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), True, "1.0"])
 def test_scan_non_finite_interwell_scan_height_names_field(bad_value):
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     protocol = _protocol(_scan_args(interwell_scan_height=bad_value))
 
-    violations = validate_protocol_semantics(protocol, board, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
 
     assert any(
         "interwell_scan_height must be a finite number" in v.message
@@ -336,12 +336,12 @@ def test_scan_non_finite_interwell_scan_height_names_field(bad_value):
 
 @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), True, "1.0"])
 def test_measure_non_finite_measurement_height_names_field(bad_value):
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     protocol = _protocol(
         _measure_args(measurement_height=bad_value), command_name="measure",
     )
 
-    violations = validate_protocol_semantics(protocol, board, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
 
     assert any(
         "measurement_height must be a finite number" in v.message
@@ -350,55 +350,55 @@ def test_measure_non_finite_measurement_height_names_field(bad_value):
 
 
 def test_scan_missing_interwell_scan_height_violates():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     args = _scan_args()
     args.pop("interwell_scan_height")
     protocol = _protocol(args)
 
-    violations = validate_protocol_semantics(protocol, board, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
 
     assert any("interwell_scan_height" in v.message for v in violations)
 
 
 def test_legacy_asmi_z_limit_is_semantic_violation():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     protocol = _protocol(_scan_args(method_kwargs={
         "z_limit": 70.0, "step_size": 0.01,
     }))
 
-    violations = validate_protocol_semantics(protocol, board, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
 
     assert any("`z_limit` is no longer supported" in v.message for v in violations)
 
 
 def test_measure_missing_measurement_height_violates():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     args = _measure_args()
     args.pop("measurement_height")
     protocol = _protocol(args, command_name="measure")
 
-    violations = validate_protocol_semantics(protocol, board, deck)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck)
 
     assert any("measurement_height" in v.message for v in violations)
 
 
 def test_measure_with_command_measurement_height_passes():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config(z_max=100.0, safe_z=85.0)
     protocol = _protocol(_measure_args(), command_name="measure")
 
-    assert validate_protocol_semantics(protocol, board, deck, gantry) == []
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
 
 
 # ─── working-volume bound checks for `move` ──────────────────────────────────
 
 
 def test_move_target_in_bounds_with_zero_offsets_passes():
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config()
     protocol = _move_step(position=(150.0, 100.0, 50.0))
 
-    assert validate_protocol_semantics(protocol, board, deck, gantry) == []
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
 
 
 def test_move_x_offset_is_subtracted_so_offset_x_can_drive_violation():
@@ -412,11 +412,11 @@ def test_move_x_offset_is_subtracted_so_offset_x_can_drive_violation():
     """
     instr = _instrument("asmi")
     instr.offset_x = -300.0
-    board, deck = _board_and_deck(instr)
+    instrumented_gantry, deck = _board_and_deck(instr)
     gantry = _gantry_config(x_max=300.0)
     protocol = _move_step(position=(10.0, 100.0, 50.0))
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("x" in v.message and "310" in v.message for v in violations), violations
 
@@ -424,11 +424,11 @@ def test_move_x_offset_is_subtracted_so_offset_x_can_drive_violation():
 def test_move_y_offset_is_subtracted():
     instr = _instrument("asmi")
     instr.offset_y = -250.0
-    board, deck = _board_and_deck(instr)
+    instrumented_gantry, deck = _board_and_deck(instr)
     gantry = _gantry_config(y_max=200.0)
     protocol = _move_step(position=(100.0, 10.0, 50.0))
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("y" in v.message for v in violations), violations
 
@@ -440,53 +440,53 @@ def test_move_depth_is_added_to_z():
     """
     instr = _instrument("asmi")
     instr.depth = 30.0
-    board, deck = _board_and_deck(instr)
+    instrumented_gantry, deck = _board_and_deck(instr)
     gantry = _gantry_config(z_max=100.0)
     protocol = _move_step(position=(100.0, 100.0, 80.0))
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("z" in v.message and "110" in v.message for v in violations), violations
 
 
 def test_move_target_at_volume_boundary_is_valid():
     """Inclusive bounds: value == low and value == high pass."""
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config(x_max=300.0, y_max=200.0, z_max=100.0)
     protocol = _move_step(position=(300.0, 200.0, 100.0))
-    assert validate_protocol_semantics(protocol, board, deck, gantry) == []
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
     protocol = _move_step(position=(0.0, 0.0, 0.0))
-    assert validate_protocol_semantics(protocol, board, deck, gantry) == []
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
 
 
 def test_move_travel_z_violation_independent_of_target():
     instr = _instrument("asmi")
     instr.depth = 0.0
-    board, deck = _board_and_deck(instr)
+    instrumented_gantry, deck = _board_and_deck(instr)
     gantry = _gantry_config(z_max=100.0)
     protocol = _move_step(position=(100.0, 100.0, 50.0), travel_z=150.0)
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("travel_z" in v.message for v in violations), violations
 
 
 def test_move_to_unknown_named_position_emits_violation():
     """Bare-except previously hid this case; now resolve failures must surface."""
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config()
     protocol = _move_step(position="does_not_exist")
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("cannot be resolved" in v.message for v in violations), violations
 
 
 def test_move_without_gantry_config_skips_bound_check():
     """Default-None gantry preserves backward compatibility with older callers."""
-    board, deck = _board_and_deck()
+    instrumented_gantry, deck = _board_and_deck()
     protocol = _move_step(position=(9999.0, 9999.0, 9999.0))
-    assert validate_protocol_semantics(protocol, board, deck) == []
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck) == []
 
 
 # ─── working-volume bound checks for `scan` ──────────────────────────────────
@@ -495,11 +495,11 @@ def test_move_without_gantry_config_skips_bound_check():
 def test_scan_well_offset_x_drives_volume_violation():
     instr = _instrument("asmi")
     instr.offset_x = -350.0
-    board, deck = _board_and_deck(instr)
+    instrumented_gantry, deck = _board_and_deck(instr)
     gantry = _gantry_config(x_max=300.0)
     protocol = _protocol(_scan_args())
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("x" in v.message for v in violations), violations
 
@@ -508,21 +508,21 @@ def test_scan_depth_drives_z_violation():
     """height=14.10 + measurement_height=80.0 + depth=30.0 = 124.10 > z_max=100."""
     instr = _instrument("asmi")
     instr.depth = 30.0
-    board, deck = _board_and_deck(instr)
+    instrumented_gantry, deck = _board_and_deck(instr)
     gantry = _gantry_config(z_max=100.0)
     protocol = _protocol(
         _scan_args(measurement_height=80.0, interwell_scan_height=85.0),
     )
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("z" in v.message for v in violations), violations
 
 
 def test_nested_plate_scan_target_passes_semantic_validation():
     deck = load_deck_from_yaml("tests/fixtures/configs/deck/mock_nested_plate_deck.yaml")
-    board = Board(
-        gantry=MagicMock(),
+    instrumented_gantry = InstrumentedGantry(
+        controller=MagicMock(),
         instruments={"uv": _instrument("uv")},
     )
     gantry = _gantry_config(x_max=300.0, y_max=300.0, z_max=100.0, safe_z=95.0)
@@ -535,13 +535,13 @@ def test_nested_plate_scan_target_passes_semantic_validation():
         "method_kwargs": {"intensity": 1, "exposure_time": 1.0},
     })
 
-    assert validate_protocol_semantics(protocol, board, deck, gantry) == []
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
 
 
 def test_nested_plate_scan_target_uses_nested_surface_z_for_safe_z_validation():
     deck = load_deck_from_yaml("tests/fixtures/configs/deck/mock_nested_plate_deck.yaml")
-    board = Board(
-        gantry=MagicMock(),
+    instrumented_gantry = InstrumentedGantry(
+        controller=MagicMock(),
         instruments={"uv": _instrument("uv")},
     )
     gantry = _gantry_config(x_max=300.0, y_max=300.0, z_max=100.0, safe_z=94.0)
@@ -554,6 +554,6 @@ def test_nested_plate_scan_target_uses_nested_surface_z_for_safe_z_validation():
         "method_kwargs": {"intensity": 1, "exposure_time": 1.0},
     })
 
-    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
 
     assert any("94.500 = 89.5+5.0" in v.message for v in violations), violations

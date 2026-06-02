@@ -3,7 +3,7 @@
 These are smoke-level guards that the move/measure/scan/pipette commands
 agree on the same motion primitives:
 
-* ``Board.move_to_labware`` travels XY at the gantry's ``safe_z``
+* ``InstrumentedGantry.move_to_labware`` travels XY at the gantry's ``safe_z``
   (absolute deck-frame).
 * Engaging commands take ``measurement_height`` as a first-class command
   argument and descend to ``well.z + measurement_height`` (where
@@ -18,7 +18,7 @@ import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
-from board.board import Board
+from gantry.instrument_mount import InstrumentedGantry
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
 from protocol_engine.protocol import ProtocolContext
@@ -61,21 +61,21 @@ def _plate() -> WellPlate:
 
 def _ctx(instr_name: str, instr, plate=None):
     plate = plate or _plate()
-    board = MagicMock()
-    board.instruments = {instr_name: instr}
+    instrumented_gantry = MagicMock()
+    instrumented_gantry.instruments = {instr_name: instr}
     deck = MagicMock()
     deck.__getitem__ = MagicMock(return_value=plate or _plate())
     deck.resolve_coordinate = MagicMock(return_value=Coordinate3D(x=10.0, y=20.0, z=WELL_Z))
     deck.resolve_labware = MagicMock(return_value=plate or _plate())
-    return ProtocolContext(board=board, deck=deck, logger=logging.getLogger("test"))
+    return ProtocolContext(gantry=instrumented_gantry, deck=deck, logger=logging.getLogger("test"))
 
 
 def test_board_move_to_labware_uses_absolute_safe_z():
     gantry = MagicMock()
     instr = _instrument()
-    board = Board(gantry=gantry, instruments={"tool": instr}, safe_z=20.0)
+    instrumented_gantry = InstrumentedGantry(controller=gantry, instruments={"tool": instr}, safe_z=20.0)
 
-    board.move_to_labware("tool", Coordinate3D(x=10.0, y=20.0, z=WELL_Z))
+    instrumented_gantry.move_to_labware("tool", Coordinate3D(x=10.0, y=20.0, z=WELL_Z))
 
     gantry.move_to.assert_called_once_with(10.0, 20.0, 20.0, travel_z=20.0)
 
@@ -89,8 +89,8 @@ def test_measure_descends_to_well_z_plus_relative_offset():
 
     measure(ctx, instrument="uvvis", position="plate_1.A1", measurement_height=2.0)
 
-    ctx.board.move_to_labware.assert_called_once()
-    ctx.board.move.assert_called_once_with("uvvis", (10.0, 20.0, WELL_Z + 2.0))
+    ctx.gantry.move_to_labware.assert_called_once()
+    ctx.gantry.move.assert_called_once_with("uvvis", (10.0, 20.0, WELL_Z + 2.0))
 
 
 def test_scan_first_well_descends_to_well_z_plus_relative_offset():
@@ -109,7 +109,7 @@ def test_scan_first_well_descends_to_well_z_plus_relative_offset():
         interwell_scan_height=10.0,
     )
 
-    move_calls = ctx.board.move.call_args_list
+    move_calls = ctx.gantry.move.call_args_list
     assert move_calls[0].args == ("uvvis", (10.0, 20.0, WELL_Z + 10.0))
     assert move_calls[1].args == ("uvvis", (10.0, 20.0, WELL_Z + 1.0))
 
@@ -124,8 +124,8 @@ def test_pipette_aspirate_descends_to_labware_reference_by_default():
 
     aspirate(ctx, position="plate_1.A1", volume_ul=10.0)
 
-    ctx.board.move_to_labware.assert_called_once()
-    ctx.board.move.assert_called_once_with(
+    ctx.gantry.move_to_labware.assert_called_once()
+    ctx.gantry.move.assert_called_once_with(
         "pipette", (10.0, 20.0, WELL_Z),
     )
 
@@ -139,8 +139,8 @@ def test_pipette_aspirate_height_is_labware_relative():
 
     aspirate(ctx, position="plate_1.A1", volume_ul=10.0, height=3.0)
 
-    ctx.board.move_to_labware.assert_called_once()
-    ctx.board.move.assert_called_once_with(
+    ctx.gantry.move_to_labware.assert_called_once()
+    ctx.gantry.move.assert_called_once_with(
         "pipette", (10.0, 20.0, WELL_Z + 3.0),
     )
 
@@ -148,10 +148,10 @@ def test_pipette_aspirate_height_is_labware_relative():
 def test_move_named_park_position_passes_travel_z_unchanged():
     from protocol_engine.commands.move import move
 
-    board = MagicMock()
-    board.instruments = {"uvvis": _instrument(name="uvvis")}
+    instrumented_gantry = MagicMock()
+    instrumented_gantry.instruments = {"uvvis": _instrument(name="uvvis")}
     ctx = ProtocolContext(
-        board=board,
+        gantry=instrumented_gantry,
         deck=MagicMock(),
         positions={"park_position": [0.0, 0.0, 20.0]},
         logger=logging.getLogger("test"),
@@ -159,7 +159,7 @@ def test_move_named_park_position_passes_travel_z_unchanged():
 
     move(ctx, instrument="uvvis", position="park_position", travel_z=20.0)
 
-    board.move.assert_called_once_with(
+    instrumented_gantry.move.assert_called_once_with(
         "uvvis",
         (0.0, 0.0, 20.0),
         travel_z=20.0,

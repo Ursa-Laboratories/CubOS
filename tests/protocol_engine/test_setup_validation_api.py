@@ -208,7 +208,7 @@ def test_run_setup_validation_returns_instruments_stage_on_instrument_load_error
 
     monkeypatch.setattr(
         sv,
-        "load_board_from_gantry_config",
+        "load_instrumented_gantry_from_config",
         lambda *a, **kw: (_ for _ in ()).throw(ValueError("unknown instrument type: foo")),
     )
 
@@ -255,15 +255,3 @@ def test_run_setup_validation_reports_semantic_violations(tmp_path, monkeypatch)
     assert result.passed is False
     assert result.stage == "validation"
     assert any("missing instrument" in error for error in result.errors)
-
-
-def test_run_validation_alias_delegates_to_run_setup_validation(tmp_path):
-    from protocol_engine.setup_validation import run_validation
-
-    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML)
-    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
-    protocol = _write(tmp_path / "protocol.yaml", "protocol: []\n")
-
-    result = run_validation(gantry, deck, protocol)
-
-    assert result.passed is True

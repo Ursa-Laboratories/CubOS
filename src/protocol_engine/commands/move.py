@@ -29,8 +29,8 @@ def move(
            (no descent — use ``measure``/``aspirate``/etc. to engage).
 
     Args:
-        context:    Runtime context (board, deck, logger).
-        instrument: Name of the instrument registered on the board.
+        context:    Runtime context (instrumented gantry, deck, logger).
+        instrument: Name of the instrument registered on the gantry.
         position:   Named position, [x, y, z] list, or deck target string.
         travel_z:   Optional raw transit Z for literal/named XYZ moves.
                     When set, the gantry first moves Z to ``travel_z`` at
@@ -43,9 +43,9 @@ def move(
             "move: %s -> %s (raw, travel_z=%s)", instrument, target, travel_z,
         )
         if travel_z is None:
-            context.board.move(instrument, target)
+            context.gantry.move(instrument, target)
         else:
-            context.board.move(instrument, target, travel_z=travel_z)
+            context.gantry.move(instrument, target, travel_z=travel_z)
         return
     if isinstance(position, str) and position in context.positions:
         target = tuple(context.positions[position])
@@ -57,9 +57,9 @@ def move(
             travel_z,
         )
         if travel_z is None:
-            context.board.move(instrument, target)
+            context.gantry.move(instrument, target)
         else:
-            context.board.move(instrument, target, travel_z=travel_z)
+            context.gantry.move(instrument, target, travel_z=travel_z)
         return
 
     # Deck target — route through move_to_labware so the gantry's
@@ -86,4 +86,4 @@ def move(
             "with instrument safe-approach behavior."
         )
     context.logger.info("move: %s -> %s (labware: safe approach)", instrument, position)
-    context.board.move_to_labware(instrument, coord)
+    context.gantry.move_to_labware(instrument, coord)

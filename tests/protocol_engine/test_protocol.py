@@ -10,7 +10,7 @@ from protocol_engine.protocol import Protocol, ProtocolContext, ProtocolStep
 
 def _mock_context():
     return ProtocolContext(
-        board=MagicMock(),
+        gantry=MagicMock(),
         deck=MagicMock(),
         logger=logging.getLogger("test_protocol"),
     )
