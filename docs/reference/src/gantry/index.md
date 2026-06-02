@@ -6,6 +6,7 @@
 
 ## Submodules
 
+- [src.gantry.calibration_utils](calibration_utils.md)
 - [src.gantry.coordinate_translator](coordinate_translator.md)
 - [src.gantry.coordinates](coordinates.md)
 - [src.gantry.errors](errors.md)

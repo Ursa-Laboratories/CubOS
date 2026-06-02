@@ -74,7 +74,7 @@ def test_auto_calibration_routes_single_instrument_to_deck_origin(monkeypatch, t
     assert any("single-instrument deck-origin calibration" in message for message in messages)
 
 
-def test_auto_calibration_routes_multiple_instruments_to_board_calibration(monkeypatch, tmp_path):
+def test_auto_calibration_routes_multiple_instruments_to_gantry_calibration(monkeypatch, tmp_path):
     path = _write_gantry(
         tmp_path / "multi.yaml",
         "  left_probe:\n    type: asmi\n    vendor: vernier\n"

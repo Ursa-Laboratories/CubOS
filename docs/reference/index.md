@@ -31,6 +31,7 @@ Narrative operator guidance belongs in the manual docs pages; code-level details
 - [src.deck.loader](src/deck/loader.md)
 - [src.deck.yaml_schema](src/deck/yaml_schema.md)
 - [src.gantry](src/gantry/index.md)
+- [src.gantry.calibration_utils](src/gantry/calibration_utils.md)
 - [src.gantry.coordinate_translator](src/gantry/coordinate_translator.md)
 - [src.gantry.coordinates](src/gantry/coordinates.md)
 - [src.gantry.errors](src/gantry/errors.md)
