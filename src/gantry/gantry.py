@@ -7,7 +7,6 @@ from typing import Any, Dict, Optional
 
 from .coordinate_translator import (
     to_machine_coordinates,
-    to_user_coordinates,
     translate_status_string,
 )
 from .grbl_settings import format_setting_value, normalize_expected_grbl_settings
@@ -236,8 +235,8 @@ class Gantry:
 
         ``travel_z``, if given, becomes the Z during XY travel: the gantry
         lifts/lowers to it at the current XY before moving XY, then
-        descends/ascends to the target Z. This is how higher layers (Board,
-        protocol commands) express "travel above this labware" without the
+        descends/ascends to the target Z. This is how higher layers
+        (InstrumentedGantry, protocol commands) express "travel above this labware" without the
         mill baking in a machine-wide retract.
         """
         if self._offline:
@@ -369,8 +368,7 @@ class Gantry:
             return dict(self._offline_coords)
         assert self._mill is not None
         coords = self._mill.current_coordinates()
-        x_user, y_user, z_user = to_user_coordinates(coords.x, coords.y, coords.z)
-        return {"x": x_user, "y": y_user, "z": z_user}
+        return {"x": float(coords.x), "y": float(coords.y), "z": float(coords.z)}
 
     def get_position_info(self) -> Dict[str, Any]:
         """Return coordinates, work position, and last-known status."""
@@ -380,8 +378,7 @@ class Gantry:
 
         assert self._mill is not None
         coords = self._mill.current_coordinates()
-        x_user, y_user, z_user = to_user_coordinates(coords.x, coords.y, coords.z)
-        user_coords = {"x": x_user, "y": y_user, "z": z_user}
+        user_coords = {"x": float(coords.x), "y": float(coords.y), "z": float(coords.z)}
         status = self._extract_status()
         return {
             "coords": user_coords,
