@@ -15,4 +15,5 @@
 - [src.protocol_engine.scan_args](scan_args.md)
 - [src.protocol_engine.registry](registry.md)
 - [src.protocol_engine.setup](setup.md)
+- [src.protocol_engine.setup_validator](setup_validator.md)
 - [src.protocol_engine.yaml_schema](yaml_schema.md)

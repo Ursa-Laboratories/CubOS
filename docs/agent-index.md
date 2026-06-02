@@ -23,13 +23,15 @@ Setup bounds validation checks the concrete motion targets implied by the loaded
 - `src/deck/loader.py` - load-name expansion, calibration, derived wells, nested labware.
 - `src/deck/labware/`, `src/deck/labware/definitions/`.
 - `configs/deck/`.
-- Tests: `tests/test_deck_loader.py`, `tests/test_holder_labware.py`, `tests/test_panda_deck_yaml.py`.
+- Tests: `tests/deck/test_deck_loader.py`,
+  `tests/deck/test_holder_labware.py`, `tests/deck/test_panda_deck_yaml.py`.
 
 After schema/config changes: focused tests, then `setup/validate_setup.py` for affected real triples.
 
 ## Protocol engine / setup validation
 
-- `src/protocol_engine/yaml_schema.py`, `loader.py`, `runtime.py`, `setup.py`.
+- `src/protocol_engine/yaml_schema.py`, `loader.py`, `runtime.py`, `setup.py`,
+  `setup_validator.py`.
 - `src/protocol_engine/commands/` - command behavior.
 - `setup/validate_setup.py` - end-to-end offline validation.
 - `configs/protocol/<instrument-or-workflow>/`.

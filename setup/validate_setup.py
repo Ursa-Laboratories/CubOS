@@ -19,7 +19,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
-from protocol_engine.setup_validation import (  # noqa: E402
+from protocol_engine.setup_validator import (  # noqa: E402
     SetupValidationResult,
     run_setup_validation,
 )

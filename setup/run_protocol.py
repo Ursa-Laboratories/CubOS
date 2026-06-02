@@ -31,7 +31,7 @@ sys.path.insert(0, str(project_root / "src"))
 
 from gantry import Gantry
 from protocol_engine.setup import setup_protocol
-from protocol_engine.setup_validation import run_setup_validation
+from protocol_engine.setup_validator import run_setup_validation
 from validation.errors import SetupValidationError
 
 SEPARATOR = "-" * 60

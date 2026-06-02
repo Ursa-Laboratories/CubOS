@@ -93,6 +93,7 @@ Narrative operator guidance belongs in the manual docs pages; code-level details
 - [src.protocol_engine.runtime](src/protocol_engine/runtime.md)
 - [src.protocol_engine.scan_args](src/protocol_engine/scan_args.md)
 - [src.protocol_engine.setup](src/protocol_engine/setup.md)
+- [src.protocol_engine.setup_validator](src/protocol_engine/setup_validator.md)
 - [src.protocol_engine.yaml_schema](src/protocol_engine/yaml_schema.md)
 - [src.validation](src/validation/index.md)
 - [src.validation.bounds](src/validation/bounds.md)

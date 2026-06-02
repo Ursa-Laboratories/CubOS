@@ -303,7 +303,7 @@ required extra is missing.
 
 ~~~python
 from protocol_engine.setup import setup_protocol
-from protocol_engine.setup_validation import run_setup_validation
+from protocol_engine.setup_validator import run_setup_validation
 
 validation = run_setup_validation(
     gantry_path="configs/gantry/cub_xl_asmi.yaml",

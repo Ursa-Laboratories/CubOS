@@ -7,7 +7,7 @@ from textwrap import dedent
 
 import pytest
 
-from protocol_engine.setup_validation import run_setup_validation
+from protocol_engine.setup_validator import run_setup_validation
 from protocol_engine.registry import CommandRegistry
 
 
@@ -172,7 +172,7 @@ def test_run_setup_validation_error_message_includes_exception_type(tmp_path):
 def test_run_setup_validation_returns_validation_stage_on_validator_exception(
     tmp_path, monkeypatch
 ):
-    from protocol_engine import setup_validation as sv
+    from protocol_engine import setup_validator as sv
 
     def _raise(*args, **kwargs):
         raise KeyError("labware_key_missing_from_deck")
@@ -204,7 +204,7 @@ def test_run_setup_validation_returns_validation_stage_on_validator_exception(
 def test_run_setup_validation_returns_instruments_stage_on_instrument_load_error(
     tmp_path, monkeypatch
 ):
-    from protocol_engine import setup_validation as sv
+    from protocol_engine import setup_validator as sv
 
     monkeypatch.setattr(
         sv,
@@ -226,7 +226,7 @@ def test_run_setup_validation_returns_instruments_stage_on_instrument_load_error
 
 def test_run_setup_validation_reports_semantic_violations(tmp_path, monkeypatch):
     from types import SimpleNamespace
-    from protocol_engine import setup_validation as sv
+    from protocol_engine import setup_validator as sv
 
     monkeypatch.setattr(
         sv,
