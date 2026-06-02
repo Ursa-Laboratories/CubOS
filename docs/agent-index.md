@@ -7,8 +7,7 @@ Use this map after reading `AGENTS.md`. Read the smallest relevant set of files 
 Read before changing motion, coordinates, bounds, homing, or scan/protocol movement.
 - `src/gantry/gantry.py`, `gantry_config.py`, `origin.py` - frame, working volume, deck-origin calibration.
 - `src/gantry/machine_geometry.py` - built-in fixed-structure AABBs per gantry family, including the `cub_xl` right-rail guard. Not user-authored YAML; consumed by setup validation.
-- `src/gantry/coordinate_translator.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `offline.py`.
-- `src/board/board.py`, `src/board/loader.py` - instrument offsets and labware movement.
+- `src/gantry/coordinate_translator.py`, `instrument_mount.py`, `instrument_loader.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `offline.py` - gantry boundary, mounted instrument offsets, and labware movement.
 - `src/validation/bounds.py`, `src/validation/protocol_semantics.py` - offline safety checks, including fixed-structure rail collision.
 - Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
 

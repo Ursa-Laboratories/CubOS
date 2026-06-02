@@ -7,7 +7,7 @@ Protocols are ordered YAML step lists that compile into an executable `Protocol`
 1. Load protocol YAML.
 2. Validate the schema and command arguments.
 3. Compile each step into a `ProtocolStep`.
-4. Inject a `ProtocolContext` containing the board, deck, logger, and optional persistence objects.
+4. Inject a `ProtocolContext` containing the instrumented gantry, deck, logger, and optional persistence objects.
 5. Run the steps sequentially.
 
 ## Config
@@ -139,5 +139,5 @@ The command implementations live under `src/protocol_engine/commands/`.
 
 - Prefer explicit instrument names instead of relying on implicit defaults
 - Use deck targets like `plate.A1` rather than hardcoded coordinates when possible
-- Keep hardware-setup changes in deck or board config, not in protocol YAML
+- Keep hardware-setup changes in deck or gantry config, not in protocol YAML
 - Treat protocols as experiment definitions, not as calibration files

@@ -47,7 +47,7 @@ KeyReader = Callable[[], tuple[str, int]]
 
 @dataclass(frozen=True)
 class MultiInstrumentCalibrationResult:
-    """Result of a multi-instrument board calibration run."""
+    """Result of a multi-instrument gantry calibration run."""
 
     measured_working_volume: tuple[float, float, float]
     xy_bounds_after_origin: tuple[float, float, float]
@@ -93,7 +93,7 @@ def compute_relative_instrument_calibrations(
     instrument defines zero XY offset, and the lowest instrument defines zero
     depth after the Z-reference step. For every other instrument, touching the
     same physical block point gives the relative WPos deltas needed by
-    Board.move() semantics:
+    InstrumentedGantry.move() semantics:
         offset_i = offset_ref + gantry_ref - gantry_i
         depth_i = depth_lowest + gantry_i_z - gantry_lowest_z
     with offset_ref=(0, 0) and depth_lowest=0 in this calibration flow.
@@ -354,11 +354,11 @@ def run_multi_instrument_calibration(
     available_instruments = _instrument_names(raw_config)
     output(f"Loaded deck-origin gantry config: {gantry_path}")
     output("Calibration overview:")
-    output("  This guided routine creates the shared CubOS deck frame for the whole instrument board.")
+    output("  This guided routine creates the shared CubOS deck frame for all mounted instruments.")
     output("  Step 1 sets the system origin: place the origin block/artifact in the front-left")
     output("  corner, then jog the first/left-most tool's active tip/probe point over the X mark.")
     output("  The script sets only G54 WPos X=0 and Y=0 there; Z is set later after the full")
-    output("  instrument board is attached and the lowest mounted tool touches the reference point.")
+    output("  mounted instruments are attached and the lowest mounted tool touches the reference point.")
     output("")
     reference_instrument = reference_instrument or _prompt_instrument_name(
         "Pick the number for the first/left-most tool for front-left origin",
@@ -400,7 +400,7 @@ def run_multi_instrument_calibration(
     output("  - Keep E-stop reachable; calibration can move mounted tools and changes G54 WPos.")
     output(f"  - First/left-most tool for front-left origin: {reference_instrument}")
     if lowest_instrument is None:
-        output("  - The lowest mounted tool will be selected later, after the full board is attached/verified.")
+        output("  - The lowest mounted tool will be selected later, after all mounted instruments are attached/verified.")
     else:
         output(f"  - Lowest mounted tool for Z/reference point: {lowest_instrument}")
     output(
@@ -477,7 +477,7 @@ def run_multi_instrument_calibration(
             label="lowest-instrument Z calibration",
         )
         output(
-            "Attach/verify the full instrument board at the deck XY center before setting Z."
+            "Attach/verify all mounted instruments at the deck XY center before setting Z."
         )
         if lowest_instrument is None:
             lowest_instrument = _prompt_instrument_name(

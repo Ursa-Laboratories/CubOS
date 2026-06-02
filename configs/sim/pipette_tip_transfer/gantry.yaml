@@ -1,7 +1,7 @@
 # Offline Cub XL pipette simulation gantry.
 #
 # This is intentionally a simulation fixture: it keeps the Cub XL fixed-
-# structure model and uses the photo-derived pipette-board mount offset. Its
+# structure model and uses the photo-derived pipette mount offset. Its
 # safe_z is the tool-tip travel plane; with the attached 59.3 mm P300 tip the
 # gantry approach plane remains just below z_max. Do not use this file as a
 # hardware setup config.

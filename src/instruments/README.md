@@ -22,7 +22,7 @@ Every instrument folder follows the same layout:
 └── exceptions.py     # Instrument-specific exception hierarchy
 ```
 
-Drivers support an `offline=True` constructor flag for dry runs — no serial I/O, synthetic return values. The board loader passes `offline=True` automatically when `mock_mode=True`.
+Drivers support an `offline=True` constructor flag for dry runs — no serial I/O, synthetic return values. The gantry instrument loader passes `offline=True` automatically when `mock_mode=True`.
 
 ## Adding a new instrument
 

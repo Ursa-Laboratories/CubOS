@@ -1,5 +1,5 @@
 # Supported instruments, their allowed vendors, and driver class paths.
-# The machine/board loaders use this to validate instrument entries and import driver classes.
+# The gantry machine loaders use this to validate instrument entries and import driver classes.
 
 instruments:
   asmi:

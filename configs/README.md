@@ -30,7 +30,7 @@ configs/
   protocol/   # Ordered protocol steps
 ```
 
-There are no separate board YAMLs. Mounted instruments and offsets live
+There are no separate instrument-board YAMLs. Mounted instruments and offsets live
 inside the corresponding `configs/gantry/*.yaml` machine file. Protocol
 motion heights live on the protocol command (see Height Semantics below).
 

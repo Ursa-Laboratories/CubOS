@@ -36,7 +36,7 @@ class ASMI(BaseInstrument):
     """Driver for the ASMI force sensor (Vernier GoDirect).
 
     Connects to a GoDirect force sensor over USB and provides force
-    measurements.  All positioning is handled by the gantry via the Board.
+    measurements.  All positioning is handled by the instrumented gantry.
 
     Pass ``offline=True`` for dry runs and testing — no USB connection,
     all readings return ``default_force``.

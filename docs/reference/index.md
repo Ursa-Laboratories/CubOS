@@ -15,11 +15,6 @@ Narrative operator guidance belongs in the manual docs pages; code-level details
 
 ## `src`
 
-- [src.board](src/board/index.md)
-- [src.board.board](src/board/board.md)
-- [src.board.errors](src/board/errors.md)
-- [src.board.loader](src/board/loader.md)
-- [src.board.yaml_schema](src/board/yaml_schema.md)
 - [src.deck](src/deck/index.md)
 - [src.deck.deck](src/deck/deck.md)
 - [src.deck.errors](src/deck/errors.md)
@@ -46,6 +41,8 @@ Narrative operator guidance belongs in the manual docs pages; code-level details
 - [src.gantry.gantry_driver.exceptions](src/gantry/gantry_driver/exceptions.md)
 - [src.gantry.gantry_driver.logger](src/gantry/gantry_driver/logger.md)
 - [src.gantry.grbl_settings](src/gantry/grbl_settings.md)
+- [src.gantry.instrument_loader](src/gantry/instrument_loader.md)
+- [src.gantry.instrument_mount](src/gantry/instrument_mount.md)
 - [src.gantry.loader](src/gantry/loader.md)
 - [src.gantry.machine_geometry](src/gantry/machine_geometry.md)
 - [src.gantry.offline](src/gantry/offline.md)

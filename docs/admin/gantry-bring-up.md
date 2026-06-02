@@ -139,7 +139,7 @@ Repeat until both are true:
 
 ## Save Expected Settings
 
-Save the final controller expectations in the gantry or board config used by
+Save the final controller expectations in the gantry config used by
 the machine. For example:
 
 ```yaml
