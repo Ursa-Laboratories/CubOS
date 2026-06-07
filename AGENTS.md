@@ -49,24 +49,11 @@ These offsets live on the protocol command, never on instruments. `scan` require
 
 `docs/agent-index.md` is the detailed retrieval map for gantry, deck, protocol, instrument, calibration, setup, exception-handling, and testing work. Keep long source lists there, not here.
 
-For setup validation:
+Common offline setup validation:
 
 ```bash
 python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
 ```
-
-### Instruments
-- `src/instruments/<instrument>/driver.py`, `mock.py`, `models.py`, `exceptions.py`.
-- `src/instruments/registry.yaml`, `src/instruments/yaml_schema.py`.
-- `src/protocol_engine/measurements.py`, `data/data_store.py` — persisted measurements.
-- Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
-
-## Calibration Scripts
-
-- `setup/calibrate_gantry.py` — only supported user-facing calibration entrypoint. Loads input gantry YAML, dispatches single- or multi-instrument flow by instrument count. Without `--output-gantry`, prompts before overwriting input; with it, writes the explicit path without extra prompt.
-- `setup/calibration/single_instrument_calibration.py` — internal one-instrument flow.
-- `setup/calibration/multi_instrument_calibration.py` — internal multi-instrument flow.
-- Detailed operator steps and offset math live in `docs/calibration.md`.
 
 Calibration soft-limit rule: `working_volume` is the usable deck/WPos range
 after homing pull-off. GRBL `$130/$131/$132` and YAML
@@ -75,14 +62,6 @@ homing pull-off reserve. Calibration sets `$10=0` for WPos status reporting,
 writes the per-machine `grbl_settings.homing_pull_off` (`$27`) before homing
 when configured, and saves/programs max travel as usable span plus pull-off.
 Do not treat the pull-off reserve as usable WPos.
-
-## Setup Scripts
-
-- `setup/validate_setup.py` — offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
-- `setup/run_protocol.py` — load, validate, connect hardware, run protocol end-to-end. Connects gantry (clearing expected GRBL alarm, restoring state) and instruments before first step; disconnects in `finally`.
-- `setup/hello_world.py` — interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y ±1mm), Z (down 1mm), X (up 1mm), Q (quit).
-- `setup/keyboard_input.py` — single-keypress reader (Unix `tty`/`termios`).
-`scan.plate` may target either a top-level `WellPlate` key or a nested holder path such as `plate_holder.plate`, as long as that path resolves to a `WellPlate`.
 
 ## Hardware Iteration Mode
 
@@ -93,7 +72,7 @@ Covers two situations where TDD is deferred:
 
 In both cases: make the minimal targeted change, mark deferred work `# TODO(iter): test` or `# TODO(iter): doc`, and sweep those tags at close-out. Temporary instrumentation is OK if tagged and removed before finalizing.
 
-See root `AGENTS.md` for the full Development Modes definition.
+See `AGENTS.md` for the full Development Modes definition.
 
 ## Progress Notes
 
