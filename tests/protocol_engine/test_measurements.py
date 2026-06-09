@@ -87,9 +87,27 @@ class TestNormalizeMeasurement:
     def test_normalize_asmi_indentation_with_return_mode(self):
         raw_result = {
             "measurements": [
-                {"z_mm": -73.01, "raw_force_n": 0.10, "corrected_force_n": 0.01, "direction": "down"},
-                {"z_mm": -73.02, "raw_force_n": 0.11, "corrected_force_n": 0.02, "direction": "down"},
-                {"z_mm": -73.01, "raw_force_n": 0.09, "corrected_force_n": 0.00, "direction": "up"},
+                {
+                    "timestamp": 1761841220.199,
+                    "z_mm": -73.01,
+                    "raw_force_n": 0.10,
+                    "corrected_force_n": 0.01,
+                    "direction": "down",
+                },
+                {
+                    "timestamp": 1761841220.327,
+                    "z_mm": -73.02,
+                    "raw_force_n": 0.11,
+                    "corrected_force_n": 0.02,
+                    "direction": "down",
+                },
+                {
+                    "timestamp": 1761841220.453,
+                    "z_mm": -73.01,
+                    "raw_force_n": 0.09,
+                    "corrected_force_n": 0.00,
+                    "direction": "up",
+                },
             ],
             "baseline_avg": 0.09,
             "baseline_std": 0.001,
@@ -105,6 +123,11 @@ class TestNormalizeMeasurement:
         )
 
         assert measurement.measurement_type == MeasurementType.ASMI_INDENTATION
+        assert measurement.payload["timestamps_s"] == [
+            1761841220.199,
+            1761841220.327,
+            1761841220.453,
+        ]
         assert measurement.payload["directions"] == ["down", "down", "up"]
         assert measurement.metadata["measure_with_return"] is True
 

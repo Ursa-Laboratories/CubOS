@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from data.asmi_raw_csv import export_asmi_raw_csvs
 from data.data_reader import DataReader
 
 
@@ -44,12 +45,32 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Instrument name: uvvis, filmetrics, camera, asmi",
     )
     instrument_parser.add_argument("--csv", help="Optional output CSV path.")
+
+    asmi_raw_parser = subparsers.add_parser(
+        "asmi-raw-csv",
+        help="Export ASMI campaign measurements as ASMI_new raw per-well CSVs.",
+    )
+    asmi_raw_parser.add_argument("campaign_id", type=int)
+    asmi_raw_parser.add_argument("output_dir")
     return parser
 
 
 def main() -> int:
     parser = _build_parser()
     args = parser.parse_args()
+
+    if args.command == "asmi-raw-csv":
+        written = export_asmi_raw_csvs(
+            db_path=args.db_path,
+            campaign_id=args.campaign_id,
+            output_dir=args.output_dir,
+        )
+        if not written:
+            print("No rows found.")
+            return 0
+        for path in written:
+            print(f"Wrote CSV: {Path(path).resolve()}")
+        return 0
 
     with DataReader(db_path=args.db_path) as reader:
         if args.command == "campaign-experiments":

@@ -25,3 +25,19 @@ When `ProtocolContext.data_store` and `ProtocolContext.campaign_id` are set, pro
 
 - `data.data_store` — database creation and write API
 - `data.data_reader` — read and query helpers
+- `data.export_helpers` — CLI helpers for exporting stored data to CSV
+
+## ASMI Raw CSV Export
+
+Use `asmi-raw-csv` to export stored ASMI indentation measurements in the raw
+per-well CSV format consumed by `projects/ASMI_new`:
+
+```bash
+PYTHONPATH=. python -m data.export_helpers \
+  --db-path data/databases/panda_data.db \
+  asmi-raw-csv <campaign_id> results/measurements/<run_folder>
+```
+
+Each ASMI measurement becomes a `well_<well>_<timestamp>.csv` file with
+metadata rows followed by `Timestamp(s)`, `Z_Position(mm)`, `Raw_Force(N)`,
+`Corrected_Force(N)`, and `Direction` when direction data is available.

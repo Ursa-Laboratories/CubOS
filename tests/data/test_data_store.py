@@ -367,9 +367,11 @@ class TestASMIInstrumentMeasurementLogging:
         measurement = InstrumentMeasurement(
             measurement_type=MeasurementType.ASMI_INDENTATION,
             payload={
+                "timestamps_s": [1761841220.199, 1761841220.327, 1761841220.453],
                 "z_positions_mm": [0.0, 0.1, 0.2],
                 "raw_forces_n": [0.01, 0.02, 0.03],
                 "corrected_forces_n": [0.005, 0.015, 0.025],
+                "directions": ["down", "down", "up"],
             },
             metadata={
                 "baseline_avg": 0.005,
@@ -381,13 +383,16 @@ class TestASMIInstrumentMeasurementLogging:
         mid = store.log_measurement(eid, measurement)
 
         row = store._conn.execute(
-            "SELECT z_positions, raw_forces, corrected_forces FROM asmi_measurements WHERE id = ?",
+            "SELECT sample_timestamps, z_positions, raw_forces, "
+            "corrected_forces, directions FROM asmi_measurements WHERE id = ?",
             (mid,),
         ).fetchone()
 
-        assert json.loads(row[0]) == [0.0, 0.1, 0.2]
-        assert json.loads(row[1]) == [0.01, 0.02, 0.03]
-        assert json.loads(row[2]) == [0.005, 0.015, 0.025]
+        assert json.loads(row[0]) == [1761841220.199, 1761841220.327, 1761841220.453]
+        assert json.loads(row[1]) == [0.0, 0.1, 0.2]
+        assert json.loads(row[2]) == [0.01, 0.02, 0.03]
+        assert json.loads(row[3]) == [0.005, 0.015, 0.025]
+        assert json.loads(row[4]) == ["down", "down", "up"]
         store.close()
 
 

@@ -144,6 +144,7 @@ def normalize_measurement(
                 "defaulting missing entries to 'down'",
             )
         payload = {
+            "timestamps_s": [s.get("timestamp") for s in steps],
             "z_positions_mm": [s["z_mm"] for s in steps],
             "raw_forces_n": [s["raw_force_n"] for s in steps],
             "corrected_forces_n": [s["corrected_force_n"] for s in steps],

@@ -59,9 +59,11 @@ CREATE TABLE IF NOT EXISTS camera_measurements (
 CREATE TABLE IF NOT EXISTS asmi_measurements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     experiment_id   INTEGER NOT NULL REFERENCES experiments(id),
+    sample_timestamps TEXT,
     z_positions     TEXT    NOT NULL,
     raw_forces      TEXT    NOT NULL,
     corrected_forces TEXT   NOT NULL,
+    directions       TEXT,
     baseline_avg    REAL    NOT NULL,
     baseline_std    REAL    NOT NULL,
     force_exceeded  INTEGER NOT NULL DEFAULT 0,
@@ -123,11 +125,34 @@ class DataStore:
 
     def _create_tables(self) -> None:
         self._conn.executescript(_SCHEMA_SQL)
+        self._ensure_asmi_optional_columns()
 
     _BLOB_COLUMNS = {
         "uvvis_measurements": ("wavelengths", "intensities"),
-        "asmi_measurements": ("z_positions", "raw_forces", "corrected_forces"),
+        "asmi_measurements": (
+            "sample_timestamps",
+            "z_positions",
+            "raw_forces",
+            "corrected_forces",
+            "directions",
+        ),
     }
+
+    def _ensure_asmi_optional_columns(self) -> None:
+        """Add ASMI raw-export columns for databases created before this feature."""
+        columns = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(asmi_measurements)")
+        }
+        additions = {
+            "sample_timestamps": "TEXT",
+            "directions": "TEXT",
+        }
+        for name, column_type in additions.items():
+            if name not in columns:
+                self._conn.execute(
+                    f"ALTER TABLE asmi_measurements ADD COLUMN {name} {column_type}"
+                )
+        self._conn.commit()
 
     def _check_schema_migration(self) -> None:
         """Raise if any float-array column still contains binary BLOB data."""
@@ -229,13 +254,26 @@ class DataStore:
         if measurement.measurement_type == MeasurementType.ASMI_INDENTATION:
             return self._log_asmi(
                 experiment_id=experiment_id,
+                sample_timestamps=(
+                    tuple(measurement.payload["timestamps_s"])
+                    if "timestamps_s" in measurement.payload
+                    else None
+                ),
                 z_positions=tuple(measurement.payload["z_positions_mm"]),
                 raw_forces=tuple(measurement.payload["raw_forces_n"]),
                 corrected_forces=tuple(measurement.payload["corrected_forces_n"]),
+                directions=(
+                    tuple(measurement.payload["directions"])
+                    if "directions" in measurement.payload
+                    else None
+                ),
                 baseline_avg=float(measurement.metadata["baseline_avg"]),
                 baseline_std=float(measurement.metadata["baseline_std"]),
                 force_exceeded=bool(measurement.metadata["force_exceeded"]),
                 data_points=int(measurement.metadata["data_points"]),
+                step_size_mm=measurement.metadata.get("step_size_mm"),
+                z_target_mm=measurement.metadata.get("z_target_mm"),
+                force_limit_n=measurement.metadata.get("force_limit_n"),
             )
 
         if measurement.measurement_type in {
@@ -318,28 +356,43 @@ class DataStore:
     def _log_asmi(
         self,
         experiment_id: int,
+        sample_timestamps: Optional[tuple[float | None, ...]],
         z_positions: tuple[float, ...],
         raw_forces: tuple[float, ...],
         corrected_forces: tuple[float, ...],
+        directions: Optional[tuple[str, ...]],
         baseline_avg: float,
         baseline_std: float,
         force_exceeded: bool,
         data_points: int,
+        step_size_mm: Optional[float] = None,
+        z_target_mm: Optional[float] = None,
+        force_limit_n: Optional[float] = None,
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO asmi_measurements "
-            "(experiment_id, z_positions, raw_forces, corrected_forces, "
-            "baseline_avg, baseline_std, force_exceeded, data_points) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "(experiment_id, sample_timestamps, z_positions, raw_forces, "
+            "corrected_forces, directions, baseline_avg, baseline_std, "
+            "force_exceeded, data_points, step_size_mm, z_target_mm, force_limit_n) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 experiment_id,
+                (
+                    json.dumps(list(sample_timestamps))
+                    if sample_timestamps is not None
+                    else None
+                ),
                 json.dumps(list(z_positions)),
                 json.dumps(list(raw_forces)),
                 json.dumps(list(corrected_forces)),
+                json.dumps(list(directions)) if directions is not None else None,
                 baseline_avg,
                 baseline_std,
                 int(force_exceeded),
                 data_points,
+                step_size_mm,
+                z_target_mm,
+                force_limit_n,
             ),
         )
         self._conn.commit()
