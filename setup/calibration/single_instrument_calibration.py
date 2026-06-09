@@ -55,21 +55,6 @@ class DeckOriginCalibrationResult:
     instrument_name: str | None
     plan: DeckOriginCalibrationPlan
 
-    @property
-    def reference_verification(self) -> tuple[float, float, float]:
-        """Backward-compatible alias for the final Z-reference verification."""
-        return self.z_reference_verification
-
-    @property
-    def reference_surface_z_mm(self) -> float:
-        """Deprecated alias for the one-instrument lower Z assignment."""
-        return self.z_min_mm
-
-    @property
-    def calculated_z_range_mm(self) -> float:
-        """Deprecated alias for the configured factory Z travel span."""
-        return self.factory_z_travel_mm
-
 
 @dataclass(frozen=True)
 class BlockZCalibration:
@@ -132,11 +117,6 @@ def _factory_z_travel_mm(raw_config: dict[str, Any]) -> float:
     if value <= 0:
         raise ValueError("cnc.factory_z_travel_mm must be > 0.")
     return _round_mm(value)
-
-
-def _calculated_z_range(raw_config: dict[str, Any]) -> float:
-    """Deprecated helper name retained for older callers."""
-    return _factory_z_travel_mm(raw_config)
 
 
 def _calibration_block_height_mm(
@@ -595,7 +575,7 @@ def _commands_for_z_min(
 ) -> tuple[str, ...]:
     z_value = "0"
     confirmation = "<confirm true deck-bottom contact>"
-    if z_reference_mode in ("prompt", "ruler-gap", "known-height"):
+    if z_reference_mode in ("prompt", "ruler-gap"):
         gap_value = "<tip_gap_mm>" if tip_gap_mm is None else f"{tip_gap_mm:g}"
         confirmation = (
             "<confirm bottom contact or enter ruler-measured TCP gap; "
@@ -948,9 +928,7 @@ def run_calibration(
     jog_feed_rate: float = 2500.0,
     limit_pull_off_mm: float = 5.0,
     tip_gap_mm: float | None = None,
-    reference_surface_z_mm: float | None = None,
     z_reference_mode: str = "bottom",
-    measure_reachable_z_min: bool | None = False,
     instrument_name: str | None = None,
     skip_soft_limit_config: bool = False,
     write_gantry_yaml: bool = False,
@@ -971,20 +949,8 @@ def run_calibration(
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     plan = build_deck_origin_calibration_plan(gantry_config)
-    if reference_surface_z_mm is not None:
-        if tip_gap_mm is not None:
-            raise ValueError("Use only one of tip_gap_mm or reference_surface_z_mm.")
-        tip_gap_mm = reference_surface_z_mm
-    deprecated_known_height_mode = z_reference_mode == "known-height"
-    if deprecated_known_height_mode:
-        z_reference_mode = "ruler-gap"
     if z_reference_mode not in ("prompt", "bottom", "ruler-gap", "block"):
         raise ValueError("z_reference_mode must be one of: prompt, bottom, ruler-gap, block")
-    if deprecated_known_height_mode:
-        output(
-            "Deprecated z_reference_mode=known-height received; treating "
-            "the supplied height as a ruler-measured deck-to-TCP gap."
-        )
 
     if dry_run:
         _print_dry_run(
@@ -1003,11 +969,6 @@ def run_calibration(
     output("  - Place a calibration block at the front-left origin point.")
     output("  - Jog the instrument tip/probe to touch the block top at that point.")
     output("  - This will set X=0 and Y=0 at that pose, then set Z from the selected reference mode.")
-    if measure_reachable_z_min is True:
-        output(
-            "  - --measure-reachable-z-min is deprecated; the lower reach is "
-            "now recorded from the origin/gap calibration point."
-        )
     if instrument_name:
         output(f"  - Instrument/TCP label for reach output: {instrument_name}")
     output("")

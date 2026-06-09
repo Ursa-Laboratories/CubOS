@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from board.board import Board
+from gantry.instrument_mount import InstrumentedGantry
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.vial import Vial
@@ -117,13 +117,13 @@ def _make_instrument(
     return instr
 
 
-def _make_board(*instruments: tuple) -> Board:
-    """Build a Board with named instruments and a mock gantry."""
+def _make_instrumented_gantry(*instruments: tuple) -> InstrumentedGantry:
+    """Build a InstrumentedGantry with named instruments and a mock gantry."""
     gantry = MagicMock()
     instr_dict = {}
     for name, instr in instruments:
         instr_dict[name] = instr
-    return Board(gantry=gantry, instruments=instr_dict)
+    return InstrumentedGantry(controller=gantry, instruments=instr_dict)
 
 
 def _make_protocol(command_name: str, **args) -> Protocol:
@@ -245,8 +245,8 @@ class TestValidateGantryPositions:
         gantry = _make_gantry()
         deck = _make_deck(vial_1=_make_vial(x=30.0, y=40.0, z=20.0))
         instr = _make_instrument(offset_x=5.0, offset_y=0.0, depth=0.0)
-        board = _make_board(("instr_1", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("instr_1", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert violations == []
 
     def test_instrument_offset_pushes_gantry_outside_x_max_fails(self):
@@ -255,8 +255,8 @@ class TestValidateGantryPositions:
         gantry = _make_gantry(x_max=300.0)
         deck = _make_deck(vial_1=_make_vial(x=299.0, y=40.0, z=20.0))
         instr = _make_instrument(offset_x=-5.0)
-        board = _make_board(("probe", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("probe", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert len(violations) >= 1
         assert any(v.axis == "x" and v.bound_name == "x_max" for v in violations)
 
@@ -266,8 +266,8 @@ class TestValidateGantryPositions:
         gantry = _make_gantry(x_min=0.0)
         deck = _make_deck(vial_1=_make_vial(x=5.0, y=40.0, z=20.0))
         instr = _make_instrument(offset_x=10.0)
-        board = _make_board(("probe", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("probe", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert len(violations) >= 1
         assert any(v.axis == "x" and v.bound_name == "x_min" for v in violations)
 
@@ -277,8 +277,8 @@ class TestValidateGantryPositions:
         gantry = _make_gantry(z_max=80.0)
         deck = _make_deck(vial_1=_make_vial(x=30.0, y=40.0, z=75.0))
         instr = _make_instrument(depth=10.0)
-        board = _make_board(("deep_instr", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("deep_instr", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert len(violations) >= 1
         assert any(v.axis == "z" and v.bound_name == "z_max" for v in violations)
 
@@ -287,8 +287,8 @@ class TestValidateGantryPositions:
         gantry = _make_gantry(x_min=0.0)
         deck = _make_deck(vial_1=_make_vial(x=5.0, y=40.0, z=20.0))
         instr = _make_instrument(offset_x=5.0)
-        board = _make_board(("instr_1", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("instr_1", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert violations == []
 
     def test_gantry_position_epsilon_beyond_boundary_fails(self):
@@ -296,16 +296,16 @@ class TestValidateGantryPositions:
         gantry = _make_gantry(x_min=0.0)
         deck = _make_deck(vial_1=_make_vial(x=4.999, y=40.0, z=20.0))
         instr = _make_instrument(offset_x=5.0)
-        board = _make_board(("instr_1", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("instr_1", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert len(violations) >= 1
 
     def test_zero_offset_instrument_gantry_equals_deck_position(self):
         gantry = _make_gantry()
         deck = _make_deck(vial_1=_make_vial(x=30.0, y=40.0, z=20.0))
         instr = _make_instrument(offset_x=0.0, offset_y=0.0, depth=0.0)
-        board = _make_board(("instr_1", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("instr_1", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert violations == []
 
     def test_multiple_instruments_one_ok_one_fails(self):
@@ -313,8 +313,8 @@ class TestValidateGantryPositions:
         deck = _make_deck(vial_1=_make_vial(x=2.0, y=40.0, z=20.0))
         ok_instr = _make_instrument(offset_x=0.0)
         bad_instr = _make_instrument(offset_x=5.0)
-        board = _make_board(("ok", ok_instr), ("bad", bad_instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("ok", ok_instr), ("bad", bad_instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert len(violations) >= 1
         instr_names = {v.instrument_name for v in violations}
         assert "bad" in instr_names
@@ -324,8 +324,8 @@ class TestValidateGantryPositions:
         gantry = _make_gantry(x_min=0.0)
         deck = _make_deck(my_vial=_make_vial(x=2.0, y=40.0, z=20.0))
         instr = _make_instrument(offset_x=5.0)
-        board = _make_board(("my_probe", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("my_probe", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert violations[0].instrument_name == "my_probe"
         assert violations[0].labware_key == "my_vial"
         assert violations[0].position_id == "location"
@@ -335,15 +335,15 @@ class TestValidateGantryPositions:
         gantry = _make_gantry()
         deck = _make_deck()
         instr = _make_instrument(offset_x=-15.0)
-        board = _make_board(("instr_1", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("instr_1", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert violations == []
 
     def test_empty_board_no_instruments_passes(self):
         gantry = _make_gantry()
         deck = _make_deck(vial_1=_make_vial())
-        board = _make_board()
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry()
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         assert violations == []
 
     def test_well_plate_gantry_validation_checks_all_wells(self):
@@ -353,8 +353,8 @@ class TestValidateGantryPositions:
         plate = _make_plate(a1_x=10.0, a1_y=10.0, a1_z=15.0)
         deck = _make_deck(plate_1=plate)
         instr = _make_instrument(offset_x=15.0)
-        board = _make_board(("big_offset", instr))
-        violations = validate_gantry_positions(gantry, deck, board)
+        instrumented_gantry = _make_instrumented_gantry(("big_offset", instr))
+        violations = validate_gantry_positions(gantry, deck, instrumented_gantry)
         # At least one well should violate x_min.
         assert len(violations) > 0
         assert all(v.instrument_name == "big_offset" for v in violations)
@@ -367,7 +367,7 @@ class TestValidateProtocolMotionBounds:
             used=_make_vial(x=30.0, y=40.0, z=20.0),
             unused=_make_vial(x=-10.0, y=40.0, z=20.0),
         )
-        board = _make_board(("probe", _make_instrument()))
+        instrumented_gantry = _make_instrumented_gantry(("probe", _make_instrument()))
         protocol = _make_protocol(
             "measure",
             instrument="probe",
@@ -375,13 +375,13 @@ class TestValidateProtocolMotionBounds:
             measurement_height=0.0,
         )
 
-        assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry) == []
 
     def test_measure_validates_only_referenced_well(self):
         gantry = _make_gantry(y_max=20.0, safe_z=80.0)
         plate = _make_plate(a1_y=10.0, y_offset=15.0)
         deck = _make_deck(plate=plate)
-        board = _make_board(("probe", _make_instrument()))
+        instrumented_gantry = _make_instrumented_gantry(("probe", _make_instrument()))
         protocol = _make_protocol(
             "measure",
             instrument="probe",
@@ -389,7 +389,7 @@ class TestValidateProtocolMotionBounds:
             measurement_height=0.0,
         )
 
-        assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry) == []
 
         protocol = _make_protocol(
             "measure",
@@ -397,7 +397,7 @@ class TestValidateProtocolMotionBounds:
             position="plate.B1",
             measurement_height=0.0,
         )
-        violations = validate_protocol_motion_bounds(gantry, protocol, deck, board)
+        violations = validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry)
 
         assert violations
         assert {v.position_id for v in violations} == {"B1.safe_z", "B1.action_z"}
@@ -406,7 +406,7 @@ class TestValidateProtocolMotionBounds:
         gantry = _make_gantry(y_max=20.0, safe_z=80.0)
         plate = _make_plate(a1_y=10.0, y_offset=15.0)
         deck = _make_deck(plate=plate)
-        board = _make_board(("probe", _make_instrument()))
+        instrumented_gantry = _make_instrumented_gantry(("probe", _make_instrument()))
         protocol = _make_protocol(
             "scan",
             instrument="probe",
@@ -416,7 +416,7 @@ class TestValidateProtocolMotionBounds:
             interwell_scan_height=1.0,
         )
 
-        violations = validate_protocol_motion_bounds(gantry, protocol, deck, board)
+        violations = validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry)
 
         assert violations
         assert any(v.position_id == "B1.action_z" for v in violations)
@@ -425,7 +425,7 @@ class TestValidateProtocolMotionBounds:
     def test_gantry_bounds_use_only_the_command_instrument(self):
         gantry = _make_gantry(x_min=0.0, safe_z=80.0)
         deck = _make_deck(vial=_make_vial(x=30.0, y=40.0, z=20.0))
-        board = _make_board(
+        instrumented_gantry = _make_instrumented_gantry(
             ("used", _make_instrument(offset_x=0.0)),
             ("unused_bad_offset", _make_instrument(offset_x=100.0)),
         )
@@ -436,7 +436,7 @@ class TestValidateProtocolMotionBounds:
             measurement_height=0.0,
         )
 
-        assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry) == []
 
     def test_holder_base_is_ignored_when_protocol_targets_nested_labware(self):
         gantry = _make_gantry(z_min=80.0, z_max=101.5, factory_z_travel_mm=101.5,
@@ -448,7 +448,7 @@ class TestValidateProtocolMotionBounds:
             contained_labware={"plate": plate},
         )
         deck = _make_deck(plate_holder=holder)
-        board = _make_board(("probe", _make_instrument()))
+        instrumented_gantry = _make_instrumented_gantry(("probe", _make_instrument()))
         protocol = _make_protocol(
             "measure",
             instrument="probe",
@@ -456,7 +456,7 @@ class TestValidateProtocolMotionBounds:
             measurement_height=1.0,
         )
 
-        assert validate_protocol_motion_bounds(gantry, protocol, deck, board) == []
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry) == []
 
     def test_collector_reports_scan_safe_approach_and_action_targets(self):
         gantry = _make_gantry(safe_z=80.0)

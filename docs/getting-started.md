@@ -41,7 +41,7 @@ Validate your YAML setup offline before connecting hardware:
 PYTHONPATH=src python setup/validate_setup.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_move_a1.yaml
+  configs/protocol/asmi/move_a1.yaml
 ```
 
 This loads all three configs, checks the protocol's concrete motion targets
@@ -98,7 +98,7 @@ minimal protocol:
 PYTHONPATH=src python setup/run_protocol.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_move_a1.yaml
+  configs/protocol/asmi/move_a1.yaml
 ```
 
 Move to ASMI indentation or scans only after the minimal move behaves as

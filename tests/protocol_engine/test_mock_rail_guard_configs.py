@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-from setup.validate_setup import run_validation
+from setup.validate_setup import run_setup_validation
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -84,7 +84,7 @@ def test_validate_setup_home_over_rail_then_low_travel_fails(tmp_path):
         encoding="utf-8",
     )
 
-    result = run_validation(
+    result = run_setup_validation(
         gantry_path,
         FIXTURES / "deck/mock_empty_deck.yaml",
         protocol_path,

@@ -109,8 +109,6 @@ took over the name; calibration-anchor `z` is the only source.
 
 For well plates, `calibration.a1` is the A1 well center and `calibration.a2` must be one adjacent column step from A1. A2 must share either the same X or the same Y as A1, and its delta must match either `x_offset` or `y_offset` depending on the plate orientation. Diagonal calibration is rejected.
 
-Top-level `a1` is still accepted for backward compatibility, but new deck files should use `calibration.a1`.
-
 ## Labware Types
 
 - **`well_plate`** — multi-well microplate defined by rows, columns, and
@@ -129,9 +127,9 @@ Top-level `a1` is still accepted for backward compatibility, but new deck files 
   offsets. Holds nested `Vial` instances at the seat height above the
   holder anchor.
 - **`well_plate_holder`** — physical fixture that seats a well plate at a
-  fixed z above the holder anchor. Holds one nested `WellPlate`. When
-  `well_plate_surface_height_from_bottom` is set, nested wells use that
-  calibrated surface Z instead of the physical seat plane.
+  fixed z above the holder anchor. Holds one nested `WellPlate`.
+  `well_plate_surface_height_from_bottom` defines the nested wells' calibrated
+  surface Z.
 - **`tip_disposal`** — bounding-box fixture for used-tip disposal.
 
 ## Adding a new definition

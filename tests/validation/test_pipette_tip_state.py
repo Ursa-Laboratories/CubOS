@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from board.board import Board
+from gantry.instrument_mount import InstrumentedGantry
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.tip_rack import DEFAULT_TIP_LENGTH_MM, TipRack
@@ -59,9 +59,9 @@ def _pipette(*, depth: float = 5.0, offset_x: float = 0.0, offset_y: float = 0.0
     return pipette
 
 
-def _board(*, depth: float = 5.0, offset_x: float = 0.0, offset_y: float = 0.0) -> Board:
-    return Board(
-        gantry=MagicMock(),
+def _board(*, depth: float = 5.0, offset_x: float = 0.0, offset_y: float = 0.0) -> InstrumentedGantry:
+    return InstrumentedGantry(
+        controller=MagicMock(),
         instruments={
             "pipette": _pipette(depth=depth, offset_x=offset_x, offset_y=offset_y),
         },

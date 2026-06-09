@@ -382,21 +382,13 @@ def _build_holder(
         isinstance(entry, WellPlateHolderYamlEntry)
         and entry.well_plate is not None
     ):
-        surface_height = getattr(
-            holder, "well_plate_surface_height_from_bottom", None,
+        nested_height = holder.well_plate_surface_height_from_bottom
+        contained_z = holder.location.z + nested_height
+        contained_labware["plate"] = _build_nested_well_plate(
+            "plate",
+            entry.well_plate,
+            resolved_z=contained_z,
         )
-        nested_height = (
-            surface_height
-            if surface_height is not None
-            else seat_height
-        )
-        if nested_height is not None:
-            contained_z = holder.location.z + nested_height
-            contained_labware["plate"] = _build_nested_well_plate(
-                "plate",
-                entry.well_plate,
-                resolved_z=contained_z,
-            )
 
     holder.contained_labware = contained_labware
     return holder

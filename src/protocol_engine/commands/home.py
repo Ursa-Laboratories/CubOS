@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from ..registry import protocol_command
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
 
 
 @protocol_command("home")
@@ -19,10 +19,10 @@ def home(context: "ProtocolContext") -> None:
     otherwise rewrite work coordinates after homing.
 
     Args:
-        context: Runtime context (board, deck, logger).
+        context: Runtime context (instrumented gantry, deck, logger).
     """
     context.logger.info("home: homing gantry")
-    gantry = context.board.gantry
+    gantry = context.gantry.controller
     gantry.set_serial_timeout(10)
     try:
         gantry.home()

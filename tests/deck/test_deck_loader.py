@@ -298,8 +298,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: { x: 0.0, y: 0.0, z: -5.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -5.0 }
       a2: { x: 10.0, y: 0.0, z: -5.0 }
     x_offset: 10.0
     y_offset: 8.0
@@ -335,8 +335,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: { x: 10.0, y: 0.0, z: -5.0 }
     calibration:
+      a1: { x: 10.0, y: 0.0, z: -5.0 }
       a2: { x: 0.0, y: 0.0, z: -5.0 }
     x_offset: 10.0
     y_offset: 8.0
@@ -370,8 +370,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: {{ x: 10.0, y: 0.0, z: -5.0 }}
     calibration:
+      a1: {{ x: 10.0, y: 0.0, z: -5.0 }}
       a2: {{ x: 0.0, y: 0.0, z: -5.0 }}
     x_offset: {x_offset_literal}
     y_offset: 8.0
@@ -404,8 +404,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: { x: 0.0, y: 0.0, z: -5.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -5.0 }
       a2: { x: 0.0, y: 8.0, z: -5.0 }
     x_offset: 10.0
     y_offset: 8.0
@@ -441,8 +441,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: { x: 0.0, y: 8.0, z: -5.0 }
     calibration:
+      a1: { x: 0.0, y: 8.0, z: -5.0 }
       a2: { x: 0.0, y: 0.0, z: -5.0 }
     x_offset: 10.0
     y_offset: 8.0
@@ -476,8 +476,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: {{ x: 0.0, y: 8.0, z: -5.0 }}
     calibration:
+      a1: {{ x: 0.0, y: 8.0, z: -5.0 }}
       a2: {{ x: 0.0, y: 0.0, z: -5.0 }}
     x_offset: 10.0
     y_offset: {y_offset_literal}
@@ -510,8 +510,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: { x: 0.0, y: 0.0, z: -5.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -5.0 }
       a2: { x: 10.0, y: 5.0, z: -5.0 }
     x_offset: 10.0
     y_offset: 8.0
@@ -541,8 +541,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: { x: 0.0, y: 0.0, z: -5.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -5.0 }
       a2: { x: 10.0, y: 5.0, z: -5.0 }
     x_offset: 10.0
     y_offset: 8.0
@@ -670,8 +670,8 @@ labware:
     length: 20.0
     width: 20.0
     height: 10.0
-    a1: { x: 0.0, y: 0.0, z: -5.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -5.0 }
       a2: { x: 0.0, y: 0.0, z: -5.0 }
     x_offset: 10.0
     y_offset: 8.0
@@ -715,7 +715,9 @@ labware:
     length: 127.71
     width: 85.43
     height: 14.10
-    a1: { x: 0.0, y: 0.0, z: -15.0 }
+    calibration:
+      a1: { x: 0.0, y: 0.0, z: -15.0 }
+      a2: { x: 9.0, y: 0.0, z: -15.0 }
     x_offset: 9.0
     y_offset: 9.0
     capacity_ul: 200.0
@@ -785,8 +787,8 @@ labware:
     length: 127.71
     width: 85.43
     height: 14.10
-    a1: { x: 0.0, y: 0.0, z: -15.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -15.0 }
       a2: { x: 9.0, y: 0.0, z: -15.0 }
     x_offset: 9.0
     y_offset: 9.0
@@ -819,8 +821,8 @@ labware:
     length: "127.71"
     width: "85.43"
     height: "14.10"
-    a1: { x: 0.0, y: 0.0, z: -15.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -15.0 }
       a2: { x: 9.0, y: 0.0, z: -15.0 }
     x_offset: 9.0
     y_offset: 9.0
@@ -851,8 +853,8 @@ labware:
     length: 127.71
     width: 85.43
     height: 14.10
-    a1: { x: 0.0, y: 0.0, z: -15.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -15.0 }
       a2: { x: 9.0, y: 0.0, z: -15.0 }
     x_offset: 9.0
     y_offset: 9.0
@@ -884,8 +886,8 @@ labware:
     length: 127.71
     width: 85.43
     height: 14.10
-    a1: { x: 0.0, y: 0.0, z: -15.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -15.0 }
       a2: { x: 9.0, y: 0.0, z: -15.0 }
     x_offset: 9.0
     y_offset: 9.0
@@ -915,8 +917,8 @@ labware:
     length: 127.71
     width: 85.43
     height: 14.10
-    a1: { x: 0.0, y: 0.0, z: -15.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: -15.0 }
       a2: { x: 9.0, y: 0.0, z: -15.0 }
     x_offset: 9.0
     y_offset: 9.0
@@ -945,8 +947,8 @@ labware:
     model_name: custom
     rows: 2
     columns: 3
-    a1: { x: 10.0, y: 20.0, z: -5.0 }
     calibration:
+      a1: { x: 10.0, y: 20.0, z: -5.0 }
       a2: { x: 19.0, y: 20.0, z: -5.0 }
     x_offset: 9.0
     y_offset: 9.0
@@ -982,8 +984,8 @@ labware:
     model_name: custom
     rows: 1
     columns: 2
-    a1: { x: 0.0, y: 0.0, z: 0.0 }
     calibration:
+      a1: { x: 0.0, y: 0.0, z: 0.0 }
       a2: { x: 9.0, y: 0.0, z: 0.0 }
     x_offset: 9.0
     y_offset: 9.0
@@ -1029,8 +1031,8 @@ def _make_entry(
         name="t", model_name="t",
         rows=2, columns=2,
         length=20.0, width=20.0, height=10.0,
-        a1=_YamlPoint3D(x=a1_x, y=a1_y, z=z),
         calibration=_YamlCalibrationPoints(
+            a1=_YamlPoint3D(x=a1_x, y=a1_y, z=z),
             a2=_YamlPoint3D(x=a2_x, y=a2_y, z=z),
         ),
         x_offset=x_offset, y_offset=y_offset,

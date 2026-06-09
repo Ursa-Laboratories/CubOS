@@ -11,7 +11,7 @@ import pytest
 
 from deck.labware.labware import Coordinate3D
 from protocol_engine.loader import load_protocol_from_yaml
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -29,7 +29,7 @@ def _mock_context(
     deck.resolve_coordinate.return_value = coord
 
     return ProtocolContext(
-        board=board,
+        gantry=board,
         deck=deck,
         positions=positions or {},
         logger=logging.getLogger("test_move"),
@@ -51,8 +51,8 @@ class TestMoveCommandRouting:
         move(ctx, instrument="pipette", position="plate_1.A1")
 
         ctx.deck.resolve_coordinate.assert_called_once_with("plate_1.A1")
-        ctx.board.move_to_labware.assert_called_once_with("pipette", coord)
-        ctx.board.move.assert_not_called()
+        ctx.gantry.move_to_labware.assert_called_once_with("pipette", coord)
+        ctx.gantry.move.assert_not_called()
 
     def test_literal_list_uses_raw_move(self):
         """[x, y, z] list bypasses move_to_labware — user wants exact coords."""
@@ -61,8 +61,8 @@ class TestMoveCommandRouting:
         ctx = _mock_context()
         move(ctx, instrument="pipette", position=[100.0, 50.0, 30.0])
 
-        ctx.board.move.assert_called_once_with("pipette", (100.0, 50.0, 30.0))
-        ctx.board.move_to_labware.assert_not_called()
+        ctx.gantry.move.assert_called_once_with("pipette", (100.0, 50.0, 30.0))
+        ctx.gantry.move_to_labware.assert_not_called()
         ctx.deck.resolve_coordinate.assert_not_called()
 
     def test_literal_tuple_uses_raw_move(self):
@@ -71,8 +71,8 @@ class TestMoveCommandRouting:
         ctx = _mock_context()
         move(ctx, instrument="pipette", position=(1.0, 2.0, 3.0))
 
-        ctx.board.move.assert_called_once_with("pipette", (1.0, 2.0, 3.0))
-        ctx.board.move_to_labware.assert_not_called()
+        ctx.gantry.move.assert_called_once_with("pipette", (1.0, 2.0, 3.0))
+        ctx.gantry.move_to_labware.assert_not_called()
 
     def test_named_position_uses_raw_move(self):
         """Named position from protocol YAML `positions:` block is literal XYZ."""
@@ -81,8 +81,8 @@ class TestMoveCommandRouting:
         ctx = _mock_context(positions={"safe": [50.0, 50.0, 70.0]})
         move(ctx, instrument="pipette", position="safe")
 
-        ctx.board.move.assert_called_once_with("pipette", (50.0, 50.0, 70.0))
-        ctx.board.move_to_labware.assert_not_called()
+        ctx.gantry.move.assert_called_once_with("pipette", (50.0, 50.0, 70.0))
+        ctx.gantry.move_to_labware.assert_not_called()
         ctx.deck.resolve_coordinate.assert_not_called()
 
     def test_named_position_forwards_travel_z(self):
@@ -91,10 +91,10 @@ class TestMoveCommandRouting:
         ctx = _mock_context(positions={"safe": [50.0, 50.0, 70.0]})
         move(ctx, instrument="pipette", position="safe", travel_z=80.0)
 
-        ctx.board.move.assert_called_once_with(
+        ctx.gantry.move.assert_called_once_with(
             "pipette", (50.0, 50.0, 70.0), travel_z=80.0,
         )
-        ctx.board.move_to_labware.assert_not_called()
+        ctx.gantry.move_to_labware.assert_not_called()
         ctx.deck.resolve_coordinate.assert_not_called()
 
     def test_passes_instrument_name_through_deck_path(self):
@@ -103,7 +103,7 @@ class TestMoveCommandRouting:
         ctx = _mock_context()
         move(ctx, instrument="filmetrics", position="vial_1")
 
-        call_args = ctx.board.move_to_labware.call_args
+        call_args = ctx.gantry.move_to_labware.call_args
         assert call_args[0][0] == "filmetrics"
 
     def test_invalid_deck_target_propagates_error(self):
@@ -168,7 +168,7 @@ protocol:
 
         deck.resolve_coordinate.side_effect = resolve_side_effect
         board = MagicMock()
-        ctx = ProtocolContext(board=board, deck=deck)
+        ctx = ProtocolContext(gantry=board, deck=deck)
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(yaml_content)
@@ -202,8 +202,8 @@ protocol:
             protocol = load_protocol_from_yaml(path)
             protocol.run(ctx)
 
-            ctx.board.move.assert_called_once_with("pipette", (100.0, 50.0, 30.0))
-            ctx.board.move_to_labware.assert_not_called()
+            ctx.gantry.move.assert_called_once_with("pipette", (100.0, 50.0, 30.0))
+            ctx.gantry.move_to_labware.assert_not_called()
         finally:
             Path(path).unlink(missing_ok=True)
 
@@ -226,9 +226,9 @@ protocol:
             protocol = load_protocol_from_yaml(path)
             protocol.run(ctx)
 
-            ctx.board.move.assert_called_once_with(
+            ctx.gantry.move.assert_called_once_with(
                 "pipette", (0.0, 0.0, 20.0), travel_z=20.0,
             )
-            ctx.board.move_to_labware.assert_not_called()
+            ctx.gantry.move_to_labware.assert_not_called()
         finally:
             Path(path).unlink(missing_ok=True)

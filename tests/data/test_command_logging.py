@@ -14,7 +14,7 @@ from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
 from instruments.base_instrument import BaseInstrument
 from instruments.uvvis_ccs.models import UVVisSpectrum
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -107,7 +107,7 @@ def _mock_context(
     deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
 
     return ProtocolContext(
-        board=board,
+        gantry=board,
         deck=deck,
         logger=logging.getLogger("test_command_logging"),
         data_store=store,
@@ -187,7 +187,7 @@ class TestPipetteDbTracking:
         deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
 
         ctx = ProtocolContext(
-            board=board, deck=deck,
+            gantry=board, deck=deck,
             logger=logging.getLogger("test"),
             data_store=store, campaign_id=cid,
         )
@@ -210,7 +210,7 @@ class TestPipetteDbTracking:
         deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
 
         ctx = ProtocolContext(
-            board=board, deck=deck,
+            gantry=board, deck=deck,
             logger=logging.getLogger("test"),
         )
 

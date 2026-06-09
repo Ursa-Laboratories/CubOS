@@ -9,7 +9,8 @@ import tempfile
 import pytest
 
 from gantry.gantry_config import GantryConfig
-from protocol_engine.protocol import Protocol, ProtocolContext
+from protocol_engine.protocol import Protocol
+from protocol_engine.runtime import ProtocolContext
 from protocol_engine.registry import CommandRegistry
 from protocol_engine.setup import setup_protocol
 from validation.errors import SetupValidationError
@@ -121,9 +122,9 @@ class TestEndToEndSetup:
 
             assert isinstance(protocol, Protocol)
             assert isinstance(context, ProtocolContext)
-            assert isinstance(context.gantry, GantryConfig)
+            assert isinstance(context.gantry_config, GantryConfig)
             assert len(protocol) == 2
-            assert "pipette" in context.board.instruments
+            assert "pipette" in context.gantry.instruments
             assert "plate_1" in context.deck
             assert "waste_vial" in context.deck
         finally:

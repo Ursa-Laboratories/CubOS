@@ -1,6 +1,6 @@
 # Sterling two-instrument vial-position scan.
 #
-# Motion-only protocol derived from sterling_vial_scan.yaml. It visits the same
+# Motion-only protocol derived from vial_scan.yaml. It visits the same
 # high deck-frame Z vial XY positions without descending into vials:
 # - odd-numbered vials use the potentiostat
 # - even-numbered vials use the Opentrons pipette

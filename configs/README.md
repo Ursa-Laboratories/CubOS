@@ -27,10 +27,14 @@ machine with homed WPos `Z=91` and `$27=10` should save
 configs/
   gantry/     # Machine envelope, GRBL expectations, mounted instruments
   deck/       # Labware placement and calibration
-  protocol/   # Ordered protocol steps
+  protocol/   # Ordered protocol steps grouped by instrument/workflow
+    asmi/
+    filmetrics/
+    sharc_uv/
+    sterling/
 ```
 
-There are no separate board YAMLs. Mounted instruments and offsets live
+There are no separate instrument-board YAMLs. Mounted instruments and offsets live
 inside the corresponding `configs/gantry/*.yaml` machine file. Protocol
 motion heights live on the protocol command (see Height Semantics below).
 
@@ -40,7 +44,7 @@ motion heights live on the protocol command (see Height Semantics below).
 PYTHONPATH=src python setup/validate_setup.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_move_a1.yaml
+  configs/protocol/asmi/move_a1.yaml
 ```
 
 For the full indentation protocol:
@@ -49,7 +53,7 @@ For the full indentation protocol:
 PYTHONPATH=src python setup/validate_setup.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_indentation.yaml
+  configs/protocol/asmi/indentation.yaml
 ```
 
 ## Current Files
@@ -64,10 +68,11 @@ PYTHONPATH=src python setup/validate_setup.py \
 - `deck/asmi_deck.yaml`, `deck/sterling_deck.yaml`,
   `deck/filmetrics_deck.yaml`, `deck/panda_deck.yaml`,
   `deck/sharc_uv_deck.yaml`.
-- `protocol/asmi_move_a1.yaml`, `protocol/asmi_indentation.yaml`,
-  `protocol/sterling_park.yaml`, `protocol/sterling_vial_scan.yaml`,
-  `protocol/filmetrics_scan.yaml`, `protocol/sharc_uv_curing_scan.yaml`,
-  `protocol/sharc_uv_motion_scan.yaml`.
+- `protocol/asmi/move_a1.yaml`, `protocol/asmi/indentation.yaml`,
+  `protocol/sterling/park.yaml`, `protocol/sterling/vial_scan.yaml`,
+  `protocol/sterling/2_instrument_vial_scan.yaml`,
+  `protocol/filmetrics/scan.yaml`, `protocol/sharc_uv/curing_scan.yaml`,
+  `protocol/sharc_uv/motion_scan.yaml`.
 
 Offline-only fixtures live under `sim/` so they are not mistaken for measured
 hardware setups. `sim/pipette_tip_transfer/` contains the gantry, deck, and
@@ -107,7 +112,7 @@ Pydantic schema.
 `scan.plate` can target a top-level `WellPlate` or a nested holder path such
 as `plate_holder.plate`. The SHARC UV config uses this nested form.
 
-Use `protocol/sharc_uv_motion_scan.yaml` for SHARC gantry scan bring-up when
+Use `protocol/sharc_uv/motion_scan.yaml` for SHARC gantry scan bring-up when
 you need the same 96-well motion path without issuing UV cure commands.
 
 ## Validation Status

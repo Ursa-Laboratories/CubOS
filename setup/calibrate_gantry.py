@@ -205,7 +205,7 @@ def run_auto_calibration(
     flow_name = (
         "single-instrument deck-origin calibration"
         if len(instruments) == 1
-        else "multi-instrument board calibration"
+        else "multi-instrument gantry calibration"
     )
     _preflight(
         input_path=gantry_path,

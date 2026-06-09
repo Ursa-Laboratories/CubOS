@@ -26,7 +26,7 @@ from instruments.base_instrument import BaseInstrument
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.errors import ProtocolExecutionError
 from protocol_engine.measurements import InstrumentMeasurement
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 HEIGHT_MM = 14.10
@@ -155,7 +155,7 @@ def _mock_context(
     deck = Deck({plate.name: plate})
 
     return ProtocolContext(
-        board=board,
+        gantry=board,
         deck=deck,
         logger=logging.getLogger("test_scan_command"),
     )
@@ -182,7 +182,7 @@ class TestScanCommand:
 
         scan(ctx, **_scan_args())
 
-        assert ctx.board.move_to_labware.call_count == 1
+        assert ctx.gantry.move_to_labware.call_count == 1
 
     def test_visits_wells_in_row_major_order(self):
         from protocol_engine.commands.scan import scan
@@ -194,7 +194,7 @@ class TestScanCommand:
              measurement_height=MEASUREMENT, interwell_scan_height=SAFE_APPROACH)
 
         action_zs = [
-            c for c in ctx.board.move.call_args_list
+            c for c in ctx.gantry.move.call_args_list
             if c.args[1][2] == ACTION_ABS
         ]
         xs = [c.args[1][0] for c in action_zs]
@@ -210,7 +210,7 @@ class TestScanCommand:
 
         scan(ctx, **_scan_args())
 
-        zs = [c.args[1][2] for c in ctx.board.move.call_args_list]
+        zs = [c.args[1][2] for c in ctx.gantry.move.call_args_list]
         assert zs == [
             APPROACH_ABS, ACTION_ABS,    # A1
             APPROACH_ABS, ACTION_ABS,    # A2
@@ -229,7 +229,7 @@ class TestScanCommand:
         scan(ctx, **_scan_args())
 
         action_calls = [
-            c for c in ctx.board.move.call_args_list
+            c for c in ctx.gantry.move.call_args_list
             if c.args[1][2] == ACTION_ABS
         ]
         for call in action_calls:
@@ -243,7 +243,7 @@ class TestScanCommand:
         scan(ctx, **_scan_args())
 
         approach_calls = [
-            c for c in ctx.board.move.call_args_list
+            c for c in ctx.gantry.move.call_args_list
             if c.args[1][2] == APPROACH_ABS and c.kwargs.get("travel_z") is not None
         ]
         assert len(approach_calls) == 4
@@ -257,7 +257,7 @@ class TestScanCommand:
 
         scan(ctx, **_scan_args())
 
-        last_move = ctx.board.move.call_args_list[-1]
+        last_move = ctx.gantry.move.call_args_list[-1]
         instr_name, position = last_move.args
         assert instr_name == "uvvis"
         assert position == (10.0, 8.0, APPROACH_ABS)
@@ -272,7 +272,7 @@ class TestScanCommand:
         scan(ctx, **_scan_args(measurement_height=2.0))
 
         action_zs = [
-            c.args[1][2] for c in ctx.board.move.call_args_list
+            c.args[1][2] for c in ctx.gantry.move.call_args_list
             if c.args[1][2] == HEIGHT_MM + 2.0
         ]
         assert len(action_zs) == 4
@@ -314,7 +314,7 @@ class TestScanCommand:
         from protocol_engine.commands.scan import scan
 
         ctx = _mock_context()
-        ctx.board.gantry = object()
+        ctx.gantry.controller = object()
 
         results = scan(
             ctx, plate="plate_1", instrument="uvvis", method="indentation",
@@ -398,7 +398,7 @@ class TestScanCommand:
         board = MagicMock()
         board.instruments = {"uvvis": sensor}
         ctx = ProtocolContext(
-            board=board,
+            gantry=board,
             deck=Deck({"plate_holder": holder}),
             logger=logging.getLogger("test_scan_command"),
         )
@@ -420,7 +420,7 @@ class TestScanCommand:
         from protocol_engine.commands.scan import scan
 
         ctx = ProtocolContext(
-            board=MagicMock(instruments={"uvvis": _make_sensor()}),
+            gantry=MagicMock(instruments={"uvvis": _make_sensor()}),
             deck=Deck({"vial_1": MagicMock(spec=[])}),
             logger=logging.getLogger("test_scan_command"),
         )
