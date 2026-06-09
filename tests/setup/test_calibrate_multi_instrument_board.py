@@ -393,7 +393,7 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
     path = _write_multi_gantry(tmp_path / "gantry.yaml")
     out_path = tmp_path / "calibrated.yaml"
     messages: list[str] = []
-    inputs = iter(["y"])
+    inputs = iter(["12.5", "y"])
 
     result = run_multi_instrument_calibration(
         path,
@@ -471,6 +471,49 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
     assert written["instruments"]["camera"]["offset_x"] == -15.0
     assert written["instruments"]["camera"]["offset_y"] == -7.0
     assert written["instruments"]["camera"]["depth"] == 6.0
+
+
+def test_multi_instrument_calibration_prompts_for_missing_block_height_and_writes_it(tmp_path):
+    path = _write_multi_gantry(tmp_path / "gantry.yaml")
+    raw = path.read_text(encoding="utf-8")
+    path.write_text(
+        raw.replace("  calibration_block_height_mm: 12.5\n", ""),
+        encoding="utf-8",
+    )
+    out_path = tmp_path / "calibrated.yaml"
+    prompts: list[str] = []
+
+    def input_reader(prompt: str) -> str:
+        prompts.append(prompt)
+        return "18.75"
+
+    result = run_multi_instrument_calibration(
+        path,
+        reference_instrument="left_probe",
+        lowest_instrument="left_probe",
+        instruments_to_calibrate=("left_probe",),
+        skip_soft_limit_config=True,
+        output_gantry_path=out_path,
+        write_gantry_yaml=True,
+        output=lambda _message: None,
+        input_reader=input_reader,
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader(
+            [
+                ("\r", 1),
+                ("Z", 1),
+                ("\r", 1),
+                ("\r", 1),
+            ]
+        ),
+        stdin_flusher=lambda: None,
+    )
+
+    assert isinstance(result, MultiInstrumentCalibrationResult)
+    assert result.z_origin_verification == (199.0, 149.5, 18.75)
+    assert "Calibration block height in mm: " in prompts
+    written = yaml.safe_load(out_path.read_text(encoding="utf-8"))
+    assert written["cnc"]["calibration_block_height_mm"] == 18.75
 
 
 def test_multi_instrument_calibration_raises_if_cnc_factory_z_travel_mm_missing(tmp_path):

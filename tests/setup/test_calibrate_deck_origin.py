@@ -352,6 +352,39 @@ def test_run_calibration_block_mode_uses_home_to_block_travel(tmp_path):
     )
 
 
+def test_run_calibration_block_mode_prompts_for_missing_block_height_and_writes_it(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+    output_path = tmp_path / "written_gantry.yaml"
+    prompts: list[str] = []
+
+    def input_reader(prompt: str) -> str:
+        prompts.append(prompt)
+        return "35.0"
+
+    result = run_calibration(
+        path,
+        output=lambda _message: None,
+        input_reader=input_reader,
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader(
+            [
+                ("Z", 50),
+                ("\r", 1),
+            ]
+        ),
+        stdin_flusher=lambda: None,
+        z_reference_mode="block",
+        write_gantry_yaml=True,
+        output_gantry_path=output_path,
+    )
+
+    assert isinstance(result, DeckOriginCalibrationResult)
+    assert result.block_height_mm == 35.0
+    assert "Calibration block height in mm: " in prompts
+    written = output_path.read_text(encoding="utf-8")
+    assert "calibration_block_height_mm: 35.0" in written
+
+
 def test_run_calibration_records_ruler_gap_but_sets_z_min_to_wpos_zero(tmp_path):
     path = _write_gantry(tmp_path / "gantry.yaml")
     messages: list[str] = []

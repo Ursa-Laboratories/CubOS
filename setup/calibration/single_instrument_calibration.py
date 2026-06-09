@@ -143,10 +143,16 @@ def _calibration_block_height_mm(
     raw_config: dict[str, Any],
     *,
     explicit_block_height_mm: float | None,
+    input_reader: Callable[[str], str] | None = None,
+    output: Callable[[str], None] | None = None,
 ) -> float:
     if explicit_block_height_mm is not None:
         value = float(explicit_block_height_mm)
     else:
+        if input_reader is not None and output is not None:
+            return _round_mm(
+                _prompt_block_height(input_reader=input_reader, output=output)
+            )
         cnc = raw_config.get("cnc")
         if not isinstance(cnc, dict) or "calibration_block_height_mm" not in cnc:
             raise ValueError(
@@ -279,6 +285,7 @@ def _updated_gantry_yaml_text(
     z_max_mm: float,
     max_travel: dict[str, float] | None = None,
     homing_pull_off_mm: float | None = None,
+    calibration_block_height_mm: float | None = None,
 ) -> str:
     updated = copy.deepcopy(raw_config)
     updated["working_volume"] = {
@@ -295,6 +302,11 @@ def _updated_gantry_yaml_text(
             max_travel=max_travel,
             homing_pull_off_mm=homing_pull_off_mm,
         )
+    if calibration_block_height_mm is not None:
+        cnc = updated.setdefault("cnc", {})
+        if not isinstance(cnc, dict):
+            raise ValueError("Input gantry YAML cnc section must be a mapping.")
+        cnc["calibration_block_height_mm"] = _round_mm(calibration_block_height_mm)
     return yaml.safe_dump(updated, sort_keys=False)
 
 
@@ -1080,6 +1092,8 @@ def run_calibration(
             block_height_mm = _calibration_block_height_mm(
                 raw_config,
                 explicit_block_height_mm=tip_gap_mm,
+                input_reader=input_reader,
+                output=output,
             )
             block_touch_wpos_z_mm = float(xy_origin_coords["z"])
             if initial_home_z_mm is None:
@@ -1187,6 +1201,7 @@ def run_calibration(
             z_max_mm=z_max_mm,
             max_travel=max_travel,
             homing_pull_off_mm=homing_pull_off_mm,
+            calibration_block_height_mm=block_height_mm,
         )
         _print_yaml_block(
             title="Full gantry YAML to copy/paste:",

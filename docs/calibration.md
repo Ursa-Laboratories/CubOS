@@ -76,6 +76,7 @@ For a gantry YAML with one mounted instrument, the flow asks you to place a
 calibration block at the front-left origin point and jog the instrument
 tip/probe to touch the block top. It assigns X/Y at that physical pose, reads
 the first homed Z and block-touch Z, then sets the block touch to
+the prompted calibration block height. The calibrated YAML writes that value to
 `cnc.calibration_block_height_mm`.
 
 The calibrated YAML keeps `cnc.factory_z_travel_mm` unchanged as the
@@ -90,7 +91,8 @@ For a gantry YAML with multiple mounted instruments, the flow asks you to pick
 the left-most/reference instrument and the lowest instrument by number. It sets
 the shared deck frame, asks for the calibration block height, then records each
 instrument against the same physical block point to compute `offset_x`,
-`offset_y`, and `depth`. The calibrated YAML still preserves
+`offset_y`, and `depth`. The calibrated YAML writes the prompted block height to
+`cnc.calibration_block_height_mm` and still preserves
 `cnc.factory_z_travel_mm`; calibrated Z bounds come from the block touch and
 final homed readback. Controller `max_travel_*` values add the same `$27`
 pull-off reserve used by the single-instrument flow.
