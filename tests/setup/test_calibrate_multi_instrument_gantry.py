@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from setup.calibration.multi_instrument_calibration import (
     MultiInstrumentCalibrationResult,
     _retract_up_after_contact,
+    _updated_yaml_text,
     compute_relative_instrument_calibrations,
     run_multi_instrument_calibration,
 )
@@ -516,6 +518,44 @@ def test_multi_instrument_calibration_prompts_for_missing_block_height_and_write
     assert written["cnc"]["calibration_block_height_mm"] == 18.75
 
 
+def test_updated_multi_instrument_yaml_writes_block_height_and_requires_cnc_mapping():
+    raw_config = {
+        "cnc": {"factory_z_travel_mm": 100.0},
+        "instruments": {"left_probe": {"type": "asmi"}},
+        "grbl_settings": {"status_report": 0},
+    }
+
+    yaml_text = _updated_yaml_text(
+        raw_config,
+        measured_coords={"x": 398.0, "y": 299.0},
+        instrument_calibrations={
+            "left_probe": {"offset_x": 0.0, "offset_y": 0.0, "depth": 0.0}
+        },
+        max_travel={"max_travel_x": 408.0, "max_travel_y": 309.0, "max_travel_z": 106.0},
+        z_min_mm=0.0,
+        z_max_mm=96.0,
+        calibration_block_height_mm=18.75,
+    )
+
+    written = yaml.safe_load(yaml_text)
+    assert written["cnc"]["calibration_block_height_mm"] == 18.75
+
+    with pytest.raises(ValueError, match="cnc section must be a mapping"):
+        _updated_yaml_text(
+            {"cnc": "bad", "instruments": {}, "grbl_settings": {}},
+            measured_coords={"x": 398.0, "y": 299.0},
+            instrument_calibrations={},
+            max_travel={
+                "max_travel_x": 408.0,
+                "max_travel_y": 309.0,
+                "max_travel_z": 106.0,
+            },
+            z_min_mm=0.0,
+            z_max_mm=96.0,
+            calibration_block_height_mm=18.75,
+        )
+
+
 def test_multi_instrument_calibration_raises_if_cnc_factory_z_travel_mm_missing(tmp_path):
     path = tmp_path / "gantry.yaml"
     path.write_text(
@@ -543,8 +583,6 @@ instruments:
 """,
         encoding="utf-8",
     )
-
-    import pytest
 
     with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
         run_multi_instrument_calibration(path, dry_run=True)
