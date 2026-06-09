@@ -33,6 +33,7 @@ from setup.calibration.single_instrument_calibration import (  # noqa: E402
     _load_raw_config,
     _maybe_write_gantry_yaml,
     _print_yaml_block,
+    _prompt_block_height,
     _restore_soft_limits_after_origin_jog,
     _round_mm,
     _set_serial_timeout_if_available,
@@ -152,6 +153,7 @@ def _updated_yaml_text(
     max_travel: dict[str, float],
     z_min_mm: float,
     z_max_mm: float,
+    calibration_block_height_mm: float,
     homing_pull_off_mm: float | None = None,
 ) -> str:
     updated = copy.deepcopy(raw_config)
@@ -168,6 +170,10 @@ def _updated_yaml_text(
         max_travel,
         homing_pull_off_mm=homing_pull_off_mm,
     )
+    cnc = updated.setdefault("cnc", {})
+    if not isinstance(cnc, dict):
+        raise ValueError("Input gantry YAML cnc section must be a mapping.")
+    cnc["calibration_block_height_mm"] = _round_mm(calibration_block_height_mm)
 
     instruments = updated.setdefault("instruments", {})
     for name, calibration in instrument_calibrations.items():
@@ -343,10 +349,6 @@ def run_multi_instrument_calibration(
     validate_deck_origin_minima(gantry_config)
     raw_config = _load_raw_config(gantry_path)
     factory_z_travel_mm = _factory_z_travel_mm(raw_config)
-    z_reference_height = _calibration_block_height_mm(
-        raw_config,
-        explicit_block_height_mm=None,
-    )
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     available_instruments = _instrument_names(raw_config)
@@ -388,6 +390,14 @@ def run_multi_instrument_calibration(
         output("  jog each remaining instrument to that same block point and compute offsets/depths")
         output("  $H and read final working-volume maxima")
         return None
+
+    z_reference_height = _calibration_block_height_mm(
+        raw_config,
+        explicit_block_height_mm=_prompt_block_height(
+            input_reader=input_reader,
+            output=output,
+        ),
+    )
 
     output("Preflight:")
     output("  - Keep E-stop reachable; calibration can move mounted tools and changes G54 WPos.")
@@ -638,6 +648,7 @@ def run_multi_instrument_calibration(
             max_travel=max_travel,
             z_min_mm=z_min_mm,
             z_max_mm=z_max_mm,
+            calibration_block_height_mm=z_reference_height,
             homing_pull_off_mm=homing_pull_off_mm,
         )
         _print_yaml_block(

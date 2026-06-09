@@ -13,7 +13,9 @@ from gantry.errors import (
 from setup.calibration.single_instrument_calibration import (
     DeckOriginCalibrationResult,
     _calculate_block_z_calibration,
+    _calibration_block_height_mm,
     _factory_z_travel_mm,
+    _updated_gantry_yaml_text,
     run_calibration,
 )
 
@@ -349,6 +351,79 @@ def test_run_calibration_block_mode_uses_home_to_block_travel(tmp_path):
         "home_to_block_travel: 50.000" in message
         for message in messages
     )
+
+
+def test_run_calibration_block_mode_prompts_for_missing_block_height_and_writes_it(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+    output_path = tmp_path / "written_gantry.yaml"
+    prompts: list[str] = []
+
+    def input_reader(prompt: str) -> str:
+        prompts.append(prompt)
+        return "35.0"
+
+    result = run_calibration(
+        path,
+        output=lambda _message: None,
+        input_reader=input_reader,
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader(
+            [
+                ("Z", 50),
+                ("\r", 1),
+            ]
+        ),
+        stdin_flusher=lambda: None,
+        z_reference_mode="block",
+        write_gantry_yaml=True,
+        output_gantry_path=output_path,
+    )
+
+    assert isinstance(result, DeckOriginCalibrationResult)
+    assert result.block_height_mm == 35.0
+    assert "Calibration block height in mm: " in prompts
+    written = output_path.read_text(encoding="utf-8")
+    assert "calibration_block_height_mm: 35.0" in written
+
+
+def test_calibration_block_height_prompts_when_reader_and_output_supplied():
+    prompts: list[str] = []
+
+    value = _calibration_block_height_mm(
+        {},
+        explicit_block_height_mm=None,
+        input_reader=lambda prompt: prompts.append(prompt) or "18.125",
+        output=lambda _message: None,
+    )
+
+    assert value == 18.125
+    assert prompts == ["Calibration block height in mm: "]
+
+
+def test_updated_gantry_yaml_writes_block_height_and_requires_cnc_mapping():
+    raw_config = {
+        "cnc": {"factory_z_travel_mm": 100.0},
+        "working_volume": {},
+    }
+
+    yaml_text = _updated_gantry_yaml_text(
+        raw_config,
+        measured_coords={"x": 398.5, "y": 299.25},
+        z_min_mm=0.0,
+        z_max_mm=96.75,
+        calibration_block_height_mm=35.0,
+    )
+
+    assert "calibration_block_height_mm: 35.0" in yaml_text
+
+    with pytest.raises(ValueError, match="cnc section must be a mapping"):
+        _updated_gantry_yaml_text(
+            {"cnc": "bad"},
+            measured_coords={"x": 398.5, "y": 299.25},
+            z_min_mm=0.0,
+            z_max_mm=96.75,
+            calibration_block_height_mm=35.0,
+        )
 
 
 def test_run_calibration_records_ruler_gap_but_sets_z_min_to_wpos_zero(tmp_path):
