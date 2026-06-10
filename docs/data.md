@@ -1,6 +1,10 @@
 # Data
 
-CubOS stores experimental state and labware tracking data locally in a SQLite database. This runs automatically during protocol execution — no external database setup is needed.
+CubOS stores experimental state and labware tracking data locally in a SQLite database. This runs automatically during protocol execution when a `DataStore` is attached — no external database setup is needed.
+
+By default `data.DataStore()` writes to CubOS' package-owned
+`data/databases/panda_data.db`. Set `CUBOS_DATA_DB_PATH` to place the database
+in a writable runtime directory, such as a packaged app's local user-data root.
 
 ## What Gets Stored
 
@@ -19,9 +23,10 @@ CubOS does not provide analysis tools — it only handles storage and retrieval.
 
 ## Runtime Integration
 
-When `ProtocolContext.data_store` and `ProtocolContext.campaign_id` are set, protocol commands automatically persist measurements and liquid transfers. When these are not set, protocol execution works identically but nothing is saved.
+When `ProtocolContext.data_store` and `ProtocolContext.campaign_id` are set, protocol commands automatically persist measurements and liquid transfers. `scan` persists per-well measurements, and single-position `measure` persists normalized ASMI indentation results. When these are not set, protocol execution works identically but nothing is saved.
 
 ## Components
 
 - `data.data_store` — database creation and write API
 - `data.data_reader` — read and query helpers
+- `data.data_store.default_database_path` — default database path and `CUBOS_DATA_DB_PATH` override

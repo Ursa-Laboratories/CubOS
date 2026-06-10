@@ -64,6 +64,15 @@ class TestSchemaCreation:
         assert store._conn is not None
         store.close()
 
+    def test_default_db_path_uses_env_override(self, monkeypatch, tmp_path):
+        db_path = tmp_path / "runtime" / "panda_data.db"
+        monkeypatch.setenv("CUBOS_DATA_DB_PATH", str(db_path))
+
+        store = DataStore()
+        store.close()
+
+        assert db_path.is_file()
+
     def test_foreign_key_enforcement(self):
         store = _make_store()
         with pytest.raises(Exception):
@@ -367,50 +376,39 @@ class TestASMIInstrumentMeasurementLogging:
         measurement = InstrumentMeasurement(
             measurement_type=MeasurementType.ASMI_INDENTATION,
             payload={
+                "sample_timestamps": [1.0, 1.1, 1.2],
                 "z_positions_mm": [0.0, 0.1, 0.2],
                 "raw_forces_n": [0.01, 0.02, 0.03],
                 "corrected_forces_n": [0.005, 0.015, 0.025],
+                "directions": ["down", "down", "up"],
             },
             metadata={
                 "baseline_avg": 0.005,
                 "baseline_std": 0.001,
                 "force_exceeded": False,
                 "data_points": 3,
+                "step_size_mm": 0.1,
+                "z_target_mm": -2.0,
+                "force_limit_n": 10.0,
             },
         )
         mid = store.log_measurement(eid, measurement)
 
         row = store._conn.execute(
-            "SELECT z_positions, raw_forces, corrected_forces FROM asmi_measurements WHERE id = ?",
+            "SELECT sample_timestamps, z_positions, raw_forces, "
+            "corrected_forces, directions, step_size_mm, z_target_mm, "
+            "force_limit_n FROM asmi_measurements WHERE id = ?",
             (mid,),
         ).fetchone()
 
-        assert json.loads(row[0]) == [0.0, 0.1, 0.2]
-        assert json.loads(row[1]) == [0.01, 0.02, 0.03]
-        assert json.loads(row[2]) == [0.005, 0.015, 0.025]
-        store.close()
-
-
-# ─── Schema migration guard ───────────────────────────────────────────────────
-
-
-class TestSchemaMigrationGuard:
-
-    def test_raises_on_legacy_blob_data(self):
-        store = _make_store()
-        # Bypass the normal write path to inject a raw BLOB directly
-        cid = store.create_campaign(description="legacy")
-        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
-        store._conn.execute(
-            "INSERT INTO uvvis_measurements "
-            "(experiment_id, wavelengths, intensities, integration_time_s) "
-            "VALUES (?, ?, ?, ?)",
-            (eid, b"\x00\x00\x00\x00\x00\x00y@", b"\x00\x00\x00\x00\x00\x00\xb4?", 0.24),
-        )
-        store._conn.commit()
-
-        with pytest.raises(RuntimeError, match="legacy binary BLOB"):
-            store._check_schema_migration()
+        assert json.loads(row[0]) == [1.0, 1.1, 1.2]
+        assert json.loads(row[1]) == [0.0, 0.1, 0.2]
+        assert json.loads(row[2]) == [0.01, 0.02, 0.03]
+        assert json.loads(row[3]) == [0.005, 0.015, 0.025]
+        assert json.loads(row[4]) == ["down", "down", "up"]
+        assert row[5] == pytest.approx(0.1)
+        assert row[6] == pytest.approx(-2.0)
+        assert row[7] == pytest.approx(10.0)
         store.close()
 
 

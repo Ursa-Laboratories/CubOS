@@ -143,6 +143,7 @@ dmypy.json
 cython_debug/
 
 # SQLite databases (runtime data) — except the empty template
+data/databases/panda_data.db
 *.db-journal
 *.db-wal
 *.db-shm

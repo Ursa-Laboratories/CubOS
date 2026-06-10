@@ -131,23 +131,12 @@ def normalize_measurement(
 
     if isinstance(raw_result, dict) and "measurements" in raw_result:
         steps = raw_result["measurements"]
-        # Warn when direction tags are partial — mid-run corruption signal.
-        # Current ASMI driver always tags; missing entries default to "down"
-        # for legacy/partial payloads, and directions is always emitted so
-        # downstream consumers see a stable schema.
-        has_any_direction = any("direction" in s for s in steps)
-        has_all_directions = all("direction" in s for s in steps) if steps else True
-        if has_any_direction and not has_all_directions:
-            import logging
-            logging.getLogger(__name__).warning(
-                "Partial 'direction' tags in ASMI indentation steps; "
-                "defaulting missing entries to 'down'",
-            )
         payload = {
+            "sample_timestamps": [s["timestamp"] for s in steps],
             "z_positions_mm": [s["z_mm"] for s in steps],
             "raw_forces_n": [s["raw_force_n"] for s in steps],
             "corrected_forces_n": [s["corrected_force_n"] for s in steps],
-            "directions": [s.get("direction", "down") for s in steps],
+            "directions": [s["direction"] for s in steps],
         }
         return InstrumentMeasurement(
             measurement_type=MeasurementType.ASMI_INDENTATION,
@@ -158,6 +147,9 @@ def normalize_measurement(
                 "force_exceeded": raw_result.get("force_exceeded", False),
                 "data_points": raw_result.get("data_points", len(steps)),
                 "measure_with_return": raw_result.get("measure_with_return", False),
+                "step_size_mm": raw_result.get("step_size_mm"),
+                "z_target_mm": raw_result.get("z_target_mm"),
+                "force_limit_n": raw_result.get("force_limit_n"),
                 "instrument_name": instrument_name,
                 "method_name": method_name,
             },

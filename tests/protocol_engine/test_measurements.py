@@ -62,8 +62,8 @@ class TestNormalizeMeasurement:
     def test_normalize_asmi_indentation_without_return_mode(self):
         raw_result = {
             "measurements": [
-                {"z_mm": -73.01, "raw_force_n": 0.10, "corrected_force_n": 0.01},
-                {"z_mm": -73.02, "raw_force_n": 0.11, "corrected_force_n": 0.02},
+                {"timestamp": 1.0, "z_mm": -73.01, "raw_force_n": 0.10, "corrected_force_n": 0.01, "direction": "down"},
+                {"timestamp": 1.1, "z_mm": -73.02, "raw_force_n": 0.11, "corrected_force_n": 0.02, "direction": "down"},
             ],
             "baseline_avg": 0.09,
             "baseline_std": 0.001,
@@ -78,24 +78,26 @@ class TestNormalizeMeasurement:
         )
 
         assert measurement.measurement_type == MeasurementType.ASMI_INDENTATION
+        assert measurement.payload["sample_timestamps"] == [1.0, 1.1]
         assert measurement.payload["z_positions_mm"] == [-73.01, -73.02]
-        # Legacy untagged payloads default to "down" so the normalized
-        # schema always exposes directions.
         assert measurement.payload["directions"] == ["down", "down"]
         assert measurement.metadata["measure_with_return"] is False
 
     def test_normalize_asmi_indentation_with_return_mode(self):
         raw_result = {
             "measurements": [
-                {"z_mm": -73.01, "raw_force_n": 0.10, "corrected_force_n": 0.01, "direction": "down"},
-                {"z_mm": -73.02, "raw_force_n": 0.11, "corrected_force_n": 0.02, "direction": "down"},
-                {"z_mm": -73.01, "raw_force_n": 0.09, "corrected_force_n": 0.00, "direction": "up"},
+                {"timestamp": 1.0, "z_mm": -73.01, "raw_force_n": 0.10, "corrected_force_n": 0.01, "direction": "down"},
+                {"timestamp": 1.1, "z_mm": -73.02, "raw_force_n": 0.11, "corrected_force_n": 0.02, "direction": "down"},
+                {"timestamp": 1.2, "z_mm": -73.01, "raw_force_n": 0.09, "corrected_force_n": 0.00, "direction": "up"},
             ],
             "baseline_avg": 0.09,
             "baseline_std": 0.001,
             "force_exceeded": False,
             "data_points": 3,
             "measure_with_return": True,
+            "step_size_mm": 0.01,
+            "z_target_mm": -80.0,
+            "force_limit_n": 10.0,
         }
 
         measurement = normalize_measurement(
@@ -105,11 +107,14 @@ class TestNormalizeMeasurement:
         )
 
         assert measurement.measurement_type == MeasurementType.ASMI_INDENTATION
+        assert measurement.payload["sample_timestamps"] == [1.0, 1.1, 1.2]
         assert measurement.payload["directions"] == ["down", "down", "up"]
         assert measurement.metadata["measure_with_return"] is True
+        assert measurement.metadata["step_size_mm"] == pytest.approx(0.01)
+        assert measurement.metadata["z_target_mm"] == pytest.approx(-80.0)
+        assert measurement.metadata["force_limit_n"] == pytest.approx(10.0)
 
-    def test_normalize_asmi_partial_direction_defaults_missing_to_down(self):
-        """Mixed-tag step lists (one sample missing ``direction``) must default missing entries to 'down'."""
+    def test_normalize_asmi_requires_sample_metadata(self):
         raw_result = {
             "measurements": [
                 {"z_mm": -73.01, "raw_force_n": 0.10, "corrected_force_n": 0.01, "direction": "down"},
@@ -123,10 +128,9 @@ class TestNormalizeMeasurement:
             "measure_with_return": True,
         }
 
-        measurement = normalize_measurement(
-            instrument_name="asmi",
-            method_name="indentation",
-            raw_result=raw_result,
-        )
-
-        assert measurement.payload["directions"] == ["down", "down", "up"]
+        with pytest.raises(KeyError, match="timestamp"):
+            normalize_measurement(
+                instrument_name="asmi",
+                method_name="indentation",
+                raw_result=raw_result,
+            )

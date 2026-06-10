@@ -2,9 +2,23 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Dict, Iterator
 
 from .labware.labware import Coordinate3D, Labware
+
+
+@dataclass(frozen=True)
+class DeckLabwareTarget:
+    """Resolved labware path plus optional location/well id."""
+
+    labware_key: str
+    labware: Labware
+    location_id: str | None = None
+
+    @property
+    def labware_name(self) -> str:
+        return getattr(self.labware, "name", self.labware_key)
 
 
 class Deck:
@@ -17,6 +31,8 @@ class Deck:
       ``"plate_1.A1"``) into a coordinate.
     - ``resolve_labware()``: resolve a nested labware object path (e.g.
       ``"plate_holder.plate"``).
+    - ``resolve_labware_target()``: split an addressable deck target into
+      the owning labware path plus optional location/well id.
     """
 
     def __init__(self, labware: Dict[str, Labware]) -> None:
@@ -59,6 +75,34 @@ class Deck:
                     f"No nested labware '{child_name}' on deck."
                 ) from exc
         return labware
+
+    def resolve_labware_target(self, target: str) -> DeckLabwareTarget:
+        """Resolve the labware owner for a deck target.
+
+        Formats:
+            'vial_1'                 -> labware_key='vial_1', location_id=None
+            'plate_1.A1'             -> labware_key='plate_1', location_id='A1'
+            'plate_holder.plate.A1'  -> labware_key='plate_holder.plate',
+                                       location_id='A1'
+        """
+        try:
+            labware = self.resolve_labware(target)
+        except KeyError:
+            if "." not in target:
+                raise
+        else:
+            return DeckLabwareTarget(
+                labware_key=target,
+                labware=labware,
+                location_id=None,
+            )
+
+        labware_key, location_id = target.rsplit(".", 1)
+        return DeckLabwareTarget(
+            labware_key=labware_key,
+            labware=self.resolve_labware(labware_key),
+            location_id=location_id,
+        )
 
     def _get_labware(self, key: str) -> Labware:
         try:
