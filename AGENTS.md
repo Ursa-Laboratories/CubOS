@@ -104,10 +104,10 @@ See `progress/README.md`. Default: no progress file. Create only for hardware-fa
 Smallest meaningful gate first, then broaden:
 
 ```bash
-python -m pytest tests/test_deck_loader.py tests/test_holder_labware.py -q
+python -m pytest tests/deck/test_deck_loader.py tests/deck/test_holder_labware.py -q
 python -m pytest tests/protocol_engine -q
 python -m pytest -q
-python setup/validate_setup.py configs/gantry/cub_xl_asmi.yaml configs/deck/asmi_deck.yaml configs/protocol/asmi_indentation.yaml
+python setup/validate_setup.py configs/gantry/cub_xl_asmi.yaml configs/deck/asmi_deck.yaml configs/protocol/asmi/indentation.yaml
 ```
 
 Report exact commands and observed results in the PR body.

@@ -35,7 +35,7 @@ class UVCuring(BaseInstrument):
     Pass ``offline=True`` for dry runs — no serial connection, cure()
     returns immediately with synthetic results.
 
-    Board YAML fields:
+    Gantry YAML instrument fields:
         port: Serial port (default /dev/ttyACM0).
         baud_rate: Baud rate (default 19200).
         default_intensity: Default UV intensity % (default 100).

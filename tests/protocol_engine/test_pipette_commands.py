@@ -14,7 +14,7 @@ from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
 from deck.labware.well_plate_holder import WellPlateHolder
 from protocol_engine.errors import ProtocolExecutionError
-from protocol_engine.protocol import ProtocolContext
+from protocol_engine.runtime import ProtocolContext
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -47,14 +47,14 @@ def _mock_context(
         board.instruments = {}
 
     return ProtocolContext(
-        board=board,
+        gantry=board,
         deck=deck,
         logger=logging.getLogger("test_pipette_commands"),
     )
 
 
 def _get_pipette(ctx: ProtocolContext) -> MagicMock:
-    return ctx.board.instruments["pipette"]
+    return ctx.gantry.instruments["pipette"]
 
 
 # ─── _parse_position tests ───────────────────────────────────────────────────
@@ -106,7 +106,7 @@ class TestAspirateCommand:
 
         ctx = _mock_context()
         call_order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
+        ctx.gantry.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
         _get_pipette(ctx).aspirate.side_effect = lambda *a: call_order.append("aspirate")
 
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
@@ -132,7 +132,7 @@ class TestAspirateCommand:
         coord = Coordinate3D(x=10.0, y=20.0, z=75.0)
         ctx = _mock_context(resolve_return=coord)
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
-        ctx.board.move_to_labware.assert_called_once_with("pipette", coord)
+        ctx.gantry.move_to_labware.assert_called_once_with("pipette", coord)
 
     def test_descends_to_well_bottom_after_approach(self):
         """aspirate descends to the labware reference Z by default."""
@@ -141,7 +141,7 @@ class TestAspirateCommand:
         coord = Coordinate3D(x=10.0, y=20.0, z=PIPETTE_HEIGHT_MM)
         ctx = _mock_context(resolve_return=coord)
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
-        ctx.board.move.assert_called_once_with(
+        ctx.gantry.move.assert_called_once_with(
             "pipette", (10.0, 20.0, PIPETTE_HEIGHT_MM),
         )
 
@@ -151,8 +151,8 @@ class TestAspirateCommand:
 
         ctx = _mock_context()
         order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **k: order.append("approach")
-        ctx.board.move.side_effect = lambda *a, **k: order.append("descent")
+        ctx.gantry.move_to_labware.side_effect = lambda *a, **k: order.append("approach")
+        ctx.gantry.move.side_effect = lambda *a, **k: order.append("descent")
         _get_pipette(ctx).aspirate.side_effect = lambda *a: order.append("aspirate")
 
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
@@ -183,7 +183,7 @@ class TestDispenseCommand:
 
         ctx = _mock_context()
         call_order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
+        ctx.gantry.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
         _get_pipette(ctx).dispense.side_effect = lambda *a: call_order.append("dispense")
 
         dispense(ctx, position="plate_1.A1", volume_ul=100.0)
@@ -228,7 +228,7 @@ class TestBlowoutCommand:
 
         ctx = _mock_context()
         call_order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
+        ctx.gantry.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
         _get_pipette(ctx).blowout.side_effect = lambda *a: call_order.append("blowout")
 
         blowout(ctx, position="plate_1.A1")
@@ -273,7 +273,7 @@ class TestMixCommand:
 
         ctx = _mock_context()
         call_order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
+        ctx.gantry.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
         _get_pipette(ctx).mix.side_effect = lambda *a: call_order.append("mix")
 
         mix(ctx, position="plate_1.A1", volume_ul=50.0)
@@ -322,7 +322,7 @@ def _tip_rack_context(*, has_pipette: bool = True) -> tuple[ProtocolContext, Tip
     board = MagicMock()
     pipette = MagicMock() if has_pipette else None
     board.instruments = {"pipette": pipette} if has_pipette else {}
-    ctx = ProtocolContext(board=board, deck=Deck({"tips": rack}))
+    ctx = ProtocolContext(gantry=board, deck=Deck({"tips": rack}))
     return ctx, rack, pipette
 
 
@@ -333,7 +333,7 @@ class TestPickUpTipCommand:
 
         ctx, _rack, pipette = _tip_rack_context()
         call_order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
+        ctx.gantry.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
         pipette.pick_up_tip.side_effect = lambda *a: call_order.append("pick_up_tip")
 
         pick_up_tip(ctx, position="tips.A1")
@@ -403,7 +403,7 @@ class TestDropTipCommand:
 
         ctx = _mock_context()
         call_order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
+        ctx.gantry.move_to_labware.side_effect = lambda *a, **kw: call_order.append("move")
         _get_pipette(ctx).drop_tip.side_effect = lambda *a: call_order.append("drop_tip")
 
         drop_tip(ctx, position="waste_1")
@@ -466,7 +466,7 @@ def _mock_context_multi_resolve(has_pipette: bool = True) -> ProtocolContext:
         board.instruments = {}
 
     return ProtocolContext(
-        board=board,
+        gantry=board,
         deck=deck,
         logger=logging.getLogger("test_pipette_commands"),
     )
@@ -488,9 +488,9 @@ class TestTransferCommand:
         from protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
         call_order = []
-        ctx.board.move_to_labware.side_effect = lambda *a, **kw: call_order.append(("move", a[1]))
+        ctx.gantry.move_to_labware.side_effect = lambda *a, **kw: call_order.append(("move", a[1]))
         pip.aspirate.side_effect = lambda *a: call_order.append("aspirate")
         pip.dispense.side_effect = lambda *a: call_order.append("dispense")
 
@@ -509,7 +509,7 @@ class TestTransferCommand:
         from protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
 
         transfer(ctx, source="plate_1.A1", destination="plate_1.B1", volume_ul=75.0, speed=25.0)
 
@@ -520,7 +520,7 @@ class TestTransferCommand:
         from protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
 
         transfer(ctx, source="plate_1.A1", destination="plate_1.B1", volume_ul=100.0)
 
@@ -584,7 +584,7 @@ def _serial_transfer_context(
         board.instruments = {}
 
     return ProtocolContext(
-        board=board,
+        gantry=board,
         deck=deck,
         logger=logging.getLogger("test_serial_transfer"),
     )
@@ -614,7 +614,7 @@ def _serial_transfer_nested_context() -> ProtocolContext:
     board.instruments = {"pipette": pipette}
 
     return ProtocolContext(
-        board=board,
+        gantry=board,
         deck=Deck({"plate_holder": holder, "vial_1": source}),
         logger=logging.getLogger("test_serial_transfer_nested"),
     )
@@ -631,7 +631,7 @@ class TestSerialTransferCommand:
             volumes=[10.0, 20.0, 30.0],
         )
 
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
         assert pip.aspirate.call_count == 3
         assert pip.dispense.call_count == 3
 
@@ -652,13 +652,13 @@ class TestSerialTransferCommand:
             volumes=[10.0, 20.0, 30.0],
         )
 
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
         assert pip.aspirate.call_count == 3
         assert pip.dispense.call_count == 3
 
         move_targets = [
             call_args.args[1]
-            for call_args in ctx.board.move_to_labware.call_args_list
+            for call_args in ctx.gantry.move_to_labware.call_args_list
         ]
         assert move_targets[1::2] == [
             Coordinate3D(x=0.0, y=0.0, z=75.0),
@@ -675,7 +675,7 @@ class TestSerialTransferCommand:
             volumes=[10.0, 20.0],
         )
 
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
         assert pip.aspirate.call_count == 2
         assert pip.dispense.call_count == 2
 
@@ -692,7 +692,7 @@ class TestSerialTransferCommand:
             volumes=[10.0, 50.0, 100.0],
         )
 
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
         aspirate_volumes = [c.args[0] for c in pip.aspirate.call_args_list]
         dispense_volumes = [c.args[0] for c in pip.dispense.call_args_list]
         assert aspirate_volumes == [10.0, 50.0, 100.0]
@@ -707,7 +707,7 @@ class TestSerialTransferCommand:
             volume_range=[10.0, 30.0],
         )
 
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
         aspirate_volumes = [c.args[0] for c in pip.aspirate.call_args_list]
         # 3 wells in row A, linspace(10, 30, 3) = [10.0, 20.0, 30.0]
         assert aspirate_volumes == pytest.approx([10.0, 20.0, 30.0])
@@ -733,7 +733,7 @@ class TestSerialTransferCommand:
             volume_range=[10.0, 100.0],
         )
 
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
         assert pip.aspirate.call_count == 1
         aspirate_volumes = [c.args[0] for c in pip.aspirate.call_args_list]
         assert aspirate_volumes == [10.0]
@@ -747,7 +747,7 @@ class TestSerialTransferCommand:
             volumes=[10.0, 20.0, 30.0], speed=25.0,
         )
 
-        pip = ctx.board.instruments["pipette"]
+        pip = ctx.gantry.instruments["pipette"]
         for c in pip.aspirate.call_args_list:
             assert c.args[1] == 25.0
         for c in pip.dispense.call_args_list:

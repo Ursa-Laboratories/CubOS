@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
-from board.board import Board
+from gantry.instrument_mount import InstrumentedGantry
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
@@ -51,9 +51,9 @@ def _instrument(*, name: str = "asmi", offset_x: float = 0.0):
     return instr
 
 
-def _board() -> Board:
-    return Board(
-        gantry=MagicMock(),
+def _board() -> InstrumentedGantry:
+    return InstrumentedGantry(
+        controller=MagicMock(),
         instruments={"asmi": _instrument()},
     )
 
@@ -153,8 +153,8 @@ def test_cub_xl_travel_segment_crossing_right_rail_at_low_z_fails():
 
 def test_home_over_rail_passes_but_lowering_while_over_rail_fails():
     gantry = _gantry(x_max=400.0, z_max=130.0)
-    board = Board(
-        gantry=MagicMock(),
+    instrumented_gantry = InstrumentedGantry(
+        controller=MagicMock(),
         instruments={
             "asmi": _instrument(name="asmi"),
             "pipette": _instrument(name="pipette", offset_x=100.0),
@@ -170,7 +170,7 @@ def test_home_over_rail_passes_but_lowering_while_over_rail_fails():
         ),
     )
 
-    violations = validate_protocol_semantics(protocol, board, _deck(), gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, _deck(), gantry)
 
     messages = [violation.message for violation in violations]
     assert not any("home pose" in message for message in messages), messages
@@ -180,13 +180,13 @@ def test_home_over_rail_passes_but_lowering_while_over_rail_fails():
 
 def test_home_over_rail_at_rail_height_fails():
     gantry = _gantry(x_max=400.0, z_max=100.0)
-    board = Board(
-        gantry=MagicMock(),
+    instrumented_gantry = InstrumentedGantry(
+        controller=MagicMock(),
         instruments={"pipette": _instrument(name="pipette", offset_x=100.0)},
     )
     protocol = _protocol(_home_step(0))
 
-    violations = validate_protocol_semantics(protocol, board, _deck(), gantry)
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, _deck(), gantry)
 
     assert any("home pose" in v.message for v in violations), violations
     assert any("Cub XL right X-max rail" in v.message for v in violations), violations

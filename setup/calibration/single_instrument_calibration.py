@@ -55,21 +55,6 @@ class DeckOriginCalibrationResult:
     instrument_name: str | None
     plan: DeckOriginCalibrationPlan
 
-    @property
-    def reference_verification(self) -> tuple[float, float, float]:
-        """Backward-compatible alias for the final Z-reference verification."""
-        return self.z_reference_verification
-
-    @property
-    def reference_surface_z_mm(self) -> float:
-        """Deprecated alias for the one-instrument lower Z assignment."""
-        return self.z_min_mm
-
-    @property
-    def calculated_z_range_mm(self) -> float:
-        """Deprecated alias for the configured factory Z travel span."""
-        return self.factory_z_travel_mm
-
 
 @dataclass(frozen=True)
 class BlockZCalibration:
@@ -134,19 +119,20 @@ def _factory_z_travel_mm(raw_config: dict[str, Any]) -> float:
     return _round_mm(value)
 
 
-def _calculated_z_range(raw_config: dict[str, Any]) -> float:
-    """Deprecated helper name retained for older callers."""
-    return _factory_z_travel_mm(raw_config)
-
-
 def _calibration_block_height_mm(
     raw_config: dict[str, Any],
     *,
     explicit_block_height_mm: float | None,
+    input_reader: Callable[[str], str] | None = None,
+    output: Callable[[str], None] | None = None,
 ) -> float:
     if explicit_block_height_mm is not None:
         value = float(explicit_block_height_mm)
     else:
+        if input_reader is not None and output is not None:
+            return _round_mm(
+                _prompt_block_height(input_reader=input_reader, output=output)
+            )
         cnc = raw_config.get("cnc")
         if not isinstance(cnc, dict) or "calibration_block_height_mm" not in cnc:
             raise ValueError(
@@ -279,6 +265,7 @@ def _updated_gantry_yaml_text(
     z_max_mm: float,
     max_travel: dict[str, float] | None = None,
     homing_pull_off_mm: float | None = None,
+    calibration_block_height_mm: float | None = None,
 ) -> str:
     updated = copy.deepcopy(raw_config)
     updated["working_volume"] = {
@@ -295,6 +282,11 @@ def _updated_gantry_yaml_text(
             max_travel=max_travel,
             homing_pull_off_mm=homing_pull_off_mm,
         )
+    if calibration_block_height_mm is not None:
+        cnc = updated.setdefault("cnc", {})
+        if not isinstance(cnc, dict):
+            raise ValueError("Input gantry YAML cnc section must be a mapping.")
+        cnc["calibration_block_height_mm"] = _round_mm(calibration_block_height_mm)
     return yaml.safe_dump(updated, sort_keys=False)
 
 
@@ -583,7 +575,7 @@ def _commands_for_z_min(
 ) -> tuple[str, ...]:
     z_value = "0"
     confirmation = "<confirm true deck-bottom contact>"
-    if z_reference_mode in ("prompt", "ruler-gap", "known-height"):
+    if z_reference_mode in ("prompt", "ruler-gap"):
         gap_value = "<tip_gap_mm>" if tip_gap_mm is None else f"{tip_gap_mm:g}"
         confirmation = (
             "<confirm bottom contact or enter ruler-measured TCP gap; "
@@ -936,9 +928,7 @@ def run_calibration(
     jog_feed_rate: float = 2500.0,
     limit_pull_off_mm: float = 5.0,
     tip_gap_mm: float | None = None,
-    reference_surface_z_mm: float | None = None,
     z_reference_mode: str = "bottom",
-    measure_reachable_z_min: bool | None = False,
     instrument_name: str | None = None,
     skip_soft_limit_config: bool = False,
     write_gantry_yaml: bool = False,
@@ -959,20 +949,8 @@ def run_calibration(
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     plan = build_deck_origin_calibration_plan(gantry_config)
-    if reference_surface_z_mm is not None:
-        if tip_gap_mm is not None:
-            raise ValueError("Use only one of tip_gap_mm or reference_surface_z_mm.")
-        tip_gap_mm = reference_surface_z_mm
-    deprecated_known_height_mode = z_reference_mode == "known-height"
-    if deprecated_known_height_mode:
-        z_reference_mode = "ruler-gap"
     if z_reference_mode not in ("prompt", "bottom", "ruler-gap", "block"):
         raise ValueError("z_reference_mode must be one of: prompt, bottom, ruler-gap, block")
-    if deprecated_known_height_mode:
-        output(
-            "Deprecated z_reference_mode=known-height received; treating "
-            "the supplied height as a ruler-measured deck-to-TCP gap."
-        )
 
     if dry_run:
         _print_dry_run(
@@ -991,11 +969,6 @@ def run_calibration(
     output("  - Place a calibration block at the front-left origin point.")
     output("  - Jog the instrument tip/probe to touch the block top at that point.")
     output("  - This will set X=0 and Y=0 at that pose, then set Z from the selected reference mode.")
-    if measure_reachable_z_min is True:
-        output(
-            "  - --measure-reachable-z-min is deprecated; the lower reach is "
-            "now recorded from the origin/gap calibration point."
-        )
     if instrument_name:
         output(f"  - Instrument/TCP label for reach output: {instrument_name}")
     output("")
@@ -1080,6 +1053,8 @@ def run_calibration(
             block_height_mm = _calibration_block_height_mm(
                 raw_config,
                 explicit_block_height_mm=tip_gap_mm,
+                input_reader=input_reader,
+                output=output,
             )
             block_touch_wpos_z_mm = float(xy_origin_coords["z"])
             if initial_home_z_mm is None:
@@ -1187,6 +1162,7 @@ def run_calibration(
             z_max_mm=z_max_mm,
             max_travel=max_travel,
             homing_pull_off_mm=homing_pull_off_mm,
+            calibration_block_height_mm=block_height_mm,
         )
         _print_yaml_block(
             title="Full gantry YAML to copy/paste:",

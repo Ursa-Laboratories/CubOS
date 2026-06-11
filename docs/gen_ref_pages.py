@@ -128,7 +128,7 @@ index_lines = [
     "",
 ]
 
-# Group by second-level package (e.g. src.board, src.gantry) instead of
+# Group by second-level package (e.g. src.deck, src.gantry) instead of
 # lumping everything under a single "src" heading.
 second_level: dict[str, list[tuple[str, Path]]] = defaultdict(list)
 
@@ -143,7 +143,7 @@ for package_name in sorted(top_level_modules):
         second_level[heading].append((module_name, docs_path))
 
 for heading in sorted(second_level):
-    # Use the short name (e.g. "board" not "src.board") for display
+    # Use the short name (e.g. "gantry" not "src.gantry") for display
     display = heading.split(".")[-1] if "." in heading else heading
     index_lines.append(f"## `{display}`")
     index_lines.append("")

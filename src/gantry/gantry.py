@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import logging
-import math
 import re
 from typing import Any, Dict, Optional
 
+from .calibration_utils import (
+    round_mm,
+    validate_homing_pull_off_mm,
+    validate_status_report,
+)
 from .coordinate_translator import (
     to_machine_coordinates,
-    to_user_coordinates,
     translate_status_string,
 )
 from .grbl_settings import format_setting_value, normalize_expected_grbl_settings
@@ -26,42 +29,6 @@ from .origin import (
 _STATUS_RE = re.compile(r"<([^|>]+)")
 
 logger = logging.getLogger(__name__)
-
-
-def _round_mm(value: float) -> float:
-    return round(float(value), 3)
-
-
-def _validate_homing_pull_off_mm(value: Any) -> float:
-    try:
-        pull_off = float(value)
-    except (TypeError, ValueError) as exc:
-        raise MillConnectionError(
-            "Cannot finalize deck-origin calibration because GRBL $27 "
-            f"homing pull-off is not numeric: {value!r}."
-        ) from exc
-    if not math.isfinite(pull_off) or pull_off < 0:
-        raise MillConnectionError(
-            "Cannot finalize deck-origin calibration because GRBL $27 "
-            f"homing pull-off must be finite and non-negative; got {value!r}."
-        )
-    return _round_mm(pull_off)
-
-
-def _validate_status_report(value: Any) -> float:
-    try:
-        status_report = float(value)
-    except (TypeError, ValueError) as exc:
-        raise MillConnectionError(
-            "Cannot configure calibration GRBL settings because $10 "
-            f"status report is not numeric: {value!r}."
-        ) from exc
-    if not math.isfinite(status_report):
-        raise MillConnectionError(
-            "Cannot configure calibration GRBL settings because $10 "
-            f"status report must be finite; got {value!r}."
-        )
-    return status_report
 
 
 class Gantry:
@@ -236,8 +203,8 @@ class Gantry:
 
         ``travel_z``, if given, becomes the Z during XY travel: the gantry
         lifts/lowers to it at the current XY before moving XY, then
-        descends/ascends to the target Z. This is how higher layers (Board,
-        protocol commands) express "travel above this labware" without the
+        descends/ascends to the target Z. This is how higher layers
+        (InstrumentedGantry, protocol commands) express "travel above this labware" without the
         mill baking in a machine-wide retract.
         """
         if self._offline:
@@ -369,8 +336,7 @@ class Gantry:
             return dict(self._offline_coords)
         assert self._mill is not None
         coords = self._mill.current_coordinates()
-        x_user, y_user, z_user = to_user_coordinates(coords.x, coords.y, coords.z)
-        return {"x": x_user, "y": y_user, "z": z_user}
+        return {"x": float(coords.x), "y": float(coords.y), "z": float(coords.z)}
 
     def get_position_info(self) -> Dict[str, Any]:
         """Return coordinates, work position, and last-known status."""
@@ -380,8 +346,7 @@ class Gantry:
 
         assert self._mill is not None
         coords = self._mill.current_coordinates()
-        x_user, y_user, z_user = to_user_coordinates(coords.x, coords.y, coords.z)
-        user_coords = {"x": x_user, "y": y_user, "z": z_user}
+        user_coords = {"x": float(coords.x), "y": float(coords.y), "z": float(coords.z)}
         status = self._extract_status()
         return {
             "coords": user_coords,
@@ -553,7 +518,7 @@ class Gantry:
                 if isinstance(raw_settings, dict):
                     settings = raw_settings
             raw = settings.get("$27", settings.get("27", settings.get("homing_pull_off")))
-            return _validate_homing_pull_off_mm(0.0 if raw is None else raw)
+            return validate_homing_pull_off_mm(0.0 if raw is None else raw)
 
         settings = self.read_grbl_settings()
         raw = settings.get("$27", settings.get("27"))
@@ -562,7 +527,7 @@ class Gantry:
                 "Cannot finalize deck-origin calibration because live GRBL "
                 "$27 homing pull-off is missing."
             )
-        return _validate_homing_pull_off_mm(raw)
+        return validate_homing_pull_off_mm(raw)
 
     def _configured_grbl_setting(self, field_name: str) -> Any:
         """Return a configured GRBL setting by schema field name, if present."""
@@ -608,9 +573,9 @@ class Gantry:
             )
         expected_reporting: Dict[str, Any] = {}
         if status_report is not None:
-            expected_reporting["$10"] = _validate_status_report(status_report)
+            expected_reporting["$10"] = validate_status_report(status_report)
         if homing_pull_off is not None:
-            expected_reporting["$27"] = _validate_homing_pull_off_mm(homing_pull_off)
+            expected_reporting["$27"] = validate_homing_pull_off_mm(homing_pull_off)
         configured_hard_limits = (
             hard_limits
             if hard_limits is not None
@@ -709,30 +674,30 @@ class Gantry:
             else self._configured_grbl_setting("homing_pull_off")
         )
         if self._offline:
-            homing_pull_off_mm = _validate_homing_pull_off_mm(
+            homing_pull_off_mm = validate_homing_pull_off_mm(
                 0.0 if configured_pull_off is None else configured_pull_off
             )
         else:
             if configured_pull_off is None:
                 homing_pull_off_mm = self.homing_pull_off_mm()
             else:
-                homing_pull_off_mm = _validate_homing_pull_off_mm(configured_pull_off)
+                homing_pull_off_mm = validate_homing_pull_off_mm(configured_pull_off)
             if status_report is not None:
-                self.set_grbl_setting("$10", _validate_status_report(status_report))
+                self.set_grbl_setting("$10", validate_status_report(status_report))
             if configured_pull_off is not None:
                 self.set_grbl_setting("$27", homing_pull_off_mm)
 
         if self._offline:
             measured = dict(self._offline_coords)
             measured_volume = {
-                "x": _round_mm(float(measured.get("x", 0.0))),
-                "y": _round_mm(float(measured.get("y", 0.0))),
+                "x": round_mm(float(measured.get("x", 0.0))),
+                "y": round_mm(float(measured.get("y", 0.0))),
                 "z": z_calibration.z_max,
             }
             max_travel = {
-                "x": _round_mm(measured_volume["x"] + homing_pull_off_mm),
-                "y": _round_mm(measured_volume["y"] + homing_pull_off_mm),
-                "z": _round_mm(
+                "x": round_mm(measured_volume["x"] + homing_pull_off_mm),
+                "y": round_mm(measured_volume["y"] + homing_pull_off_mm),
+                "z": round_mm(
                     z_calibration.max_travel_z + homing_pull_off_mm
                 ),
             }
@@ -760,8 +725,8 @@ class Gantry:
             )
 
         measured_volume = {
-            "x": _round_mm(float(measured["x"])),
-            "y": _round_mm(float(measured["y"])),
+            "x": round_mm(float(measured["x"])),
+            "y": round_mm(float(measured["y"])),
             "z": z_calibration.z_max,
         }
         usable_spans = {
@@ -780,9 +745,9 @@ class Gantry:
                 + ", ".join(invalid)
             )
         max_travel = {
-            "x": _round_mm(measured_volume["x"] + homing_pull_off_mm),
-            "y": _round_mm(measured_volume["y"] + homing_pull_off_mm),
-            "z": _round_mm(
+            "x": round_mm(measured_volume["x"] + homing_pull_off_mm),
+            "y": round_mm(measured_volume["y"] + homing_pull_off_mm),
+            "z": round_mm(
                 z_calibration.max_travel_z + homing_pull_off_mm
             ),
         }

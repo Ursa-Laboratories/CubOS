@@ -8,12 +8,13 @@ import tempfile
 
 import pytest
 
-from board.errors import BoardLoaderError
 from deck.errors import DeckLoaderError
 from gantry.errors import GantryLoaderError
 from gantry.gantry_config import GantryConfig
+from gantry.instrument_mount import InstrumentedGantry
 from protocol_engine.errors import ProtocolLoaderError
-from protocol_engine.protocol import Protocol, ProtocolContext
+from protocol_engine.protocol import Protocol
+from protocol_engine.runtime import ProtocolContext
 from protocol_engine.registry import CommandRegistry
 from protocol_engine.setup import run_protocol, setup_protocol
 from validation.errors import SetupValidationError
@@ -130,12 +131,12 @@ class TestSetupProtocol:
             assert isinstance(protocol, Protocol)
             assert isinstance(context, ProtocolContext)
 
-    def test_context_has_board_with_instruments(self):
+    def test_context_has_gantry_with_instruments(self):
         with _TempYamlFiles() as f:
             _, context = setup_protocol(
                 f.gantry_path, f.deck_path, f.protocol_path,
             )
-            assert "pipette" in context.board.instruments
+            assert "pipette" in context.gantry.instruments
 
     def test_context_has_deck_with_labware(self):
         with _TempYamlFiles() as f:
@@ -183,8 +184,21 @@ protocol:
             _, context = setup_protocol(
                 f.gantry_path, f.deck_path, f.protocol_path,
             )
-            assert isinstance(context.gantry, GantryConfig)
-            assert context.gantry.working_volume.x_min == 0.0
+            assert isinstance(context.gantry_config, GantryConfig)
+            assert context.gantry_config.working_volume.x_min == 0.0
+
+    def test_context_carries_optional_data_store_and_campaign_id(self):
+        data_store = object()
+        with _TempYamlFiles() as f:
+            _, context = setup_protocol(
+                f.gantry_path,
+                f.deck_path,
+                f.protocol_path,
+                data_store=data_store,
+                campaign_id=42,
+            )
+            assert context.data_store is data_store
+            assert context.campaign_id == 42
 
     def test_rejects_negative_space_gantry_config(self):
         legacy_gantry = GANTRY_YAML.replace("  x_min: 0.0\n", "  x_min: -300.0\n")
@@ -263,17 +277,10 @@ labware:
                     f.gantry_path, "/nonexistent/deck.yaml", f.protocol_path,
                 )
 
-    def test_raises_on_missing_legacy_board_file(self):
-        with _TempYamlFiles() as f:
-            with pytest.raises(BoardLoaderError):
-                setup_protocol(
-                    f.gantry_path, f.deck_path, "/nonexistent/board.yaml", f.protocol_path,
-                )
-
     def test_raises_when_gantry_has_no_instruments(self):
         gantry_without_instruments = GANTRY_YAML.split("instruments:\n", 1)[0]
         with _TempYamlFiles(gantry=gantry_without_instruments) as f:
-            with pytest.raises(BoardLoaderError, match="instruments"):
+            with pytest.raises(GantryLoaderError, match="instruments"):
                 setup_protocol(
                     f.gantry_path, f.deck_path, f.protocol_path,
                 )
@@ -290,8 +297,8 @@ labware:
             _, context = setup_protocol(
                 f.gantry_path, f.deck_path, f.protocol_path,
             )
-            # Board should have a gantry (mock) — verify it exists
-            assert context.board.gantry is not None
+            assert isinstance(context.gantry, InstrumentedGantry)
+            assert context.gantry.controller is not None
 
     def test_mock_mode_swaps_instrument_types(self):
         gantry_yaml = _gantry_with_instruments("""\
@@ -309,8 +316,8 @@ instruments:
                 mock_mode=True,
             )
             from instruments.pipette.driver import Pipette
-            assert isinstance(context.board.instruments["pipette"], Pipette)
-            assert context.board.instruments["pipette"]._offline is True
+            assert isinstance(context.gantry.instruments["pipette"], Pipette)
+            assert context.gantry.instruments["pipette"]._offline is True
 
 
 class TestRunProtocolLifecycle:

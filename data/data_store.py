@@ -3,13 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
+from pathlib import Path
 from typing import Any, List, Optional, Union
 
 from instruments.asmi.models import MeasurementResult as ASMIMeasurementResult
 from instruments.filmetrics.models import MeasurementResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.measurements import InstrumentMeasurement, MeasurementType
+
+DATA_DB_PATH_ENV = "CUBOS_DATA_DB_PATH"
+SQLITE_MEMORY_DATABASE = ":memory:"
+
+
+def default_database_path() -> Path:
+    """Return the default SQLite path for CubOS runtime data."""
+    override = os.environ.get(DATA_DB_PATH_ENV)
+    if override:
+        return Path(override).expanduser()
+    return Path(__file__).resolve().parent / "databases" / "panda_data.db"
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -59,16 +72,18 @@ CREATE TABLE IF NOT EXISTS camera_measurements (
 CREATE TABLE IF NOT EXISTS asmi_measurements (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     experiment_id   INTEGER NOT NULL REFERENCES experiments(id),
+    sample_timestamps TEXT NOT NULL,
     z_positions     TEXT    NOT NULL,
     raw_forces      TEXT    NOT NULL,
     corrected_forces TEXT   NOT NULL,
+    directions      TEXT    NOT NULL,
     baseline_avg    REAL    NOT NULL,
     baseline_std    REAL    NOT NULL,
     force_exceeded  INTEGER NOT NULL DEFAULT 0,
     data_points     INTEGER NOT NULL,
-    step_size_mm    REAL,
-    z_target_mm     REAL,
-    force_limit_n   REAL,
+    step_size_mm    REAL    NOT NULL,
+    z_target_mm     REAL    NOT NULL,
+    force_limit_n   REAL    NOT NULL,
     timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -115,40 +130,20 @@ CREATE TABLE IF NOT EXISTS labware (
 class DataStore:
     """Local SQLite data store for experiment campaigns and measurements."""
 
-    def __init__(self, db_path: str = "data/databases/panda_data.db") -> None:
-        self._conn = sqlite3.connect(db_path)
+    def __init__(self, db_path: str | Path | None = None) -> None:
+        resolved_path = default_database_path() if db_path is None else db_path
+        if str(resolved_path) == SQLITE_MEMORY_DATABASE:
+            sqlite_path = SQLITE_MEMORY_DATABASE
+        else:
+            path = Path(resolved_path).expanduser()
+            path.parent.mkdir(parents=True, exist_ok=True)
+            sqlite_path = str(path)
+        self._conn = sqlite3.connect(sqlite_path)
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
-        self._check_schema_migration()
 
     def _create_tables(self) -> None:
         self._conn.executescript(_SCHEMA_SQL)
-
-    _BLOB_COLUMNS = {
-        "uvvis_measurements": ("wavelengths", "intensities"),
-        "asmi_measurements": ("z_positions", "raw_forces", "corrected_forces"),
-    }
-
-    def _check_schema_migration(self) -> None:
-        """Raise if any float-array column still contains binary BLOB data."""
-        for table, columns in self._BLOB_COLUMNS.items():
-            table_exists = self._conn.execute(
-                "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
-                (table,),
-            ).fetchone()
-            if table_exists is None:
-                continue
-            for column in columns:
-                row = self._conn.execute(
-                    f"SELECT {column} FROM {table} LIMIT 1"
-                ).fetchone()
-                if row is not None and isinstance(row[0], (bytes, bytearray)):
-                    raise RuntimeError(
-                        f"Database contains legacy binary BLOB data in "
-                        f"{table}.{column}. This database was written before "
-                        f"the JSON migration. Re-run experiments or contact "
-                        f"support for a migration script."
-                    )
 
     def create_campaign(
         self,
@@ -190,7 +185,7 @@ class DataStore:
 
         Args:
             experiment_id: FK to the experiments table.
-            result: An InstrumentMeasurement or legacy measurement value.
+            result: An InstrumentMeasurement or measurement value.
 
         Returns:
             The newly inserted measurement row ID.
@@ -229,13 +224,18 @@ class DataStore:
         if measurement.measurement_type == MeasurementType.ASMI_INDENTATION:
             return self._log_asmi(
                 experiment_id=experiment_id,
+                sample_timestamps=tuple(measurement.payload["sample_timestamps"]),
                 z_positions=tuple(measurement.payload["z_positions_mm"]),
                 raw_forces=tuple(measurement.payload["raw_forces_n"]),
                 corrected_forces=tuple(measurement.payload["corrected_forces_n"]),
+                directions=tuple(measurement.payload["directions"]),
                 baseline_avg=float(measurement.metadata["baseline_avg"]),
                 baseline_std=float(measurement.metadata["baseline_std"]),
                 force_exceeded=bool(measurement.metadata["force_exceeded"]),
                 data_points=int(measurement.metadata["data_points"]),
+                step_size_mm=float(measurement.metadata["step_size_mm"]),
+                z_target_mm=float(measurement.metadata["z_target_mm"]),
+                force_limit_n=float(measurement.metadata["force_limit_n"]),
             )
 
         if measurement.measurement_type in {
@@ -318,29 +318,44 @@ class DataStore:
     def _log_asmi(
         self,
         experiment_id: int,
+        sample_timestamps: tuple[float, ...],
         z_positions: tuple[float, ...],
         raw_forces: tuple[float, ...],
         corrected_forces: tuple[float, ...],
+        directions: tuple[str, ...],
         baseline_avg: float,
         baseline_std: float,
         force_exceeded: bool,
         data_points: int,
+        step_size_mm: float,
+        z_target_mm: float,
+        force_limit_n: float,
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO asmi_measurements "
-            "(experiment_id, z_positions, raw_forces, corrected_forces, "
-            "baseline_avg, baseline_std, force_exceeded, data_points) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (
-                experiment_id,
-                json.dumps(list(z_positions)),
-                json.dumps(list(raw_forces)),
-                json.dumps(list(corrected_forces)),
-                baseline_avg,
-                baseline_std,
-                int(force_exceeded),
-                data_points,
-            ),
+            "(experiment_id, sample_timestamps, z_positions, raw_forces, "
+            "corrected_forces, directions, baseline_avg, baseline_std, "
+            "force_exceeded, data_points, step_size_mm, z_target_mm, "
+            "force_limit_n) "
+            "VALUES (:experiment_id, :sample_timestamps, :z_positions, "
+            ":raw_forces, :corrected_forces, :directions, :baseline_avg, "
+            ":baseline_std, :force_exceeded, :data_points, :step_size_mm, "
+            ":z_target_mm, :force_limit_n)",
+            {
+                "experiment_id": experiment_id,
+                "sample_timestamps": json.dumps(list(sample_timestamps)),
+                "z_positions": json.dumps(list(z_positions)),
+                "raw_forces": json.dumps(list(raw_forces)),
+                "corrected_forces": json.dumps(list(corrected_forces)),
+                "directions": json.dumps(list(directions)),
+                "baseline_avg": baseline_avg,
+                "baseline_std": baseline_std,
+                "force_exceeded": int(force_exceeded),
+                "data_points": data_points,
+                "step_size_mm": step_size_mm,
+                "z_target_mm": z_target_mm,
+                "force_limit_n": force_limit_n,
+            },
         )
         self._conn.commit()
         return cursor.lastrowid

@@ -1,20 +1,17 @@
-"""Load runtime Board objects from gantry machine config or legacy board YAML."""
+"""Load mounted instruments from gantry machine config."""
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import Any, Dict, Mapping, TYPE_CHECKING
 
-import yaml
 from pydantic import ValidationError
 
 from instruments.base_instrument import BaseInstrument
 from instruments.registry import get_instrument_class, validate_instrument
-from gantry.grbl_settings import normalize_expected_grbl_settings
 
-from .board import Board
-from .errors import BoardLoaderError
-from .yaml_schema import BoardYamlSchema
+from .errors import GantryLoaderError
+from .instrument_mount import InstrumentedGantry
 
 if TYPE_CHECKING:
     from gantry import Gantry
@@ -33,18 +30,14 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
         if "missing" in error_type or "Field required" in detail:
             guidance = "Add the missing required YAML field shown in the error location."
         elif "extra_forbidden" in error_type or "Extra inputs are not permitted" in detail:
-            guidance = "Remove unknown YAML fields; only 'instruments' and 'grbl_settings' are allowed at root."
+            guidance = (
+                "Remove unknown YAML fields from the gantry instrument entry."
+            )
         else:
-            guidance = "Review the YAML values against the board schema."
+            guidance = "Review the YAML values against the gantry schema."
 
         prefix = f" at `{location}`" if location else ""
-        return f"Board YAML error{prefix}: {detail}\nHow to fix: {guidance}"
-
-    if isinstance(error, yaml.YAMLError):
-        return (
-            f"Board YAML parse error in `{path}`.\n"
-            "How to fix: Check YAML indentation, colons, and structure."
-        )
+        return f"Gantry instrument YAML error{prefix}: {detail}\nHow to fix: {guidance}"
 
     if isinstance(error, ValueError):
         if "must define mounted instruments" in detail:
@@ -58,8 +51,8 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
         )
 
     return (
-        f"Board loader error in `{path}`: {detail}\n"
-        "How to fix: Verify the file path and board YAML contents."
+        f"Gantry instrument loader error in `{path}`: {detail}\n"
+        "How to fix: Verify the gantry YAML path and instrument entries."
     )
 
 
@@ -81,17 +74,17 @@ def _instantiate_instruments(
     return instruments
 
 
-def build_board_from_instrument_configs(
+def build_instrumented_gantry(
     instrument_configs: Mapping[str, Mapping[str, Any]],
     gantry: Gantry,
     *,
     expected_grbl_settings: dict[str, float] | None = None,
     mock_mode: bool = False,
     safe_z: float | None = None,
-) -> Board:
-    """Build a Board from parsed instrument config entries."""
-    return Board(
-        gantry=gantry,
+) -> InstrumentedGantry:
+    """Build an InstrumentedGantry from parsed instrument config entries."""
+    return InstrumentedGantry(
+        controller=gantry,
         instruments=_instantiate_instruments(
             instrument_configs,
             mock_mode=mock_mode,
@@ -101,12 +94,12 @@ def build_board_from_instrument_configs(
     )
 
 
-def load_board_from_gantry_config(
+def load_instrumented_gantry_from_config(
     config: Any,
     gantry: Gantry,
     mock_mode: bool = False,
-) -> Board:
-    """Load the runtime Board from a loaded gantry machine config."""
+) -> InstrumentedGantry:
+    """Load the runtime instrumented gantry from a loaded machine config."""
     instrument_configs = getattr(config, "instruments", None)
     if not instrument_configs:
         raise ValueError(
@@ -115,7 +108,7 @@ def load_board_from_gantry_config(
         )
     expected_grbl_settings = getattr(config, "expected_grbl_settings", None)
     safe_z = getattr(config, "resolved_safe_z", None)
-    return build_board_from_instrument_configs(
+    return build_instrumented_gantry(
         instrument_configs,
         gantry,
         expected_grbl_settings=expected_grbl_settings,
@@ -124,79 +117,32 @@ def load_board_from_gantry_config(
     )
 
 
-def load_board_from_gantry_yaml(
+def load_instrumented_gantry_from_yaml(
     path: str | Path,
     gantry: Gantry,
     mock_mode: bool = False,
-) -> Board:
-    """Load a Board from the instruments embedded in a gantry YAML file."""
+) -> InstrumentedGantry:
+    """Load an InstrumentedGantry from instruments embedded in a gantry YAML."""
     from gantry.loader import load_gantry_from_yaml
 
     config = load_gantry_from_yaml(path)
-    return load_board_from_gantry_config(
+    return load_instrumented_gantry_from_config(
         config,
         gantry,
         mock_mode=mock_mode,
     )
 
 
-def load_board_from_gantry_yaml_safe(
+def load_instrumented_gantry_from_yaml_safe(
     path: str | Path,
     gantry: Gantry,
     mock_mode: bool = False,
-) -> Board:
-    """Load board-from-gantry YAML with user-friendly exception formatting."""
+) -> InstrumentedGantry:
+    """Load mounted instruments from gantry YAML with user-friendly errors."""
     resolved = Path(path)
     try:
-        return load_board_from_gantry_yaml(resolved, gantry, mock_mode=mock_mode)
+        return load_instrumented_gantry_from_yaml(
+            resolved, gantry, mock_mode=mock_mode,
+        )
     except Exception as exc:
-        raise BoardLoaderError(_format_loader_exception(resolved, exc)) from exc
-
-
-def load_board_from_yaml(
-    path: str | Path, gantry: Gantry, mock_mode: bool = False,
-) -> Board:
-    """Load a legacy board YAML file and return a Board with instruments.
-
-    Args:
-        path: Path to the board YAML file.
-        gantry: The Gantry instance to attach to the Board.
-        mock_mode: If True, all instruments are created with offline=True.
-
-    Returns:
-        Board with all instruments instantiated from the YAML config.
-
-    Raises:
-        FileNotFoundError: If the YAML file does not exist.
-        yaml.YAMLError: If the file is not valid YAML.
-        ValidationError: If the YAML does not match the schema.
-        ValueError: If an instrument type or vendor is invalid.
-    """
-    path = Path(path)
-    with path.open() as f:
-        raw = yaml.safe_load(f)
-    if raw is None:
-        raw = {}
-
-    schema = BoardYamlSchema.model_validate(raw)
-
-    return build_board_from_instrument_configs(
-        {
-            name: entry.model_dump()
-            for name, entry in schema.instruments.items()
-        },
-        gantry=gantry,
-        expected_grbl_settings=normalize_expected_grbl_settings(schema.grbl_settings),
-        mock_mode=mock_mode,
-    )
-
-
-def load_board_from_yaml_safe(
-    path: str | Path, gantry: Gantry, mock_mode: bool = False,
-) -> Board:
-    """Load board YAML with user-friendly exception formatting."""
-    resolved = Path(path)
-    try:
-        return load_board_from_yaml(resolved, gantry, mock_mode=mock_mode)
-    except Exception as exc:
-        raise BoardLoaderError(_format_loader_exception(resolved, exc)) from exc
+        raise GantryLoaderError(_format_loader_exception(resolved, exc)) from exc

@@ -774,8 +774,8 @@ class Mill:
         When ``travel_z`` is provided, XY travel happens at that Z rather
         than whatever Z the tip is currently at. The sequence becomes:
         lift/lower to ``travel_z`` at current XY, XY travel at ``travel_z``,
-        then descend/ascend to the target Z. This lets callers (Board,
-        protocol commands) own their own "safe approach" height instead of
+        then descend/ascend to the target Z. This lets callers
+        (InstrumentedGantry, protocol commands) own their own "safe approach" height instead of
         the mill baking in a machine-wide retract.
 
         When ``travel_z`` is None, the mill issues a direct axis-by-axis

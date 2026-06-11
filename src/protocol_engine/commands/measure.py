@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
+import json
+import logging
+import sqlite3
 from typing import Any, Dict, TYPE_CHECKING
 
 from ..errors import ProtocolExecutionError
+from ..measurements import normalize_measurement
 from ..registry import protocol_command
 from ..scan_args import normalize_scan_arguments
 from ._dispatch import inject_runtime_args
 from ._movement import engage_at_labware
 
 if TYPE_CHECKING:
-    from ..protocol import ProtocolContext
+    from ..runtime import ProtocolContext
+
+logger = logging.getLogger(__name__)
 
 
 @protocol_command("measure")
@@ -42,12 +48,12 @@ def measure(
     Lets ``measure`` drive a single-well indentation without iterating
     a plate.
     """
-    if instrument not in context.board.instruments:
+    if instrument not in context.gantry.instruments:
         raise ProtocolExecutionError(
             f"Unknown instrument '{instrument}'. "
-            f"Available: {', '.join(sorted(context.board.instruments.keys()))}"
+            f"Available: {', '.join(sorted(context.gantry.instruments.keys()))}"
         )
-    instr = context.board.instruments[instrument]
+    instr = context.gantry.instruments[instrument]
 
     if not hasattr(instr, method):
         raise ProtocolExecutionError(
@@ -100,4 +106,30 @@ def measure(
         measurement_height=measurement_height,
         indentation_limit_height=indentation_limit_height,
     )
-    return callable_method(**kwargs)
+    result = callable_method(**kwargs)
+
+    if context.data_store is not None and context.campaign_id is not None:
+        try:
+            target = context.deck.resolve_labware_target(position)
+            contents = context.data_store.get_contents(
+                context.campaign_id, target.labware_key, target.location_id,
+            )
+            contents_json = json.dumps(contents) if contents else "[]"
+            exp_id = context.data_store.create_experiment(
+                campaign_id=context.campaign_id,
+                labware_name=target.labware_name,
+                well_id=target.location_id,
+                contents_json=contents_json,
+            )
+            measurement = normalize_measurement(
+                instrument_name=instrument,
+                method_name=method,
+                raw_result=result,
+            )
+            context.data_store.log_measurement(exp_id, measurement)
+        except sqlite3.Error as exc:
+            logger.warning(
+                "Failed to log measurement for position %s: %s", position, exc,
+            )
+
+    return result
