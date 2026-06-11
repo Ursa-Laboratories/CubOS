@@ -183,3 +183,42 @@ def test_resolve_labware_missing_child_reports_failing_segment():
     message = str(exc_info.value)
     assert "missing_plate" in message
     assert "plate_holder.missing_plate" not in message
+
+
+def test_resolve_labware_target_bare_labware():
+    deck = _make_deck()
+
+    target = deck.resolve_labware_target("vial_1")
+
+    assert target.labware_key == "vial_1"
+    assert target.labware_name == "vial_1"
+    assert target.location_id is None
+    assert isinstance(target.labware, Vial)
+
+
+def test_resolve_labware_target_plate_well():
+    deck = _make_deck()
+
+    target = deck.resolve_labware_target("plate_1.A1")
+
+    assert target.labware_key == "plate_1"
+    assert target.labware_name == "plate_1"
+    assert target.location_id == "A1"
+    assert isinstance(target.labware, WellPlate)
+
+
+def test_resolve_labware_target_nested_holder_plate_well():
+    plate = _make_plate()
+    holder = WellPlateHolder(
+        name="plate_holder",
+        location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+        contained_labware={"plate": plate},
+    )
+    deck = Deck({"plate_holder": holder})
+
+    target = deck.resolve_labware_target("plate_holder.plate.A1")
+
+    assert target.labware_key == "plate_holder.plate"
+    assert target.labware_name == "plate_1"
+    assert target.location_id == "A1"
+    assert target.labware is plate

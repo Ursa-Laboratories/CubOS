@@ -28,6 +28,8 @@ def setup_protocol(
     protocol_path: str | Path,
     gantry: Any | None = None,
     mock_mode: bool = False,
+    data_store: Any | None = None,
+    campaign_id: int | None = None,
 ) -> Tuple[Protocol, ProtocolContext]:
     """Load all configs, validate bounds, and return a ready-to-run protocol.
 
@@ -47,6 +49,8 @@ def setup_protocol(
         gantry: Optional Gantry instance. If None, an offline Gantry is used
             for validation.
         mock_mode: If True, instantiate real driver classes in offline mode.
+        data_store: Optional persistence store attached to the runtime context.
+        campaign_id: Optional campaign ID used with ``data_store``.
 
     Returns:
         Tuple of (Protocol, ProtocolContext) ready for ``protocol.run(context)``.
@@ -103,6 +107,8 @@ def setup_protocol(
         deck=deck,
         positions=protocol.positions,
         gantry_config=gantry_config,
+        data_store=data_store,
+        campaign_id=campaign_id,
     )
     return protocol, context
 
@@ -113,6 +119,8 @@ def run_protocol(
     protocol_path: str | Path,
     gantry: Any | None = None,
     mock_mode: bool = False,
+    data_store: Any | None = None,
+    campaign_id: int | None = None,
 ) -> List[Any]:
     """Load configs, validate, and execute the protocol in one call.
 
@@ -125,6 +133,7 @@ def run_protocol(
     protocol, context = setup_protocol(
         gantry_path, deck_path, protocol_path,
         gantry=gantry, mock_mode=mock_mode,
+        data_store=data_store, campaign_id=campaign_id,
     )
     context.gantry.connect_instruments()
     try:

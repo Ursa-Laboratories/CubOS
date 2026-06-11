@@ -327,7 +327,9 @@ protocol.run(context)
 
 Campaign state can be stored in SQLite through `data.DataStore`. Measurement
 commands can log into a `ProtocolContext` when `data_store` and
-`campaign_id` are provided.
+`campaign_id` are provided. `DataStore()` uses CubOS'
+`data/databases/panda_data.db` by default; set `CUBOS_DATA_DB_PATH` to use a
+writable runtime path.
 
 ## Development
 

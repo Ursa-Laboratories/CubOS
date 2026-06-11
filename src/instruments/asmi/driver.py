@@ -289,6 +289,7 @@ class ASMI(BaseInstrument):
                 target_z,
                 _step_size,
                 action_z,
+                _force_limit,
                 measure_with_return=measure_with_return,
             )
 
@@ -328,6 +329,9 @@ class ASMI(BaseInstrument):
             baseline_std=baseline_std,
             force_exceeded=force_exceeded,
             measure_with_return=measure_with_return,
+            step_size_mm=_step_size,
+            z_target_mm=target_z,
+            force_limit_n=_force_limit,
         )
 
     def _resolve_indentation_settings(
@@ -529,6 +533,9 @@ class ASMI(BaseInstrument):
         baseline_std: float,
         force_exceeded: bool,
         measure_with_return: bool,
+        step_size_mm: float,
+        z_target_mm: float,
+        force_limit_n: float,
     ) -> dict:
         return {
             "measurements": measurements,
@@ -537,6 +544,9 @@ class ASMI(BaseInstrument):
             "force_exceeded": force_exceeded,
             "data_points": len(measurements),
             "measure_with_return": measure_with_return,
+            "step_size_mm": step_size_mm,
+            "z_target_mm": z_target_mm,
+            "force_limit_n": force_limit_n,
         }
 
     def _offline_indentation(
@@ -545,6 +555,7 @@ class ASMI(BaseInstrument):
         target_z,
         step_size,
         action_z,
+        force_limit,
         measure_with_return: bool = False,
     ) -> dict:
         """Fast offline indentation — no idle-wait, synthetic data.
@@ -600,4 +611,7 @@ class ASMI(BaseInstrument):
             "force_exceeded": False,
             "data_points": len(measurements),
             "measure_with_return": measure_with_return,
+            "step_size_mm": step_size,
+            "z_target_mm": target_z,
+            "force_limit_n": force_limit,
         }
