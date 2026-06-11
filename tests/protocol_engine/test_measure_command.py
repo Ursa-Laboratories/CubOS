@@ -1,5 +1,6 @@
 """Tests for the ``measure`` protocol command."""
 
+import logging
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,6 +10,8 @@ from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
 from instruments.base_instrument import BaseInstrument
+from instruments.filmetrics.models import MeasurementResult
+from instruments.uv_curing.models import CureResult
 from protocol_engine.commands.measure import measure
 from protocol_engine.errors import ProtocolExecutionError
 from protocol_engine.runtime import ProtocolContext
@@ -81,6 +84,23 @@ class _FakeASMI:
             "z_target_mm": 13.0,
             "force_limit_n": force_limit,
         }
+
+
+class _FakeFilmetrics:
+    def measure(self):
+        return MeasurementResult(thickness_nm=151.2, goodness_of_fit=0.96)
+
+
+class _FakeUVCuring:
+    def cure(self):
+        return CureResult(
+            intensity_percent=60.0,
+            exposure_time_s=1.5,
+            timestamp=123.4,
+        )
+
+    def health_check(self):
+        return True
 
 
 def test_measure_travels_at_safe_z_then_descends():
@@ -168,6 +188,121 @@ def test_measure_persists_single_asmi_indentation_when_campaign_is_present():
     assert row[4] == pytest.approx(0.1)
     assert row[5] == pytest.approx(13.0)
     assert row[6] == pytest.approx(10.0)
+    store.close()
+
+
+def test_measure_persists_single_filmetrics_thickness_when_campaign_is_present():
+    plate = _plate()
+    board = MagicMock()
+    board.controller = object()
+    board.instruments = {"filmetrics": _FakeFilmetrics()}
+    deck = Deck({"plate_1": plate})
+    store = DataStore(db_path=":memory:")
+    campaign_id = store.create_campaign(description="measure")
+    store.register_labware(campaign_id, "plate_1", plate)
+    ctx = ProtocolContext(
+        gantry=board,
+        deck=deck,
+        data_store=store,
+        campaign_id=campaign_id,
+    )
+
+    measure(
+        ctx,
+        instrument="filmetrics",
+        position="plate_1.A1",
+        measurement_height=0.0,
+    )
+
+    row = store._conn.execute(
+        """
+        SELECT e.labware_name, e.well_id, m.thickness_nm, m.goodness_of_fit
+        FROM experiments e
+        JOIN filmetrics_measurements m ON m.experiment_id = e.id
+        WHERE e.campaign_id = ?
+        """,
+        (campaign_id,),
+    ).fetchone()
+    assert row[0] == "test_plate"
+    assert row[1] == "A1"
+    assert row[2] == pytest.approx(151.2)
+    assert row[3] == pytest.approx(0.96)
+    store.close()
+
+
+def test_measure_persists_single_uv_curing_exposure_when_campaign_is_present():
+    plate = _plate()
+    board = MagicMock()
+    board.controller = object()
+    board.instruments = {"uv_curing": _FakeUVCuring()}
+    deck = Deck({"plate_1": plate})
+    store = DataStore(db_path=":memory:")
+    campaign_id = store.create_campaign(description="measure")
+    store.register_labware(campaign_id, "plate_1", plate)
+    ctx = ProtocolContext(
+        gantry=board,
+        deck=deck,
+        data_store=store,
+        campaign_id=campaign_id,
+    )
+
+    measure(
+        ctx,
+        instrument="uv_curing",
+        position="plate_1.A1",
+        measurement_height=0.0,
+        method="cure",
+    )
+
+    row = store._conn.execute(
+        """
+        SELECT e.labware_name, e.well_id, m.intensity_percent,
+               m.exposure_time_s, m.cure_timestamp_s
+        FROM experiments e
+        JOIN uv_curing_measurements m ON m.experiment_id = e.id
+        WHERE e.campaign_id = ?
+        """,
+        (campaign_id,),
+    ).fetchone()
+    assert row[0] == "test_plate"
+    assert row[1] == "A1"
+    assert row[2] == pytest.approx(60.0)
+    assert row[3] == pytest.approx(1.5)
+    assert row[4] == pytest.approx(123.4)
+    store.close()
+
+
+def test_measure_uv_health_check_does_not_persist_or_fail(caplog):
+    plate = _plate()
+    board = MagicMock()
+    board.controller = object()
+    board.instruments = {"uv_curing": _FakeUVCuring()}
+    deck = Deck({"plate_1": plate})
+    store = DataStore(db_path=":memory:")
+    campaign_id = store.create_campaign(description="measure")
+    store.register_labware(campaign_id, "plate_1", plate)
+    ctx = ProtocolContext(
+        gantry=board,
+        deck=deck,
+        data_store=store,
+        campaign_id=campaign_id,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = measure(
+            ctx,
+            instrument="uv_curing",
+            position="plate_1.A1",
+            measurement_height=0.0,
+            method="health_check",
+        )
+
+    assert result is True
+    assert "not persistable" in caplog.text
+    assert store._conn.execute("SELECT COUNT(*) FROM experiments").fetchone()[0] == 0
+    assert store._conn.execute(
+        "SELECT COUNT(*) FROM uv_curing_measurements"
+    ).fetchone()[0] == 0
     store.close()
 
 

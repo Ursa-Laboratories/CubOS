@@ -10,6 +10,7 @@ from typing import Any, List, Optional, Union
 
 from instruments.asmi.models import MeasurementResult as ASMIMeasurementResult
 from instruments.filmetrics.models import MeasurementResult
+from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.measurements import InstrumentMeasurement, MeasurementType
 
@@ -60,6 +61,15 @@ CREATE TABLE IF NOT EXISTS filmetrics_measurements (
     thickness_nm    REAL,
     goodness_of_fit REAL,
     timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS uv_curing_measurements (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    experiment_id     INTEGER NOT NULL REFERENCES experiments(id),
+    intensity_percent REAL    NOT NULL,
+    exposure_time_s   REAL    NOT NULL,
+    cure_timestamp_s  REAL    NOT NULL,
+    timestamp         TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS camera_measurements (
@@ -179,7 +189,9 @@ class DataStore:
     def log_measurement(
         self,
         experiment_id: int,
-        result: Union[InstrumentMeasurement, UVVisSpectrum, MeasurementResult, str],
+        result: Union[
+            InstrumentMeasurement, UVVisSpectrum, MeasurementResult, CureResult, str,
+        ],
     ) -> int:
         """Log a measurement result, dispatching by type.
 
@@ -199,6 +211,8 @@ class DataStore:
             return self._log_uvvis(experiment_id, result)
         if isinstance(result, MeasurementResult):
             return self._log_filmetrics(experiment_id, result)
+        if isinstance(result, CureResult):
+            return self._log_uv_curing(experiment_id, result)
         if isinstance(result, str):
             return self._log_camera(experiment_id, result)
         raise TypeError(
@@ -236,6 +250,21 @@ class DataStore:
                 step_size_mm=float(measurement.metadata["step_size_mm"]),
                 z_target_mm=float(measurement.metadata["z_target_mm"]),
                 force_limit_n=float(measurement.metadata["force_limit_n"]),
+            )
+
+        if measurement.measurement_type == MeasurementType.FILMETRICS_THICKNESS:
+            return self._log_filmetrics_values(
+                experiment_id=experiment_id,
+                thickness_nm=measurement.payload["thickness_nm"],
+                goodness_of_fit=measurement.payload["goodness_of_fit"],
+            )
+
+        if measurement.measurement_type == MeasurementType.UV_CURING_EXPOSURE:
+            return self._log_uv_curing_values(
+                experiment_id=experiment_id,
+                intensity_percent=float(measurement.payload["intensity_percent"]),
+                exposure_time_s=float(measurement.payload["exposure_time_s"]),
+                cure_timestamp_s=float(measurement.payload["cure_timestamp_s"]),
             )
 
         if measurement.measurement_type in {
@@ -307,10 +336,51 @@ class DataStore:
         return cursor.lastrowid
 
     def _log_filmetrics(self, experiment_id: int, result: MeasurementResult) -> int:
+        return self._log_filmetrics_values(
+            experiment_id=experiment_id,
+            thickness_nm=result.thickness_nm,
+            goodness_of_fit=result.goodness_of_fit,
+        )
+
+    def _log_filmetrics_values(
+        self,
+        experiment_id: int,
+        thickness_nm: Optional[float],
+        goodness_of_fit: Optional[float],
+    ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO filmetrics_measurements "
             "(experiment_id, thickness_nm, goodness_of_fit) VALUES (?, ?, ?)",
-            (experiment_id, result.thickness_nm, result.goodness_of_fit),
+            (experiment_id, thickness_nm, goodness_of_fit),
+        )
+        self._conn.commit()
+        return cursor.lastrowid
+
+    def _log_uv_curing(self, experiment_id: int, result: CureResult) -> int:
+        return self._log_uv_curing_values(
+            experiment_id=experiment_id,
+            intensity_percent=result.intensity_percent,
+            exposure_time_s=result.exposure_time_s,
+            cure_timestamp_s=result.timestamp,
+        )
+
+    def _log_uv_curing_values(
+        self,
+        experiment_id: int,
+        intensity_percent: float,
+        exposure_time_s: float,
+        cure_timestamp_s: float,
+    ) -> int:
+        cursor = self._conn.execute(
+            "INSERT INTO uv_curing_measurements "
+            "(experiment_id, intensity_percent, exposure_time_s, cure_timestamp_s) "
+            "VALUES (?, ?, ?, ?)",
+            (
+                experiment_id,
+                intensity_percent,
+                exposure_time_s,
+                cure_timestamp_s,
+            ),
         )
         self._conn.commit()
         return cursor.lastrowid

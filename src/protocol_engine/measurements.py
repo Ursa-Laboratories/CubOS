@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from instruments.filmetrics.models import MeasurementResult
+from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
 
 # Potentiostat results are recognised by duck-typing on their `.technique`
@@ -19,6 +21,8 @@ class MeasurementType(str, Enum):
 
     UVVIS_SPECTRUM = "uvvis_spectrum"
     ASMI_INDENTATION = "asmi_indentation"
+    FILMETRICS_THICKNESS = "filmetrics_thickness"
+    UV_CURING_EXPOSURE = "uv_curing_exposure"
     POTENTIOSTAT_OCP = "potentiostat_ocp"
     POTENTIOSTAT_CA = "potentiostat_ca"
     POTENTIOSTAT_CV = "potentiostat_cv"
@@ -124,6 +128,33 @@ def normalize_measurement(
             },
             metadata={
                 "integration_time_s": raw_result.integration_time_s,
+                "instrument_name": instrument_name,
+                "method_name": method_name,
+            },
+        )
+
+    if isinstance(raw_result, MeasurementResult):
+        return InstrumentMeasurement(
+            measurement_type=MeasurementType.FILMETRICS_THICKNESS,
+            payload={
+                "thickness_nm": raw_result.thickness_nm,
+                "goodness_of_fit": raw_result.goodness_of_fit,
+            },
+            metadata={
+                "instrument_name": instrument_name,
+                "method_name": method_name,
+            },
+        )
+
+    if isinstance(raw_result, CureResult):
+        return InstrumentMeasurement(
+            measurement_type=MeasurementType.UV_CURING_EXPOSURE,
+            payload={
+                "intensity_percent": raw_result.intensity_percent,
+                "exposure_time_s": raw_result.exposure_time_s,
+                "cure_timestamp_s": raw_result.timestamp,
+            },
+            metadata={
                 "instrument_name": instrument_name,
                 "method_name": method_name,
             },

@@ -172,6 +172,11 @@ def scan(
 
         if context.data_store is not None and context.campaign_id is not None:
             try:
+                measurement = normalize_measurement(
+                    instrument_name=instrument,
+                    method_name=method,
+                    raw_result=result,
+                )
                 contents = context.data_store.get_contents(
                     context.campaign_id, plate, well_id,
                 )
@@ -182,12 +187,13 @@ def scan(
                     well_id=well_id,
                     contents_json=contents_json,
                 )
-                measurement = normalize_measurement(
-                    instrument_name=instrument,
-                    method_name=method,
-                    raw_result=result,
-                )
                 context.data_store.log_measurement(exp_id, measurement)
+            except TypeError as exc:
+                logger.warning(
+                    "Measurement result from %s.%s at well %s is not "
+                    "persistable: %s",
+                    instrument, method, well_id, exc,
+                )
             except sqlite3.Error as exc:
                 logger.warning(
                     "Failed to log measurement for well %s: %s", well_id, exc,

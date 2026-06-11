@@ -32,6 +32,7 @@ store = DataStore("runs/example.db")
 | `experiments` | One row per measured labware location within a campaign. |
 | `uvvis_measurements` | Wavelengths, intensities, integration time. |
 | `filmetrics_measurements` | Thickness and goodness-of-fit. |
+| `uv_curing_measurements` | UV intensity, exposure duration, and cure timestamp. |
 | `camera_measurements` | Image path results. |
 | `asmi_measurements` | Force/z/time series, baseline stats, force-limit metadata. |
 | `potentiostat_measurements` | OCP/CA/CV/CP time, voltage, current, and technique metadata. |
@@ -50,6 +51,10 @@ Protocol commands persist data only when both fields are present:
 measurement. `measure` creates one experiment row for the target position and
 logs the normalized result. Pipette `transfer` updates destination labware
 contents through `record_dispense()`.
+
+Normalized measurement persistence covers ASMI indentation, UV-Vis spectra,
+Filmetrics thickness, potentiostat traces, and UV curing exposure results.
+Boolean status checks and other non-data method results are not persisted.
 
 Without a `DataStore`, protocol execution is unchanged and nothing is saved.
 
@@ -72,8 +77,9 @@ with DataStore("runs/example.db") as store:
 
 `DataStore.log_measurement()` accepts normalized
 `protocol_engine.measurements.InstrumentMeasurement` objects, UV-Vis spectra,
-Filmetrics results, and camera image paths. ASMI and potentiostat results are
-normalized in `protocol_engine.measurements` before they are written.
+Filmetrics results, UV curing exposure results, and camera image paths. ASMI and
+potentiostat results are normalized in `protocol_engine.measurements` before
+they are written.
 
 ## Read API
 
@@ -96,6 +102,7 @@ Generic measurement readers currently allow these tables:
 
 - `uvvis_measurements`
 - `filmetrics_measurements`
+- `uv_curing_measurements`
 - `camera_measurements`
 - `asmi_measurements`
 
