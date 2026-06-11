@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pytest
 
+from instruments.filmetrics.models import MeasurementResult
+from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.measurements import (
     InstrumentMeasurement,
@@ -50,6 +52,37 @@ class TestNormalizeMeasurement:
         )
 
         assert measurement.metadata["integration_time_s"] == pytest.approx(0.24)
+
+    def test_normalize_filmetrics_thickness(self):
+        measurement = normalize_measurement(
+            instrument_name="filmetrics",
+            method_name="measure",
+            raw_result=MeasurementResult(thickness_nm=151.2, goodness_of_fit=0.96),
+        )
+
+        assert measurement.measurement_type == MeasurementType.FILMETRICS_THICKNESS
+        assert measurement.payload["thickness_nm"] == pytest.approx(151.2)
+        assert measurement.payload["goodness_of_fit"] == pytest.approx(0.96)
+        assert measurement.metadata["instrument_name"] == "filmetrics"
+        assert measurement.metadata["method_name"] == "measure"
+
+    def test_normalize_uv_curing_exposure(self):
+        measurement = normalize_measurement(
+            instrument_name="uv_curing",
+            method_name="cure",
+            raw_result=CureResult(
+                intensity_percent=55.0,
+                exposure_time_s=1.25,
+                timestamp=123.4,
+            ),
+        )
+
+        assert measurement.measurement_type == MeasurementType.UV_CURING_EXPOSURE
+        assert measurement.payload["intensity_percent"] == pytest.approx(55.0)
+        assert measurement.payload["exposure_time_s"] == pytest.approx(1.25)
+        assert measurement.payload["cure_timestamp_s"] == pytest.approx(123.4)
+        assert measurement.metadata["instrument_name"] == "uv_curing"
+        assert measurement.metadata["method_name"] == "cure"
 
     def test_unknown_measurement_type_raises_type_error(self):
         with pytest.raises(TypeError, match="Unsupported measurement result"):

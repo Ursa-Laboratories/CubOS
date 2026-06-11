@@ -12,7 +12,7 @@ During a protocol run, the database records:
 
 - **Campaigns** — top-level grouping for a set of experiments
 - **Experiments** — individual runs within a campaign
-- **Measurements** — per-well results from instruments (UV-Vis spectra, Filmetrics thickness, force data, etc.)
+- **Measurements** — per-well results from instruments (ASMI indentation, UV-Vis spectra, Filmetrics thickness, potentiostat traces, UV curing exposures, etc.)
 - **Labware state** — volume levels and contents for each well and vial, updated after every aspirate/dispense
 
 ## Reading Data Back
@@ -23,7 +23,7 @@ CubOS does not provide analysis tools — it only handles storage and retrieval.
 
 ## Runtime Integration
 
-When `ProtocolContext.data_store` and `ProtocolContext.campaign_id` are set, protocol commands automatically persist measurements and liquid transfers. `scan` persists per-well measurements, and single-position `measure` persists normalized ASMI indentation results. When these are not set, protocol execution works identically but nothing is saved.
+When `ProtocolContext.data_store` and `ProtocolContext.campaign_id` are set, protocol commands automatically persist measurements and liquid transfers. `scan` persists per-well measurements, and single-position `measure` persists normalized ASMI indentation, UV-Vis, Filmetrics thickness, potentiostat, and UV curing exposure results. Boolean status checks and other non-data method results are not persisted. When these are not set, protocol execution works identically but nothing is saved.
 
 ## Components
 

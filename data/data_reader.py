@@ -14,12 +14,14 @@ from typing import Any, Dict, List, Optional
 _VALID_MEASUREMENT_TABLES = frozenset({
     "uvvis_measurements",
     "filmetrics_measurements",
+    "uv_curing_measurements",
     "camera_measurements",
     "asmi_measurements",
 })
 _TABLE_TO_INSTRUMENT = {
     "uvvis_measurements": "uvvis",
     "filmetrics_measurements": "filmetrics",
+    "uv_curing_measurements": "uv_curing",
     "camera_measurements": "camera",
     "asmi_measurements": "asmi",
 }
@@ -209,7 +211,7 @@ class DataReader:
         """Return all measurements for one experiment as a single DataFrame.
 
         The rows are instrument-agnostic and include:
-        - `instrument` (e.g. uvvis, filmetrics, camera, asmi)
+        - `instrument` (e.g. uvvis, filmetrics, uv_curing, camera, asmi)
         - `measurement_id`
         - `experiment_id`
         - `timestamp`
@@ -251,7 +253,8 @@ class DataReader:
 
         Args:
             experiment_id: Experiment identifier.
-            instrument: One of `uvvis`, `filmetrics`, `camera`, or `asmi`.
+            instrument: One of `uvvis`, `filmetrics`, `uv_curing`, `camera`,
+                or `asmi`.
         """
         pd = self._require_pandas()
         normalized_instrument = instrument.strip().lower()

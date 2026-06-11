@@ -18,11 +18,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from data.data_store import DataStore
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
 from deck.labware.well_plate_holder import WellPlateHolder
 from instruments.base_instrument import BaseInstrument
+from instruments.filmetrics.models import MeasurementResult
+from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.errors import ProtocolExecutionError
 from protocol_engine.measurements import InstrumentMeasurement
@@ -135,6 +138,38 @@ class _FakeSensor(BaseInstrument):
             "well_z": well_z,
             "gantry": gantry,
         }
+
+
+class _FakeFilmetrics(BaseInstrument):
+    def connect(self) -> None:
+        pass
+
+    def disconnect(self) -> None:
+        pass
+
+    def health_check(self) -> bool:
+        return True
+
+    def measure(self) -> MeasurementResult:
+        return MeasurementResult(thickness_nm=151.2, goodness_of_fit=0.96)
+
+
+class _FakeUVCuring(BaseInstrument):
+    def connect(self) -> None:
+        pass
+
+    def disconnect(self) -> None:
+        pass
+
+    def health_check(self) -> bool:
+        return True
+
+    def cure(self) -> CureResult:
+        return CureResult(
+            intensity_percent=60.0,
+            exposure_time_s=1.5,
+            timestamp=123.4,
+        )
 
 
 def _make_sensor(**kwargs) -> _FakeSensor:
@@ -467,6 +502,113 @@ class TestScanCommand:
         assert ctx.data_store.log_measurement.call_count == 4
         measurement = ctx.data_store.log_measurement.call_args_list[0].args[1]
         assert isinstance(measurement, InstrumentMeasurement)
+
+    def test_persists_filmetrics_measurements(self):
+        from protocol_engine.commands.scan import scan
+
+        plate = _make_2x2_plate()
+        filmetrics = _FakeFilmetrics(
+            name="filmetrics", offset_x=0.0, offset_y=0.0, depth=0.0,
+        )
+        board = MagicMock()
+        board.instruments = {"filmetrics": filmetrics}
+        store = DataStore(db_path=":memory:")
+        campaign_id = store.create_campaign(description="filmetrics scan")
+        store.register_labware(campaign_id, "plate_1", plate)
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=Deck({"plate_1": plate}),
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+
+        scan(ctx, **_scan_args(instrument="filmetrics"))
+
+        rows = store._conn.execute(
+            """
+            SELECT e.well_id, m.thickness_nm, m.goodness_of_fit
+            FROM experiments e
+            JOIN filmetrics_measurements m ON m.experiment_id = e.id
+            WHERE e.campaign_id = ?
+            ORDER BY e.id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        assert [row[0] for row in rows] == ["A1", "A2", "B1", "B2"]
+        assert all(row[1] == pytest.approx(151.2) for row in rows)
+        assert all(row[2] == pytest.approx(0.96) for row in rows)
+        store.close()
+
+    def test_persists_uv_curing_measurements(self):
+        from protocol_engine.commands.scan import scan
+
+        plate = _make_2x2_plate()
+        uv_curing = _FakeUVCuring(
+            name="uv_curing", offset_x=0.0, offset_y=0.0, depth=0.0,
+        )
+        board = MagicMock()
+        board.instruments = {"uv_curing": uv_curing}
+        store = DataStore(db_path=":memory:")
+        campaign_id = store.create_campaign(description="uv curing scan")
+        store.register_labware(campaign_id, "plate_1", plate)
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=Deck({"plate_1": plate}),
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+
+        scan(ctx, **_scan_args(instrument="uv_curing", method="cure"))
+
+        rows = store._conn.execute(
+            """
+            SELECT e.well_id, m.intensity_percent, m.exposure_time_s,
+                   m.cure_timestamp_s
+            FROM experiments e
+            JOIN uv_curing_measurements m ON m.experiment_id = e.id
+            WHERE e.campaign_id = ?
+            ORDER BY e.id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        assert [row[0] for row in rows] == ["A1", "A2", "B1", "B2"]
+        assert all(row[1] == pytest.approx(60.0) for row in rows)
+        assert all(row[2] == pytest.approx(1.5) for row in rows)
+        assert all(row[3] == pytest.approx(123.4) for row in rows)
+        store.close()
+
+    def test_uv_health_check_does_not_persist_or_fail(self, caplog):
+        from protocol_engine.commands.scan import scan
+
+        plate = _make_2x2_plate()
+        uv_curing = _FakeUVCuring(
+            name="uv_curing", offset_x=0.0, offset_y=0.0, depth=0.0,
+        )
+        board = MagicMock()
+        board.instruments = {"uv_curing": uv_curing}
+        store = DataStore(db_path=":memory:")
+        campaign_id = store.create_campaign(description="uv curing scan")
+        store.register_labware(campaign_id, "plate_1", plate)
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=Deck({"plate_1": plate}),
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+
+        with caplog.at_level(logging.WARNING):
+            results = scan(
+                ctx,
+                **_scan_args(instrument="uv_curing", method="health_check"),
+            )
+
+        assert results == {"A1": True, "A2": True, "B1": True, "B2": True}
+        assert "not persistable" in caplog.text
+        assert store._conn.execute("SELECT COUNT(*) FROM experiments").fetchone()[0] == 0
+        assert store._conn.execute(
+            "SELECT COUNT(*) FROM uv_curing_measurements"
+        ).fetchone()[0] == 0
+        store.close()
 
     def test_delay_sleeps_between_wells(self):
         from unittest.mock import patch

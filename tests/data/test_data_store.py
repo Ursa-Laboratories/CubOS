@@ -8,6 +8,7 @@ import pytest
 
 from data.data_store import DataStore
 from instruments.filmetrics.models import MeasurementResult
+from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.measurements import InstrumentMeasurement, MeasurementType
 
@@ -34,6 +35,14 @@ def _make_filmetrics_result() -> MeasurementResult:
     return MeasurementResult(thickness_nm=150.5, goodness_of_fit=0.95)
 
 
+def _make_cure_result() -> CureResult:
+    return CureResult(
+        intensity_percent=45.0,
+        exposure_time_s=2.5,
+        timestamp=123.456,
+    )
+
+
 # ─── Schema creation ─────────────────────────────────────────────────────────
 
 
@@ -48,7 +57,8 @@ class TestSchemaCreation:
         expected = {
             "campaigns", "experiments",
             "uvvis_measurements", "filmetrics_measurements",
-            "camera_measurements", "asmi_measurements", "labware",
+            "uv_curing_measurements", "camera_measurements",
+            "asmi_measurements", "labware",
         }
         assert expected.issubset(tables)
         store.close()
@@ -254,6 +264,77 @@ class TestFilmetricsMeasurementLogging:
         assert row[1] is None
         store.close()
 
+    def test_routes_normalized_filmetrics_measurement(self):
+        store = _make_store()
+        cid = store.create_campaign(description="test")
+        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
+
+        measurement = InstrumentMeasurement(
+            measurement_type=MeasurementType.FILMETRICS_THICKNESS,
+            payload={"thickness_nm": 222.2, "goodness_of_fit": 0.91},
+            metadata={},
+        )
+        mid = store.log_measurement(eid, measurement)
+
+        row = store._conn.execute(
+            "SELECT thickness_nm, goodness_of_fit "
+            "FROM filmetrics_measurements WHERE id = ?",
+            (mid,),
+        ).fetchone()
+        assert row[0] == pytest.approx(222.2)
+        assert row[1] == pytest.approx(0.91)
+        store.close()
+
+
+# ─── UV curing measurement logging ───────────────────────────────────────────
+
+
+class TestUVCuringMeasurementLogging:
+
+    def test_stores_cure_exposure(self):
+        store = _make_store()
+        cid = store.create_campaign(description="test")
+        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
+
+        result = _make_cure_result()
+        mid = store.log_measurement(eid, result)
+
+        row = store._conn.execute(
+            "SELECT intensity_percent, exposure_time_s, cure_timestamp_s "
+            "FROM uv_curing_measurements WHERE id = ?",
+            (mid,),
+        ).fetchone()
+        assert row[0] == pytest.approx(45.0)
+        assert row[1] == pytest.approx(2.5)
+        assert row[2] == pytest.approx(123.456)
+        store.close()
+
+    def test_routes_normalized_cure_exposure(self):
+        store = _make_store()
+        cid = store.create_campaign(description="test")
+        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
+
+        measurement = InstrumentMeasurement(
+            measurement_type=MeasurementType.UV_CURING_EXPOSURE,
+            payload={
+                "intensity_percent": 80.0,
+                "exposure_time_s": 0.75,
+                "cure_timestamp_s": 555.0,
+            },
+            metadata={},
+        )
+        mid = store.log_measurement(eid, measurement)
+
+        row = store._conn.execute(
+            "SELECT intensity_percent, exposure_time_s, cure_timestamp_s "
+            "FROM uv_curing_measurements WHERE id = ?",
+            (mid,),
+        ).fetchone()
+        assert row[0] == pytest.approx(80.0)
+        assert row[1] == pytest.approx(0.75)
+        assert row[2] == pytest.approx(555.0)
+        store.close()
+
 
 # ─── Camera measurement logging ──────────────────────────────────────────────
 
@@ -297,6 +378,16 @@ class TestLogMeasurementDispatch:
         mid = store.log_measurement(eid, _make_filmetrics_result())
         assert store._conn.execute(
             "SELECT COUNT(*) FROM filmetrics_measurements WHERE id = ?", (mid,)
+        ).fetchone()[0] == 1
+        store.close()
+
+    def test_routes_uv_curing(self):
+        store = _make_store()
+        cid = store.create_campaign(description="test")
+        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
+        mid = store.log_measurement(eid, _make_cure_result())
+        assert store._conn.execute(
+            "SELECT COUNT(*) FROM uv_curing_measurements WHERE id = ?", (mid,)
         ).fetchone()[0] == 1
         store.close()
 
