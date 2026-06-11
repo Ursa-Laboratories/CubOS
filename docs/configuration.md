@@ -9,15 +9,6 @@ configs/
   protocol/    # ordered experiment steps
 ```
 
-```mermaid
-flowchart TD
-    G[Gantry YAML] --> S[setup_protocol]
-    D[Deck YAML] --> S
-    P[Protocol YAML] --> S
-    S --> V[Bounds and semantic validation]
-    V --> R[Executable Protocol + ProtocolContext]
-```
-
 Use the CubOS deck frame in every file:
 
 - origin: front-left-bottom reachable work volume
@@ -27,6 +18,8 @@ Use the CubOS deck frame in every file:
 
 Do not pre-flip signs in YAML. GRBL settings and calibration must make WPos
 match this frame.
+
+![CubOS deck coordinate frame shown on the gantry](images/orientation.webp){ width="520" }
 
 ## Gantry YAML
 
@@ -68,14 +61,8 @@ Important fields:
 
 | Field | Meaning |
 | --- | --- |
-| `serial_port` | Serial device used by the GRBL controller. |
-| `gantry_type` | Machine family: `cub` or `cub_xl`. `cub_xl` enables the fixed right-rail guard during validation. |
-| `cnc.homing_strategy` | Currently `standard`, which runs GRBL `$H`. |
-| `cnc.factory_z_travel_mm` | Factory vertical travel safety bound; calibration preserves it. |
+| `gantry_type` | Machine family, currently `cub` or `cub_xl`. |
 | `cnc.calibration_block_height_mm` | Calibration block height used by gantry calibration. |
-| `cnc.safe_z` | Absolute deck-frame travel ceiling. Defaults to `working_volume.z_max` when omitted. |
-| `working_volume` | Usable deck/WPos bounds after homing pull-off. |
-| `grbl_settings` | Expected GRBL `$` settings. Max travel fields include the `$27` pull-off reserve. |
 | `instruments` | Mounted instruments, offsets, depth, and driver-specific connection fields. |
 
 Instrument blocks carry physical mounting state only. Protocol engagement
@@ -111,6 +98,9 @@ Supported labware entries include:
 
 Important rules:
 
+- After gantry calibration, find A1 and A2 by manually jogging the mounted
+  tool to the center of those positions in UGS or Zoo. Record each point as
+  deck-frame `{x, y, z}` values in the deck YAML.
 - A1/A2 calibration must be axis-aligned; diagonal A2 is rejected.
 - Well plates, tip racks, and holders take their surface/reference Z from
   calibration anchors.
@@ -120,6 +110,19 @@ Important rules:
 - `height` is the physical outer dimension, not a shortcut for a Z reference.
 - `load_name` expands a built-in definition from
   `src/deck/labware/definitions/`; user fields override the template.
+
+Custom labware definitions live under `src/deck/labware/definitions/`. Add a
+folder for the new part, add a YAML definition with the labware class fields,
+then register it in `src/deck/labware/definitions/registry.yaml`.
+
+Common required fields:
+
+| Type | Required fields |
+| --- | --- |
+| `well_plate` | `type`, `name`, `rows`, `columns`, `calibration.a1`, `calibration.a2`, `x_offset`, `y_offset` |
+| `tip_rack` | `type`, `name`, `rows`, `columns`, `pickup_z`, `tip_length`, `calibration.a1`, `calibration.a2`, `x_offset`, `y_offset` |
+| `vial` | `type`, `name`, `height`, `diameter`, `location`, `capacity_ul`, `working_volume_ul` |
+| `well_plate_holder` / `vial_holder` / `tip_disposal` | `type`, `name`, `model_name`, `location`; add slots, nested labware, and geometry fields when the fixture needs them |
 
 ## Protocol YAML
 
@@ -152,7 +155,7 @@ Registered YAML commands:
 
 | Command | Purpose |
 | --- | --- |
-| `home` | Home the gantry without redefining calibrated WPos. |
+| `home` | Home the gantry without redefining calibrated work coordinates. |
 | `move` | Move an instrument to a named, literal, or deck position. |
 | `measure` | Move to one deck position and call an instrument method. |
 | `scan` | Iterate every well on a plate and call an instrument method. |

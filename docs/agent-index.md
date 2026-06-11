@@ -6,14 +6,14 @@ Use this map after reading `AGENTS.md`. Read the smallest relevant set of files 
 
 Read before changing motion, coordinates, bounds, homing, or scan/protocol movement.
 - `src/gantry/gantry.py`, `gantry_config.py`, `origin.py` - frame, working volume, deck-origin calibration.
-- `src/gantry/machine_geometry.py` - built-in fixed-structure AABBs per gantry family, including the `cub_xl` right-rail guard. Not user-authored YAML; consumed by setup validation.
+- `src/gantry/machine_geometry.py` - built-in machine geometry per gantry family. Not user-authored YAML; consumed by setup validation.
 - `src/gantry/coordinate_translator.py`, `instrument_mount.py`, `instrument_loader.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `calibration_utils.py`, `offline.py` - gantry boundary, mounted instrument offsets, GRBL calibration utilities, and labware movement.
-- `src/validation/bounds.py`, `src/validation/protocol_semantics.py` - offline safety checks, including fixed-structure rail collision.
+- `src/validation/bounds.py`, `src/validation/protocol_semantics.py` - offline safety checks.
 - Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
 
 Setup and calibration flows should route through public `Gantry` APIs. Do not import `Mill` or `gantry_driver` internals from user-facing scripts.
 
-Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`). For `cub_xl`, setup validation rejects protocols whose instrument point or known travel segment would hit the fixed right X-max rail.
+Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`).
 
 Setup bounds validation checks the concrete motion targets implied by the loaded protocol, not every physical geometry anchor or unused labware point on the deck.
 

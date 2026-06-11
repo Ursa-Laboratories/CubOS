@@ -12,16 +12,6 @@ CubOS is used to:
 - execute protocols against real hardware
 - persist experiment state and instrument measurements for later analysis
 
-```mermaid
-flowchart LR
-    A[Machine YAML] --> D[CubOS setup]
-    B[Deck YAML] --> D
-    C[Protocol YAML] --> D
-    D --> E[Offline validation]
-    E --> F[Hardware run]
-    F --> G[SQLite data]
-```
-
 ## Contents
 
 | Section | Use it for |
@@ -32,15 +22,3 @@ flowchart LR
 | [Running a Protocol](protocol.md) | Validate and run a protocol from YAML. |
 | [Data](data.md) | Understand persistence, read helpers, and CSV export. |
 | [API Reference](reference/index.md) | Inspect generated Python API docs. |
-
-## Coordinate Frame
-
-CubOS uses the deck frame everywhere above the GRBL boundary:
-
-- origin: front-left-bottom reachable work volume
-- `+X`: operator-right
-- `+Y`: back, away from the operator
-- `+Z`: up, away from the deck
-
-High-level code does not pre-flip signs. Controller direction, homing direction,
-and work-coordinate setup must make GRBL WPos match this frame.

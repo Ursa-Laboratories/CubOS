@@ -28,12 +28,6 @@ pip install -U pip
 pip install -e ".[dev]"
 ```
 
-Install docs tooling only when editing or building the documentation:
-
-```bash
-pip install -e ".[docs]"
-```
-
 Instrument vendor SDKs are optional. Install only the extras for hardware you
 actually use, for example:
 

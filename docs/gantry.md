@@ -24,14 +24,8 @@ does not apply `G92` or redefine work coordinates after homing.
 
 Gantry YAML defines:
 
-- serial port
-- gantry type (`cub` or `cub_xl`)
-- CNC homing strategy
-- total Z reference height
-- Y-axis motion mode
-- working volume
-- optional `safe_z` (absolute deck-frame travel ceiling)
-- optional GRBL settings expectations
+- `gantry_type`
+- calibration block height
 - mounted instruments, offsets, reach depths, and driver settings
 
 Representative example:
@@ -85,10 +79,7 @@ Use this file when:
 ## CNC Fields
 
 `gantry_type` is required at the gantry YAML root and identifies the physical
-machine family. Supported values are `cub` and `cub_xl`. For `cub_xl`, setup
-validation applies a built-in right X-max rail guard and rejects protocols whose
-instrument point or known travel segment would hit the rail. A pose over the
-rail is valid only when the instrument point is above the built-in rail height.
+machine family. Supported values are `cub` and `cub_xl`.
 
 `homing_strategy` must be `standard`, which runs GRBL `$H`.
 

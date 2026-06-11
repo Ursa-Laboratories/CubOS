@@ -3,25 +3,8 @@
 A protocol run loads gantry, deck, and protocol YAML, compiles the protocol
 steps, validates the resulting motion plan, then executes against hardware.
 
-```mermaid
-flowchart LR
-    Y[YAML files] --> C[Compiled Protocol]
-    P[Python-built Protocol] --> C
-    C --> V[Setup validation]
-    V --> R[Protocol run]
-    R --> H[Hardware execution]
-    R --> M[Instrument results]
-    M --> D[DataStore]
-    D --> DB[(SQLite DB)]
-```
-
 ## Architecture
 
-- `protocol_engine.loader.load_protocol_from_yaml()` parses protocol YAML and
-  compiles each step into a `ProtocolStep`.
-- `protocol_engine.setup.setup_protocol()` loads gantry and deck YAML, builds
-  the instrumented gantry, validates bounds and semantics, and returns
-  `(Protocol, ProtocolContext)`.
 - `setup/validate_setup.py` runs the same offline validation path without
   contacting hardware.
 - `setup/run_protocol.py` validates first, connects the gantry and
@@ -47,8 +30,6 @@ Validation checks:
 - gantry, deck, instrument, and protocol YAML load correctly
 - protocol targets are inside the gantry working volume
 - mounted instruments can reach the commanded areas
-- configured fixed-structure guards, such as the `cub_xl` right rail, are not
-  hit by known target points or travel segments
 - command semantics are valid, including required height fields and pipette
   tip state
 

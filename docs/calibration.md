@@ -17,11 +17,9 @@ travel settings. Keep the E-stop reachable and clear the deck before starting.
    `cnc.factory_z_travel_mm`, and mounted `instruments`.
 5. Put the calibration block and any board placement markers within reach.
 
-!!! note "Image placeholder: calibration block"
-    Add a photo of the calibration block here.
+![Calibration block aligned to a board placement marker](images/calibration-block-marker.webp){ width="420" }
 
-!!! note "Image placeholder: placement markers on the board"
-    Add a photo showing the board placement markers here.
+![Board placement markers used during calibration](images/calibration-marks.webp){ width="520" }
 
 ## Run Calibration
 
@@ -69,8 +67,7 @@ Use this flow when the gantry YAML has one mounted instrument.
 6. Let the script home and measure the usable work volume.
 7. Review the summary and calibrated YAML path.
 
-!!! note "Image placeholder: single instrument touching calibration block"
-    Add a close-up of the instrument tip touching the calibration block here.
+![Single instrument touching the calibration block](images/single-instrument-calibration-block.webp){ width="420" }
 
 The script saves the deck-frame working volume, preserves
 `cnc.factory_z_travel_mm` as the factory safety bound, and writes
@@ -86,40 +83,23 @@ Use this flow when the gantry YAML has more than one mounted instrument.
 2. Confirm the multi-instrument flow in the preflight.
 3. Select the leftmost/reference instrument when prompted.
 4. Select the lowest instrument when prompted.
-5. Place the first calibration block at the shared reference point.
-6. Jog the leftmost/reference instrument to touch the first block.
-7. Jog each remaining instrument to the shared reference point as prompted.
-8. For pipette setups, jog the pipette to the center reference point on the
+5. Place the first calibration block on the leftmost board mark for the red
+   reference instrument.
+
+   ![Red reference instrument touching the block at the leftmost mark](images/leftmost-red-instrument-block.webp){ width="420" }
+
+6. Jog the red reference instrument to touch the first block.
+7. Move the calibration block to the center board mark.
+
+   ![Calibration block moved to the center board mark](images/center-calibration-block.webp){ width="520" }
+
+8. Jog each remaining instrument to the shared center reference point as
+   prompted.
+9. For pipette setups, jog the pipette to the center reference point on the
    block when prompted.
-9. Let the script compute `offset_x`, `offset_y`, and `depth` for each
+10. Let the script compute `offset_x`, `offset_y`, and `depth` for each
    instrument.
-10. Review the summary and calibrated YAML path.
-
-!!! note "Image placeholder: multi instrument leftmost instrument touching first calibration block"
-    Add the reference-instrument touch photo here.
-
-!!! note "Image placeholder: multi instrument pipette touching center reference point on block"
-    Add the pipette center-reference touch photo here.
-
-## WPos And Soft Limits
-
-Calibration uses GRBL WPos in the CubOS deck frame. It sets `$10=0` before
-homing so status reports contain WPos.
-
-`working_volume` is usable deck/WPos space after homing pull-off.
-`grbl_settings.max_travel_x/y/z` mirrors GRBL `$130/$131/$132` and includes
-the `$27` pull-off reserve. Do not add the pull-off reserve to
-`working_volume`.
-
-Example with `$27=10` and homed WPos `Z=91`:
-
-```yaml
-working_volume:
-  z_max: 91.0
-grbl_settings:
-  homing_pull_off: 10.0
-  max_travel_z: 101.0
-```
+11. Review the summary and calibrated YAML path.
 
 ## Interactive Jog Test
 
