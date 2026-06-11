@@ -6,14 +6,11 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Configuration: configuration.md
   - Calibration: calibration.md
-  - Gantry: gantry.md
-  - Deck: deck.md
-  - Protocol: protocol.md
+  - Configuration: configuration.md
+  - Running a Protocol: protocol.md
   - Data: data.md
-  - Admin:
-    - Gantry Bring-Up: admin/gantry-bring-up.md
+  - Appendix: appendix.md
   - API Reference:
     - Overview: reference/index.md
     - deck: reference/src/deck/index.md
@@ -33,6 +30,9 @@ nav:
 
 not_in_nav: |
   agent-index.md
+  admin/**
+  deck.md
+  gantry.md
   reference/src/**
   reference/data/**
 
@@ -64,7 +64,7 @@ markdown_extensions:
   - admonition
   - attr_list
   - def_list
-  - fenced_code
+  - pymdownx.superfences
   - tables
   - toc:
       permalink: true

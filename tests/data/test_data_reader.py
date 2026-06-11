@@ -10,6 +10,7 @@ import pytest
 
 from data.data_reader import CampaignRecord, DataReader, ExperimentRecord, LabwareRecord
 from data.data_store import DataStore
+from instruments.uv_curing.models import CureResult
 from protocol_engine.measurements import InstrumentMeasurement, MeasurementType
 
 
@@ -211,6 +212,30 @@ class TestGetMeasurementsByExperiment:
         with pytest.raises(ValueError, match="not a valid measurement table"):
             seeded_reader.get_measurements(experiment_id=1, table="users; DROP TABLE--")
 
+    def test_uv_curing_measurements_table_is_queryable(self):
+        store = DataStore(db_path=":memory:")
+        cid = store.create_campaign(description="uv curing")
+        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
+        store.log_measurement(
+            eid,
+            CureResult(
+                intensity_percent=70.0,
+                exposure_time_s=1.5,
+                timestamp=12.0,
+            ),
+        )
+        reader = DataReader(connection=store._conn)
+
+        rows = reader.get_measurements(
+            experiment_id=eid, table="uv_curing_measurements",
+        )
+
+        assert len(rows) == 1
+        assert rows[0]["intensity_percent"] == pytest.approx(70.0)
+        assert rows[0]["exposure_time_s"] == pytest.approx(1.5)
+        assert rows[0]["cure_timestamp_s"] == pytest.approx(12.0)
+        store.close()
+
 
 class TestGetMeasurementsByCampaign:
 
@@ -238,6 +263,30 @@ class TestGetMeasurementsByCampaign:
             campaign_id=999, table="uvvis_measurements",
         )
         assert rows == []
+
+    def test_returns_uv_curing_measurements_for_campaign(self):
+        store = DataStore(db_path=":memory:")
+        cid = store.create_campaign(description="uv curing")
+        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
+        store.log_measurement(
+            eid,
+            CureResult(
+                intensity_percent=70.0,
+                exposure_time_s=1.5,
+                timestamp=12.0,
+            ),
+        )
+        reader = DataReader(connection=store._conn)
+
+        rows = reader.get_measurements_by_campaign(
+            campaign_id=cid, table="uv_curing_measurements",
+        )
+
+        assert len(rows) == 1
+        assert rows[0]["well_id"] == "A1"
+        assert rows[0]["labware_name"] == "plate_1"
+        assert rows[0]["intensity_percent"] == pytest.approx(70.0)
+        store.close()
 
 
 class TestDataFrameHelpers:
@@ -274,6 +323,56 @@ class TestDataFrameHelpers:
         assert isinstance(df, pd.DataFrame)
         assert len(df) == 1
         assert int(df.iloc[0]["experiment_id"]) == 1
+
+    def test_uv_curing_appears_in_generic_measurements_dataframe(self):
+        pd = pytest.importorskip("pandas")
+        store = DataStore(db_path=":memory:")
+        cid = store.create_campaign(description="uv curing")
+        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
+        store.log_measurement(
+            eid,
+            CureResult(
+                intensity_percent=70.0,
+                exposure_time_s=1.5,
+                timestamp=12.0,
+            ),
+        )
+        reader = DataReader(connection=store._conn)
+
+        df = reader.get_experiment_measurements_dataframe(experiment_id=eid)
+
+        assert isinstance(df, pd.DataFrame)
+        assert list(df["instrument"]) == ["uv_curing"]
+        payload = json.loads(df.iloc[0]["data_json"])
+        assert payload["intensity_percent"] == pytest.approx(70.0)
+        assert payload["exposure_time_s"] == pytest.approx(1.5)
+        assert payload["cure_timestamp_s"] == pytest.approx(12.0)
+        store.close()
+
+    def test_uv_curing_instrument_dataframe(self):
+        pd = pytest.importorskip("pandas")
+        store = DataStore(db_path=":memory:")
+        cid = store.create_campaign(description="uv curing")
+        eid = store.create_experiment(cid, "plate_1", "A1", "[]")
+        store.log_measurement(
+            eid,
+            CureResult(
+                intensity_percent=70.0,
+                exposure_time_s=1.5,
+                timestamp=12.0,
+            ),
+        )
+        reader = DataReader(connection=store._conn)
+
+        df = reader.get_experiment_measurements_by_instrument_dataframe(
+            experiment_id=eid,
+            instrument="uv_curing",
+        )
+
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 1
+        assert float(df.iloc[0]["intensity_percent"]) == pytest.approx(70.0)
+        store.close()
 
     def test_invalid_instrument_rejected(self, seeded_reader: DataReader):
         pytest.importorskip("pandas")

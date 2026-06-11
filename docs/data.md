@@ -1,32 +1,156 @@
 # Data
 
-CubOS stores experimental state and labware tracking data locally in a SQLite database. This runs automatically during protocol execution when a `DataStore` is attached — no external database setup is needed.
+CubOS stores campaign state, experiment rows, measurement results, and labware
+contents in a local SQLite database when a `DataStore` is attached to the
+runtime context. No external database server is required.
 
-By default `data.DataStore()` writes to CubOS' package-owned
-`data/databases/panda_data.db`. Set `CUBOS_DATA_DB_PATH` to place the database
-in a writable runtime directory, such as a packaged app's local user-data root.
+## Database Path
+
+`DataStore()` uses:
+
+```text
+data/databases/panda_data.db
+```
+
+Override it with `CUBOS_DATA_DB_PATH` or pass a path explicitly:
+
+```python
+from data import DataStore
+
+store = DataStore("runs/example.db")
+```
+
+`DataStore(":memory:")` creates an in-memory SQLite database for tests.
 
 ## What Gets Stored
 
-During a protocol run, the database records:
+`data.data_store.DataStore` creates these tables:
 
-- **Campaigns** — top-level grouping for a set of experiments
-- **Experiments** — individual runs within a campaign
-- **Measurements** — per-well results from instruments (UV-Vis spectra, Filmetrics thickness, force data, etc.)
-- **Labware state** — volume levels and contents for each well and vial, updated after every aspirate/dispense
+| Table | Contents |
+| --- | --- |
+| `campaigns` | Run grouping, config path metadata, creation time, status. |
+| `experiments` | One row per measured labware location within a campaign. |
+| `uvvis_measurements` | Wavelengths, intensities, integration time. |
+| `filmetrics_measurements` | Thickness and goodness-of-fit. |
+| `uv_curing_measurements` | UV intensity, exposure duration, and cure timestamp. |
+| `camera_measurements` | Image path results. |
+| `asmi_measurements` | Force/z/time series, baseline stats, force-limit metadata. |
+| `potentiostat_measurements` | OCP/CA/CV/CP time, voltage, current, and technique metadata. |
+| `labware` | Per-well or per-vial volume and contents tracking. |
 
-## Reading Data Back
+Measurement arrays are stored as JSON text inside SQLite columns.
 
-The `data.data_reader` module provides helper functions for extracting data from the SQLite database after a run. Use these to pull measurements, labware state, or campaign metadata into Python for your own analysis.
+## Runtime Persistence
 
-CubOS does not provide analysis tools — it only handles storage and retrieval. Analysis is left to the user.
+Protocol commands persist data only when both fields are present:
 
-## Runtime Integration
+- `ProtocolContext.data_store`
+- `ProtocolContext.campaign_id`
 
-When `ProtocolContext.data_store` and `ProtocolContext.campaign_id` are set, protocol commands automatically persist measurements and liquid transfers. `scan` persists per-well measurements, and single-position `measure` persists normalized ASMI indentation results. When these are not set, protocol execution works identically but nothing is saved.
+`scan` creates one experiment row per well and logs each normalized
+measurement. `measure` creates one experiment row for the target position and
+logs the normalized result. Pipette `transfer` updates destination labware
+contents through `record_dispense()`.
 
-## Components
+Normalized measurement persistence covers ASMI indentation, UV-Vis spectra,
+Filmetrics thickness, potentiostat traces, and UV curing exposure results.
+Boolean status checks and other non-data method results are not persisted.
 
-- `data.data_store` — database creation and write API
-- `data.data_reader` — read and query helpers
-- `data.data_store.default_database_path` — default database path and `CUBOS_DATA_DB_PATH` override
+Without a `DataStore`, protocol execution is unchanged and nothing is saved.
+
+## Write API
+
+Common write-side calls:
+
+```python
+from data import DataStore
+
+with DataStore("runs/example.db") as store:
+    campaign_id = store.create_campaign(
+        "ASMI indentation",
+        gantry_config="configs/gantry/cub_xl_asmi.yaml",
+        deck_config="configs/deck/asmi_deck.yaml",
+        protocol_config="configs/protocol/asmi/indentation.yaml",
+    )
+    # Protocol commands normally create experiments and measurements.
+```
+
+`DataStore.log_measurement()` accepts normalized
+`protocol_engine.measurements.InstrumentMeasurement` objects, UV-Vis spectra,
+Filmetrics results, UV curing exposure results, and camera image paths. ASMI and
+potentiostat results are normalized in `protocol_engine.measurements` before
+they are written.
+
+## Read API
+
+`data.data_reader.DataReader` is a read-only query layer:
+
+```python
+from data.data_reader import DataReader
+
+with DataReader(db_path="runs/example.db") as reader:
+    campaigns = reader.list_campaigns()
+    experiments = reader.get_experiments(campaign_id=1)
+    labware = reader.get_labware(campaign_id=1)
+    asmi_rows = reader.get_measurements_by_campaign(
+        campaign_id=1,
+        table="asmi_measurements",
+    )
+```
+
+Generic measurement readers currently allow these tables:
+
+- `uvvis_measurements`
+- `filmetrics_measurements`
+- `uv_curing_measurements`
+- `camera_measurements`
+- `asmi_measurements`
+
+`potentiostat_measurements` is written by `DataStore`, but the generic
+`DataReader` allow-list has not yet been extended to export it through the
+table helper methods.
+
+## CSV Export
+
+CSV export is implemented in `data.export_helpers` and the
+`DataReader.export_dataframe_to_csv()` method. These helpers require pandas:
+
+```bash
+pip install pandas
+```
+
+List experiment IDs for a campaign:
+
+```bash
+python -m data.export_helpers \
+  --db-path runs/example.db \
+  campaign-experiments 1 \
+  --csv runs/campaign_1_experiments.csv
+```
+
+Export all measurements for one experiment:
+
+```bash
+python -m data.export_helpers \
+  --db-path runs/example.db \
+  experiment-all 42 \
+  --csv runs/experiment_42_measurements.csv
+```
+
+Export one supported instrument table for an experiment:
+
+```bash
+python -m data.export_helpers \
+  --db-path runs/example.db \
+  experiment-instrument 42 asmi \
+  --csv runs/experiment_42_asmi.csv
+```
+
+If `--csv` is omitted, the helper prints the DataFrame to stdout.
+
+## Modules
+
+- `data.data_store` - SQLite schema and write API
+- `data.data_reader` - read-only query and DataFrame helpers
+- `data.export_helpers` - CLI wrappers for CSV/table export
+- `data.analysis.uvvis` - UV-Vis analysis helper module
