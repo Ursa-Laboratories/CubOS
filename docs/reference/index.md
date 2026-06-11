@@ -1,101 +1,43 @@
 # API Reference
 
-These pages are generated from the Python package tree during the MkDocs build.
+These pages are generated from the current Python package tree during the
+MkDocs build. The import names below match the runtime package names; modules
+under `src/` import as `deck`, `gantry`, `instruments`,
+`protocol_engine`, and `validation`.
 
-Narrative operator guidance belongs in the manual docs pages; code-level details belong here.
+## Common Entrypoints
 
-## `data`
+- `deck.load_deck_from_yaml_safe(path)`
+- `gantry.load_gantry_from_yaml_safe(path)`
+- `protocol_engine.load_protocol_from_yaml_safe(path)`
+- `protocol_engine.setup.setup_protocol(gantry_path, deck_path, protocol_path, ...)`
+- `protocol_engine.setup.run_protocol(gantry_path, deck_path, protocol_path, ...)`
+- `protocol_engine.setup_validator.run_setup_validation(gantry_path, deck_path, protocol_path)`
+- `data.DataStore(db_path=None)`
+- `data.DataReader(db_path=..., connection=...)`
+
+## Packages
 
 - [data](data/index.md)
-- [data.analysis](data/analysis/index.md)
-- [data.analysis.uvvis](data/analysis/uvvis.md)
-- [data.data_reader](data/data_reader.md)
+- [deck](src/deck/index.md)
+- [gantry](src/gantry/index.md)
+- [instruments](src/instruments/index.md)
+- [protocol_engine](src/protocol_engine/index.md)
+- [validation](src/validation/index.md)
+
+## Data Modules
+
 - [data.data_store](data/data_store.md)
+- [data.data_reader](data/data_reader.md)
 - [data.export_helpers](data/export_helpers.md)
+- [data.analysis.uvvis](data/analysis/uvvis.md)
 
-## `src`
+## Protocol Modules
 
-- [src.deck](src/deck/index.md)
-- [src.deck.deck](src/deck/deck.md)
-- [src.deck.errors](src/deck/errors.md)
-- [src.deck.labware](src/deck/labware/index.md)
-- [src.deck.labware.holder](src/deck/labware/holder.md)
-- [src.deck.labware.labware](src/deck/labware/labware.md)
-- [src.deck.labware.tip_disposal](src/deck/labware/tip_disposal.md)
-- [src.deck.labware.tip_rack](src/deck/labware/tip_rack.md)
-- [src.deck.labware.vial](src/deck/labware/vial.md)
-- [src.deck.labware.vial_holder](src/deck/labware/vial_holder.md)
-- [src.deck.labware.wall](src/deck/labware/wall.md)
-- [src.deck.labware.well_plate](src/deck/labware/well_plate.md)
-- [src.deck.labware.well_plate_holder](src/deck/labware/well_plate_holder.md)
-- [src.deck.loader](src/deck/loader.md)
-- [src.deck.yaml_schema](src/deck/yaml_schema.md)
-- [src.gantry](src/gantry/index.md)
-- [src.gantry.calibration_utils](src/gantry/calibration_utils.md)
-- [src.gantry.coordinate_translator](src/gantry/coordinate_translator.md)
-- [src.gantry.coordinates](src/gantry/coordinates.md)
-- [src.gantry.errors](src/gantry/errors.md)
-- [src.gantry.gantry](src/gantry/gantry.md)
-- [src.gantry.gantry_config](src/gantry/gantry_config.md)
-- [src.gantry.gantry_driver](src/gantry/gantry_driver/index.md)
-- [src.gantry.gantry_driver.driver](src/gantry/gantry_driver/driver.md)
-- [src.gantry.gantry_driver.exceptions](src/gantry/gantry_driver/exceptions.md)
-- [src.gantry.gantry_driver.logger](src/gantry/gantry_driver/logger.md)
-- [src.gantry.grbl_settings](src/gantry/grbl_settings.md)
-- [src.gantry.instrument_loader](src/gantry/instrument_loader.md)
-- [src.gantry.instrument_mount](src/gantry/instrument_mount.md)
-- [src.gantry.loader](src/gantry/loader.md)
-- [src.gantry.machine_geometry](src/gantry/machine_geometry.md)
-- [src.gantry.offline](src/gantry/offline.md)
-- [src.gantry.origin](src/gantry/origin.md)
-- [src.gantry.yaml_schema](src/gantry/yaml_schema.md)
-- [src.instruments](src/instruments/index.md)
-- [src.instruments.asmi](src/instruments/asmi/index.md)
-- [src.instruments.asmi.driver](src/instruments/asmi/driver.md)
-- [src.instruments.asmi.exceptions](src/instruments/asmi/exceptions.md)
-- [src.instruments.asmi.models](src/instruments/asmi/models.md)
-- [src.instruments.base_instrument](src/instruments/base_instrument.md)
-- [src.instruments.filmetrics](src/instruments/filmetrics/index.md)
-- [src.instruments.filmetrics.driver](src/instruments/filmetrics/driver.md)
-- [src.instruments.filmetrics.exceptions](src/instruments/filmetrics/exceptions.md)
-- [src.instruments.filmetrics.models](src/instruments/filmetrics/models.md)
-- [src.instruments.pipette](src/instruments/pipette/index.md)
-- [src.instruments.pipette.driver](src/instruments/pipette/driver.md)
-- [src.instruments.pipette.exceptions](src/instruments/pipette/exceptions.md)
-- [src.instruments.pipette.models](src/instruments/pipette/models.md)
-- [src.instruments.potentiostat](src/instruments/potentiostat/index.md)
-- [src.instruments.potentiostat.driver](src/instruments/potentiostat/driver.md)
-- [src.instruments.potentiostat.exceptions](src/instruments/potentiostat/exceptions.md)
-- [src.instruments.potentiostat.models](src/instruments/potentiostat/models.md)
-- [src.instruments.registry](src/instruments/registry.md)
-- [src.instruments.uv_curing](src/instruments/uv_curing/index.md)
-- [src.instruments.uv_curing.driver](src/instruments/uv_curing/driver.md)
-- [src.instruments.uv_curing.exceptions](src/instruments/uv_curing/exceptions.md)
-- [src.instruments.uv_curing.models](src/instruments/uv_curing/models.md)
-- [src.instruments.uvvis_ccs](src/instruments/uvvis_ccs/index.md)
-- [src.instruments.uvvis_ccs.driver](src/instruments/uvvis_ccs/driver.md)
-- [src.instruments.uvvis_ccs.exceptions](src/instruments/uvvis_ccs/exceptions.md)
-- [src.instruments.uvvis_ccs.models](src/instruments/uvvis_ccs/models.md)
-- [src.instruments.yaml_schema](src/instruments/yaml_schema.md)
-- [src.protocol_engine](src/protocol_engine/index.md)
-- [src.protocol_engine.commands](src/protocol_engine/commands/index.md)
-- [src.protocol_engine.commands.home](src/protocol_engine/commands/home.md)
-- [src.protocol_engine.commands.measure](src/protocol_engine/commands/measure.md)
-- [src.protocol_engine.commands.move](src/protocol_engine/commands/move.md)
-- [src.protocol_engine.commands.pause](src/protocol_engine/commands/pause.md)
-- [src.protocol_engine.commands.pipette](src/protocol_engine/commands/pipette.md)
-- [src.protocol_engine.commands.scan](src/protocol_engine/commands/scan.md)
-- [src.protocol_engine.errors](src/protocol_engine/errors.md)
-- [src.protocol_engine.loader](src/protocol_engine/loader.md)
-- [src.protocol_engine.measurements](src/protocol_engine/measurements.md)
-- [src.protocol_engine.protocol](src/protocol_engine/protocol.md)
-- [src.protocol_engine.registry](src/protocol_engine/registry.md)
-- [src.protocol_engine.runtime](src/protocol_engine/runtime.md)
-- [src.protocol_engine.scan_args](src/protocol_engine/scan_args.md)
-- [src.protocol_engine.setup](src/protocol_engine/setup.md)
-- [src.protocol_engine.setup_validator](src/protocol_engine/setup_validator.md)
-- [src.protocol_engine.yaml_schema](src/protocol_engine/yaml_schema.md)
-- [src.validation](src/validation/index.md)
-- [src.validation.bounds](src/validation/bounds.md)
-- [src.validation.errors](src/validation/errors.md)
-- [src.validation.protocol_semantics](src/validation/protocol_semantics.md)
+- [protocol_engine.setup](src/protocol_engine/setup.md)
+- [protocol_engine.setup_validator](src/protocol_engine/setup_validator.md)
+- [protocol_engine.loader](src/protocol_engine/loader.md)
+- [protocol_engine.protocol](src/protocol_engine/protocol.md)
+- [protocol_engine.runtime](src/protocol_engine/runtime.md)
+- [protocol_engine.measurements](src/protocol_engine/measurements.md)
+- [protocol_engine.commands](src/protocol_engine/commands/index.md)
