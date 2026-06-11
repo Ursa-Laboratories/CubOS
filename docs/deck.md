@@ -34,6 +34,12 @@ Use the deck YAML when:
 - the physical deck arrangement changes
 - a different plate, rack, or vial layout is installed
 
+After gantry calibration, find A1 and A2 by manually jogging the mounted tool
+to the center of those positions in UGS or Zoo. Record each point as
+deck-frame `{x, y, z}` values. For a well plate, A1 is the A1 well center and
+A2 is the adjacent column position from A1. For a tip rack, A1 and A2 are the
+corresponding tip pickup centers.
+
 ## Config (via labware definitions)
 
 Common labware — standard SBS microplates, Ursa-specific 3D-printed
@@ -143,6 +149,15 @@ For well plates, `calibration.a1` is the A1 well center and `calibration.a2` mus
    module, class name, and config path.
 4. Add a short `README.md` in the new folder describing the physical
    part (dimensions, compatibility, printable files if any).
+
+Common required fields:
+
+| Type | Required fields |
+| --- | --- |
+| `well_plate` | `type`, `name`, `rows`, `columns`, `calibration.a1`, `calibration.a2`, `x_offset`, `y_offset` |
+| `tip_rack` | `type`, `name`, `rows`, `columns`, `pickup_z`, `tip_length`, `calibration.a1`, `calibration.a2`, `x_offset`, `y_offset` |
+| `vial` | `type`, `name`, `height`, `diameter`, `location`, `capacity_ul`, `working_volume_ul` |
+| `well_plate_holder` / `vial_holder` / `tip_disposal` | `type`, `name`, `model_name`, `location`; add slots, nested labware, and geometry fields when the fixture needs them |
 
 The registry is cached at module import time; a programmatic consumer
 can inspect it via `deck.labware.definitions.registry`:

@@ -1,19 +1,35 @@
-# Gantry Calibration
+# Calibration
 
-Use `setup/calibrate_gantry.py` as the only user-facing calibration entrypoint.
-It reads a gantry YAML, counts mounted instruments, chooses the single- or
+Use `setup/calibrate_gantry.py` for gantry calibration. It reads one gantry
+YAML file, detects the mounted instruments, selects the single- or
 multi-instrument flow, and writes calibrated values back to YAML.
 
-## Run Guided Calibration
+Calibration moves hardware and can update work coordinates and GRBL soft-limit
+travel settings. Keep the E-stop reachable and clear the deck before starting.
 
-With only an input gantry path, calibration prompts before overwriting that file:
+## Before You Start
+
+1. Turn on the gantry and controller.
+2. Connect the gantry to the computer over USB/serial.
+3. Make sure mounted instruments, cables, fixtures, and samples have clear
+   travel paths.
+4. Confirm the gantry YAML has the correct `serial_port`,
+   `cnc.factory_z_travel_mm`, and mounted `instruments`.
+5. Put the calibration block and any board placement markers within reach.
+
+![Calibration block aligned to a board placement marker](images/calibration-block-marker.webp){ width="420" }
+
+![Board placement markers used during calibration](images/calibration-marks.webp){ width="520" }
+
+## Run Calibration
+
+To calibrate in place, run:
 
 ```bash
 PYTHONPATH=src python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
 ```
 
-To write a calibrated copy instead, provide an explicit output path. Explicit
-outputs do not get an extra overwrite prompt from the wrapper:
+The script asks before overwriting the input file. To write a calibrated copy:
 
 ```bash
 PYTHONPATH=src python setup/calibrate_gantry.py \
@@ -21,93 +37,85 @@ PYTHONPATH=src python setup/calibrate_gantry.py \
   --output-gantry configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
 ```
 
-The wrapper preflights the input/output paths, lists detected instruments, and
-asks for confirmation before connecting to hardware.
+The preflight shows the input file, output file, detected instruments, and the
+chosen flow before it connects to hardware.
 
-During jog steps:
+## Jog Controls
+
+During calibration:
 
 - arrow keys jog X/Y
 - `X` jogs `+Z` up
 - `Z` jogs `-Z` down
-- number keys change jog step size
-- Enter confirms the current calibration step
+- number keys change step size
+- Enter confirms the current step
 - `Q` aborts
 
-If a jog trips a hard limit, CubOS soft-resets and unlocks GRBL, then pulls off
-opposite the failed jog direction. The pull-off retries up to five times before
-aborting and requiring a controller/E-stop reset.
+If a jog trips a hard limit, CubOS soft-resets, unlocks GRBL, and attempts a
+small pull-off opposite the failed jog direction. Stop and reset the controller
+if recovery fails.
 
-## WPos, MPos, And Homing Pull-Off
+## Single-Instrument Calibration
 
-Calibration math uses deck-origin WPos, not raw GRBL MPos. CubOS sets `$10=0`
-before calibration homing so status reports contain WPos. If a controller is
-left in MPos reporting, the homed pose can look offset by WCO and the `$27`
-pull-off distance, which makes soft limits look smaller than the physical
-machine span.
+Use this flow when the gantry YAML has one mounted instrument.
 
-`working_volume` is the usable deck/WPos range after the machine has homed and
-pulled off the switches. GRBL `$130/$131/$132` and YAML
-`grbl_settings.max_travel_x/y/z` are controller soft-limit spans and include
-the homing pull-off reserve outside the user-visible deck range.
+1. Start `setup/calibrate_gantry.py`.
+2. Confirm the single-instrument flow in the preflight.
+3. Place the calibration block at the front-left origin reference point.
+4. Jog the instrument tip or probe until it touches the top of the block.
+5. Confirm the touch point when prompted.
+6. Let the script home and measure the usable work volume.
+7. Review the summary and calibrated YAML path.
 
-For example, with `$27=10` and a calibrated homed WPos of
-`X=386 Y=250.5 Z=91`, the YAML should save:
+![Single instrument touching the calibration block](images/single-instrument-calibration-block.webp){ width="420" }
 
-```yaml
-working_volume:
-  x_max: 386.0
-  y_max: 250.5
-  z_min: 0.0
-  z_max: 91.0
-grbl_settings:
-  status_report: 0
-  homing_pull_off: 10.0
-  max_travel_x: 396.0
-  max_travel_y: 260.5
-  max_travel_z: 101.0
-```
+The script saves the deck-frame working volume, preserves
+`cnc.factory_z_travel_mm` as the factory safety bound, and writes
+`cnc.calibration_block_height_mm` from the prompted block height. If
+`grbl_settings.homing_pull_off` is configured, GRBL max travel values include
+that pull-off reserve.
 
-Changing `$27` changes the controller soft-limit spans. Re-run calibration or
-recompute `max_travel_*` after changing a machine's homing pull-off.
+## Multi-Instrument Calibration
 
-## Single-Instrument Flow
+Use this flow when the gantry YAML has more than one mounted instrument.
 
-For a gantry YAML with one mounted instrument, the flow asks you to place a
-calibration block at the front-left origin point and jog the instrument
-tip/probe to touch the block top. It assigns X/Y at that physical pose, reads
-the first homed Z and block-touch Z, then sets the block touch to
-the prompted calibration block height. The calibrated YAML writes that value to
-`cnc.calibration_block_height_mm`.
+1. Start `setup/calibrate_gantry.py`.
+2. Confirm the multi-instrument flow in the preflight.
+3. Select the leftmost/reference instrument when prompted.
+4. Select the lowest instrument when prompted.
+5. Place the first calibration block on the leftmost board mark for the red
+   reference instrument.
 
-The calibrated YAML keeps `cnc.factory_z_travel_mm` unchanged as the
-out-of-box safety travel. It writes `working_volume.z_max` from the final homed
-readback, uses the factory travel only to decide whether deck bottom is safely
-reachable, and programs `max_travel_z` as `z_max - z_min` plus the machine's
-`$27` homing pull-off reserve.
+   ![Red reference instrument touching the block at the leftmost mark](images/leftmost-red-instrument-block.webp){ width="420" }
 
-## Multi-Instrument Flow
+6. Jog the red reference instrument to touch the first block.
+7. Move the calibration block to the center board mark.
 
-For a gantry YAML with multiple mounted instruments, the flow asks you to pick
-the left-most/reference instrument and the lowest instrument by number. It sets
-the shared deck frame, asks for the calibration block height, then records each
-instrument against the same physical block point to compute `offset_x`,
-`offset_y`, and `depth`. The calibrated YAML writes the prompted block height to
-`cnc.calibration_block_height_mm` and still preserves
-`cnc.factory_z_travel_mm`; calibrated Z bounds come from the block touch and
-final homed readback. Controller `max_travel_*` values add the same `$27`
-pull-off reserve used by the single-instrument flow.
+   ![Calibration block moved to the center board mark](images/center-calibration-block.webp){ width="520" }
 
-## After Calibration
+8. Jog each remaining instrument to the shared center reference point as
+   prompted.
+9. For pipette setups, jog the pipette to the center reference point on the
+   block when prompted.
+10. Let the script compute `offset_x`, `offset_y`, and `depth` for each
+   instrument.
+11. Review the summary and calibrated YAML path.
 
-Validate the calibrated gantry with a deck and protocol before running real
-protocols:
+## Interactive Jog Test
+
+After calibration, run the interactive deck-frame jog check:
 
 ```bash
-PYTHONPATH=src python setup/validate_setup.py \
-  configs/gantry/<calibrated>.yaml \
-  configs/deck/<deck>.yaml \
-  configs/protocol/<instrument-or-workflow>/<protocol>.yaml
+PYTHONPATH=src python setup/hello_world.py \
+  --gantry configs/gantry/cub_xl_asmi.yaml
 ```
 
-Calibration can move hardware, change work coordinates, and program soft-limit
-travel settings. Keep E-stop reachable and validate slowly on hardware.
+Expected directions:
+
+- `+X` moves right
+- `+Y` moves back, away from the operator
+- `+Z` moves up
+- `-Z` moves down
+
+Once calibration and the jog test are complete, continue to
+[Configuration](configuration.md).

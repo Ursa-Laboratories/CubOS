@@ -1,143 +1,134 @@
-# Protocol
+# Running a Protocol
 
-Protocols are ordered YAML step lists that compile into an executable `Protocol` object. At runtime, each step resolves to a registered command handler and executes against a shared `ProtocolContext` from `protocol_engine.runtime`.
+A protocol run loads gantry, deck, and protocol YAML, compiles the protocol
+steps, validates the resulting motion plan, then executes against hardware.
 
-## Core Flow
+## Architecture
 
-1. Load protocol YAML.
-2. Validate the schema and command arguments.
-3. Compile each step into a `ProtocolStep` from `protocol_engine.runtime`.
-4. Inject a `ProtocolContext` containing the instrumented gantry, deck, logger, and optional persistence objects.
-5. Run the steps sequentially.
+- `setup/validate_setup.py` runs the same offline validation path without
+  contacting hardware.
+- `setup/run_protocol.py` validates first, connects the gantry and
+  instruments, runs the protocol, and disconnects in `finally`.
 
-## Config
+Data is written only when a `DataStore` and `campaign_id` are attached to
+the `ProtocolContext`. The stock `setup/run_protocol.py` command focuses on
+hardware execution and does not create a campaign automatically.
 
-Representative example:
+## Validate Before Hardware
 
-```yaml
-positions:
-  park_position: [360.0, 250.0, 85.0]
+Run setup validation before connecting hardware:
 
-protocol:
-  # Home the gantry without redefining calibrated deck-origin WPos
-  - home:
-
-  # Scan all wells: travel at gantry safe_z to the first well, descend to
-  # interwell_scan_height above each plate surface, then to measurement_height.
-  - scan:
-      plate: plate
-      instrument: asmi
-      method: indentation
-      # Labware-relative offsets above the well surface (negative = below).
-      measurement_height: -1.0       # 1 mm into the well surface
-      interwell_scan_height: 8.0     # 8 mm above the well for between-wells travel
-      indentation_limit_height: -5.0 # 5 mm into the well at deepest descent
-      method_kwargs:
-        step_size: 0.01
-        force_limit: 10.0
-        baseline_samples: 10
-        measure_with_return: false  # true = down + return (up) sampling
-
-  # Return to park position after scan
-  - move:
-      instrument: asmi
-      position: park_position
-
-  # Home the gantry
-  - home:
+```bash
+PYTHONPATH=src python setup/validate_setup.py \
+  configs/gantry/cub_xl_asmi.yaml \
+  configs/deck/asmi_deck.yaml \
+  configs/protocol/asmi/move_a1.yaml
 ```
 
-Use this file when:
+Validation checks:
 
-- changing the experimental sequence
-- adding measurement or liquid-handling steps
-- adjusting step parameters without changing the machine layout
+- gantry, deck, instrument, and protocol YAML load correctly
+- protocol targets are inside the gantry working volume
+- mounted instruments can reach the commanded areas
+- command semantics are valid, including required height fields and pipette
+  tip state
 
-## Available Commands
+Offline validation reduces risk, but it does not prove real-world clearance.
+Confirm physical fixture, cable, tool, and sample clearance before running.
+
+## Run From YAML
+
+After calibration, jog checks, and offline validation, run a protocol with:
+
+```bash
+PYTHONPATH=src python setup/run_protocol.py \
+  configs/gantry/cub_xl_asmi.yaml \
+  configs/deck/asmi_deck.yaml \
+  configs/protocol/asmi/move_a1.yaml
+```
+
+`setup/run_protocol.py` performs these phases:
+
+1. Offline setup validation.
+2. Hardware gantry construction from the gantry YAML.
+3. `setup_protocol(..., gantry=real_gantry)` to re-load and re-validate.
+4. Gantry connection and startup alarm preparation.
+5. Instrument connection.
+6. Sequential protocol execution.
+7. Instrument and gantry disconnect in cleanup.
+
+## Python API
+
+`protocol_engine.setup.run_protocol()` is useful for tests and custom
+orchestration. If no `gantry` argument is supplied, it builds an offline
+`Gantry` for validation/execution against mock motion, not a connected
+controller.
+
+```python
+from protocol_engine.setup import run_protocol
+
+results = run_protocol(
+    "configs/gantry/cub_xl_asmi.yaml",
+    "configs/deck/asmi_deck.yaml",
+    "configs/protocol/asmi/move_a1.yaml",
+)
+```
+
+Use `setup_protocol()` when you need to inspect or customize the context before
+running. Attach a `DataStore` and `campaign_id` when you want command handlers
+to persist measurements:
+
+```python
+from data import DataStore
+from protocol_engine.setup import setup_protocol
+
+store = DataStore("runs/example.db")
+campaign_id = store.create_campaign(
+    "ASMI indentation run",
+    gantry_config="configs/gantry/cub_xl_asmi.yaml",
+    deck_config="configs/deck/asmi_deck.yaml",
+    protocol_config="configs/protocol/asmi/indentation.yaml",
+)
+
+protocol, context = setup_protocol(
+    "configs/gantry/cub_xl_asmi.yaml",
+    "configs/deck/asmi_deck.yaml",
+    "configs/protocol/asmi/indentation.yaml",
+    data_store=store,
+    campaign_id=campaign_id,
+)
+
+results = protocol.run(context)
+store.close()
+```
+
+For real hardware in custom Python code, mirror `setup/run_protocol.py`:
+construct `Gantry(config=...)`, connect it, call `prepare_for_protocol_run()`,
+pass it into `setup_protocol(..., gantry=gantry)`, connect instruments, run,
+and disconnect in cleanup.
+
+## Protocol Commands
 
 | Command | Description |
-|---------|-------------|
-| `move` | Move an instrument to a deck position |
-| `scan` | Iterate all wells on a plate, calling an instrument method per well |
-| `measure` | Move to one deck position, then call an instrument method |
-| `pick_up_tip` | Pipette: pick up a tip |
-| `aspirate` | Pipette: draw liquid |
-| `transfer` | Pipette: combined move + aspirate + move + dispense |
-| `serial_transfer` | Pipette: sequential transfers across positions |
-| `mix` | Pipette: aspirate/dispense repeatedly |
-| `blowout` | Pipette: blow out remaining liquid |
-| `drop_tip` | Pipette: drop the tip |
-| `home` | Home the gantry |
-| `pause` | Pause execution for N seconds |
-| `breakpoint` | Debug pause with user prompt |
+| --- | --- |
+| `home` | Home the gantry without redefining calibrated deck-origin WPos. |
+| `move` | Move to a named XYZ, literal XYZ, or deck target. `travel_z` applies only to named/literal XYZ targets. |
+| `measure` | Move to a deck position, descend to `well.z + measurement_height`, call an instrument method, and optionally persist the result. |
+| `scan` | Iterate a well plate row-major, using `interwell_scan_height` between wells and `measurement_height` for action. |
+| `pause` | Sleep for `seconds`. |
+| `breakpoint` | Wait for operator input. |
+| `pick_up_tip` | Pick up a tip from a `tip_rack` slot and mark it consumed. |
+| `aspirate`, `transfer`, `serial_transfer`, `mix`, `blowout`, `drop_tip` | Pipette liquid-handling operations. |
 
-`dispense` exists as an internal helper used by `transfer`, but it is not currently registered as a YAML protocol command.
-Pipette liquid commands require a preceding `pick_up_tip`; validation tracks
-the attached tip through `drop_tip`.
+Deck targets can be top-level labware such as `plate.A1` or nested paths such
+as `plate_holder.plate.A1`. `scan.plate` accepts a top-level or nested target
+that resolves to a `WellPlate`.
 
-## Position Values
+## Height Semantics
 
-The `move` command accepts:
+`measurement_height`, `interwell_scan_height`, `indentation_limit_height`,
+and pipette engagement heights are labware-relative offsets from the resolved
+labware reference Z. Positive is above the surface; negative is below.
 
-- a named position from the top-level `positions` mapping
-- raw `[x, y, z]` coordinates
-- a deck target string such as `plate_1.A1`, `plate_holder.plate.A1`, or
-  `vial_1`
-
-The `scan` command's `plate` argument accepts a top-level well plate key or a
-nested holder path such as `plate_holder.plate`. The resolved object must be a
-`WellPlate`.
-
-The `measure` command requires `instrument`, `position`, and
-`measurement_height`. It travels XY at the gantry's absolute `safe_z`,
-descends to `well.z + measurement_height` (where `well.z` is the
-calibrated deck-frame surface Z of the resolved position), and calls
-the selected method. The default method is `measure`.
-
-## Heights on engaging commands
-
-Heights are *labware-relative* offsets above the calibrated well/labware
-surface Z (positive = above; negative = below) and are first-class
-command arguments:
-
-- `measurement_height` — required on `measure` and `scan`. Action plane
-  offset.
-- `interwell_scan_height` — required on `scan`. Between-wells XY-travel
-  offset; must be at or above `measurement_height` in +Z-up.
-- `indentation_limit_height` (ASMI scan) — signed labware-relative offset
-  (mm above the well surface; negative = below). The deepest absolute Z
-  reached during descent is `well.z + indentation_limit_height`. Must be
-  at or below `measurement_height`. Legacy `indentation_limit` (sign-agnostic
-  magnitude) and `z_limit` are rejected.
-
-Pipette commands engage at the resolved labware coordinate by default
-(`height = 0`, e.g. a well coordinate or tip pickup point). `aspirate`, `mix`, and
-`blowout` accept `height`; `transfer` and `serial_transfer` accept
-`source_height` and `destination_height`. After `pick_up_tip`, validation
-adds the rack's `tip_length` to the pipette's active depth for safe_z and
-action-Z bounds checks until `drop_tip` clears it. Omitted `tip_length`
-defaults to 59.3 mm for the current Opentrons 300 uL tips.
-Inter-labware travel and the first-well entry of a scan use the gantry's
-absolute `safe_z`, not these labware-relative fields.
-
-Example:
-
-```yaml
-protocol:
-  - measure:
-      instrument: uvvis
-      position: plate_1.A1
-      method: measure
-      measurement_height: 3.0
-```
-
-## Where Commands Live
-
-The command implementations live under `src/protocol_engine/commands/`.
-
-## Authoring Guidance
-
-- Prefer explicit instrument names instead of relying on implicit defaults
-- Use deck targets like `plate.A1` rather than hardcoded coordinates when possible
-- Keep hardware-setup changes in deck or gantry config, not in protocol YAML
-- Treat protocols as experiment definitions, not as calibration files
+The gantry's `safe_z` is different: it is an absolute deck-frame Z used for
+inter-labware travel and first-well scan entry.

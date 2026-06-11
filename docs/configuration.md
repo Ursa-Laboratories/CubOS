@@ -1,62 +1,53 @@
 # Configuration
 
-CubOS uses three YAML inputs to define a runnable experiment. Together they
-describe the machine, the deck layout, and the step sequence.
-
-## Directory Layout
+CubOS runs from three YAML inputs:
 
 ```text
 configs/
-  gantry/     # Machine envelope, serial port, homing strategy, instruments
-  deck/       # Labware placement and calibration
-  protocol/   # Ordered protocol steps grouped by instrument/workflow
+  gantry/      # machine envelope, GRBL expectations, mounted instruments
+  deck/        # labware placement and calibration anchors
+  protocol/    # ordered experiment steps
 ```
 
-## Gantry Config
+Use the CubOS deck frame in every file:
 
-Gantry YAML defines:
+- origin: front-left-bottom reachable work volume
+- `+X`: operator-right
+- `+Y`: back, away from the operator
+- `+Z`: up, away from the deck
 
-- serial port
-- gantry type (`cub` or `cub_xl`)
-- CNC homing strategy
-- out-of-box Z travel safety range (`cnc.factory_z_travel_mm`)
-- calibration block height (`cnc.calibration_block_height_mm`)
-- Y-axis motion mode
-- working volume
-- optional absolute `safe_z` plane (inter-labware travel)
-- optional GRBL settings expectations
-- mounted instruments, offsets, reach depths, and driver-specific settings
+Do not pre-flip signs in YAML. GRBL settings and calibration must make WPos
+match this frame.
 
-Representative example:
+![CubOS deck coordinate frame shown on the gantry](images/orientation.webp){ width="520" }
+
+## Gantry YAML
+
+Gantry YAML describes the machine and mounted instruments.
 
 ```yaml
-serial_port: /dev/cu.usbserial-140
+serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
   homing_strategy: standard
   factory_z_travel_mm: 110.0
   calibration_block_height_mm: 35.0
   y_axis_motion: head
-  # Absolute deck-frame Z used for inter-labware travel and the entry
-  # approach to the first well of a scan. Defaults to working_volume.z_max.
   safe_z: 85.0
-
 working_volume:
   x_min: 0.0
-  x_max: 399.0
+  x_max: 386.0
   y_min: 0.0
-  y_max: 280.0
+  y_max: 250.0
   z_min: 0.0
   z_max: 87.0
-
 grbl_settings:
   status_report: 0
   homing_enable: true
   homing_pull_off: 10.0
-  max_travel_x: 409.0
-  max_travel_y: 290.0
+  max_travel_x: 396.0
+  max_travel_y: 260.0
   max_travel_z: 97.0
-
 instruments:
   asmi:
     type: asmi
@@ -66,140 +57,127 @@ instruments:
     depth: 0.0
 ```
 
-Use this file when:
+Important fields:
 
-- switching to a different gantry
-- changing travel limits
-- updating homing behavior
-- recording expected controller settings
-- changing mounted instruments, offsets, reach depths, or instrument-specific connection settings
+| Field | Meaning |
+| --- | --- |
+| `gantry_type` | Machine family, currently `cub` or `cub_xl`. |
+| `cnc.calibration_block_height_mm` | Calibration block height used by gantry calibration. |
+| `instruments` | Mounted instruments, offsets, depth, and driver-specific connection fields. |
 
-CubOS is cut over to the deck-origin frame. Protocol `home` runs GRBL homing
-and preserves the persistent G54 work-coordinate frame established by
-`setup/calibrate_gantry.py`; it does not zero WPos after homing. Protocol
-setup rejects gantry configs whose X/Y minima are not `0.0` or whose Z minimum
-is negative.
+Instrument blocks carry physical mounting state only. Protocol engagement
+heights such as `measurement_height` and `interwell_scan_height` belong in
+the protocol YAML, not under `instruments`.
 
-Use top-level `gantry_type` to identify the physical machine family. Built-in
-setup validation uses it for machine-specific safety checks; for `cub_xl`, this
-includes rejecting protocols whose commanded instrument point or known travel
-segment would hit the fixed right X-max rail. The rail is not deck labware and
-is not configured in YAML.
+## Deck YAML
 
-Run [Calibrate Deck Origin](calibration.md) before trusting measured working
-volume values on real hardware. Seed `cnc.factory_z_travel_mm` with the
-out-of-box gantry Z travel and `cnc.calibration_block_height_mm` with the block
-height before calibration. Calibration preserves the factory travel as a safety
-bound; calibrated Z bounds and GRBL `max_travel_z` come from the measured
-home-to-block travel and final homed readback. `working_volume` is usable
-deck/WPos space; GRBL `max_travel_*` is controller soft-limit space and
-includes the `$27` `homing_pull_off` reserve. Use
-[Gantry Bring-Up](admin/gantry-bring-up.md) first if controller direction,
-homing, pull-off, or WPos reporting is unknown.
-
-## Deck Config
-
-Deck YAML defines labware positions. Well plates use calibration anchors, while
-single-location labware such as vials store a direct position.
-
-All deck Z values use the CubOS deck-origin frame: `+Z` is up, and a labware
-`height` field is a direct absolute deck-frame Z value.
-
-Representative well plate example:
+Deck YAML describes physical labware and collision-relevant fixtures.
 
 ```yaml
 labware:
   plate:
     load_name: sbs_96_wellplate
-    name: asmi_96_well
-    model_name: asmi_96_well
+    name: asmi_96_well_deck_origin
+    model_name: asmi_96_well_deck_origin
     calibration:
-      a1:
-        x: 347.0
-        y: 42.0
-        z: 30.0
-      a2:
-        x: 338.0
-        y: 42.0
-        z: 30.0
-    x_offset: -9.0
+      a1: { x: 347.0, y: 42.0, z: 30.0 }
+      a2: { x: 338.0, y: 42.0, z: 30.0 }
+    x_offset: 9.0
     y_offset: 9.0
 ```
 
-Use this file when:
+Supported labware entries include:
 
-- labware is moved or re-calibrated
-- the physical deck arrangement changes
-- a different plate or vial layout is installed
+- `well_plate` - two-point A1/A2 calibration, generated wells
+- `tip_rack` - two-point calibration, tip occupancy, `tip_length`
+- `vial` - one fixed `location`
+- `well_plate_holder` - physical holder that can contain a nested plate
+- `vial_holder` - physical holder that can contain nested vials
+- `tip_disposal` - disposal geometry for used tips
+- `wall` - rectangular obstacle from two opposite corners
 
-## Instrument Config
+Important rules:
 
-Mounted instruments are defined inside the gantry YAML under `instruments`.
-Offsets are relative to the gantry/router reference point.
+- After gantry calibration, find A1 and A2 by manually jogging the mounted
+  tool to the center of those positions in UGS or Zoo. Record each point as
+  deck-frame `{x, y, z}` values in the deck YAML.
+- A1/A2 calibration must be axis-aligned; diagonal A2 is rejected.
+- Well plates, tip racks, and holders take their surface/reference Z from
+  calibration anchors.
+- Vials and holders take their reference Z from `location.z`.
+- Nested labware derives Z from the holder seat; do not provide nested
+  calibration `z` values.
+- `height` is the physical outer dimension, not a shortcut for a Z reference.
+- `load_name` expands a built-in definition from
+  `src/deck/labware/definitions/`; user fields override the template.
 
-Instrument blocks carry only physical mounting state (offsets, depth,
-hardware-specific config). Labware-relative motion heights
-(`measurement_height`, `interwell_scan_height`) are first-class arguments
-to the protocol commands that consume them — see the Protocol Config
-section. Inter-labware and first-well-entry travel use the gantry-level
-`safe_z`, not any instrument field.
+Custom labware definitions live under `src/deck/labware/definitions/`. Add a
+folder for the new part, add a YAML definition with the labware class fields,
+then register it in `src/deck/labware/definitions/registry.yaml`.
 
-Representative example:
+Common required fields:
+
+| Type | Required fields |
+| --- | --- |
+| `well_plate` | `type`, `name`, `rows`, `columns`, `calibration.a1`, `calibration.a2`, `x_offset`, `y_offset` |
+| `tip_rack` | `type`, `name`, `rows`, `columns`, `pickup_z`, `tip_length`, `calibration.a1`, `calibration.a2`, `x_offset`, `y_offset` |
+| `vial` | `type`, `name`, `height`, `diameter`, `location`, `capacity_ul`, `working_volume_ul` |
+| `well_plate_holder` / `vial_holder` / `tip_disposal` | `type`, `name`, `model_name`, `location`; add slots, nested labware, and geometry fields when the fixture needs them |
+
+## Protocol YAML
+
+Protocol YAML defines the ordered steps that run against the loaded gantry and
+deck.
 
 ```yaml
-instruments:
-  uvvis:
-    type: uvvis_ccs
-    vendor: thorlabs
-    serial_number: "M00801544"
-    dll_path: "TLCCS_64.dll"
-    default_integration_time_s: 0.24
-    offset_x: 0.0
-    offset_y: 0.0
-    depth: 0.0
-```
+positions:
+  park_position: [360.0, 250.0, 85.0]
 
-## Protocol Config
-
-Protocol YAML defines the experiment step sequence. It should be the file you
-change most often during routine experiment work.
-
-Representative example:
-
-```yaml
 protocol:
+  - home:
+  - scan:
+      plate: plate
+      instrument: asmi
+      method: indentation
+      measurement_height: -1.0
+      interwell_scan_height: 8.0
+      indentation_limit_height: -5.0
+      method_kwargs:
+        step_size: 0.1
+        force_limit: 10.0
   - move:
-      instrument: uvvis
-      position: plate.A1
-  - measure:
-      instrument: uvvis
-      position: plate.A1
+      instrument: asmi
+      position: park_position
+      travel_z: 85.0
 ```
 
-Use this file when:
+Registered YAML commands:
 
-- changing the experimental sequence
-- adding measurement or liquid-handling steps
-- adjusting step parameters without changing the machine layout
+| Command | Purpose |
+| --- | --- |
+| `home` | Home the gantry without redefining calibrated work coordinates. |
+| `move` | Move an instrument to a named, literal, or deck position. |
+| `measure` | Move to one deck position and call an instrument method. |
+| `scan` | Iterate every well on a plate and call an instrument method. |
+| `pause` | Sleep for a fixed number of seconds. |
+| `breakpoint` | Wait for operator input. |
+| `pick_up_tip`, `aspirate`, `transfer`, `serial_transfer`, `mix`, `blowout`, `drop_tip` | Pipette workflow commands. |
 
-Protocol heights are labware-relative (mm above the calibrated
-well/labware surface Z) and first-class command arguments:
+Height fields on engaging commands are labware-relative offsets from the
+resolved well/labware reference Z:
 
-- `measurement_height` — action plane. Required on `measure` and `scan`.
-- `interwell_scan_height` — between-wells XY-travel plane. Required on
-  `scan`. Must be at or above `measurement_height` (in +Z-up).
+- `measurement_height`: action plane; required on `measure` and `scan`
+- `interwell_scan_height`: between-well travel plane; required on `scan`
+- `indentation_limit_height`: ASMI deepest descent plane; signed, often
+  negative, and must be at or below `measurement_height`
+- pipette `height`, `source_height`, and `destination_height`: optional
+  labware-relative engagement offsets
 
-Pipette commands default to the labware reference Z (`height = 0`).
-Liquid-handling commands may set `height`, or `source_height` /
-`destination_height` for transfers. After `pick_up_tip`, validation uses the
-target tip rack's `tip_length` as active pipette depth until `drop_tip`.
-Omitted `tip_length` defaults to 59.3 mm for the current Opentrons 300 uL tips.
+Inter-labware travel uses the gantry's absolute `safe_z`. Protocol
+`positions:` entries are named absolute XYZ targets, not deck labware.
 
-Inter-labware travel uses the gantry's absolute `safe_z`. Legacy names
-`entry_travel_z`, `entry_travel_height`, `interwell_travel_height`, and
-ASMI `z_limit` are rejected before motion.
+## Editing Rule
 
-## Recommended Editing Rule
-
-If the physical machine setup has not changed, edit the protocol file and leave
-the gantry and deck files alone.
+If the hardware has not moved, edit the protocol YAML. Change deck YAML only
+when labware placement changes. Change gantry YAML only for machine,
+calibration, GRBL, or mounted-instrument changes.
