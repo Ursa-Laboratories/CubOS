@@ -6,14 +6,10 @@ theme:
 nav:
   - Home: index.md
   - Getting Started: getting-started.md
-  - Configuration: configuration.md
   - Calibration: calibration.md
-  - Gantry: gantry.md
-  - Deck: deck.md
-  - Protocol: protocol.md
+  - Configuration: configuration.md
+  - Running a Protocol: protocol.md
   - Data: data.md
-  - Admin:
-    - Gantry Bring-Up: admin/gantry-bring-up.md
   - API Reference:
     - Overview: reference/index.md
     - deck: reference/src/deck/index.md
@@ -33,8 +29,15 @@ nav:
 
 not_in_nav: |
   agent-index.md
+  admin/**
+  deck.md
+  gantry.md
   reference/src/**
   reference/data/**
+
+extra_javascript:
+  - https://unpkg.com/mermaid@10.9.1/dist/mermaid.min.js
+  - javascripts/mermaid-init.js
 
 plugins:
   - search
@@ -64,7 +67,11 @@ markdown_extensions:
   - admonition
   - attr_list
   - def_list
-  - fenced_code
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - tables
   - toc:
       permalink: true

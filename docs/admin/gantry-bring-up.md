@@ -5,7 +5,7 @@ Use it when a machine is new, controller settings are unknown, homing direction
 is wrong, or WPos/MPos behavior has not been recorded.
 
 For normal operator calibration after the controller is already normalized, use
-[Calibrate Deck Origin](../calibration.md).
+[Calibration](../calibration.md).
 
 ## Target Behavior
 

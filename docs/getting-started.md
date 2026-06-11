@@ -1,27 +1,21 @@
 # Getting Started
 
-## Two Ways To Use CubOS
-
-There are two entrypoints:
-
-1. **YAML-based** - define your experiment across three YAML config files
-   (gantry, deck, protocol) and run it from the command line.
-2. **Python API** - import `setup_protocol()` and build experiments
-   programmatically. See the [API Reference](reference/index.md) for details.
-
-This guide focuses on the YAML-based workflow.
+This guide gets CubOS installed and points you to the right setup path. It
+focuses on the YAML workflow: one gantry file, one deck file, and one protocol
+file.
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.10 or newer
 - `pip`
-- a GRBL-compatible CNC gantry over serial for hardware runs
-- instrument-specific drivers when using real instruments
+- Git
+- For hardware runs: a GRBL-compatible gantry connected over serial
+- For real instruments: the vendor SDKs required by those instrument drivers
 
-Hardware motion depends on controller settings and WPos calibration. If the
-machine has not been normalized yet, start with
-[Gantry Bring-Up](admin/gantry-bring-up.md), then run
-[Calibrate Deck Origin](calibration.md).
+If you bought a CubOS system through [ursalabs.ai](https://ursalabs.ai), gantry
+controller bring-up should already be handled. If you are setting up your own
+machine, normalize controller direction, homing, and WPos reporting with
+[Gantry Bring-Up](admin/gantry-bring-up.md) before calibration.
 
 ## Installation
 
@@ -30,76 +24,39 @@ git clone https://github.com/Ursa-Laboratories/CubOS.git
 cd CubOS
 python -m venv .venv
 source .venv/bin/activate
+pip install -U pip
 pip install -e ".[dev]"
 ```
 
-## First Validation
-
-Validate your YAML setup offline before connecting hardware:
+Install docs tooling only when editing or building the documentation:
 
 ```bash
-PYTHONPATH=src python setup/validate_setup.py \
-  configs/gantry/cub_xl_asmi.yaml \
-  configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi/move_a1.yaml
+pip install -e ".[docs]"
 ```
 
-This loads all three configs, checks the protocol's concrete motion targets
-against the gantry working volume, validates protocol motion semantics, and
-prints PASS/FAIL.
-
-## Calibration
-
-For a real setup, calibrate the gantry YAML before running protocols. With only
-an input path, the script prompts before overwriting that file:
+Instrument vendor SDKs are optional. Install only the extras for hardware you
+actually use, for example:
 
 ```bash
-PYTHONPATH=src python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
+pip install -e ".[asmi]"
 ```
 
-To write a calibrated copy, provide `--output-gantry`.
+## Setup Path
 
-The calibration script counts mounted instruments in the gantry YAML and chooses
-the single- or multi-instrument flow. Single-instrument calibration uses a
-calibration block at the front-left origin point, assigns X/Y at that physical
-pose, and preserves `cnc.factory_z_travel_mm` only as the out-of-box Z travel
-safety bound. Calibrated Z bounds come from the measured home-to-block travel
-and final homed readback.
-Multi-instrument calibration uses a shared block point to compute per-instrument
-`offset_x`, `offset_y`, and `depth`.
+1. Install CubOS.
+2. If you are building your own machine, complete
+   [Gantry Bring-Up](admin/gantry-bring-up.md).
+3. Calibrate the gantry with [Calibration](calibration.md).
+4. Define the active gantry, deck, and protocol YAML files in
+   [Configuration](configuration.md).
+5. Validate and run with [Running a Protocol](protocol.md).
 
-Calibration sets `$10=0` so GRBL reports WPos, writes the configured
-`grbl_settings.homing_pull_off` (`$27`) before homing, and saves controller
-`max_travel_*` as usable `working_volume` span plus that pull-off reserve. Do
-not include the reserve in user-visible `working_volume`.
+## Python API
 
-## Interactive Jog Test
+Most operators use YAML files from the command line. Python callers can use:
 
-After calibration, run a small jog test and verify physical direction:
-
-```bash
-PYTHONPATH=src python setup/hello_world.py \
-  --gantry configs/gantry/cub_xl_asmi.yaml
+```python
+from protocol_engine.setup import setup_protocol, run_protocol
 ```
 
-Expected directions:
-
-- `+X` moves right
-- `+Y` moves back, away from the operator
-- `+Z` moves up
-- `-Z` moves down
-
-## Running A Protocol
-
-Once validation, calibration, and jog checks pass, connect the gantry and run a
-minimal protocol:
-
-```bash
-PYTHONPATH=src python setup/run_protocol.py \
-  configs/gantry/cub_xl_asmi.yaml \
-  configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi/move_a1.yaml
-```
-
-Move to ASMI indentation or scans only after the minimal move behaves as
-expected on hardware.
+See the [API Reference](reference/index.md) for generated module docs.

@@ -121,7 +121,7 @@ Protocol setup requires:
 - `y_min: 0.0`
 - non-negative `z_min`
 
-Use [Calibrate Deck Origin](calibration.md) to measure the physical working
+Use [Calibration](calibration.md) to measure the physical working
 volume. The calibration script records the first homed Z, jogs to the
 front-left block/reference point, sets X/Y with `G10 L20 P1 X0 Y0`, sets the
 block touch to `cnc.calibration_block_height_mm`, then re-homes to measure
