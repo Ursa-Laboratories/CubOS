@@ -157,12 +157,6 @@ class TestGantry(unittest.TestCase):
         mock_mill.home.assert_called_once_with()
 
     @patch("gantry.gantry.Mill")
-    def test_home_raises_on_unknown_strategy(self, mock_mill_cls):
-        gantry = Gantry(config={"cnc": {"homing_strategy": "nonexistent"}})
-        with self.assertRaises(ValueError):
-            gantry.home()
-
-    @patch("gantry.gantry.Mill")
     def test_prepare_for_protocol_run_unlocks_alarm_and_restores_state(
         self, mock_mill_cls
     ):

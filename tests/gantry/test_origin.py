@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from gantry.gantry_config import GantryConfig, GantryType, HomingStrategy, WorkingVolume
+from gantry.gantry_config import GantryConfig, GantryType, WorkingVolume
 from gantry.origin import (
     DeckOriginCalibrationPlan,
     build_deck_origin_calibration_plan,
@@ -26,7 +26,6 @@ def _deck_origin_config(
     return GantryConfig(
         serial_port="/dev/null",
         gantry_type=GantryType.CUB_XL,
-        homing_strategy=HomingStrategy.STANDARD,
         factory_z_travel_mm=z_max,
         working_volume=WorkingVolume(
             x_min=x_min,

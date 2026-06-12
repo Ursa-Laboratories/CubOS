@@ -10,7 +10,7 @@ from gantry.gantry import Gantry
 
 def _config() -> dict:
     return {
-        "cnc": {"homing_strategy": "standard", "factory_z_travel_mm": 90.0},
+        "cnc": {"factory_z_travel_mm": 90.0},
         "working_volume": {
             "x_min": 0.0,
             "x_max": 300.0,

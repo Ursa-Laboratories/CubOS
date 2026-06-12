@@ -7,7 +7,6 @@ import pytest
 from gantry.gantry_config import (
     GantryConfig,
     GantryType,
-    HomingStrategy,
     WorkingVolume,
 )
 
@@ -110,34 +109,20 @@ class TestGantryConfig:
         config = GantryConfig(
             serial_port="/dev/ttyUSB0",
             gantry_type=GantryType.CUB_XL,
-            homing_strategy=HomingStrategy.STANDARD,
             factory_z_travel_mm=90.0,
             working_volume=vol,
             safe_z=75.0,
         )
         assert config.serial_port == "/dev/ttyUSB0"
         assert config.gantry_type == GantryType.CUB_XL
-        assert config.homing_strategy == HomingStrategy.STANDARD
         assert config.factory_z_travel_mm == 90.0
         assert config.working_volume is vol
         assert config.safe_z == 75.0
-
-    def test_homing_strategy_is_enum(self):
-        config = GantryConfig(
-            serial_port="/dev/ttyUSB0",
-            gantry_type=GantryType.CUB_XL,
-            homing_strategy=HomingStrategy.STANDARD,
-            factory_z_travel_mm=90.0,
-            working_volume=_make_volume(),
-        )
-        assert isinstance(config.homing_strategy, HomingStrategy)
-        assert config.homing_strategy.value == "standard"
 
     def test_gantry_type_string_is_normalized_to_enum(self):
         config = GantryConfig(
             serial_port="/dev/ttyUSB0",
             gantry_type="cub_xl",
-            homing_strategy=HomingStrategy.STANDARD,
             factory_z_travel_mm=90.0,
             working_volume=_make_volume(),
         )
@@ -148,7 +133,6 @@ class TestGantryConfig:
             GantryConfig(
                 serial_port="/dev/ttyUSB0",
                 gantry_type="other_machine",
-                homing_strategy=HomingStrategy.STANDARD,
                 factory_z_travel_mm=90.0,
                 working_volume=_make_volume(),
             )
@@ -157,7 +141,6 @@ class TestGantryConfig:
         config = GantryConfig(
             serial_port="/dev/ttyUSB0",
             gantry_type=GantryType.CUB_XL,
-            homing_strategy=HomingStrategy.STANDARD,
             factory_z_travel_mm=90.0,
             working_volume=_make_volume(),
         )
@@ -172,7 +155,6 @@ class TestGantryConfig:
             GantryConfig(
                 serial_port="/dev/ttyUSB0",
                 gantry_type=GantryType.CUB_XL,
-                homing_strategy=HomingStrategy.STANDARD,
                 factory_z_travel_mm=-10.0,
                 working_volume=_make_volume(),
             )
@@ -182,7 +164,6 @@ class TestGantryConfig:
             GantryConfig(
                 serial_port="/dev/ttyUSB0",
                 gantry_type=GantryType.CUB_XL,
-                homing_strategy=HomingStrategy.STANDARD,
                 factory_z_travel_mm=0.0,
                 working_volume=_make_volume(),
             )
@@ -192,7 +173,6 @@ class TestGantryConfig:
             GantryConfig(
                 serial_port="/dev/ttyUSB0",
                 gantry_type=GantryType.CUB_XL,
-                homing_strategy=HomingStrategy.STANDARD,
                 factory_z_travel_mm=90.0,
                 working_volume=_make_volume(z_min=0.0, z_max=80.0),
                 safe_z=85.0,

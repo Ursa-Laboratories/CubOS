@@ -41,7 +41,6 @@ def _gantry_yaml(
         "serial_port: /dev/ttyUSB0",
         "gantry_type: cub_xl",
         "cnc:",
-        "  homing_strategy: standard",
         "  factory_z_travel_mm: 90.0",
     ]
     if safe_z:
@@ -144,7 +143,6 @@ class TestLoadInstrumentedGantryFromConfig:
             serial_port: /dev/ttyUSB0
             gantry_type: cub_xl
             cnc:
-              homing_strategy: standard
               factory_z_travel_mm: 90.0
             working_volume:
               x_min: 0.0

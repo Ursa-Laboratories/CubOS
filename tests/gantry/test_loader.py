@@ -16,7 +16,6 @@ VALID_GANTRY_YAML = """\
 serial_port: /dev/cu.usbserial-2130
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 90.0
   safe_z: 75.0
 working_volume:
@@ -81,14 +80,6 @@ class TestLoadGantryFromYaml:
         finally:
             os.unlink(path)
 
-    def test_loaded_gantry_has_homing_strategy(self):
-        path = _write_temp_yaml(VALID_GANTRY_YAML)
-        try:
-            config = load_gantry_from_yaml(path)
-            assert config.homing_strategy == "standard"
-        finally:
-            os.unlink(path)
-
     def test_loaded_gantry_has_instruments_and_grbl_settings(self):
         path = _write_temp_yaml(GANTRY_WITH_INSTRUMENTS_YAML)
         try:
@@ -135,7 +126,6 @@ machine_structures:
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 90.0
 """
         path = _write_temp_yaml(yaml_content)
@@ -150,7 +140,6 @@ cnc:
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 90.0
 working_volume:
   x_min: 300.0
@@ -199,7 +188,6 @@ class TestLoadGantryFromYamlSafe:
         yaml_content = """\
 serial_port: /dev/ttyUSB0
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 90.0
 """
         path = _write_temp_yaml(yaml_content)
@@ -217,7 +205,6 @@ cnc:
         yaml_content = """\
 serial_port: /dev/ttyUSB0
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 90.0
 """
         path = _write_temp_yaml(yaml_content)

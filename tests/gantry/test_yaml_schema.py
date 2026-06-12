@@ -12,7 +12,7 @@ def _valid_gantry_dict() -> dict:
     return {
         "serial_port": "/dev/cu.usbserial-2130",
         "gantry_type": "cub_xl",
-        "cnc": {"homing_strategy": "standard", "factory_z_travel_mm": 90.0},
+        "cnc": {"factory_z_travel_mm": 90.0},
         "working_volume": {
             "x_min": 0.0,
             "x_max": 300.0,
@@ -32,7 +32,6 @@ class TestGantryYamlSchema:
 
         assert schema.serial_port == "/dev/cu.usbserial-2130"
         assert schema.gantry_type == "cub_xl"
-        assert schema.cnc.homing_strategy == "standard"
         assert schema.cnc.factory_z_travel_mm == 90.0
         assert schema.working_volume.x_min == 0.0
         assert schema.working_volume.x_max == 300.0
@@ -41,14 +40,9 @@ class TestGantryYamlSchema:
         assert schema.working_volume.z_min == 0.0
         assert schema.working_volume.z_max == 80.0
 
-    def test_only_standard_homing_strategy_accepted(self):
+    def test_homing_strategy_is_rejected(self):
         data = _valid_gantry_dict()
-        schema = GantryYamlSchema.model_validate(data)
-        assert schema.cnc.homing_strategy == "standard"
-
-    def test_invalid_homing_strategy_rejected(self):
-        data = _valid_gantry_dict()
-        data["cnc"]["homing_strategy"] = "unknown_strategy"
+        data["cnc"]["homing_strategy"] = "standard"
         with pytest.raises(ValidationError):
             GantryYamlSchema.model_validate(data)
 
