@@ -15,7 +15,6 @@ from deck.labware.well_plate import WellPlate
 from gantry.gantry_config import (
     GantryConfig,
     GantryType,
-    HomingStrategy,
     WorkingVolume,
 )
 from protocol_engine.protocol import Protocol, ProtocolStep
@@ -36,7 +35,6 @@ def _gantry(
     return GantryConfig(
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
-        homing_strategy=HomingStrategy.STANDARD,
         factory_z_travel_mm=z_max,
         working_volume=WorkingVolume(
             x_min=0.0,

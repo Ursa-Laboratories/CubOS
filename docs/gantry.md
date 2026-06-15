@@ -34,7 +34,6 @@ Representative example:
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 87.0
   y_axis_motion: head
   # Absolute deck-frame Z used for inter-labware travel and the entry
@@ -72,7 +71,6 @@ Use this file when:
 
 - switching to a different gantry
 - changing travel limits
-- updating homing behavior
 - recording expected controller settings
 - changing mounted instruments, offsets, reach depths, or driver-specific connection settings
 
@@ -80,8 +78,6 @@ Use this file when:
 
 `gantry_type` is required at the gantry YAML root and identifies the physical
 machine family. Supported values are `cub` and `cub_xl`.
-
-`homing_strategy` must be `standard`, which runs GRBL `$H`.
 
 `factory_z_travel_mm` is required and must be greater than zero. It is the
 out-of-box vertical travel range for the gantry family/workcell and is not

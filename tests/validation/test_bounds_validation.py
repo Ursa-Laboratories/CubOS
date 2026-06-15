@@ -11,7 +11,7 @@ from deck.labware.vial import Vial
 from deck.labware.well_plate import WellPlate
 from deck.labware.well_plate_holder import WellPlateHolder
 from instruments.base_instrument import BaseInstrument
-from gantry.gantry_config import GantryConfig, GantryType, HomingStrategy, WorkingVolume
+from gantry.gantry_config import GantryConfig, GantryType, WorkingVolume
 from protocol_engine.protocol import Protocol, ProtocolStep
 from validation.bounds import (
     collect_protocol_motion_targets,
@@ -37,7 +37,6 @@ def _make_gantry(
     return GantryConfig(
         serial_port="/dev/ttyUSB0",
         gantry_type=GantryType.CUB_XL,
-        homing_strategy=HomingStrategy.STANDARD,
         factory_z_travel_mm=factory_z_travel_mm,
         working_volume=WorkingVolume(
             x_min=x_min, x_max=x_max,

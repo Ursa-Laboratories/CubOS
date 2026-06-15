@@ -40,7 +40,6 @@ class CncYaml(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    homing_strategy: Literal["standard"]
     factory_z_travel_mm: float
     calibration_block_height_mm: Optional[float] = None
     y_axis_motion: Literal["head", "bed"] = "head"

@@ -22,7 +22,6 @@ def test_validate_setup_home_over_rail_then_low_travel_fails(tmp_path):
             gantry_type: cub_xl
 
             cnc:
-              homing_strategy: standard
               factory_z_travel_mm: 130.0
               y_axis_motion: head
               safe_z: 110.0

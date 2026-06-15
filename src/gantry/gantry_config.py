@@ -7,12 +7,6 @@ from enum import Enum
 from typing import Any, Dict, Optional
 
 
-class HomingStrategy(str, Enum):
-    """Supported CNC homing strategies."""
-
-    STANDARD = "standard"
-
-
 class YAxisMotion(str, Enum):
     """Whether Y-axis motion moves the head or the bed (base plate)."""
 
@@ -66,7 +60,6 @@ class GantryConfig:
 
     serial_port: str
     gantry_type: GantryType
-    homing_strategy: HomingStrategy
     factory_z_travel_mm: float
     working_volume: WorkingVolume
     y_axis_motion: YAxisMotion = YAxisMotion.HEAD

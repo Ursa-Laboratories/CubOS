@@ -34,7 +34,7 @@ def setup_protocol(
     """Load all configs, validate bounds, and return a ready-to-run protocol.
 
     Steps:
-        1. Load gantry config (working volume, homing strategy, instruments)
+        1. Load gantry config (working volume and instruments)
         2. Load deck (labware positions)
         3. Build instrumented gantry (mounted instruments with offsets)
         4. Load protocol (command steps)

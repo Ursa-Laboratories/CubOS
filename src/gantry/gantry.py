@@ -138,16 +138,12 @@ class Gantry:
             return False
 
     def home(self) -> None:
-        """Home the gantry using the configured homing strategy."""
+        """Home the gantry with GRBL's standard homing command."""
         if self._offline:
             return
         assert self._mill is not None
-        strategy = self._homing_strategy()
         try:
-            if strategy == "standard":
-                self._mill.home()
-            else:
-                raise ValueError(f"Unknown homing strategy: {strategy!r}")
+            self._mill.home()
         except (MillConnectionError, StatusReturnError) as exc:
             self.logger.error("Error homing gantry: %s", exc)
             raise
@@ -777,17 +773,6 @@ class Gantry:
             "homing_pull_off_mm": homing_pull_off_mm,
             "position": final_position,
         }
-
-    def _homing_strategy(self) -> str:
-        """Extract the configured homing strategy from dict or dataclass config."""
-        if isinstance(self.config, dict):
-            cnc = self.config.get("cnc", {})
-            if isinstance(cnc, dict):
-                return cnc.get("homing_strategy", "standard")
-        if hasattr(self.config, "homing_strategy"):
-            value = getattr(self.config, "homing_strategy")
-            return getattr(value, "value", value)
-        return "standard"
 
     def _extract_status(self) -> str:
         """Extract the GRBL state word from the last raw status string."""

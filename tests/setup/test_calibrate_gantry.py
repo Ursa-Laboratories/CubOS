@@ -14,7 +14,6 @@ def _write_gantry(path: Path, instruments_yaml: str) -> Path:
         f"""\
 serial_port: /dev/ttyUSB0
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 100.0
   y_axis_motion: head
 working_volume:

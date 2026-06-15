@@ -12,7 +12,6 @@ from .gantry import Gantry
 from .gantry_config import (
     GantryConfig,
     GantryType,
-    HomingStrategy,
     WorkingVolume,
 )
 from .instrument_loader import (
@@ -43,7 +42,6 @@ __all__ = [
     "GantryLoaderError",
     "GantryType",
     "FixedStructureBox",
-    "HomingStrategy",
     "LocationNotFound",
     "MillConnectionError",
     "LimitRecoveryResult",

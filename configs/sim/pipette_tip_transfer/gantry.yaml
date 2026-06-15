@@ -9,7 +9,6 @@
 serial_port: /dev/null
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 129.0
   y_axis_motion: head
   safe_z: 69.0
