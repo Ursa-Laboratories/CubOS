@@ -29,7 +29,6 @@ Gantry YAML describes the machine and mounted instruments.
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 110.0
   calibration_block_height_mm: 35.0
   y_axis_motion: head

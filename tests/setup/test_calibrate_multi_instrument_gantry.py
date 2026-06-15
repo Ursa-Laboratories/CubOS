@@ -22,7 +22,6 @@ def _write_multi_gantry(path: Path) -> Path:
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 100.0
   calibration_block_height_mm: 12.5
   y_axis_motion: head
@@ -563,7 +562,6 @@ def test_multi_instrument_calibration_raises_if_cnc_factory_z_travel_mm_missing(
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   y_axis_motion: head
 working_volume:
   x_min: 0.0

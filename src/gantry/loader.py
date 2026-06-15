@@ -11,7 +11,6 @@ from .errors import GantryLoaderError
 from .gantry_config import (
     GantryConfig,
     GantryType,
-    HomingStrategy,
     WorkingVolume,
     YAxisMotion,
 )
@@ -86,7 +85,6 @@ def load_gantry_from_yaml(path: str | Path) -> GantryConfig:
     return GantryConfig(
         serial_port=schema.serial_port,
         gantry_type=GantryType(schema.gantry_type),
-        homing_strategy=HomingStrategy(schema.cnc.homing_strategy),
         factory_z_travel_mm=schema.cnc.factory_z_travel_mm,
         calibration_block_height_mm=schema.cnc.calibration_block_height_mm,
         safe_z=schema.safe_z,

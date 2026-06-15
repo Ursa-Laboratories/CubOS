@@ -26,7 +26,6 @@ def _write_gantry(path: Path, *, x_min: float = 0.0) -> Path:
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 100.0
   y_axis_motion: head
   safe_z: 85.0
@@ -466,7 +465,6 @@ def test_run_calibration_prints_full_gantry_yaml_with_grbl_settings(tmp_path):
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 100.0
   y_axis_motion: head
   safe_z: 85.0
@@ -853,7 +851,7 @@ def test_factory_z_travel_mm_raises_if_cnc_key_missing():
 
 def test_factory_z_travel_mm_raises_if_factory_z_travel_mm_key_missing():
     with pytest.raises(ValueError, match="cnc.factory_z_travel_mm"):
-        _factory_z_travel_mm({"cnc": {"homing_strategy": "standard"}})
+        _factory_z_travel_mm({"cnc": {}})
 
 
 def test_factory_z_travel_mm_raises_if_cnc_not_a_dict():
@@ -917,7 +915,6 @@ def _write_gantry_small_z(path):
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 15.0
   y_axis_motion: head
   safe_z: 12.0

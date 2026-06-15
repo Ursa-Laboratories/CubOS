@@ -127,7 +127,6 @@ def run_setup_validation(
         f"  Working volume: X[{vol.x_min}, {vol.x_max}]  "
         f"Y[{vol.y_min}, {vol.y_max}]  Z[{vol.z_min}, {vol.z_max}]"
     )
-    out(f"  Homing strategy: {gantry_config.homing_strategy}")
     out()
 
     out("[2/4] Loading deck config...")

@@ -1,7 +1,6 @@
 serial_port: /dev/ttyUSB0
 gantry_type: cub
 cnc:
-  homing_strategy: standard
   factory_z_travel_mm: 101.5
   y_axis_motion: head
   safe_z: 101.5
