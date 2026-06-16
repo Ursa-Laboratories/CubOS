@@ -32,6 +32,11 @@ def create_campaign_for_protocol_run(
     protocol_file: str,
 ) -> int:
     """Create a campaign and register deck labware for a protocol run."""
+    gantry_config = load_gantry_from_yaml_safe(gantry_path)
+    deck = load_deck_from_yaml_safe(
+        deck_path,
+        factory_z_travel_mm=gantry_config.factory_z_travel_mm,
+    )
     campaign_id = data_store.create_campaign(
         description=(
             f"Zoo protocol run: gantry={gantry_file}, deck={deck_file}, "
@@ -40,11 +45,6 @@ def create_campaign_for_protocol_run(
         deck_config=deck_file,
         gantry_config=gantry_file,
         protocol_config=protocol_file,
-    )
-    gantry_config = load_gantry_from_yaml_safe(gantry_path)
-    deck = load_deck_from_yaml_safe(
-        deck_path,
-        factory_z_travel_mm=gantry_config.factory_z_travel_mm,
     )
     register_deck_labware(data_store, campaign_id, deck)
     return campaign_id

@@ -9,6 +9,7 @@ import json
 import re
 import sqlite3
 import zipfile
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -73,7 +74,7 @@ def list_campaign_summaries(db_path: str | Path) -> list[CampaignSummary]:
     if not path.is_file():
         return []
 
-    with _connect(path) as conn:
+    with closing(_connect(path)) as conn:
         _ensure_tables(conn, ("campaigns", "experiments"))
         rows = conn.execute(
             """
@@ -128,7 +129,7 @@ def export_campaign_measurements_zip(db_path: str | Path, campaign_id: int) -> b
         raise DataDatabaseNotFoundError(f"Data database not found: {path}")
 
     archive = io.BytesIO()
-    with _connect(path) as conn:
+    with closing(_connect(path)) as conn:
         _ensure_tables(conn, ("campaigns", "experiments"))
         if not _campaign_exists(conn, campaign_id):
             raise CampaignNotFoundError(f"Campaign {campaign_id} not found")
@@ -181,7 +182,7 @@ def export_campaign_asmi_zip(db_path: str | Path, campaign_id: int) -> bytes:
     if not path.is_file():
         raise DataDatabaseNotFoundError(f"Data database not found: {path}")
 
-    with _connect(path) as conn:
+    with closing(_connect(path)) as conn:
         _ensure_tables(conn, ("experiments", "asmi_measurements"))
         rows = conn.execute(
             """

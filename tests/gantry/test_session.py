@@ -200,6 +200,25 @@ def test_connect_failure_preserves_existing_session(tmp_path):
     assert session.operation_lock.locked() is False
 
 
+def test_connect_handshake_failure_disconnects_staged_gantry(tmp_path):
+    class PositionFailingGantry(FakeGantry):
+        def get_position_info(self):
+            raise RuntimeError("position read failed")
+
+    session = GantrySession(
+        gantry_factory=PositionFailingGantry,
+        sleep=lambda _seconds: None,
+    )
+
+    with pytest.raises(RuntimeError, match="position read failed"):
+        session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    staged = PositionFailingGantry.instances[-1]
+    assert staged.disconnect_calls == 1
+    assert session.connected is False
+    assert session.operation_lock.locked() is False
+
+
 def test_position_returns_cached_status_while_operation_lock_is_held(tmp_path):
     session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
     session.connect(_write_gantry(tmp_path), filename="gantry.yaml")

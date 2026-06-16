@@ -95,6 +95,35 @@ def test_list_campaign_summaries_counts_measurements(tmp_path):
     assert summary.measurement_counts["asmi"] == 1
 
 
+def test_list_campaign_summaries_closes_database_connection(monkeypatch, tmp_path):
+    import data.exports as exports
+
+    db_path = tmp_path / "panda_data.db"
+    _seed_store(db_path)
+    real_connect = exports._connect
+    closed = []
+
+    class ClosingProbe:
+        def __init__(self, conn):
+            self._conn = conn
+
+        def close(self):
+            closed.append(True)
+            self._conn.close()
+
+        def __getattr__(self, name):
+            return getattr(self._conn, name)
+
+    monkeypatch.setattr(
+        exports,
+        "_connect",
+        lambda path: ClosingProbe(real_connect(path)),
+    )
+
+    assert list_campaign_summaries(db_path)
+    assert closed == [True]
+
+
 def test_export_campaign_measurements_zip_preserves_table_archive_shape(tmp_path):
     db_path = tmp_path / "panda_data.db"
     campaign_id = _seed_store(db_path)

@@ -143,13 +143,20 @@ class GantrySession:
             )
             staged = self._gantry_factory(config=self._runtime_connect_config(config))
             port = str(config.get("serial_port") or "") or None
-            staged.connect(port=port)
-            calibration_warning = self._calibration_mismatch_warning(staged, config)
-            for _ in range(10):
-                info = staged.get_position_info()
-                if info.get("work_pos") is not None:
-                    break
-                self._sleep(0.1)
+            try:
+                staged.connect(port=port)
+                calibration_warning = self._calibration_mismatch_warning(staged, config)
+                for _ in range(10):
+                    info = staged.get_position_info()
+                    if info.get("work_pos") is not None:
+                        break
+                    self._sleep(0.1)
+            except Exception:
+                try:
+                    staged.disconnect()
+                except Exception:
+                    pass
+                raise
 
             self._gantry = staged
             self._calibration_warning = calibration_warning

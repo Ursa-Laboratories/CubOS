@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from data.data_store import DataStore
 from data.protocol_runs import create_campaign_for_protocol_run
 
@@ -80,3 +82,24 @@ def test_create_campaign_for_protocol_run_registers_nested_labware(tmp_path):
     assert [(row[0], row[1], row[2]) for row in rows] == [
         ("vial_holder.vial_1", "vial", None),
     ]
+
+
+def test_create_campaign_for_protocol_run_validates_before_creating_campaign(tmp_path):
+    gantry_path = tmp_path / "gantry.yaml"
+    deck_path = tmp_path / "missing_deck.yaml"
+    gantry_path.write_text(GANTRY_YAML, encoding="utf-8")
+    store = DataStore(db_path=":memory:")
+
+    with pytest.raises(Exception):
+        create_campaign_for_protocol_run(
+            store,
+            gantry_path=gantry_path,
+            deck_path=deck_path,
+            gantry_file="gantry.yaml",
+            deck_file="missing_deck.yaml",
+            protocol_file="protocol.yaml",
+        )
+
+    count = store._conn.execute("SELECT COUNT(*) FROM campaigns").fetchone()[0]
+    store.close()
+    assert count == 0
