@@ -4,14 +4,15 @@ Use this map after reading `AGENTS.md`. Read the smallest relevant set of files 
 
 ## Gantry / motion / coordinates / homing
 
-Read before changing motion, coordinates, bounds, homing, or scan/protocol movement.
+Read before changing motion, coordinates, bounds, homing, session ownership, or scan/protocol movement.
+- `src/gantry/session.py` - persistent connected gantry session, serial operation lock, cached position/status, calibration policy, interrupt handling, and Zoo-owned HTTP runtime delegation.
 - `src/gantry/gantry.py`, `gantry_config.py`, `origin.py` - frame, working volume, deck-origin calibration.
 - `src/gantry/machine_geometry.py` - built-in machine geometry per gantry family. Not user-authored YAML; consumed by setup validation.
 - `src/gantry/coordinate_translator.py`, `instrument_mount.py`, `instrument_loader.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `calibration_utils.py`, `offline.py` - gantry boundary, mounted instrument offsets, GRBL calibration utilities, and labware movement.
 - `src/validation/bounds.py`, `src/validation/protocol_semantics.py` - offline safety checks.
 - Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
 
-Setup and calibration flows should route through public `Gantry` APIs. Do not import `Mill` or `gantry_driver` internals from user-facing scripts.
+Setup and calibration flows should route through public `Gantry` APIs. Long-lived UI/API runtimes such as Zoo should route through `GantrySession`. Do not import `Mill` or `gantry_driver` internals from user-facing scripts.
 
 Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`).
 
@@ -42,6 +43,7 @@ After schema/config changes: focused tests, then `setup/validate_setup.py` for a
 - `src/instruments/<instrument>/driver.py`, `mock.py`, `models.py`, `exceptions.py`.
 - `src/instruments/registry.yaml`, `src/instruments/yaml_schema.py`.
 - `src/protocol_engine/measurements.py`, `data/data_store.py` - persisted measurements.
+- `data/protocol_runs.py`, `data/exports.py` - campaign creation for CubOS-owned protocol sessions and Zoo-compatible result summaries/ZIP exports.
 - Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
 
 ## Calibration scripts
