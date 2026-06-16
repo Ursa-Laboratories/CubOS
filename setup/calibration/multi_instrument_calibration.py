@@ -661,11 +661,6 @@ def run_multi_instrument_calibration(
         non_contact_calibrations: dict[str, dict[str, float]] = {}
         for instrument in calibration_sequence:
             if instrument in rpi_cameras:
-                height_above_block = _prompt_camera_block_distance(
-                    camera_name=instrument,
-                    input_reader=input_reader,
-                    output=output,
-                )
                 _interactive_jog_to_reference(
                     gantry,
                     target_description=(
@@ -684,6 +679,17 @@ def run_multi_instrument_calibration(
                     limit_pull_off_mm=5.0,
                 )
                 camera_coords = dict(gantry.get_coordinates())
+                output(
+                    f"Camera pose recorded for {instrument}: "
+                    f"X={camera_coords['x']:.3f}, "
+                    f"Y={camera_coords['y']:.3f}, "
+                    f"Z={camera_coords['z']:.3f}"
+                )
+                height_above_block = _prompt_camera_block_distance(
+                    camera_name=instrument,
+                    input_reader=input_reader,
+                    output=output,
+                )
                 reference_coords = block_coordinates.get(reference_instrument)
                 if reference_coords is None:
                     raise RuntimeError(
@@ -698,7 +704,7 @@ def run_multi_instrument_calibration(
                     )
                 )
                 output(
-                    f"Recorded camera pose for {instrument}: "
+                    f"Recorded camera calibration for {instrument}: "
                     f"X={camera_coords['x']:.3f}, "
                     f"Y={camera_coords['y']:.3f}, "
                     f"Z={camera_coords['z']:.3f}, "

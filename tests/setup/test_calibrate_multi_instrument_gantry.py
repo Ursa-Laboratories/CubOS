@@ -551,6 +551,11 @@ def test_multi_instrument_calibration_records_rpi_camera_over_block(tmp_path):
     messages: list[str] = []
     inputs = iter(["12.5", "20.0", "y"])
 
+    def read_input(prompt: str) -> str:
+        if "Distance from calibration block top" in prompt:
+            assert any("Camera pose recorded for pi_camera" in message for message in messages)
+        return next(inputs)
+
     result = run_multi_instrument_calibration(
         path,
         reference_instrument="left_probe",
@@ -560,7 +565,7 @@ def test_multi_instrument_calibration_records_rpi_camera_over_block(tmp_path):
         output_gantry_path=out_path,
         write_gantry_yaml=True,
         output=messages.append,
-        input_reader=lambda _prompt: next(inputs),
+        input_reader=read_input,
         gantry_factory=_FakeGantry,
         key_reader=_key_reader(
             [
