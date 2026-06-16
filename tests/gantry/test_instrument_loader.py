@@ -15,6 +15,7 @@ from gantry.loader import load_gantry_from_yaml
 from instruments.asmi.driver import ASMI
 from instruments.filmetrics.driver import Filmetrics
 from instruments.pipette.driver import Pipette
+from instruments.rpi_camera.driver import RPiCamera
 from instruments.uvvis_ccs.driver import UVVisCCS
 from instruments.yaml_schema import InstrumentYamlEntry
 
@@ -220,6 +221,28 @@ class TestLoadInstrumentedGantryFromYaml:
         instr = mounted.instruments["film"]
         assert isinstance(instr, Filmetrics)
         assert instr.offset_x == 20.0
+
+    def test_loads_rpi_camera(self, tmp_path):
+        gantry_path = _write_gantry_yaml(
+            tmp_path,
+            _gantry_yaml(
+                """
+                camera:
+                  type: rpi_camera
+                  vendor: raspberry_pi
+                  offset_x: -12.0
+                  offset_y: -4.0
+                  depth: 3.0
+                  offline: true
+                """
+            ),
+        )
+        mounted = load_instrumented_gantry_from_yaml(gantry_path, _mock_controller())
+        instr = mounted.instruments["camera"]
+        assert isinstance(instr, RPiCamera)
+        assert instr.offset_x == -12.0
+        assert instr.offset_y == -4.0
+        assert instr.depth == 3.0
 
     def test_invalid_vendor_raises_value_error(self, tmp_path):
         gantry_path = _write_gantry_yaml(
