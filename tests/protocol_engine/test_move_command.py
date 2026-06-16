@@ -176,7 +176,7 @@ protocol:
         try:
             protocol = load_protocol_from_yaml(path)
             assert len(protocol) == 2
-            protocol.run(ctx)
+            protocol.execute(ctx)
 
             assert deck.resolve_coordinate.call_count == 2
             assert board.move_to_labware.call_count == 2
@@ -200,7 +200,7 @@ protocol:
             path = f.name
         try:
             protocol = load_protocol_from_yaml(path)
-            protocol.run(ctx)
+            protocol.execute(ctx)
 
             ctx.gantry.move.assert_called_once_with("pipette", (100.0, 50.0, 30.0))
             ctx.gantry.move_to_labware.assert_not_called()
@@ -224,7 +224,7 @@ protocol:
             path = f.name
         try:
             protocol = load_protocol_from_yaml(path)
-            protocol.run(ctx)
+            protocol.execute(ctx)
 
             ctx.gantry.move.assert_called_once_with(
                 "pipette", (0.0, 0.0, 20.0), travel_z=20.0,

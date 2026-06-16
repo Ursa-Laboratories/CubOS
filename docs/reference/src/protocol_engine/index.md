@@ -7,6 +7,8 @@
 ## Submodules
 
 - [protocol_engine.commands](commands/index.md)
+- [protocol_engine.builder](builder.md)
+- [protocol_engine.compiler](compiler.md)
 - [protocol_engine.errors](errors.md)
 - [protocol_engine.loader](loader.md)
 - [protocol_engine.measurements](measurements.md)

@@ -105,15 +105,13 @@ Generic measurement readers currently allow these tables:
 - `uv_curing_measurements`
 - `camera_measurements`
 - `asmi_measurements`
-
-`potentiostat_measurements` is written by `DataStore`, but the generic
-`DataReader` allow-list has not yet been extended to export it through the
-table helper methods.
+- `potentiostat_measurements`
 
 ## CSV Export
 
-CSV export is implemented in `data.export_helpers` and the
-`DataReader.export_dataframe_to_csv()` method. These helpers require pandas:
+CSV and ZIP export is implemented in `data.export_helpers`,
+`data.exports`, and the `DataReader.export_dataframe_to_csv()` method.
+The DataFrame helpers require pandas:
 
 ```bash
 pip install pandas
@@ -148,9 +146,31 @@ python -m data.export_helpers \
 
 If `--csv` is omitted, the helper prints the DataFrame to stdout.
 
+`data.exports` provides UI/API-safe helpers for campaign summaries,
+multi-table measurement ZIPs, and the ASMI raw CSV ZIP:
+
+```python
+from data import (
+    export_campaign_asmi_zip,
+    export_campaign_measurements_zip,
+    list_campaign_summaries,
+)
+
+summaries = list_campaign_summaries("runs/example.db")
+zip_bytes = export_campaign_measurements_zip("runs/example.db", campaign_id=1)
+asmi_zip_bytes = export_campaign_asmi_zip("runs/example.db", campaign_id=1)
+```
+
+Protocol-run campaign setup for wrappers lives in
+`data.protocol_runs.create_campaign_for_protocol_run()`. It creates the
+campaign, registers nested deck labware recursively, and returns the
+`campaign_id` used by `ProtocolContext`.
+
 ## Modules
 
 - `data.data_store` - SQLite schema and write API
 - `data.data_reader` - read-only query and DataFrame helpers
+- `data.exports` - campaign summaries and ZIP export helpers
+- `data.protocol_runs` - protocol-run campaign and labware registration helpers
 - `data.export_helpers` - CLI wrappers for CSV/table export
 - `data.analysis.uvvis` - UV-Vis analysis helper module

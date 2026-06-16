@@ -17,6 +17,7 @@ _VALID_MEASUREMENT_TABLES = frozenset({
     "uv_curing_measurements",
     "camera_measurements",
     "asmi_measurements",
+    "potentiostat_measurements",
 })
 _TABLE_TO_INSTRUMENT = {
     "uvvis_measurements": "uvvis",
@@ -24,6 +25,7 @@ _TABLE_TO_INSTRUMENT = {
     "uv_curing_measurements": "uv_curing",
     "camera_measurements": "camera",
     "asmi_measurements": "asmi",
+    "potentiostat_measurements": "potentiostat",
 }
 _INSTRUMENT_TO_TABLE = {
     instrument: table for table, instrument in _TABLE_TO_INSTRUMENT.items()
@@ -254,7 +256,7 @@ class DataReader:
         Args:
             experiment_id: Experiment identifier.
             instrument: One of `uvvis`, `filmetrics`, `uv_curing`, `camera`,
-                or `asmi`.
+                `asmi`, or `potentiostat`.
         """
         pd = self._require_pandas()
         normalized_instrument = instrument.strip().lower()

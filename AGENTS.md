@@ -79,7 +79,8 @@ Do not treat the pull-off reserve as usable WPos.
 ## Setup Scripts
 
 - `setup/validate_setup.py` — offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
-- `setup/run_protocol.py` — load, validate, connect hardware, run protocol end-to-end. Connects gantry (clearing expected GRBL alarm, restoring state) and instruments before first step; disconnects in `finally`.
+- `setup/run_protocol.py` — load, validate, connect hardware, run protocol end-to-end. Delegates the hardware lifecycle to `protocol_engine.setup.run_on_hardware`, which connects the gantry (clearing expected GRBL alarm, restoring state) and instruments before the first step and disconnects both in `finally`.
+- Python-authored protocols use `ProtocolBuilder.with_setup(...)` (in `protocol_engine.builder`); `protocol.validate()` runs the offline checks and `protocol.run()` runs the same `run_on_hardware` lifecycle. The low-level `protocol.execute(context)` runs steps against a context the caller already prepared.
 - `setup/hello_world.py` — interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y ±1mm), Z (down 1mm), X (up 1mm), Q (quit).
 - `setup/keyboard_input.py` — single-keypress reader (Unix `tty`/`termios`).
 `scan.plate` may target either a top-level `WellPlate` key or a nested holder path such as `plate_holder.plate`, as long as that path resolves to a `WellPlate`.

@@ -8,7 +8,8 @@ nav:
   - Getting Started: getting-started.md
   - Calibration: calibration.md
   - Configuration: configuration.md
-  - Running a Protocol: protocol.md
+  - Run a Protocol with YAML: protocol-yaml.md
+  - Run a Protocol with Python: protocol-python.md
   - Data: data.md
   - Appendix: appendix.md
   - API Reference:

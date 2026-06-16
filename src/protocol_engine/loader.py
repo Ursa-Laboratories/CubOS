@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import List
 
 import yaml
 from pydantic import ValidationError
@@ -44,10 +43,10 @@ _LEGACY_TOP_LEVEL_HINTS: dict[str, str] = {
 # the CommandRegistry is populated before any YAML is validated.
 from . import commands as _commands  # noqa: F401
 
+from .compiler import CommandCall, compile_protocol
 from .errors import ProtocolLoaderError
 from .protocol import Protocol
 from .registry import CommandRegistry
-from .runtime import ProtocolStep
 from .yaml_schema import ProtocolYamlSchema
 
 
@@ -106,28 +105,6 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
     )
 
 
-def _compile_steps(schema: ProtocolYamlSchema) -> List[ProtocolStep]:
-    """Convert validated schema steps into executable ProtocolStep objects."""
-    registry = CommandRegistry.instance()
-    steps: List[ProtocolStep] = []
-    for i, step_schema in enumerate(schema.protocol):
-        registered = registry.get(step_schema.command)
-        validated_args = registered.schema.model_validate(step_schema.args)
-        steps.append(
-            ProtocolStep(
-                index=i,
-                command_name=step_schema.command,
-                handler=registered.handler,
-                # Keep the compiled step aligned with the YAML surface by only
-                # carrying arguments that were explicitly provided. This avoids
-                # materializing handler defaults such as ``travel_z=None`` or
-                # ``reason=""`` into ProtocolStep.args.
-                args=validated_args.model_dump(exclude_unset=True),
-            )
-        )
-    return steps
-
-
 def load_protocol_from_yaml(path: str | Path) -> Protocol:
     """Load a protocol YAML file and return an executable Protocol."""
     path = Path(path)
@@ -136,9 +113,15 @@ def load_protocol_from_yaml(path: str | Path) -> Protocol:
     if raw is None:
         raw = {}
     schema = ProtocolYamlSchema.model_validate(raw)
-    steps = _compile_steps(schema)
-    positions = schema.positions or {}
-    return Protocol(steps=steps, source_path=path, positions=positions)
+    calls = [
+        CommandCall(command=step_schema.command, args=step_schema.args)
+        for step_schema in schema.protocol
+    ]
+    return compile_protocol(
+        calls,
+        source_path=path,
+        positions=schema.positions or {},
+    )
 
 
 def load_protocol_from_yaml_safe(path: str | Path) -> Protocol:

@@ -90,6 +90,11 @@ The runtime package is split by responsibility:
 - `data/` provides SQLite persistence and analysis helpers.
 - `setup/` contains operator-facing validation, calibration, and run scripts.
 
+UI/API wrappers such as Zoo should use `gantry.session.GantrySession` when they
+need a persistent connected gantry. The session owns serial locking, cached
+position/status, manual movement guards, calibration soft-limit state, protocol
+execution against the connected gantry, campaign creation, and run persistence.
+
 For configuration details, command semantics, and operator procedures, use the
 full documentation instead of treating this README as the source of truth.
 

@@ -4,14 +4,15 @@ Use this map after reading `AGENTS.md`. Read the smallest relevant set of files 
 
 ## Gantry / motion / coordinates / homing
 
-Read before changing motion, coordinates, bounds, homing, or scan/protocol movement.
+Read before changing motion, coordinates, bounds, homing, session ownership, or scan/protocol movement.
+- `src/gantry/session.py` - persistent connected gantry session, serial operation lock, cached position/status, calibration policy, interrupt handling, and Zoo-owned HTTP runtime delegation.
 - `src/gantry/gantry.py`, `gantry_config.py`, `origin.py` - frame, working volume, deck-origin calibration.
 - `src/gantry/machine_geometry.py` - built-in machine geometry per gantry family. Not user-authored YAML; consumed by setup validation.
 - `src/gantry/coordinate_translator.py`, `instrument_mount.py`, `instrument_loader.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `calibration_utils.py`, `offline.py` - gantry boundary, mounted instrument offsets, GRBL calibration utilities, and labware movement.
 - `src/validation/bounds.py`, `src/validation/protocol_semantics.py` - offline safety checks.
 - Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
 
-Setup and calibration flows should route through public `Gantry` APIs. Do not import `Mill` or `gantry_driver` internals from user-facing scripts.
+Setup and calibration flows should route through public `Gantry` APIs. Long-lived UI/API runtimes such as Zoo should route through `GantrySession`. Do not import `Mill` or `gantry_driver` internals from user-facing scripts.
 
 Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`).
 
@@ -42,6 +43,7 @@ After schema/config changes: focused tests, then `setup/validate_setup.py` for a
 - `src/instruments/<instrument>/driver.py`, `mock.py`, `models.py`, `exceptions.py`.
 - `src/instruments/registry.yaml`, `src/instruments/yaml_schema.py`.
 - `src/protocol_engine/measurements.py`, `data/data_store.py` - persisted measurements.
+- `data/protocol_runs.py`, `data/exports.py` - campaign creation for CubOS-owned protocol sessions and Zoo-compatible result summaries/ZIP exports.
 - Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
 
 ## Calibration scripts
@@ -54,7 +56,7 @@ After schema/config changes: focused tests, then `setup/validate_setup.py` for a
 ## Setup scripts
 
 - `setup/validate_setup.py` - offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
-- `setup/run_protocol.py` - load, validate, connect hardware, run protocol end-to-end. Connects gantry after clearing expected GRBL alarm and restoring state, connects instruments before first step, and disconnects in `finally`.
+- `setup/run_protocol.py` - load, validate, connect hardware, run protocol end-to-end. Delegates the hardware lifecycle to `protocol_engine.setup.run_on_hardware`, which connects the gantry after clearing the expected GRBL alarm and restoring state, connects instruments before the first step, and disconnects both in `finally`. Python-authored protocols built with `ProtocolBuilder.with_setup(...)` reach the same path via `protocol.run()` (and `protocol.validate()` for offline checks).
 - `setup/hello_world.py` - interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y +/-1mm), Z (down 1mm), X (up 1mm), Q (quit).
 - `setup/keyboard_input.py` - single-keypress reader using Unix `tty`/`termios`.
 

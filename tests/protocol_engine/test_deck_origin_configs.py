@@ -190,7 +190,7 @@ def test_sharc_motion_scan_config_does_not_call_uv_cure():
     uv.cure = MagicMock(side_effect=AssertionError("cure should not be called"))
     uv.health_check = MagicMock(return_value=True)
 
-    result = protocol.run(context)
+    result = protocol.execute(context)
 
     assert len(result[0]) == 96
     assert uv.health_check.call_count == 96

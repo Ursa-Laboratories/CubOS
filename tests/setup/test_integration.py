@@ -138,7 +138,7 @@ class TestEndToEndSetup:
         ]
         try:
             protocol, context = setup_protocol(*paths)
-            results = protocol.run(context)
+            results = protocol.execute(context)
             assert len(results) == 2
         finally:
             for p in paths:

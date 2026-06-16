@@ -23,16 +23,12 @@ import sys
 import traceback
 from pathlib import Path
 
-import yaml
-
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
-from gantry import Gantry
-from protocol_engine.setup import setup_protocol
+from protocol_engine.setup import run_on_hardware
 from protocol_engine.setup_validator import run_setup_validation
-from validation.errors import SetupValidationError
 
 SEPARATOR = "-" * 60
 
@@ -57,65 +53,18 @@ def main() -> None:
         print("\nAborting — validation did not pass.")
         sys.exit(1)
 
-    # Phase 2: Load gantry config for hardware construction
+    # Phase 2: Run on hardware via the shared orchestration path.
+    # run_on_hardware owns the full lifecycle: construct gantry, re-load and
+    # validate configs, connect, prepare, connect instruments, health check,
+    # execute, and disconnect in finally.
     print()
     print(SEPARATOR)
-    print("Setting up for execution...")
+    print("Running protocol on hardware...")
     print(SEPARATOR)
     print()
 
     try:
-        with open(gantry_path) as f:
-            raw_config = yaml.safe_load(f)
-    except Exception as exc:
-        print(f"ERROR: Could not load gantry config: {exc}")
-        sys.exit(1)
-
-    gantry = Gantry(config=raw_config)
-
-    # Phase 3: Run setup_protocol with real gantry (re-loads + validates)
-    try:
-        protocol, context = setup_protocol(
-            gantry_path, deck_path, protocol_path, gantry=gantry,
-        )
-    except SetupValidationError as exc:
-        print(f"Validation failed:\n{exc}")
-        sys.exit(1)
-    except Exception as exc:
-        print(f"Setup failed: {exc}")
-        sys.exit(1)
-
-    print(f"Protocol loaded: {len(protocol)} steps")
-    print()
-
-    # Phase 4: Connect + run
-    try:
-        print("Connecting to gantry...")
-        gantry.connect()
-
-        print("Clearing gantry alarm state if needed...")
-        gantry.prepare_for_protocol_run()
-
-        print("Connecting instruments...")
-        context.gantry.connect_instruments()
-
-        if not gantry.is_healthy():
-            print("ERROR: Gantry health check failed. Aborting.")
-            gantry.disconnect()
-            sys.exit(1)
-
-        print(SEPARATOR)
-        print("Running protocol...")
-        print(SEPARATOR)
-        print()
-
-        results = protocol.run(context)
-
-        print()
-        print(SEPARATOR)
-        print(f"Protocol complete — {len(results)} steps executed.")
-        print(SEPARATOR)
-
+        results = run_on_hardware(gantry_path, deck_path, protocol_path)
     except KeyboardInterrupt:
         print("\nAborted by user.")
         sys.exit(130)
@@ -123,12 +72,11 @@ def main() -> None:
         print(f"\nERROR during execution: {exc}")
         traceback.print_exc()
         sys.exit(1)
-    finally:
-        print("Disconnecting instruments...")
-        context.gantry.disconnect_instruments()
-        print("Disconnecting...")
-        gantry.disconnect()
-        print("Done.")
+
+    print()
+    print(SEPARATOR)
+    print(f"Protocol complete — {len(results)} steps executed.")
+    print(SEPARATOR)
 
 
 if __name__ == "__main__":
