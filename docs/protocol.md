@@ -5,6 +5,13 @@ protocol steps, validates the resulting motion plan, then executes against
 hardware. The protocol source can be a YAML file or a Python-built `Protocol`;
 both paths compile to the same runtime representation before validation.
 
+CubOS provides validation scripts and setup APIs so protocol authors can check
+their work before any hardware moves. Use these checks to catch invalid
+maneuvers, unreachable deck placements, out-of-bounds motion targets, missing
+instruments, and command-semantics problems. When adding protocols, provide a
+validation path alongside the protocol so operators can run the same preflight
+checks before hardware execution.
+
 Data is written only when a `DataStore` and `campaign_id` are attached to
 the `ProtocolContext`. The stock `setup/run_protocol.py` command focuses on
 hardware execution and does not create a campaign automatically.
