@@ -275,7 +275,7 @@ def test_attached_tip_extension_is_checked_against_working_volume_by_semantics()
         ),
     )
 
-    # Cub XL Sterling-like Z geometry: safe_z 85 plus mounted pipette
+    # CubXL multi-instrument-like Z geometry: safe_z 85 plus mounted pipette
     # depth -17 plus a 59.3 mm attached tip requires gantry z=127.3.
     violations = validate_protocol_semantics(
         protocol,

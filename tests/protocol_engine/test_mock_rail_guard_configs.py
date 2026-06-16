@@ -13,8 +13,8 @@ FIXTURES = ROOT / "tests/fixtures/configs"
 
 
 def test_validate_setup_home_over_rail_then_low_travel_fails(tmp_path):
-    gantry_path = tmp_path / "mock_sterling_two_instrument_rail.yaml"
-    protocol_path = tmp_path / "mock_sterling_two_instrument_rail_fail.yaml"
+    gantry_path = tmp_path / "mock_cubxl_multi_instrument_two_instrument_rail.yaml"
+    protocol_path = tmp_path / "mock_cubxl_multi_instrument_two_instrument_rail_fail.yaml"
     gantry_path.write_text(
         dedent(
             """\

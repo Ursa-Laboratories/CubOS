@@ -33,8 +33,8 @@ The script asks before overwriting the input file. To write a calibrated copy:
 
 ```bash
 PYTHONPATH=src python setup/calibrate_gantry.py \
-  configs/gantry/cub_xl_sterling_3_instrument.yaml \
-  --output-gantry configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
+  configs/gantry/cubxl_multi_instrument_3_instrument.yaml \
+  --output-gantry configs/gantry/cubxl_multi_instrument_3_instrument_calibrated.yaml
 ```
 
 The preflight shows the input file, output file, detected instruments, and the
