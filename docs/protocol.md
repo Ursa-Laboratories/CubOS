@@ -9,9 +9,12 @@ Data is written only when a `DataStore` and `campaign_id` are attached to
 the `ProtocolContext`. The stock `setup/run_protocol.py` command focuses on
 hardware execution and does not create a campaign automatically.
 
-## Run Setup Validation First
+## YAML
 
-### Validate YAML From CLI
+YAML remains the standard operator-facing protocol format. It is the path used
+by the stock validation and run scripts.
+
+### Validate YAML
 
 Run `setup/validate_setup.py` before connecting hardware. Use the exact
 gantry, deck, and protocol files intended for the hardware run:
@@ -37,43 +40,6 @@ Validation checks:
 
 Offline validation reduces risk, but it does not prove real-world clearance.
 Confirm physical fixture, cable, tool, and sample clearance before running.
-
-### Validate Python From Python
-
-`setup/validate_setup.py` is the YAML-file CLI. Python-authored protocols
-validate through the same setup path by passing a built `Protocol` object to
-`setup_protocol()`.
-
-This validates gantry, deck, instrument mounts, motion bounds, and protocol
-semantics without executing protocol steps or contacting hardware:
-
-```python
-from protocol_engine.setup import setup_protocol
-from my_protocols.asmi_indentation_a1 import build_protocol
-
-gantry_config = "configs/gantry/cub_xl_asmi.yaml"
-deck_config = "configs/deck/asmi_deck.yaml"
-protocol = build_protocol()
-
-validated_protocol, context = setup_protocol(
-    gantry_config,
-    deck_config,
-    protocol,
-    mock_mode=True,
-)
-
-print(f"Validation passed: {len(validated_protocol)} steps")
-```
-
-Run that validation script before passing a connected gantry into
-`setup_protocol()` or calling `run_protocol()` for a hardware run. Python
-protocols do not bypass bounds validation, semantic validation, setup checks,
-or physical clearance requirements.
-
-## YAML Protocols
-
-YAML remains the standard operator-facing protocol format. It is the path used
-by the stock validation and run scripts.
 
 ### Run YAML From CLI
 
@@ -115,11 +81,43 @@ results = run_protocol(
 If no `gantry` argument is supplied, CubOS builds an offline `Gantry` for
 validation/execution against mock motion, not a connected controller.
 
-## Python Protocols
+## Python
 
 Python-authored protocols are useful when loops, shared constants, or helper
 functions make the protocol clearer than repeated YAML. Use `ProtocolBuilder`,
 then pass the built `Protocol` into the same setup and run functions as YAML.
+
+### Validate Python
+
+`setup/validate_setup.py` is the YAML-file CLI. Python-authored protocols
+validate through the same setup path by passing a built `Protocol` object to
+`setup_protocol()`.
+
+This validates gantry, deck, instrument mounts, motion bounds, and protocol
+semantics without executing protocol steps or contacting hardware:
+
+```python
+from protocol_engine.setup import setup_protocol
+from my_protocols.asmi_indentation_a1 import build_protocol
+
+gantry_config = "configs/gantry/cub_xl_asmi.yaml"
+deck_config = "configs/deck/asmi_deck.yaml"
+protocol = build_protocol()
+
+validated_protocol, context = setup_protocol(
+    gantry_config,
+    deck_config,
+    protocol,
+    mock_mode=True,
+)
+
+print(f"Validation passed: {len(validated_protocol)} steps")
+```
+
+Run that validation script before passing a connected gantry into
+`setup_protocol()` or calling `run_protocol()` for a hardware run. Python
+protocols do not bypass bounds validation, semantic validation, setup checks,
+or physical clearance requirements.
 
 ### Build A Protocol
 
