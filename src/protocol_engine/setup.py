@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any, List, Tuple
 
@@ -21,11 +22,24 @@ from validation.bounds import validate_protocol_motion_bounds
 from validation.errors import ProtocolSemanticValidationError, SetupValidationError
 from validation.protocol_semantics import validate_protocol_semantics
 
+ProtocolInput = str | os.PathLike[str] | Protocol
+
+
+def _validate_protocol_input(protocol_input: ProtocolInput) -> Protocol | None:
+    if isinstance(protocol_input, Protocol):
+        return protocol_input
+    if isinstance(protocol_input, (str, os.PathLike)):
+        return None
+    raise TypeError(
+        "protocol must be a YAML path or protocol_engine.Protocol, "
+        f"got {type(protocol_input).__name__}."
+    )
+
 
 def setup_protocol(
     gantry_path: str | Path,
     deck_path: str | Path,
-    protocol_path: str | Path,
+    protocol_path: ProtocolInput,
     gantry: Any | None = None,
     mock_mode: bool = False,
     data_store: Any | None = None,
@@ -45,7 +59,7 @@ def setup_protocol(
     Args:
         gantry_path: Path to gantry machine YAML config.
         deck_path: Path to deck YAML config.
-        protocol_path: Path to protocol YAML config.
+        protocol_path: Path to protocol YAML config or a prebuilt Protocol.
         gantry: Optional Gantry instance. If None, an offline Gantry is used
             for validation.
         mock_mode: If True, instantiate real driver classes in offline mode.
@@ -60,8 +74,11 @@ def setup_protocol(
         DeckLoaderError: If deck YAML is invalid or missing.
         GantryLoaderError: If embedded instruments are invalid or missing.
         ProtocolLoaderError: If protocol YAML is invalid or missing.
+        TypeError: If protocol_path is neither a path nor a Protocol.
         SetupValidationError: If any positions violate gantry bounds.
     """
+    protocol = _validate_protocol_input(protocol_path)
+
     gantry_config: GantryConfig = load_gantry_from_yaml_safe(gantry_path)
     validate_deck_origin_minima(gantry_config)
     deck: Deck = load_deck_from_yaml_safe(
@@ -88,7 +105,8 @@ def setup_protocol(
             source=str(gantry_path),
         )
 
-    protocol: Protocol = load_protocol_from_yaml_safe(protocol_path)
+    if protocol is None:
+        protocol = load_protocol_from_yaml_safe(protocol_path)
 
     violations = validate_protocol_motion_bounds(
         gantry_config, protocol, deck, instrumented_gantry,
@@ -116,7 +134,7 @@ def setup_protocol(
 def run_protocol(
     gantry_path: str | Path,
     deck_path: str | Path,
-    protocol_path: str | Path,
+    protocol_path: ProtocolInput,
     gantry: Any | None = None,
     mock_mode: bool = False,
     data_store: Any | None = None,

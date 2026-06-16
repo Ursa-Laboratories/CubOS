@@ -12,6 +12,7 @@ from deck.errors import DeckLoaderError
 from gantry.errors import GantryLoaderError
 from gantry.gantry_config import GantryConfig
 from gantry.instrument_mount import InstrumentedGantry
+from protocol_engine.authoring import ProtocolBuilder
 from protocol_engine.errors import ProtocolLoaderError
 from protocol_engine.protocol import Protocol
 from protocol_engine.runtime import ProtocolContext
@@ -215,6 +216,50 @@ protocol:
             assert len(protocol) == 1
             assert protocol.steps[0].command_name == "move"
 
+    def test_setup_accepts_built_protocol_object(self):
+        built_protocol = (
+            ProtocolBuilder()
+            .move(instrument="pipette", position="vial_1")
+            .build()
+        )
+        with _TempYamlFiles() as f:
+            protocol, context = setup_protocol(
+                f.gantry_path, f.deck_path, built_protocol,
+            )
+
+            assert protocol is built_protocol
+            assert isinstance(context, ProtocolContext)
+
+    def test_setup_protocol_object_runs_bounds_validation(self):
+        near_edge_deck = """\
+labware:
+  vial_1:
+    type: vial
+    name: test_vial
+    model_name: standard_vial
+    height: 66.75
+    diameter: 28.0
+    location:
+      x: 2.0
+      y: 40.0
+      z: 20.0
+    capacity_ul: 1500.0
+    working_volume_ul: 1200.0
+"""
+        built_protocol = (
+            ProtocolBuilder()
+            .move(instrument="pipette", position="vial_1")
+            .build()
+        )
+        with _TempYamlFiles(deck=near_edge_deck) as f:
+            with pytest.raises(SetupValidationError):
+                setup_protocol(f.gantry_path, f.deck_path, built_protocol)
+
+    def test_setup_rejects_invalid_protocol_argument_type(self):
+        with _TempYamlFiles() as f:
+            with pytest.raises(TypeError, match="YAML path or protocol_engine.Protocol"):
+                setup_protocol(f.gantry_path, f.deck_path, object())
+
     def test_raises_on_deck_position_out_of_bounds(self):
         out_of_bounds_deck = """\
 labware:
@@ -359,3 +404,43 @@ instruments:
                 mock_mode=True,
             )
             assert isinstance(results, list)
+
+    def test_run_protocol_object_connects_and_disconnects(self, monkeypatch):
+        calls = []
+        original_connect = InstrumentedGantry.connect_instruments
+        original_disconnect = InstrumentedGantry.disconnect_instruments
+
+        def tracking_connect(self):
+            calls.append("connect")
+            return original_connect(self)
+
+        def tracking_disconnect(self):
+            calls.append("disconnect")
+            return original_disconnect(self)
+
+        monkeypatch.setattr(
+            InstrumentedGantry,
+            "connect_instruments",
+            tracking_connect,
+        )
+        monkeypatch.setattr(
+            InstrumentedGantry,
+            "disconnect_instruments",
+            tracking_disconnect,
+        )
+
+        built_protocol = (
+            ProtocolBuilder()
+            .move(instrument="pipette", position="vial_1")
+            .build()
+        )
+        with _TempYamlFiles() as f:
+            results = run_protocol(
+                f.gantry_path,
+                f.deck_path,
+                built_protocol,
+                mock_mode=True,
+            )
+
+        assert isinstance(results, list)
+        assert calls == ["connect", "disconnect"]

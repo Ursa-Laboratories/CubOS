@@ -59,10 +59,14 @@ PYTHONPATH=src python setup/run_protocol.py \
 
 ## Python API
 
-`protocol_engine.setup.run_protocol()` is useful for tests and custom
-orchestration. If no `gantry` argument is supplied, it builds an offline
-`Gantry` for validation/execution against mock motion, not a connected
-controller.
+`protocol_engine.setup.run_protocol()` and `setup_protocol()` are useful for
+tests and custom orchestration. The third argument can be either a YAML
+protocol path or a built `Protocol` object.
+
+If no `gantry` argument is supplied, CubOS builds an offline `Gantry` for
+validation/execution against mock motion, not a connected controller.
+
+### YAML From Python
 
 ```python
 from protocol_engine.setup import run_protocol
@@ -74,38 +78,107 @@ results = run_protocol(
 )
 ```
 
-Use `setup_protocol()` when you need to inspect or customize the context before
-running. Attach a `DataStore` and `campaign_id` when you want command handlers
-to persist measurements:
+### Python Builder
+
+Python-authored protocols use `ProtocolBuilder`, then pass the built
+`Protocol` into the same setup and run functions as YAML:
+
+```python
+from protocol_engine.authoring import ProtocolBuilder, wells
+
+protocol_builder = ProtocolBuilder()
+protocol_builder.home()
+for well_position in wells("plate", rows="A:D", columns=range(1, 7)):
+    protocol_builder.measure(
+        position=well_position,
+        instrument="asmi",
+        method="indentation",
+        measurement_height=-1.0,
+        indentation_limit_height=-5.0,
+        method_kwargs={
+            "step_size": 0.1,
+            "force_limit": 10.0,
+            "baseline_samples": 10,
+            "measure_with_return": False,
+        },
+    )
+protocol_builder.home()
+
+protocol = protocol_builder.build()
+```
+
+`ProtocolBuilder.command("registered_name", ...)` supports registered protocol
+commands that do not have typed builder wrappers.
+
+### Complete Python Main
+
+Attach a `DataStore` and `campaign_id` when command handlers should persist
+measurements. Use a stable `protocol_config` string for Python-authored
+protocols so the campaign records the source that built the protocol.
 
 ```python
 from data import DataStore
-from protocol_engine.setup import setup_protocol
+from protocol_engine.authoring import ProtocolBuilder
+from protocol_engine.setup import run_protocol
 
-store = DataStore("runs/example.db")
-campaign_id = store.create_campaign(
-    "ASMI indentation run",
-    gantry_config="configs/gantry/cub_xl_asmi.yaml",
-    deck_config="configs/deck/asmi_deck.yaml",
-    protocol_config="configs/protocol/asmi/indentation.yaml",
-)
 
-protocol, context = setup_protocol(
-    "configs/gantry/cub_xl_asmi.yaml",
-    "configs/deck/asmi_deck.yaml",
-    "configs/protocol/asmi/indentation.yaml",
-    data_store=store,
-    campaign_id=campaign_id,
-)
+def build_protocol():
+    protocol_builder = ProtocolBuilder()
+    protocol_builder.home()
+    protocol_builder.measure(
+        position="plate.B1",
+        instrument="asmi",
+        method="indentation",
+        measurement_height=-1.0,
+        indentation_limit_height=-3.0,
+        method_kwargs={
+            "step_size": 0.01,
+            "force_limit": 3.0,
+            "baseline_samples": 10,
+            "measure_with_return": False,
+        },
+    )
+    protocol_builder.home()
+    return protocol_builder.build()
 
-results = protocol.run(context)
-store.close()
+
+def main():
+    gantry_config = "configs/gantry/cub_xl_asmi.yaml"
+    deck_config = "configs/deck/asmi_deck.yaml"
+    protocol = build_protocol()
+
+    store = DataStore("runs/example.db")
+    try:
+        campaign_id = store.create_campaign(
+            "ASMI indentation run",
+            gantry_config=gantry_config,
+            deck_config=deck_config,
+            protocol_config="python:my_asmi_protocol.build_protocol",
+        )
+
+        results = run_protocol(
+            gantry_config,
+            deck_config,
+            protocol,
+            mock_mode=True,
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+        print(f"Executed {len(results)} protocol steps")
+    finally:
+        store.close()
+
+
+if __name__ == "__main__":
+    main()
 ```
 
-For real hardware in custom Python code, mirror `setup/run_protocol.py`:
-construct `Gantry(config=...)`, connect it, call `prepare_for_protocol_run()`,
-pass it into `setup_protocol(..., gantry=gantry)`, connect instruments, run,
-and disconnect in cleanup.
+For real hardware in custom Python code, still run offline validation before
+motion. Then mirror `setup/run_protocol.py`: construct `Gantry(config=...)`,
+connect it, call `prepare_for_protocol_run()`, pass it into
+`setup_protocol(..., gantry=gantry)`, connect instruments, run, and disconnect
+in cleanup. Python-authored protocols do not bypass bounds validation, semantic
+validation, setup checks, or physical clearance requirements.
 
 ## Protocol Commands
 

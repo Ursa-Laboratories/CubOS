@@ -8,6 +8,7 @@ import pytest
 from protocol_engine.errors import ProtocolLoaderError
 from protocol_engine.loader import load_protocol_from_yaml, load_protocol_from_yaml_safe
 from protocol_engine.protocol import Protocol
+from protocol_engine.registry import CommandRegistry
 
 
 # ─── Valid protocol YAML fixtures ─────────────────────────────────────────────
@@ -310,6 +311,46 @@ def test_loaded_protocol_has_source_path():
     try:
         protocol = load_protocol_from_yaml(path)
         assert protocol.source_path == Path(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_representative_yaml_compiles_to_expected_runtime_protocol():
+    yaml = """
+positions:
+  park: [1.0, 2.0, 3.0]
+protocol:
+  - home:
+  - move:
+      instrument: pipette
+      position: park
+      travel_z: 10.0
+  - pause:
+      seconds: 0.5
+"""
+    path = _write_yaml(yaml)
+    try:
+        protocol = load_protocol_from_yaml(path)
+        registry = CommandRegistry.instance()
+        steps = protocol.steps
+
+        assert protocol.positions == {"park": [1.0, 2.0, 3.0]}
+        assert [step.index for step in steps] == [0, 1, 2]
+        assert [step.command_name for step in steps] == ["home", "move", "pause"]
+        assert [step.handler for step in steps] == [
+            registry.get("home").handler,
+            registry.get("move").handler,
+            registry.get("pause").handler,
+        ]
+        assert [step.args for step in steps] == [
+            {},
+            {
+                "instrument": "pipette",
+                "position": "park",
+                "travel_z": 10.0,
+            },
+            {"seconds": 0.5},
+        ]
     finally:
         Path(path).unlink(missing_ok=True)
 
