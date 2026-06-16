@@ -10,7 +10,15 @@ from instruments.registry import (
 from instruments.base_instrument import BaseInstrument
 
 
-EXPECTED_TYPES = ["asmi", "filmetrics", "pipette", "potentiostat", "uv_curing", "uvvis_ccs"]
+EXPECTED_TYPES = [
+    "asmi",
+    "filmetrics",
+    "pipette",
+    "potentiostat",
+    "rpi_camera",
+    "uv_curing",
+    "uvvis_ccs",
+]
 
 
 class TestLoadRegistry:
@@ -52,6 +60,9 @@ class TestGetSupportedVendors:
     def test_potentiostat_vendors(self):
         assert get_supported_vendors("potentiostat") == ["admiral"]
 
+    def test_rpi_camera_vendors(self):
+        assert get_supported_vendors("rpi_camera") == ["raspberry_pi"]
+
     def test_uv_curing_vendors(self):
         assert get_supported_vendors("uv_curing") == ["excelitas"]
 
@@ -86,6 +97,10 @@ class TestGetInstrumentClass:
         from instruments.potentiostat.driver import Potentiostat
         assert get_instrument_class("potentiostat") is Potentiostat
 
+    def test_rpi_camera_class(self):
+        from instruments.rpi_camera.driver import RPiCamera
+        assert get_instrument_class("rpi_camera") is RPiCamera
+
     def test_uv_curing_class(self):
         from instruments.uv_curing.driver import UVCuring
         assert get_instrument_class("uv_curing") is UVCuring
@@ -107,6 +122,7 @@ class TestValidateInstrument:
             ("filmetrics", "kla"),
             ("pipette", "opentrons"),
             ("potentiostat", "admiral"),
+            ("rpi_camera", "raspberry_pi"),
             ("uv_curing", "excelitas"),
             ("uvvis_ccs", "thorlabs"),
         ]
