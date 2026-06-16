@@ -11,6 +11,8 @@ hardware execution and does not create a campaign automatically.
 
 ## Run Setup Validation First
 
+### Validate YAML From CLI
+
 Run `setup/validate_setup.py` before connecting hardware. Use the exact
 gantry, deck, and protocol files intended for the hardware run:
 
@@ -36,9 +38,35 @@ Validation checks:
 Offline validation reduces risk, but it does not prove real-world clearance.
 Confirm physical fixture, cable, tool, and sample clearance before running.
 
-Python protocols still need offline setup validation before motion. Build the
-`Protocol` object and pass it to `setup_protocol()` or `run_protocol()` with
-the target gantry and deck configs before using a connected gantry. Python
+### Validate Python From Python
+
+`setup/validate_setup.py` is the YAML-file CLI. Python-authored protocols
+validate through the same setup path by passing a built `Protocol` object to
+`setup_protocol()`.
+
+This validates gantry, deck, instrument mounts, motion bounds, and protocol
+semantics without executing protocol steps or contacting hardware:
+
+```python
+from protocol_engine.setup import setup_protocol
+from my_protocols.asmi_indentation_a1 import build_protocol
+
+gantry_config = "configs/gantry/cub_xl_asmi.yaml"
+deck_config = "configs/deck/asmi_deck.yaml"
+protocol = build_protocol()
+
+validated_protocol, context = setup_protocol(
+    gantry_config,
+    deck_config,
+    protocol,
+    mock_mode=True,
+)
+
+print(f"Validation passed: {len(validated_protocol)} steps")
+```
+
+Run that validation script before passing a connected gantry into
+`setup_protocol()` or calling `run_protocol()` for a hardware run. Python
 protocols do not bypass bounds validation, semantic validation, setup checks,
 or physical clearance requirements.
 
