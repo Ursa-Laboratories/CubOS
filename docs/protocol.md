@@ -5,23 +5,14 @@ protocol steps, validates the resulting motion plan, then executes against
 hardware. The protocol source can be a YAML file or a Python-built `Protocol`;
 both paths compile to the same runtime representation before validation.
 
-## Architecture
-
-- `setup/validate_setup.py` runs the same offline validation path without
-  contacting hardware for YAML protocol files.
-- `setup/run_protocol.py` validates first, connects the gantry and
-  instruments, runs a YAML protocol, and disconnects in `finally`.
-- Python-authored protocols use `ProtocolBuilder` to produce the same
-  `Protocol` object that YAML compilation produces, then call
-  `setup_protocol()` or `run_protocol()` directly.
-
 Data is written only when a `DataStore` and `campaign_id` are attached to
 the `ProtocolContext`. The stock `setup/run_protocol.py` command focuses on
 hardware execution and does not create a campaign automatically.
 
-## Validate Before Hardware
+## Run Setup Validation First
 
-Run setup validation before connecting hardware:
+Run `setup/validate_setup.py` before connecting hardware. Use the exact
+gantry, deck, and protocol files intended for the hardware run:
 
 ```bash
 PYTHONPATH=src python setup/validate_setup.py \
@@ -29,6 +20,10 @@ PYTHONPATH=src python setup/validate_setup.py \
   configs/deck/asmi_deck.yaml \
   configs/protocol/asmi/move_a1.yaml
 ```
+
+Treat this as a required preflight check after calibration changes, deck edits,
+gantry edits, protocol edits, or before the first run of the day on a setup.
+Do not move from offline review to physical motion until this command passes.
 
 Validation checks:
 
@@ -41,9 +36,11 @@ Validation checks:
 Offline validation reduces risk, but it does not prove real-world clearance.
 Confirm physical fixture, cable, tool, and sample clearance before running.
 
-Python protocols still need the same offline setup validation before motion.
-For a Python-authored protocol, build the `Protocol` object and pass it to
-`setup_protocol()` or `run_protocol()` with the target gantry and deck configs.
+Python protocols still need offline setup validation before motion. Build the
+`Protocol` object and pass it to `setup_protocol()` or `run_protocol()` with
+the target gantry and deck configs before using a connected gantry. Python
+protocols do not bypass bounds validation, semantic validation, setup checks,
+or physical clearance requirements.
 
 ## YAML Protocols
 
@@ -211,12 +208,3 @@ validation, setup checks, or physical clearance requirements.
 Deck targets can be top-level labware such as `plate.A1` or nested paths such
 as `plate_holder.plate.A1`. `scan.plate` accepts a top-level or nested target
 that resolves to a `WellPlate`.
-
-## Height Semantics
-
-`measurement_height`, `interwell_scan_height`, `indentation_limit_height`,
-and pipette engagement heights are labware-relative offsets from the resolved
-labware reference Z. Positive is above the surface; negative is below.
-
-The gantry's `safe_z` is different: it is an absolute deck-frame Z used for
-inter-labware travel and first-well scan entry.
