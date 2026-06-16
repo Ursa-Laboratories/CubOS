@@ -14,7 +14,7 @@ hardware execution and does not create a campaign automatically.
 YAML remains the standard operator-facing protocol format. It is the path used
 by the stock validation and run scripts.
 
-### Validate YAML
+### Validate Hardware Setup Before Running YAML
 
 Run `setup/validate_setup.py` before connecting hardware. Use the exact
 gantry, deck, and protocol files intended for the hardware run:
@@ -62,32 +62,13 @@ PYTHONPATH=src python setup/run_protocol.py \
 6. Sequential protocol execution.
 7. Instrument and gantry disconnect in cleanup.
 
-### Run YAML From Python
-
-`protocol_engine.setup.run_protocol()` and `setup_protocol()` are useful for
-tests and custom orchestration. Pass a YAML protocol path as the third
-argument to preserve the same load and compile path as the CLI.
-
-```python
-from protocol_engine.setup import run_protocol
-
-results = run_protocol(
-    "configs/gantry/cub_xl_asmi.yaml",
-    "configs/deck/asmi_deck.yaml",
-    "configs/protocol/asmi/move_a1.yaml",
-)
-```
-
-If no `gantry` argument is supplied, CubOS builds an offline `Gantry` for
-validation/execution against mock motion, not a connected controller.
-
 ## Python
 
 Python-authored protocols are useful when loops, shared constants, or helper
 functions make the protocol clearer than repeated YAML. Use `ProtocolBuilder`,
 then pass the built `Protocol` into the same setup and run functions as YAML.
 
-### Validate Python
+### Validate Hardware Setup Before Running Python
 
 `setup/validate_setup.py` is the YAML-file CLI. Python-authored protocols
 validate through the same setup path by passing a built `Protocol` object to
