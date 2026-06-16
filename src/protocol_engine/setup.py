@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 from typing import Any, List, Tuple
 
+import yaml
+
 from deck.deck import Deck
 from deck.loader import load_deck_from_yaml_safe
 from gantry.errors import GantryLoaderError
@@ -15,6 +17,7 @@ from gantry.instrument_loader import load_instrumented_gantry_from_config
 from gantry.instrument_mount import InstrumentedGantry
 from gantry.loader import load_gantry_from_yaml_safe
 from gantry.origin import validate_deck_origin_minima
+from protocol_engine.errors import GantryHealthCheckError
 from protocol_engine.loader import load_protocol_from_yaml_safe
 from protocol_engine.protocol import Protocol
 from protocol_engine.runtime import ProtocolContext
@@ -67,7 +70,7 @@ def setup_protocol(
         campaign_id: Optional campaign ID used with ``data_store``.
 
     Returns:
-        Tuple of (Protocol, ProtocolContext) ready for ``protocol.run(context)``.
+        Tuple of (Protocol, ProtocolContext) ready for ``protocol.execute(context)``.
 
     Raises:
         GantryLoaderError: If gantry YAML is invalid or missing.
@@ -131,7 +134,7 @@ def setup_protocol(
     return protocol, context
 
 
-def run_protocol(
+def run_on_hardware(
     gantry_path: str | Path,
     deck_path: str | Path,
     protocol_path: ProtocolInput,
@@ -140,21 +143,56 @@ def run_protocol(
     data_store: Any | None = None,
     campaign_id: int | None = None,
 ) -> List[Any]:
-    """Load configs, validate, and execute the protocol in one call.
+    """Load configs, validate, and run the protocol as a full hardware session.
 
-    Connects instruments before running and disconnects them afterwards,
-    even if the protocol raises an exception.
+    This is the single orchestration path shared by the YAML CLI
+    (``setup/run_protocol.py``) and ``Protocol.run()``. The lifecycle is:
+
+        1. construct a ``Gantry`` from the gantry YAML (when ``gantry`` is None)
+        2. ``setup_protocol`` — load/validate configs, build the context
+        3. ``gantry.connect()``
+        4. ``gantry.prepare_for_protocol_run()`` — clear any startup alarm
+        5. ``connect_instruments()``
+        6. ``gantry.is_healthy()`` health check (abort if unhealthy)
+        7. ``protocol.execute(context)`` — run the steps
+        8. disconnect instruments and gantry in ``finally``, even on error
+
+    Args:
+        gantry_path: Path to gantry machine YAML config.
+        deck_path: Path to deck YAML config.
+        protocol_path: Path to protocol YAML config or a prebuilt Protocol.
+        gantry: Optional Gantry instance. If None, one is constructed from
+            ``gantry_path``. Tests pass an offline Gantry to stay off hardware.
+        mock_mode: If True, instantiate real driver classes in offline mode.
+        data_store: Optional persistence store attached to the runtime context.
+        campaign_id: Optional campaign ID used with ``data_store``.
 
     Returns:
         List of step results from protocol execution.
+
+    Raises:
+        GantryHealthCheckError: If the gantry health check fails.
     """
+    if gantry is None:
+        with open(gantry_path) as f:
+            raw_config = yaml.safe_load(f)
+        gantry = Gantry(config=raw_config)
+
     protocol, context = setup_protocol(
         gantry_path, deck_path, protocol_path,
         gantry=gantry, mock_mode=mock_mode,
         data_store=data_store, campaign_id=campaign_id,
     )
-    context.gantry.connect_instruments()
+
     try:
-        return protocol.run(context)
+        gantry.connect()
+        gantry.prepare_for_protocol_run()
+        context.gantry.connect_instruments()
+        if not gantry.is_healthy():
+            raise GantryHealthCheckError(
+                "Gantry health check failed before protocol execution; aborting."
+            )
+        return protocol.execute(context)
     finally:
         context.gantry.disconnect_instruments()
+        gantry.disconnect()

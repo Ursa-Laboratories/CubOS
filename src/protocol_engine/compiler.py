@@ -10,7 +10,7 @@ from typing import Any, Iterable, Mapping
 # Side-effect import: triggers all @protocol_command decorators so that
 # the CommandRegistry is populated before Python-authored protocols compile.
 from . import commands as _commands  # noqa: F401
-from .protocol import Protocol
+from .protocol import Protocol, ProtocolSetup
 from .registry import CommandRegistry
 from .runtime import ProtocolStep
 
@@ -28,6 +28,7 @@ def compile_protocol(
     *,
     positions: Mapping[str, Any] | None = None,
     source_path: str | Path | None = None,
+    setup: ProtocolSetup | None = None,
 ) -> Protocol:
     """Compile validated command calls into an executable ``Protocol``.
 
@@ -55,4 +56,5 @@ def compile_protocol(
         steps=steps,
         source_path=protocol_source,
         positions=deepcopy(dict(positions or {})),
+        setup=setup,
     )

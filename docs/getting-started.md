@@ -43,14 +43,14 @@ pip install -e ".[asmi]"
 3. Calibrate the gantry with [Calibration](calibration.md).
 4. Define the active gantry, deck, and protocol YAML files in
    [Configuration](configuration.md).
-5. Validate and run with [Running a Protocol](protocol.md).
+5. Validate and run with [Run a Protocol with YAML](protocol-yaml.md).
 
 ## Python API
 
 Most operators use YAML files from the command line. Python callers can use:
 
 ```python
-from protocol_engine.setup import setup_protocol, run_protocol
+from protocol_engine.setup import setup_protocol, run_on_hardware
 ```
 
 See the [API Reference](reference/index.md) for generated module docs.

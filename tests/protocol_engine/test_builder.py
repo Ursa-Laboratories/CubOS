@@ -1,4 +1,4 @@
-"""Tests for Python protocol authoring and shared compilation."""
+"""Tests for the Python protocol builder and shared compilation."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import importlib
 import pytest
 from pydantic import ValidationError
 
-from protocol_engine.authoring import ProtocolBuilder, wells
+from protocol_engine.builder import ProtocolBuilder, wells
 from protocol_engine.compiler import CommandCall, compile_protocol
+from protocol_engine.protocol import ProtocolSetup
 from protocol_engine.registry import CommandRegistry
 
 
@@ -92,7 +93,7 @@ def test_wells_returns_row_major_targets():
 def test_builder_supports_registered_commands_without_typed_wrapper():
     protocol = (
         ProtocolBuilder()
-        .command("breakpoint", message="Continue?")
+        .add_command("breakpoint", message="Continue?")
         .build()
     )
 
@@ -102,8 +103,8 @@ def test_builder_supports_registered_commands_without_typed_wrapper():
 
 
 def test_builder_omits_defaults_unless_explicitly_set():
-    implicit_default = ProtocolBuilder().pause(1.0).build()
-    explicit_default = ProtocolBuilder().pause(1.0, reason="").build()
+    implicit_default = ProtocolBuilder().add_pause(1.0).build()
+    explicit_default = ProtocolBuilder().add_pause(1.0, reason="").build()
 
     assert implicit_default.steps[0].args == {"seconds": 1.0}
     assert explicit_default.steps[0].args == {"seconds": 1.0, "reason": ""}
@@ -111,8 +112,8 @@ def test_builder_omits_defaults_unless_explicitly_set():
 
 def test_builder_mutation_after_build_does_not_mutate_built_protocol():
     protocol_builder = ProtocolBuilder()
-    protocol_builder.position("park", [1.0, 2.0, 3.0])
-    protocol_builder.move(
+    protocol_builder.add_position("park", [1.0, 2.0, 3.0])
+    protocol_builder.add_move(
         instrument="pipette",
         position="park",
         travel_z=10.0,
@@ -120,8 +121,8 @@ def test_builder_mutation_after_build_does_not_mutate_built_protocol():
 
     protocol = protocol_builder.build()
 
-    protocol_builder.position("park", [9.0, 9.0, 9.0])
-    protocol_builder.home()
+    protocol_builder.add_position("park", [9.0, 9.0, 9.0])
+    protocol_builder.add_home()
 
     assert protocol.positions == {"park": [1.0, 2.0, 3.0]}
     assert _step_signature(protocol) == [
@@ -135,3 +136,24 @@ def test_builder_mutation_after_build_does_not_mutate_built_protocol():
             },
         ),
     ]
+
+
+def test_with_setup_attaches_setup_metadata():
+    protocol = (
+        ProtocolBuilder.with_setup(
+            gantry_path="configs/gantry/cub_xl_asmi.yaml",
+            deck_path="configs/deck/asmi_deck.yaml",
+        )
+        .add_home()
+        .build()
+    )
+
+    assert protocol.setup == ProtocolSetup(
+        gantry_path="configs/gantry/cub_xl_asmi.yaml",
+        deck_path="configs/deck/asmi_deck.yaml",
+    )
+
+
+def test_builder_without_setup_has_no_setup_metadata():
+    protocol = ProtocolBuilder().add_home().build()
+    assert protocol.setup is None

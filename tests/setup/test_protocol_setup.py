@@ -10,14 +10,15 @@ import pytest
 
 from deck.errors import DeckLoaderError
 from gantry.errors import GantryLoaderError
+from gantry.gantry import Gantry
 from gantry.gantry_config import GantryConfig
 from gantry.instrument_mount import InstrumentedGantry
-from protocol_engine.authoring import ProtocolBuilder
+from protocol_engine.builder import ProtocolBuilder
 from protocol_engine.errors import ProtocolLoaderError
 from protocol_engine.protocol import Protocol
 from protocol_engine.runtime import ProtocolContext
 from protocol_engine.registry import CommandRegistry
-from protocol_engine.setup import run_protocol, setup_protocol
+from protocol_engine.setup import run_on_hardware, setup_protocol
 from validation.errors import SetupValidationError
 
 
@@ -219,7 +220,7 @@ protocol:
     def test_setup_accepts_built_protocol_object(self):
         built_protocol = (
             ProtocolBuilder()
-            .move(instrument="pipette", position="vial_1")
+            .add_move(instrument="pipette", position="vial_1")
             .build()
         )
         with _TempYamlFiles() as f:
@@ -248,7 +249,7 @@ labware:
 """
         built_protocol = (
             ProtocolBuilder()
-            .move(instrument="pipette", position="vial_1")
+            .add_move(instrument="pipette", position="vial_1")
             .build()
         )
         with _TempYamlFiles(deck=near_edge_deck) as f:
@@ -364,17 +365,24 @@ instruments:
             assert context.gantry.instruments["pipette"]._offline is True
 
 
-class TestRunProtocolLifecycle:
+class TestRunOnHardwareLifecycle:
+    """run_on_hardware drives the full session against an offline gantry.
 
-    def test_run_protocol_connects_and_disconnects(self):
+    These tests pass an explicit offline Gantry so the shared orchestration
+    path (connect → prepare → connect instruments → health check → execute →
+    disconnect) runs without touching real hardware.
+    """
+
+    def test_run_on_hardware_connects_and_disconnects(self):
         with _TempYamlFiles() as f:
-            results = run_protocol(
+            results = run_on_hardware(
                 f.gantry_path, f.deck_path, f.protocol_path,
+                gantry=Gantry(offline=True),
                 mock_mode=True,
             )
             assert isinstance(results, list)
 
-    def test_run_protocol_disconnects_on_failure(self):
+    def test_run_on_hardware_disconnects_on_failure(self):
         bad_protocol = """\
 protocol:
   - move:
@@ -383,12 +391,13 @@ protocol:
 """
         with _TempYamlFiles(protocol=bad_protocol) as f:
             with pytest.raises(Exception):
-                run_protocol(
+                run_on_hardware(
                     f.gantry_path, f.deck_path, f.protocol_path,
+                    gantry=Gantry(offline=True),
                     mock_mode=True,
                 )
 
-    def test_run_protocol_mock_mode(self):
+    def test_run_on_hardware_mock_mode(self):
         gantry_yaml = _gantry_with_instruments("""\
 instruments:
   pipette:
@@ -399,48 +408,75 @@ instruments:
     depth: 0.0
 """)
         with _TempYamlFiles(gantry=gantry_yaml) as f:
-            results = run_protocol(
+            results = run_on_hardware(
                 f.gantry_path, f.deck_path, f.protocol_path,
+                gantry=Gantry(offline=True),
                 mock_mode=True,
             )
             assert isinstance(results, list)
 
-    def test_run_protocol_object_connects_and_disconnects(self, monkeypatch):
+    def test_run_on_hardware_full_lifecycle_order(self, monkeypatch):
         calls = []
+
+        # Track the gantry-level lifecycle steps.
+        for name in ("connect", "prepare_for_protocol_run", "disconnect"):
+            original = getattr(Gantry, name)
+
+            def make_tracker(method, label):
+                def tracker(self, *args, **kwargs):
+                    calls.append(label)
+                    return method(self, *args, **kwargs)
+                return tracker
+
+            monkeypatch.setattr(Gantry, name, make_tracker(original, name))
+
+        original_is_healthy = Gantry.is_healthy
+
+        def tracking_is_healthy(self):
+            calls.append("is_healthy")
+            return original_is_healthy(self)
+
+        monkeypatch.setattr(Gantry, "is_healthy", tracking_is_healthy)
+
+        # Track the instrument-level connect/disconnect steps.
         original_connect = InstrumentedGantry.connect_instruments
         original_disconnect = InstrumentedGantry.disconnect_instruments
 
         def tracking_connect(self):
-            calls.append("connect")
+            calls.append("connect_instruments")
             return original_connect(self)
 
         def tracking_disconnect(self):
-            calls.append("disconnect")
+            calls.append("disconnect_instruments")
             return original_disconnect(self)
 
         monkeypatch.setattr(
-            InstrumentedGantry,
-            "connect_instruments",
-            tracking_connect,
+            InstrumentedGantry, "connect_instruments", tracking_connect,
         )
         monkeypatch.setattr(
-            InstrumentedGantry,
-            "disconnect_instruments",
-            tracking_disconnect,
+            InstrumentedGantry, "disconnect_instruments", tracking_disconnect,
         )
 
         built_protocol = (
             ProtocolBuilder()
-            .move(instrument="pipette", position="vial_1")
+            .add_move(instrument="pipette", position="vial_1")
             .build()
         )
         with _TempYamlFiles() as f:
-            results = run_protocol(
+            results = run_on_hardware(
                 f.gantry_path,
                 f.deck_path,
                 built_protocol,
+                gantry=Gantry(offline=True),
                 mock_mode=True,
             )
 
         assert isinstance(results, list)
-        assert calls == ["connect", "disconnect"]
+        assert calls == [
+            "connect",
+            "prepare_for_protocol_run",
+            "connect_instruments",
+            "is_healthy",
+            "disconnect_instruments",
+            "disconnect",
+        ]

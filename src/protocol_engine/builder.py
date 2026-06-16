@@ -1,4 +1,4 @@
-"""Python authoring helpers for CubOS protocols."""
+"""Build CubOS protocols from Python: ``ProtocolBuilder`` and well helpers."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .compiler import CommandCall, compile_protocol
-from .protocol import Protocol
+from .protocol import Protocol, ProtocolSetup
 
 _UNSET = object()
 
@@ -55,11 +55,28 @@ class ProtocolBuilder:
     def __init__(self) -> None:
         self._calls: list[CommandCall] = []
         self._positions: dict[str, Any] = {}
+        self._setup: ProtocolSetup | None = None
 
-    def home(self) -> "ProtocolBuilder":
-        return self.command("home")
+    @classmethod
+    def with_setup(
+        cls,
+        *,
+        gantry_path: str | Path,
+        deck_path: str | Path,
+    ) -> "ProtocolBuilder":
+        """Start a builder that carries the gantry/deck pairing for hardware runs.
 
-    def move(
+        The resulting :class:`Protocol` can be validated offline with
+        ``protocol.validate()`` and run on hardware with ``protocol.run()``.
+        """
+        builder = cls()
+        builder._setup = ProtocolSetup(gantry_path=gantry_path, deck_path=deck_path)
+        return builder
+
+    def add_home(self) -> "ProtocolBuilder":
+        return self.add_command("home")
+
+    def add_move(
         self,
         *,
         instrument: str,
@@ -69,9 +86,9 @@ class ProtocolBuilder:
         args = {"instrument": instrument, "position": position}
         if travel_z is not _UNSET:
             args["travel_z"] = travel_z
-        return self.command("move", args)
+        return self.add_command("move", args)
 
-    def measure(
+    def add_measure(
         self,
         *,
         instrument: str,
@@ -92,9 +109,9 @@ class ProtocolBuilder:
             args["indentation_limit_height"] = indentation_limit_height
         if method_kwargs is not _UNSET:
             args["method_kwargs"] = method_kwargs
-        return self.command("measure", args)
+        return self.add_command("measure", args)
 
-    def scan(
+    def add_scan(
         self,
         *,
         plate: str,
@@ -119,9 +136,9 @@ class ProtocolBuilder:
             args["delay_s"] = delay_s
         if method_kwargs is not _UNSET:
             args["method_kwargs"] = method_kwargs
-        return self.command("scan", args)
+        return self.add_command("scan", args)
 
-    def pause(
+    def add_pause(
         self,
         seconds: float,
         *,
@@ -130,9 +147,9 @@ class ProtocolBuilder:
         args: dict[str, Any] = {"seconds": seconds}
         if reason is not _UNSET:
             args["reason"] = reason
-        return self.command("pause", args)
+        return self.add_command("pause", args)
 
-    def position(
+    def add_position(
         self,
         name: str,
         coordinates: Iterable[float],
@@ -140,12 +157,12 @@ class ProtocolBuilder:
         self._positions[name] = list(coordinates)
         return self
 
-    def positions(self, positions: Mapping[str, Any]) -> "ProtocolBuilder":
+    def add_positions(self, positions: Mapping[str, Any]) -> "ProtocolBuilder":
         for name, coordinates in positions.items():
             self._positions[name] = deepcopy(coordinates)
         return self
 
-    def command(
+    def add_command(
         self,
         command: str,
         args: Mapping[str, Any] | None = None,
@@ -165,4 +182,5 @@ class ProtocolBuilder:
             self._calls,
             positions=self._positions,
             source_path=source_path,
+            setup=self._setup,
         )

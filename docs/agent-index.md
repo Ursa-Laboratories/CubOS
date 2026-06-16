@@ -54,7 +54,7 @@ After schema/config changes: focused tests, then `setup/validate_setup.py` for a
 ## Setup scripts
 
 - `setup/validate_setup.py` - offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
-- `setup/run_protocol.py` - load, validate, connect hardware, run protocol end-to-end. Connects gantry after clearing expected GRBL alarm and restoring state, connects instruments before first step, and disconnects in `finally`.
+- `setup/run_protocol.py` - load, validate, connect hardware, run protocol end-to-end. Delegates the hardware lifecycle to `protocol_engine.setup.run_on_hardware`, which connects the gantry after clearing the expected GRBL alarm and restoring state, connects instruments before the first step, and disconnects both in `finally`. Python-authored protocols built with `ProtocolBuilder.with_setup(...)` reach the same path via `protocol.run()` (and `protocol.validate()` for offline checks).
 - `setup/hello_world.py` - interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y +/-1mm), Z (down 1mm), X (up 1mm), Q (quit).
 - `setup/keyboard_input.py` - single-keypress reader using Unix `tty`/`termios`.
 
