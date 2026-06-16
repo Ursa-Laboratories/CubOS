@@ -31,7 +31,7 @@ configs/
     asmi/
     filmetrics/
     sharc_uv/
-    sterling/
+    cubxl_multi_instrument/
 ```
 
 There are no separate instrument-board YAMLs. Mounted instruments and offsets live
@@ -59,18 +59,18 @@ PYTHONPATH=src python setup/validate_setup.py \
 ## Current Files
 
 - `gantry/cub_xl_asmi.yaml` - measured ASMI Cub-XL setup.
-- `gantry/cub_xl_sterling.yaml` - Sterling ASMI setup.
+- `gantry/cubxl_multi_instrument.yaml` - cubxl_multi_instrument ASMI setup.
 - `gantry/cub_filmetrics.yaml` - Filmetrics setup with placeholder optical TCP
   values that still require hardware calibration.
 - `gantry/cub_xl_panda.yaml` - PANDA estimate with placeholder camera/capper
   instrument entries; those placeholders parse as config data but will not
   instantiate until real instrument drivers are registered.
-- `deck/asmi_deck.yaml`, `deck/sterling_deck.yaml`,
+- `deck/asmi_deck.yaml`, `deck/cubxl_multi_instrument_deck.yaml`,
   `deck/filmetrics_deck.yaml`, `deck/panda_deck.yaml`,
   `deck/sharc_uv_deck.yaml`.
 - `protocol/asmi/move_a1.yaml`, `protocol/asmi/indentation.yaml`,
-  `protocol/sterling/park.yaml`, `protocol/sterling/vial_scan.yaml`,
-  `protocol/sterling/2_instrument_vial_scan.yaml`,
+  `protocol/cubxl_multi_instrument/park.yaml`, `protocol/cubxl_multi_instrument/vial_scan.yaml`,
+  `protocol/cubxl_multi_instrument/2_instrument_vial_scan.yaml`,
   `protocol/filmetrics/scan.yaml`, `protocol/sharc_uv/curing_scan.yaml`,
   `protocol/sharc_uv/motion_scan.yaml`.
 

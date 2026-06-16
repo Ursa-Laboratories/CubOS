@@ -1,4 +1,4 @@
-# Sterling two-instrument vial-position scan.
+# cubxl_multi_instrument two-instrument vial-position scan.
 #
 # Motion-only protocol derived from vial_scan.yaml. It visits the same
 # high deck-frame Z vial XY positions without descending into vials:
@@ -6,10 +6,10 @@
 # - even-numbered vials use the Opentrons pipette
 #
 # Order preserves the original front/back alternating pattern: 1, 8, 2, 7, 3,
-# 6, 4, 5. Run only after Sterling has been calibrated with both instruments.
+# 6, 4, 5. Run only after cubxl_multi_instrument has been calibrated with both instruments.
 
 positions:
-  # Shared park target chosen to remain in-bounds after Sterling pipette offset compensation.
+  # Shared park target chosen to remain in-bounds after cubxl_multi_instrument pipette offset compensation.
   park_position: [223.0, 260.0, 85.0]
   vial_1_scan: [223.0, 25.0, 40.0]
   vial_2_scan: [223.0, 58.5, 40.0]

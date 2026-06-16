@@ -197,20 +197,20 @@ def test_sharc_motion_scan_config_does_not_call_uv_cure():
     uv.cure.assert_not_called()
 
 
-def test_sterling_candidate_validates_with_park_protocol():
+def test_cubxl_multi_instrument_candidate_validates_with_park_protocol():
     _, context = setup_protocol(
-        FIXTURES / "gantry/mock_sterling.yaml",
-        FIXTURES / "deck/mock_sterling_deck.yaml",
-        FIXTURES / "protocol/mock_sterling_park.yaml",
+        FIXTURES / "gantry/mock_cubxl_multi_instrument.yaml",
+        FIXTURES / "deck/mock_cubxl_multi_instrument_deck.yaml",
+        FIXTURES / "protocol/mock_cubxl_multi_instrument_park.yaml",
     )
     assert context.gantry.instruments["potentiostat"]._offline is True
 
 
-def test_sterling_vial_scan_visits_vials_in_alternating_order():
+def test_cubxl_multi_instrument_vial_scan_visits_vials_in_alternating_order():
     protocol, context = setup_protocol(
-        FIXTURES / "gantry/mock_sterling.yaml",
-        FIXTURES / "deck/mock_sterling_deck.yaml",
-        FIXTURES / "protocol/mock_sterling_vial_scan.yaml",
+        FIXTURES / "gantry/mock_cubxl_multi_instrument.yaml",
+        FIXTURES / "deck/mock_cubxl_multi_instrument_deck.yaml",
+        FIXTURES / "protocol/mock_cubxl_multi_instrument_vial_scan.yaml",
     )
 
     move_positions = [

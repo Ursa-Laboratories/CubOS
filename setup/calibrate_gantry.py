@@ -5,8 +5,8 @@ Examples:
     python setup/calibrate_gantry.py ../BU-Configs/configs/gantry/cub_xl_asmi.yaml
 
     python setup/calibrate_gantry.py \
-      ../BU-Configs/configs/gantry/cub_xl_sterling_3_instrument.yaml \
-      --output-gantry ../BU-Configs/configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
+      ../BU-Configs/configs/gantry/cubxl_multi_instrument_3_instrument.yaml \
+      --output-gantry ../BU-Configs/configs/gantry/cubxl_multi_instrument_3_instrument_calibrated.yaml
 
 The script reads the input gantry YAML, counts mounted instruments, and chooses
 single- or multi-instrument calibration. If no output path is provided, it asks
@@ -251,8 +251,8 @@ def main() -> None:
             "  PYTHONPATH=src python setup/calibrate_gantry.py "
             "../BU-Configs/configs/gantry/cub_xl_asmi.yaml\n"
             "  PYTHONPATH=src python setup/calibrate_gantry.py "
-            "../BU-Configs/configs/gantry/cub_xl_sterling_3_instrument.yaml "
-            "--output-gantry ../BU-Configs/configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml"
+            "../BU-Configs/configs/gantry/cubxl_multi_instrument_3_instrument.yaml "
+            "--output-gantry ../BU-Configs/configs/gantry/cubxl_multi_instrument_3_instrument_calibrated.yaml"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

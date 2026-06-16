@@ -1,6 +1,6 @@
-# Minimal Sterling gantry bring-up protocol.
+# Minimal cubxl_multi_instrument gantry bring-up protocol.
 #
-# This exercises the consolidated Sterling gantry machine config without
+# This exercises the consolidated cubxl_multi_instrument gantry machine config without
 # descending toward the vial holder. Run only after homing, WPos calibration,
 # jog-direction checks, and clearance checks pass on the physical setup.
 

@@ -1,4 +1,4 @@
-# Sterling vial-position scan.
+# cubxl_multi_instrument vial-position scan.
 #
 # This is a motion-only protocol: it visits the configured vial XY centers at a
 # high deck-frame Z plane without descending into the vials.
