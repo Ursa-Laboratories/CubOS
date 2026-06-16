@@ -1,14 +1,19 @@
 # Running a Protocol
 
-A protocol run loads gantry, deck, and protocol YAML, compiles the protocol
-steps, validates the resulting motion plan, then executes against hardware.
+A protocol run loads gantry and deck YAML plus a protocol source, compiles the
+protocol steps, validates the resulting motion plan, then executes against
+hardware. The protocol source can be a YAML file or a Python-built `Protocol`;
+both paths compile to the same runtime representation before validation.
 
 ## Architecture
 
 - `setup/validate_setup.py` runs the same offline validation path without
-  contacting hardware.
+  contacting hardware for YAML protocol files.
 - `setup/run_protocol.py` validates first, connects the gantry and
-  instruments, runs the protocol, and disconnects in `finally`.
+  instruments, runs a YAML protocol, and disconnects in `finally`.
+- Python-authored protocols use `ProtocolBuilder` to produce the same
+  `Protocol` object that YAML compilation produces, then call
+  `setup_protocol()` or `run_protocol()` directly.
 
 Data is written only when a `DataStore` and `campaign_id` are attached to
 the `ProtocolContext`. The stock `setup/run_protocol.py` command focuses on
@@ -36,7 +41,16 @@ Validation checks:
 Offline validation reduces risk, but it does not prove real-world clearance.
 Confirm physical fixture, cable, tool, and sample clearance before running.
 
-## Run From YAML
+Python protocols still need the same offline setup validation before motion.
+For a Python-authored protocol, build the `Protocol` object and pass it to
+`setup_protocol()` or `run_protocol()` with the target gantry and deck configs.
+
+## YAML Protocols
+
+YAML remains the standard operator-facing protocol format. It is the path used
+by the stock validation and run scripts.
+
+### Run YAML From CLI
 
 After calibration, jog checks, and offline validation, run a protocol with:
 
@@ -57,16 +71,11 @@ PYTHONPATH=src python setup/run_protocol.py \
 6. Sequential protocol execution.
 7. Instrument and gantry disconnect in cleanup.
 
-## Python API
+### Run YAML From Python
 
 `protocol_engine.setup.run_protocol()` and `setup_protocol()` are useful for
-tests and custom orchestration. The third argument can be either a YAML
-protocol path or a built `Protocol` object.
-
-If no `gantry` argument is supplied, CubOS builds an offline `Gantry` for
-validation/execution against mock motion, not a connected controller.
-
-### YAML From Python
+tests and custom orchestration. Pass a YAML protocol path as the third
+argument to preserve the same load and compile path as the CLI.
 
 ```python
 from protocol_engine.setup import run_protocol
@@ -78,10 +87,16 @@ results = run_protocol(
 )
 ```
 
-### Python Builder
+If no `gantry` argument is supplied, CubOS builds an offline `Gantry` for
+validation/execution against mock motion, not a connected controller.
 
-Python-authored protocols use `ProtocolBuilder`, then pass the built
-`Protocol` into the same setup and run functions as YAML:
+## Python Protocols
+
+Python-authored protocols are useful when loops, shared constants, or helper
+functions make the protocol clearer than repeated YAML. Use `ProtocolBuilder`,
+then pass the built `Protocol` into the same setup and run functions as YAML.
+
+### Build A Protocol
 
 ```python
 from protocol_engine.authoring import ProtocolBuilder, wells
@@ -110,7 +125,7 @@ protocol = protocol_builder.build()
 `ProtocolBuilder.command("registered_name", ...)` supports registered protocol
 commands that do not have typed builder wrappers.
 
-### Complete Python Main
+### Run Python From Python
 
 Attach a `DataStore` and `campaign_id` when command handlers should persist
 measurements. Use a stable `protocol_config` string for Python-authored
