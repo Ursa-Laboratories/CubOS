@@ -588,6 +588,10 @@ def test_multi_instrument_calibration_records_rpi_camera_over_block(tmp_path):
         "depth": -13.0,
     }
     assert any("non-contact camera" in message for message in messages)
+    assert any(
+        "Measure the height from the calibration block top to pi_camera" in message
+        for message in messages
+    )
     assert any("distance from block=20.000 mm" in message for message in messages)
 
     written = yaml.safe_load(out_path.read_text(encoding="utf-8"))

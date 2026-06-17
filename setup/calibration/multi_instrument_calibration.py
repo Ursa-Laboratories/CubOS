@@ -299,6 +299,15 @@ def _prompt_camera_block_distance(
     input_reader: Callable[[str], str],
     output: Callable[[str], None],
 ) -> float:
+    output("")
+    output(
+        f"Measure the height from the calibration block top to {camera_name}'s "
+        "camera reference point now."
+    )
+    output(
+        "Keep the camera centered over the block mark, then enter that measured "
+        "distance in millimeters."
+    )
     while True:
         raw = input_reader(
             f"Distance from calibration block top to {camera_name} camera reference point in mm: "
