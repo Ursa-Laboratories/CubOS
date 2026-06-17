@@ -38,12 +38,14 @@ class RPiCamera(BaseInstrument):
         )
 
     def connect(self) -> None:
+        # TODO: Implement camera connection handling in a hardware-backed implementation.
         if self._offline:
             self.logger.info("RPiCamera connected (offline)")
             return
         self.logger.info("RPiCamera connect is a no-op in the base class")
 
     def disconnect(self) -> None:
+        # TODO: Implement camera disconnection handling in a hardware-backed implementation.
         if self._offline:
             self.logger.info("RPiCamera disconnected (offline)")
             return
@@ -53,6 +55,7 @@ class RPiCamera(BaseInstrument):
         return True
 
     def capture(self, *args, **kwargs) -> str:
+        # TODO: Implement camera capture in a hardware-backed implementation.
         raise NotImplementedError(
             "RPiCamera.capture is not implemented in the base CubOS class."
         )
