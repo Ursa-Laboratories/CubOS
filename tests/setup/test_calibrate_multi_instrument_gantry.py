@@ -11,6 +11,7 @@ from setup.calibration.multi_instrument_calibration import (
     MultiInstrumentCalibrationResult,
     _retract_up_after_contact,
     _updated_yaml_text,
+    compute_non_contact_block_calibration,
     compute_relative_instrument_calibrations,
     run_multi_instrument_calibration,
 )
@@ -51,6 +52,51 @@ instruments:
   camera:
     type: uv_curing
     vendor: excelitas
+    offset_x: 1.0
+    offset_y: 2.0
+    depth: 3.0
+    offline: true
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _write_rpi_camera_gantry(path: Path) -> Path:
+    path.write_text(
+        """\
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+cnc:
+  factory_z_travel_mm: 100.0
+  calibration_block_height_mm: 12.5
+  y_axis_motion: head
+working_volume:
+  x_min: 0.0
+  x_max: 400.0
+  y_min: 0.0
+  y_max: 300.0
+  z_min: 0.0
+  z_max: 100.0
+grbl_settings:
+  status_report: 0
+  soft_limits: true
+  homing_enable: true
+  homing_pull_off: 10.0
+  max_travel_x: 400.0
+  max_travel_y: 300.0
+  max_travel_z: 100.0
+instruments:
+  left_probe:
+    type: asmi
+    vendor: vernier
+    offset_x: 99.0
+    offset_y: 99.0
+    depth: 99.0
+    offline: true
+  pi_camera:
+    type: rpi_camera
+    vendor: raspberry_pi
     offset_x: 1.0
     offset_y: 2.0
     depth: 3.0
@@ -255,6 +301,31 @@ def test_compute_relative_instrument_calibrations_uses_shared_block_point():
         "offset_y": 3.0,
         "depth": 6.0,
     }
+
+
+def test_compute_non_contact_block_calibration_uses_centered_camera_pose():
+    calibration = compute_non_contact_block_calibration(
+        block_reference_coordinates={"x": 199.0, "y": 149.5, "z": 12.5},
+        camera_coordinates={"x": 211.0, "y": 153.5, "z": 35.5},
+        block_height_mm=12.5,
+        height_above_block_mm=20.0,
+    )
+
+    assert calibration == {
+        "offset_x": -12.0,
+        "offset_y": -4.0,
+        "depth": 3.0,
+    }
+
+
+def test_compute_non_contact_block_calibration_rejects_negative_distance():
+    with pytest.raises(ValueError, match="must be >= 0"):
+        compute_non_contact_block_calibration(
+            block_reference_coordinates={"x": 199.0, "y": 149.5, "z": 12.5},
+            camera_coordinates={"x": 211.0, "y": 153.5, "z": 35.5},
+            block_height_mm=12.5,
+            height_above_block_mm=-1.0,
+        )
 
 
 def test_dry_run_prompts_for_only_operator_choices(tmp_path):
@@ -472,6 +543,76 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
     assert written["instruments"]["camera"]["offset_x"] == -15.0
     assert written["instruments"]["camera"]["offset_y"] == -7.0
     assert written["instruments"]["camera"]["depth"] == 6.0
+
+
+def test_multi_instrument_calibration_records_rpi_camera_over_block(tmp_path):
+    path = _write_rpi_camera_gantry(tmp_path / "gantry.yaml")
+    out_path = tmp_path / "calibrated.yaml"
+    messages: list[str] = []
+    inputs = iter(["12.5", "20.0", "y"])
+
+    def read_input(prompt: str) -> str:
+        if "Distance from calibration block top" in prompt:
+            assert any("Camera pose recorded for pi_camera" in message for message in messages)
+        return next(inputs)
+
+    result = run_multi_instrument_calibration(
+        path,
+        reference_instrument="left_probe",
+        lowest_instrument="left_probe",
+        instruments_to_calibrate=("left_probe", "pi_camera"),
+        skip_soft_limit_config=False,
+        output_gantry_path=out_path,
+        write_gantry_yaml=True,
+        output=messages.append,
+        input_reader=read_input,
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader(
+            [
+                ("\r", 1),  # XY origin
+                ("Z", 3),
+                ("\r", 1),  # lowest instrument shared block point
+                ("RIGHT", 12),
+                ("UP", 4),
+                ("Z", 8),
+                ("\r", 1),  # camera centered over block
+            ]
+        ),
+        stdin_flusher=lambda: None,
+    )
+
+    assert isinstance(result, MultiInstrumentCalibrationResult)
+    assert result.instrument_calibrations["pi_camera"] == {
+        "offset_x": -12.0,
+        "offset_y": -4.0,
+        "depth": -13.0,
+    }
+    assert any("non-contact camera" in message for message in messages)
+    assert any(
+        "Measure the height from the calibration block top to pi_camera" in message
+        for message in messages
+    )
+    assert any("distance from block=20.000 mm" in message for message in messages)
+
+    written = yaml.safe_load(out_path.read_text(encoding="utf-8"))
+    assert written["instruments"]["pi_camera"]["offset_x"] == -12.0
+    assert written["instruments"]["pi_camera"]["offset_y"] == -4.0
+    assert written["instruments"]["pi_camera"]["depth"] == -13.0
+
+
+def test_multi_instrument_calibration_rejects_rpi_camera_as_lowest(tmp_path):
+    path = _write_rpi_camera_gantry(tmp_path / "gantry.yaml")
+
+    with pytest.raises(ValueError, match="cannot be an rpi_camera"):
+        run_multi_instrument_calibration(
+            path,
+            reference_instrument="left_probe",
+            lowest_instrument="pi_camera",
+            instruments_to_calibrate=("left_probe", "pi_camera"),
+            dry_run=True,
+            output=lambda _message: None,
+            input_reader=lambda _prompt: "y",
+        )
 
 
 def test_multi_instrument_calibration_prompts_for_missing_block_height_and_writes_it(tmp_path):

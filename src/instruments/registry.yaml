@@ -37,3 +37,9 @@ instruments:
     class_name: UVVisCCS
     vendors:
       - thorlabs
+
+  rpi_camera:
+    module: instruments.rpi_camera.driver
+    class_name: RPiCamera
+    vendors:
+      - raspberry_pi

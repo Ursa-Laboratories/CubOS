@@ -95,11 +95,14 @@ Use this flow when the gantry YAML has more than one mounted instrument.
 
 8. Jog each remaining instrument to the shared center reference point as
    prompted.
-9. For pipette setups, jog the pipette to the center reference point on the
+9. For an RPi camera, center the camera over the same block mark, press Enter,
+   then measure and enter the height from the calibration block top to the
+   camera reference point.
+10. For pipette setups, jog the pipette to the center reference point on the
    block when prompted.
-10. Let the script compute `offset_x`, `offset_y`, and `depth` for each
+11. Let the script compute `offset_x`, `offset_y`, and `depth` for each
    instrument.
-11. Review the summary and calibrated YAML path.
+12. Review the summary and calibrated YAML path.
 
 ## Interactive Jog Test
 

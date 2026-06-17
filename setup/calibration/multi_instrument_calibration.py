@@ -43,6 +43,7 @@ from setup.keyboard_input import flush_stdin, read_keypress_batch  # noqa: E402
 
 
 KeyReader = Callable[[], tuple[str, int]]
+RPI_CAMERA_TYPE = "rpi_camera"
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,37 @@ def compute_relative_instrument_calibrations(
             "depth": _round_mm(float(coords["z"]) - float(lowest_coords["z"])),
         }
     return calibrations
+
+
+def compute_non_contact_block_calibration(
+    *,
+    block_reference_coordinates: dict[str, float],
+    camera_coordinates: dict[str, float],
+    block_height_mm: float,
+    height_above_block_mm: float,
+) -> dict[str, float]:
+    """Compute camera mount fields from a centered-over-block pose.
+
+    ``block_reference_coordinates`` is the WPos pose recorded when the reference
+    contact instrument was at the shared block point. ``camera_coordinates`` is
+    the WPos pose recorded after the operator centers the camera over that same
+    block mark. The entered height defines the camera optical reference point's
+    distance above the block top.
+    """
+    if height_above_block_mm < 0:
+        raise ValueError("Camera distance from calibration block must be >= 0 mm.")
+    return {
+        "offset_x": _round_mm(
+            float(block_reference_coordinates["x"]) - float(camera_coordinates["x"])
+        ),
+        "offset_y": _round_mm(
+            float(block_reference_coordinates["y"]) - float(camera_coordinates["y"])
+        ),
+        "depth": _round_mm(
+            float(camera_coordinates["z"])
+            - (float(block_height_mm) + float(height_above_block_mm))
+        ),
+    }
 
 
 def _build_grbl_settings(
@@ -207,6 +239,30 @@ def _instrument_names(raw_config: dict[str, Any]) -> tuple[str, ...]:
     return tuple(instruments.keys())
 
 
+def _instrument_type(raw_config: dict[str, Any], name: str) -> str | None:
+    instruments = raw_config.get("instruments")
+    if not isinstance(instruments, dict):
+        return None
+    entry = instruments.get(name)
+    if not isinstance(entry, dict):
+        return None
+    value = entry.get("type")
+    return str(value) if value is not None else None
+
+
+def _rpi_camera_names(raw_config: dict[str, Any]) -> tuple[str, ...]:
+    return tuple(
+        name
+        for name in _instrument_names(raw_config)
+        if _instrument_type(raw_config, name) == RPI_CAMERA_TYPE
+    )
+
+
+def _contact_instrument_names(raw_config: dict[str, Any]) -> tuple[str, ...]:
+    cameras = set(_rpi_camera_names(raw_config))
+    return tuple(name for name in _instrument_names(raw_config) if name not in cameras)
+
+
 def _unique_instrument_sequence(names: Sequence[str]) -> tuple[str, ...]:
     seen: set[str] = set()
     ordered: list[str] = []
@@ -233,6 +289,36 @@ def _prompt_z_reference_height(
             continue
         if value <= 0:
             output("Calibration block height must be > 0 mm.")
+            continue
+        return value
+
+
+def _prompt_camera_block_distance(
+    *,
+    camera_name: str,
+    input_reader: Callable[[str], str],
+    output: Callable[[str], None],
+) -> float:
+    output("")
+    output(
+        f"Measure the height from the calibration block top to {camera_name}'s "
+        "camera reference point now."
+    )
+    output(
+        "Keep the camera centered over the block mark, then enter that measured "
+        "distance in millimeters."
+    )
+    while True:
+        raw = input_reader(
+            f"Distance from calibration block top to {camera_name} camera reference point in mm: "
+        ).strip()
+        try:
+            value = float(raw)
+        except ValueError:
+            output("Enter a numeric camera distance in millimeters.")
+            continue
+        if value < 0:
+            output("Camera distance from calibration block must be >= 0 mm.")
             continue
         return value
 
@@ -352,6 +438,14 @@ def run_multi_instrument_calibration(
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
     available_instruments = _instrument_names(raw_config)
+    contact_instruments = _contact_instrument_names(raw_config)
+    rpi_cameras = set(_rpi_camera_names(raw_config))
+    if not contact_instruments:
+        raise ValueError(
+            "Multi-instrument calibration requires at least one contact-capable "
+            "instrument. rpi_camera instruments are calibrated after a contact "
+            "instrument establishes the block reference."
+        )
     output(f"Loaded deck-origin gantry config: {gantry_path}")
     output("Calibration overview:")
     output("  This guided routine creates the shared CubOS deck frame for all mounted instruments.")
@@ -362,7 +456,7 @@ def run_multi_instrument_calibration(
     output("")
     reference_instrument = reference_instrument or _prompt_instrument_name(
         "Pick the number for the first/left-most tool for front-left origin",
-        available_instruments,
+        contact_instruments,
         raw_config=raw_config,
         input_reader=input_reader,
         output=output,
@@ -372,6 +466,16 @@ def run_multi_instrument_calibration(
     if lowest_instrument is not None:
         names_to_validate.append(lowest_instrument)
     _validate_instrument_names(raw_config, names_to_validate)
+    if reference_instrument in rpi_cameras:
+        raise ValueError(
+            f"Reference instrument {reference_instrument!r} cannot be an rpi_camera; "
+            "choose a contact-capable instrument."
+        )
+    if lowest_instrument in rpi_cameras:
+        raise ValueError(
+            f"Lowest instrument {lowest_instrument!r} cannot be an rpi_camera; "
+            "choose a contact-capable instrument."
+        )
     if dry_run:
         output(f"Loaded deck-origin gantry config: {gantry_path}")
         output("Dry run only. Physical calibration flow:")
@@ -387,7 +491,9 @@ def run_multi_instrument_calibration(
         output("  enter the calibration block height")
         output("  G10 L20 P1 Z<block_height>")
         output("  record the lowest instrument's X/Y/Z block coordinate immediately")
-        output("  jog each remaining instrument to that same block point and compute offsets/depths")
+        output("  jog each remaining contact instrument to that same block point and compute offsets/depths")
+        if rpi_cameras:
+            output("  center each rpi_camera over the block, enter its block distance, and record its pose")
         output("  $H and read final working-volume maxima")
         return None
 
@@ -485,7 +591,7 @@ def run_multi_instrument_calibration(
         if lowest_instrument is None:
             lowest_instrument = _prompt_instrument_name(
                 "Pick the number for the lowest mounted tool / first Z-reference touch",
-                available_instruments,
+                contact_instruments,
                 raw_config=raw_config,
                 input_reader=input_reader,
                 output=output,
@@ -561,7 +667,59 @@ def run_multi_instrument_calibration(
             )
             if instrument != lowest_instrument
         )
+        non_contact_calibrations: dict[str, dict[str, float]] = {}
         for instrument in calibration_sequence:
+            if instrument in rpi_cameras:
+                _interactive_jog_to_reference(
+                    gantry,
+                    target_description=(
+                        f"Step 3: calibrate non-contact camera {instrument!r}. "
+                        "Jog until the camera is centered over the same calibration "
+                        "block mark used by the contact instruments. The camera "
+                        "does not touch the block."
+                    ),
+                    confirmation_description=(
+                        "Press ENTER when the camera is centered over the block mark."
+                    ),
+                    key_reader=key_reader,
+                    output=output,
+                    feed_rate=jog_feed_rate,
+                    initial_step_mm=jog_step_mm,
+                    limit_pull_off_mm=5.0,
+                )
+                camera_coords = dict(gantry.get_coordinates())
+                output(
+                    f"Camera pose recorded for {instrument}: "
+                    f"X={camera_coords['x']:.3f}, "
+                    f"Y={camera_coords['y']:.3f}, "
+                    f"Z={camera_coords['z']:.3f}"
+                )
+                height_above_block = _prompt_camera_block_distance(
+                    camera_name=instrument,
+                    input_reader=input_reader,
+                    output=output,
+                )
+                reference_coords = block_coordinates.get(reference_instrument)
+                if reference_coords is None:
+                    raise RuntimeError(
+                        f"Missing block coordinates for reference instrument {reference_instrument!r}."
+                    )
+                non_contact_calibrations[instrument] = (
+                    compute_non_contact_block_calibration(
+                        block_reference_coordinates=reference_coords,
+                        camera_coordinates=camera_coords,
+                        block_height_mm=z_reference_height,
+                        height_above_block_mm=height_above_block,
+                    )
+                )
+                output(
+                    f"Recorded camera calibration for {instrument}: "
+                    f"X={camera_coords['x']:.3f}, "
+                    f"Y={camera_coords['y']:.3f}, "
+                    f"Z={camera_coords['z']:.3f}, "
+                    f"distance from block={height_above_block:.3f} mm"
+                )
+                continue
             _interactive_jog_to_reference(
                 gantry,
                 target_description=(
@@ -629,6 +787,7 @@ def run_multi_instrument_calibration(
             reference_instrument=reference_instrument,
             lowest_instrument=lowest_instrument,
         )
+        all_calibrations.update(non_contact_calibrations)
         instrument_calibrations = {
             instrument: all_calibrations[instrument]
             for instrument in instruments
