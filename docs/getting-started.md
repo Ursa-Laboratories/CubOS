@@ -1,8 +1,8 @@
 # Getting Started
 
-This guide gets CubOS installed and points you to the right setup path. It
-focuses on the YAML workflow: one gantry file, one deck file, and one protocol
-file.
+This guide gets CubOS installed and points you to the right setup path. First
+time users should follow the YAML workflow: one gantry file, one deck file, and
+one protocol file.
 
 ## Prerequisites
 
@@ -40,10 +40,10 @@ pip install -e ".[asmi]"
 1. Install CubOS.
 2. If you are building your own machine, complete
    [Gantry Bring-Up](admin/gantry-bring-up.md).
-3. Calibrate the gantry with [Calibration](calibration.md).
-4. Define the active gantry, deck, and protocol YAML files in
-   [Configuration](configuration.md).
-5. Validate and run with [Run a Protocol with YAML](protocol-yaml.md).
+3. Calibrate the gantry with [Calibrate Gantry](calibration.md).
+4. Place labware and define deck YAML with [Set Up Deck and Labware](deck.md).
+5. Validate and run a protocol with
+   [Run a Protocol with YAML](protocol-yaml.md).
 
 ## Python API
 

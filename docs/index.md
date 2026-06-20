@@ -16,10 +16,6 @@ CubOS is used to:
 
 | Section | Use it for |
 | --- | --- |
-| [Getting Started](getting-started.md) | Install CubOS and understand when gantry bring-up is needed. |
-| [Calibration](calibration.md) | Calibrate the gantry and run the interactive jog check. |
-| [Configuration](configuration.md) | Author gantry, deck, and protocol YAML files. |
-| [Run a Protocol with YAML](protocol-yaml.md) | Validate and run a protocol from YAML. |
-| [Run a Protocol with Python](protocol-python.md) | Build, validate, and run a protocol with `ProtocolBuilder`. |
-| [Data](data.md) | Understand persistence, read helpers, and CSV export. |
+| [Set Up and Use CubOS](getting-started.md) | Install CubOS, calibrate hardware, set up labware, and run YAML protocols. |
+| [Contributing to CubOS](contributing.md) | Work on CubOS source, docs, tests, and implementation details. |
 | [API Reference](reference/index.md) | Inspect generated Python API docs. |

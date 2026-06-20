@@ -121,4 +121,4 @@ Expected directions:
 - `-Z` moves down
 
 Once calibration and the jog test are complete, continue to
-[Configuration](configuration.md).
+[Set Up Deck and Labware](deck.md).
