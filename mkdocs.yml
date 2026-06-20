@@ -5,13 +5,20 @@ theme:
 
 nav:
   - Home: index.md
-  - Getting Started: getting-started.md
-  - Calibration: calibration.md
-  - Configuration: configuration.md
-  - Run a Protocol with YAML: protocol-yaml.md
-  - Run a Protocol with Python: protocol-python.md
-  - Data: data.md
-  - Appendix: appendix.md
+  - Set Up and Use CubOS:
+    - Getting Started: getting-started.md
+    - Calibrate Gantry: calibration.md
+    - Set Up Deck and Labware: deck.md
+    - Run a Protocol with YAML: protocol-yaml.md
+    - Data: data.md
+  - Contributing to CubOS:
+    - Overview: contributing.md
+    - Development Setup: development.md
+    - Gantry Internals: gantry.md
+    - Deck Internals: deck-internals.md
+    - Python Protocols: protocol-python.md
+    - YAML File Overview: configuration.md
+    - Appendix: appendix.md
   - API Reference:
     - Overview: reference/index.md
     - deck: reference/src/deck/index.md
@@ -32,8 +39,6 @@ nav:
 not_in_nav: |
   agent-index.md
   admin/**
-  deck.md
-  gantry.md
   reference/src/**
   reference/data/**
 
