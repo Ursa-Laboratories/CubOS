@@ -1283,13 +1283,13 @@ def _validate_asmi_indentation(
     # sensor named e.g. ``force_sensor`` or ``asmi_main`` still goes
     # through the depth-bound check. The deepest-Z bound is the only thing
     # protecting against driving the gantry through the deck.
-    from instruments.asmi.driver import ASMI
+    from instruments.asmi.interface import ASMIInstrument
 
     violations: list[ProtocolSemanticViolation] = []
     instrument = args.get("instrument")
     if (
         instrument not in instrumented_gantry.instruments
-        or not isinstance(instrumented_gantry.instruments[instrument], ASMI)
+        or not isinstance(instrumented_gantry.instruments[instrument], ASMIInstrument)
         or args.get("method") != "indentation"
     ):
         return violations

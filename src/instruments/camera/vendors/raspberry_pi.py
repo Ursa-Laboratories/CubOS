@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from instruments.base_instrument import BaseInstrument
+from instruments.camera.interface import CameraInstrument
 
 
-class RPiCamera(BaseInstrument):
+class RaspberryPiCamera(CameraInstrument):
     """Placeholder Raspberry Pi camera instrument.
 
     The gantry runtime can position this instrument through the standard
@@ -40,16 +40,16 @@ class RPiCamera(BaseInstrument):
     def connect(self) -> None:
         # TODO: Implement camera connection handling in a hardware-backed implementation.
         if self._offline:
-            self.logger.info("RPiCamera connected (offline)")
+            self.logger.info("RaspberryPiCamera connected (offline)")
             return
-        self.logger.info("RPiCamera connect is a no-op in the base class")
+        self.logger.info("RaspberryPiCamera connect is a no-op in the base class")
 
     def disconnect(self) -> None:
         # TODO: Implement camera disconnection handling in a hardware-backed implementation.
         if self._offline:
-            self.logger.info("RPiCamera disconnected (offline)")
+            self.logger.info("RaspberryPiCamera disconnected (offline)")
             return
-        self.logger.info("RPiCamera disconnect is a no-op in the base class")
+        self.logger.info("RaspberryPiCamera disconnect is a no-op in the base class")
 
     def health_check(self) -> bool:
         return True
@@ -57,5 +57,5 @@ class RPiCamera(BaseInstrument):
     def capture(self, *args, **kwargs) -> str:
         # TODO: Implement camera capture in a hardware-backed implementation.
         raise NotImplementedError(
-            "RPiCamera.capture is not implemented in the base CubOS class."
+            "RaspberryPiCamera.capture is not implemented in the base CubOS class."
         )

@@ -95,7 +95,7 @@ instruments:
     depth: 99.0
     offline: true
   pi_camera:
-    type: rpi_camera
+    type: camera
     vendor: raspberry_pi
     offset_x: 1.0
     offset_y: 2.0
@@ -306,7 +306,7 @@ def test_compute_relative_instrument_calibrations_uses_shared_block_point():
 def test_compute_non_contact_block_calibration_uses_centered_camera_pose():
     calibration = compute_non_contact_block_calibration(
         block_reference_coordinates={"x": 199.0, "y": 149.5, "z": 12.5},
-        camera_coordinates={"x": 211.0, "y": 153.5, "z": 35.5},
+        non_contact_coordinates={"x": 211.0, "y": 153.5, "z": 35.5},
         block_height_mm=12.5,
         height_above_block_mm=20.0,
     )
@@ -322,7 +322,7 @@ def test_compute_non_contact_block_calibration_rejects_negative_distance():
     with pytest.raises(ValueError, match="must be >= 0"):
         compute_non_contact_block_calibration(
             block_reference_coordinates={"x": 199.0, "y": 149.5, "z": 12.5},
-            camera_coordinates={"x": 211.0, "y": 153.5, "z": 35.5},
+            non_contact_coordinates={"x": 211.0, "y": 153.5, "z": 35.5},
             block_height_mm=12.5,
             height_above_block_mm=-1.0,
         )
@@ -553,7 +553,10 @@ def test_multi_instrument_calibration_records_rpi_camera_over_block(tmp_path):
 
     def read_input(prompt: str) -> str:
         if "Distance from calibration block top" in prompt:
-            assert any("Camera pose recorded for pi_camera" in message for message in messages)
+            assert any(
+                "Non-contact pose recorded for pi_camera" in message
+                for message in messages
+            )
         return next(inputs)
 
     result = run_multi_instrument_calibration(
@@ -587,7 +590,7 @@ def test_multi_instrument_calibration_records_rpi_camera_over_block(tmp_path):
         "offset_y": -4.0,
         "depth": -13.0,
     }
-    assert any("non-contact camera" in message for message in messages)
+    assert any("non-contact instrument" in message for message in messages)
     assert any(
         "Measure the height from the calibration block top to pi_camera" in message
         for message in messages
@@ -603,7 +606,7 @@ def test_multi_instrument_calibration_records_rpi_camera_over_block(tmp_path):
 def test_multi_instrument_calibration_rejects_rpi_camera_as_lowest(tmp_path):
     path = _write_rpi_camera_gantry(tmp_path / "gantry.yaml")
 
-    with pytest.raises(ValueError, match="cannot be an rpi_camera"):
+    with pytest.raises(ValueError, match="cannot be non-contact"):
         run_multi_instrument_calibration(
             path,
             reference_instrument="left_probe",

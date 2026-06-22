@@ -1,45 +1,70 @@
-# Supported instruments, their allowed vendors, and driver class paths.
-# The gantry machine loaders use this to validate instrument entries and import driver classes.
+# Supported instrument types, vendor implementations, and calibration metadata.
+# Gantry YAML selects a generic `type` plus a concrete `vendor`.
 
 instruments:
   asmi:
-    module: instruments.asmi.driver
-    class_name: ASMI
+    interface: instruments.asmi.interface.ASMIInstrument
+    calibration_mode: contact
     vendors:
-      - vernier
+      vernier:
+        module: instruments.asmi.vendors.vernier
+        class_name: VernierASMI
 
   filmetrics:
-    module: instruments.filmetrics.driver
-    class_name: Filmetrics
+    interface: instruments.filmetrics.interface.FilmetricsInstrument
+    calibration_mode: contact
     vendors:
-      - kla
+      kla:
+        module: instruments.filmetrics.vendors.kla
+        class_name: KLAFilmetrics
 
   pipette:
-    module: instruments.pipette.driver
-    class_name: Pipette
+    interface: instruments.pipette.interface.PipetteInstrument
+    calibration_mode: contact
     vendors:
-      - opentrons
+      opentrons:
+        module: instruments.pipette.vendors.opentrons
+        class_name: OpentronsPipette
 
   potentiostat:
-    module: instruments.potentiostat.driver
-    class_name: Potentiostat
+    interface: instruments.potentiostat.interface.PotentiostatInstrument
+    calibration_mode: contact
     vendors:
-      - admiral
+      admiral:
+        module: instruments.potentiostat.vendors.admiral
+        class_name: AdmiralPotentiostat
 
   uv_curing:
-    module: instruments.uv_curing.driver
-    class_name: UVCuring
+    interface: instruments.uv_curing.interface.UVCuringInstrument
+    calibration_mode: contact
     vendors:
-      - excelitas
+      excelitas:
+        module: instruments.uv_curing.vendors.excelitas
+        class_name: ExcelitasUVCuring
 
   uvvis_ccs:
-    module: instruments.uvvis_ccs.driver
-    class_name: UVVisCCS
+    interface: instruments.uvvis_ccs.interface.UVVisCCSInstrument
+    calibration_mode: contact
     vendors:
-      - thorlabs
+      thorlabs:
+        module: instruments.uvvis_ccs.vendors.thorlabs
+        class_name: ThorlabsUVVisCCS
 
-  rpi_camera:
-    module: instruments.rpi_camera.driver
-    class_name: RPiCamera
+  camera:
+    interface: instruments.camera.interface.CameraInstrument
+    calibration_mode: non_contact
     vendors:
-      - raspberry_pi
+      mount_only:
+        module: instruments.camera.vendors.mount_only
+        class_name: MountOnlyCamera
+      raspberry_pi:
+        module: instruments.camera.vendors.raspberry_pi
+        class_name: RaspberryPiCamera
+
+  mounted_tool:
+    interface: instruments.mounted_tool.interface.MountedToolInstrument
+    calibration_mode: contact
+    vendors:
+      mount_only:
+        module: instruments.mounted_tool.vendors.mount_only
+        class_name: MountOnlyTool

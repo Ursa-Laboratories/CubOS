@@ -3,7 +3,7 @@ import subprocess
 import time
 from typing import Optional
 
-from instruments.base_instrument import BaseInstrument
+from instruments.filmetrics.interface import FilmetricsInstrument
 from instruments.filmetrics.exceptions import (
     FilmetricsConnectionError,
     FilmetricsCommandError,
@@ -16,7 +16,7 @@ _ERROR_SENTINELS = ("error", "exception")
 _DEFAULT_RESULT = MeasurementResult(thickness_nm=150.0, goodness_of_fit=0.95)
 
 
-class Filmetrics(BaseInstrument):
+class KLAFilmetrics(FilmetricsInstrument):
     """Driver for the Filmetrics film thickness measurement system.
 
     Communicates with a C# console app (FilmetricsTool.exe) via stdin/stdout.

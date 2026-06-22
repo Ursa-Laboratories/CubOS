@@ -13,12 +13,17 @@ pip install -U pip
 pip install -e ".[dev,docs]"
 ```
 
-Install instrument-specific extras only when you need that driver:
+Install vendor-specific extras only when you need that built-in driver:
 
 ```bash
-pip install -e ".[asmi]"
-pip install -e ".[potentiostat]"
+pip install -e ".[asmi-vernier]"
+pip install -e ".[potentiostat-admiral]"
 ```
+
+Private or customer drivers should live in a separate installable package. Expose
+that package through the `cubos.instrument_registries` entry point group, or set
+`CUBOS_INSTRUMENT_REGISTRY_PATHS` to one or more overlay YAML files during local
+development.
 
 ## Run Tests
 

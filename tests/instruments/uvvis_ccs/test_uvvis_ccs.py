@@ -10,7 +10,7 @@ from instruments.uvvis_ccs.exceptions import (
     UVVisCCSMeasurementError,
     UVVisCCSTimeoutError,
 )
-from instruments.uvvis_ccs.driver import UVVisCCS, _synthetic_spectrum
+from instruments.uvvis_ccs.vendors.thorlabs import ThorlabsUVVisCCS, _synthetic_spectrum
 
 
 # --- UVVisSpectrum model tests ------------------------------------------------
@@ -173,7 +173,7 @@ class TestUVVisCCSDriver:
         dll = self._make_mock_dll()
         mock_cdll.LoadLibrary.return_value = dll
 
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         ccs.connect()
 
         mock_cdll.LoadLibrary.assert_called_once_with("fake.dll")
@@ -186,7 +186,7 @@ class TestUVVisCCSDriver:
     def test_connect_raises_on_missing_dll(self, mock_cdll):
         mock_cdll.LoadLibrary.side_effect = OSError("not found")
 
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="missing.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="missing.dll")
         with pytest.raises(UVVisCCSConnectionError, match="Failed to load DLL"):
             ccs.connect()
 
@@ -196,7 +196,7 @@ class TestUVVisCCSDriver:
         dll.tlccs_init.side_effect = lambda *args: -1  # nonzero = error
         mock_cdll.LoadLibrary.return_value = dll
 
-        ccs = UVVisCCS(serial_number="BAD_SERIAL", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="BAD_SERIAL", dll_path="fake.dll")
         with pytest.raises(UVVisCCSConnectionError, match="tlccs_init failed"):
             ccs.connect()
 
@@ -205,7 +205,7 @@ class TestUVVisCCSDriver:
         dll = self._make_mock_dll()
         mock_cdll.LoadLibrary.return_value = dll
 
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         ccs.connect()
         ccs.disconnect()
 
@@ -214,7 +214,7 @@ class TestUVVisCCSDriver:
 
     @patch("ctypes.cdll")
     def test_disconnect_safe_when_not_connected(self, mock_cdll):
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         ccs.disconnect()  # should not raise
 
     @patch("ctypes.cdll")
@@ -222,12 +222,12 @@ class TestUVVisCCSDriver:
         dll = self._make_mock_dll()
         mock_cdll.LoadLibrary.return_value = dll
 
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         ccs.connect()
         assert ccs.health_check() is True
 
     def test_health_check_false_when_not_connected(self):
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         assert ccs.health_check() is False
 
     @patch("ctypes.cdll")
@@ -235,7 +235,7 @@ class TestUVVisCCSDriver:
         dll = self._make_mock_dll()
         mock_cdll.LoadLibrary.return_value = dll
 
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         ccs.connect()
         result = ccs.measure()
 
@@ -252,7 +252,7 @@ class TestUVVisCCSDriver:
         dll.tlccs_getScanData.side_effect = lambda h, d: -1
         mock_cdll.LoadLibrary.return_value = dll
 
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         ccs.connect()
 
         with pytest.raises(UVVisCCSMeasurementError, match="getScanData failed"):
@@ -260,27 +260,27 @@ class TestUVVisCCSDriver:
 
     @patch("ctypes.cdll")
     def test_is_base_instrument(self, mock_cdll):
-        ccs = UVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         assert isinstance(ccs, BaseInstrument)
 
 
-# --- Offline UVVisCCS tests ---------------------------------------------------
+# --- Offline ThorlabsUVVisCCS tests ---------------------------------------------------
 
 
 class TestOfflineUVVisCCS:
 
     def test_is_base_instrument(self):
-        ccs = UVVisCCS(offline=True)
+        ccs = ThorlabsUVVisCCS(offline=True)
         assert isinstance(ccs, BaseInstrument)
 
     def test_connect_disconnect_cycle(self):
-        ccs = UVVisCCS(offline=True)
+        ccs = ThorlabsUVVisCCS(offline=True)
         ccs.connect()
         assert ccs.health_check() is True
         ccs.disconnect()  # safe no-op in offline mode
 
     def test_measure_returns_default_spectrum(self):
-        ccs = UVVisCCS(offline=True)
+        ccs = ThorlabsUVVisCCS(offline=True)
         ccs.connect()
         result = ccs.measure()
         assert isinstance(result, UVVisSpectrum)
@@ -288,11 +288,11 @@ class TestOfflineUVVisCCS:
         assert result.num_pixels == NUM_PIXELS
 
     def test_set_integration_time_updates_state(self):
-        ccs = UVVisCCS(offline=True)
+        ccs = ThorlabsUVVisCCS(offline=True)
         ccs.connect()
         ccs.set_integration_time(1.5)
         assert ccs.get_integration_time() == 1.5
 
     def test_disconnect_safe_when_not_connected(self):
-        ccs = UVVisCCS(offline=True)
+        ccs = ThorlabsUVVisCCS(offline=True)
         ccs.disconnect()  # should not raise

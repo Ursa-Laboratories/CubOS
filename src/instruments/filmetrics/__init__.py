@@ -1,5 +1,6 @@
-from instruments.filmetrics.driver import Filmetrics
+from instruments.filmetrics.interface import FilmetricsInstrument
 from instruments.filmetrics.models import MeasurementResult
+from instruments.filmetrics.vendors.kla import KLAFilmetrics
 from instruments.filmetrics.exceptions import (
     FilmetricsError,
     FilmetricsConnectionError,
@@ -8,7 +9,8 @@ from instruments.filmetrics.exceptions import (
 )
 
 __all__ = [
-    "Filmetrics",
+    "FilmetricsInstrument",
+    "KLAFilmetrics",
     "MeasurementResult",
     "FilmetricsError",
     "FilmetricsConnectionError",

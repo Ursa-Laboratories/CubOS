@@ -44,13 +44,13 @@ class TestNormalize:
             vendor="admiral",
             metadata={"device_id": "unit-test"},
         )
-        m = normalize_measurement("pstat_a", "run_ocp", raw)
+        m = normalize_measurement("pstat_a", "run_OCP", raw)
         assert m.measurement_type == MeasurementType.POTENTIOSTAT_OCP
         assert m.payload == {"time_s": [0.0, 0.1], "voltage_v": [0.35, 0.36]}
         assert m.metadata["technique"] == "ocp"
         assert m.metadata["vendor"] == "admiral"
         assert m.metadata["instrument_name"] == "pstat_a"
-        assert m.metadata["method_name"] == "run_ocp"
+        assert m.metadata["method_name"] == "run_OCP"
         assert m.metadata["device_id"] == "unit-test"
         assert m.metadata["duration_s"] == 0.2
 
@@ -64,7 +64,7 @@ class TestNormalize:
             step_potential_v=0.5,
             vendor="admiral",
         )
-        m = normalize_measurement("pstat_a", "run_ca", raw)
+        m = normalize_measurement("pstat_a", "run_CA", raw)
         assert m.measurement_type == MeasurementType.POTENTIOSTAT_CA
         assert m.payload["current_a"] == [1e-6]
         assert m.metadata["step_potential_v"] == 0.5
@@ -79,7 +79,7 @@ class TestNormalize:
             step_current_a=1e-3,
             vendor="admiral",
         )
-        m = normalize_measurement("pstat_a", "run_cp", raw)
+        m = normalize_measurement("pstat_a", "run_CP", raw)
         assert m.measurement_type == MeasurementType.POTENTIOSTAT_CP
         assert m.metadata["step_current_a"] == 1e-3
         assert m.payload["voltage_v"] == [0.1]
@@ -94,7 +94,7 @@ class TestNormalize:
             cycles=3,
             vendor="admiral",
         )
-        m = normalize_measurement("pstat_a", "run_cv", raw)
+        m = normalize_measurement("pstat_a", "run_CV", raw)
         assert m.measurement_type == MeasurementType.POTENTIOSTAT_CV
         assert m.metadata["cycles"] == 3
         assert m.metadata["scan_rate_v_s"] == 0.05
@@ -127,7 +127,7 @@ class TestPersistence:
             vendor="admiral",
             metadata={"device_id": "unit-test"},
         )
-        m = normalize_measurement("pstat_a", "run_ocp", raw)
+        m = normalize_measurement("pstat_a", "run_OCP", raw)
         row_id = store.log_measurement(store._experiment_id, m)
         assert isinstance(row_id, int)
 
@@ -159,7 +159,7 @@ class TestPersistence:
             cycles=2,
             vendor="admiral",
         )
-        m = normalize_measurement("pstat_a", "run_cv", raw)
+        m = normalize_measurement("pstat_a", "run_CV", raw)
         row_id = store.log_measurement(store._experiment_id, m)
 
         row = store._conn.execute(
@@ -186,7 +186,7 @@ class TestPersistence:
             step_potential_v=0.5,
             vendor="admiral",
         )
-        m = normalize_measurement("pstat_a", "run_ca", raw)
+        m = normalize_measurement("pstat_a", "run_CA", raw)
         row_id = store.log_measurement(store._experiment_id, m)
         step_potential_v = store._conn.execute(
             "SELECT step_potential_v FROM potentiostat_measurements WHERE id = ?",
@@ -206,7 +206,7 @@ class TestPersistence:
             step_current_a=1e-3,
             vendor="admiral",
         )
-        m = normalize_measurement("pstat_a", "run_cp", raw)
+        m = normalize_measurement("pstat_a", "run_CP", raw)
         row_id = store.log_measurement(store._experiment_id, m)
         step_current_a = store._conn.execute(
             "SELECT step_current_a FROM potentiostat_measurements WHERE id = ?",
@@ -235,7 +235,7 @@ class TestPersistence:
                 "stop_reason": "completed",
             },
         )
-        m = normalize_measurement("pstat_a", "run_ocp", raw)
+        m = normalize_measurement("pstat_a", "run_OCP", raw)
         row_id = store.log_measurement(store._experiment_id, m)
 
         row = store._conn.execute(
@@ -262,7 +262,7 @@ class TestPersistence:
             vendor="admiral",
             metadata={"aborted": True, "stop_reason": "user_stop"},
         )
-        m = normalize_measurement("pstat_a", "run_ocp", raw)
+        m = normalize_measurement("pstat_a", "run_OCP", raw)
         row_id = store.log_measurement(store._experiment_id, m)
         aborted = store._conn.execute(
             "SELECT aborted FROM potentiostat_measurements WHERE id = ?",

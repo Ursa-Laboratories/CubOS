@@ -10,7 +10,7 @@ from instruments.filmetrics.exceptions import (
     FilmetricsCommandError,
     FilmetricsParseError,
 )
-from instruments.filmetrics.driver import Filmetrics
+from instruments.filmetrics.vendors.kla import KLAFilmetrics
 
 
 # --- MeasurementResult tests --------------------------------------------------
@@ -79,15 +79,15 @@ class TestParsing:
             "Goodness of fit 0.98765",
             "Measurement Complete",
         ]
-        assert Filmetrics._parse_thickness(lines) == pytest.approx(150.23)
+        assert KLAFilmetrics._parse_thickness(lines) == pytest.approx(150.23)
 
     def test_parse_thickness_negative(self):
         lines = ["Layer 1: Polyimide    -5.12 nm"]
-        assert Filmetrics._parse_thickness(lines) == pytest.approx(-5.12)
+        assert KLAFilmetrics._parse_thickness(lines) == pytest.approx(-5.12)
 
     def test_parse_thickness_no_match(self):
         lines = ["No relevant data here", "Measurement Complete"]
-        assert Filmetrics._parse_thickness(lines) is None
+        assert KLAFilmetrics._parse_thickness(lines) is None
 
     def test_parse_thickness_multiple_polyimide_lines(self):
         """When multiple Polyimide lines exist, take the last nm value."""
@@ -95,7 +95,7 @@ class TestParsing:
             "Layer 1: Polyimide    100.0 nm",
             "Layer 2: Polyimide    200.0 nm",
         ]
-        assert Filmetrics._parse_thickness(lines) == pytest.approx(200.0)
+        assert KLAFilmetrics._parse_thickness(lines) == pytest.approx(200.0)
 
     def test_parse_gof_typical(self):
         lines = [
@@ -104,15 +104,15 @@ class TestParsing:
             "Goodness of fit 0.98765",
             "Measurement Complete",
         ]
-        assert Filmetrics._parse_goodness_of_fit(lines) == pytest.approx(0.98765)
+        assert KLAFilmetrics._parse_goodness_of_fit(lines) == pytest.approx(0.98765)
 
     def test_parse_gof_integer(self):
         lines = ["Goodness of fit 1"]
-        assert Filmetrics._parse_goodness_of_fit(lines) == pytest.approx(1.0)
+        assert KLAFilmetrics._parse_goodness_of_fit(lines) == pytest.approx(1.0)
 
     def test_parse_gof_no_match(self):
         lines = ["No relevant data here"]
-        assert Filmetrics._parse_goodness_of_fit(lines) is None
+        assert KLAFilmetrics._parse_goodness_of_fit(lines) is None
 
 
 # --- Driver lifecycle tests (mocked subprocess) -------------------------------
@@ -148,7 +148,7 @@ class TestFilmetricsLifecycle:
         proc = self._make_mock_process()
         mock_popen.return_value = proc
 
-        fm = Filmetrics(exe_path="/fake/FilmetricsTool.exe", recipe_name="TestRecipe")
+        fm = KLAFilmetrics(exe_path="/fake/FilmetricsTool.exe", recipe_name="TestRecipe")
         fm.connect()
 
         mock_popen.assert_called_once()
@@ -160,7 +160,7 @@ class TestFilmetricsLifecycle:
     def test_connect_raises_on_missing_exe(self, mock_popen):
         mock_popen.side_effect = FileNotFoundError("not found")
 
-        fm = Filmetrics(exe_path="/bad/path.exe", recipe_name="Test")
+        fm = KLAFilmetrics(exe_path="/bad/path.exe", recipe_name="Test")
         with pytest.raises(FilmetricsConnectionError):
             fm.connect()
 
@@ -169,7 +169,7 @@ class TestFilmetricsLifecycle:
         proc = self._make_mock_process()
         mock_popen.return_value = proc
 
-        fm = Filmetrics(exe_path="/fake/exe", recipe_name="Test")
+        fm = KLAFilmetrics(exe_path="/fake/exe", recipe_name="Test")
         fm.connect()
 
         # Reset readline for disconnect's _send_command
@@ -186,7 +186,7 @@ class TestFilmetricsLifecycle:
     @patch("subprocess.Popen")
     def test_disconnect_when_not_connected(self, mock_popen):
         """disconnect() should be safe to call when not connected."""
-        fm = Filmetrics(exe_path="/fake/exe", recipe_name="Test")
+        fm = KLAFilmetrics(exe_path="/fake/exe", recipe_name="Test")
         fm.disconnect()  # Should not raise
 
     @patch("subprocess.Popen")
@@ -194,7 +194,7 @@ class TestFilmetricsLifecycle:
         proc = self._make_mock_process()
         mock_popen.return_value = proc
 
-        fm = Filmetrics(exe_path="/fake/exe", recipe_name="Test")
+        fm = KLAFilmetrics(exe_path="/fake/exe", recipe_name="Test")
         fm.connect()
         proc.poll.return_value = None  # still alive
         assert fm.health_check() is True
@@ -204,18 +204,18 @@ class TestFilmetricsLifecycle:
         proc = self._make_mock_process()
         mock_popen.return_value = proc
 
-        fm = Filmetrics(exe_path="/fake/exe", recipe_name="Test")
+        fm = KLAFilmetrics(exe_path="/fake/exe", recipe_name="Test")
         fm.connect()
         proc.poll.return_value = 1  # process exited
         assert fm.health_check() is False
 
     def test_health_check_false_when_not_connected(self):
-        fm = Filmetrics(exe_path="/fake/exe", recipe_name="Test")
+        fm = KLAFilmetrics(exe_path="/fake/exe", recipe_name="Test")
         assert fm.health_check() is False
 
     @patch("subprocess.Popen")
     def test_is_base_instrument(self, mock_popen):
-        fm = Filmetrics(exe_path="/fake/exe", recipe_name="Test")
+        fm = KLAFilmetrics(exe_path="/fake/exe", recipe_name="Test")
         assert isinstance(fm, BaseInstrument)
 
 
@@ -224,7 +224,7 @@ class TestFilmetricsLifecycle:
 class TestFilmetricsCommands:
 
     def _make_connected_filmetrics(self, mock_popen, command_response_lines):
-        """Helper: create a connected Filmetrics with mocked subprocess."""
+        """Helper: create a connected KLAFilmetrics with mocked subprocess."""
         proc = MagicMock()
         proc.poll.return_value = None
         proc.pid = 12345
@@ -239,7 +239,7 @@ class TestFilmetricsCommands:
         proc.stdout.readline.side_effect = command_lines
 
         mock_popen.return_value = proc
-        fm = Filmetrics(exe_path="/fake/exe", recipe_name="Test")
+        fm = KLAFilmetrics(exe_path="/fake/exe", recipe_name="Test")
         fm.connect()
         return fm, proc
 
@@ -339,36 +339,36 @@ class TestFilmetricsCommands:
         proc.stdout.readline.side_effect = [""]
 
         mock_popen.return_value = proc
-        fm = Filmetrics(exe_path="/fake/exe", recipe_name="Test", command_timeout=0.1)
+        fm = KLAFilmetrics(exe_path="/fake/exe", recipe_name="Test", command_timeout=0.1)
         fm.connect()
 
         with pytest.raises(FilmetricsCommandError):
             fm.acquire_sample()
 
 
-# --- Offline Filmetrics tests -------------------------------------------------
+# --- Offline KLAFilmetrics tests -------------------------------------------------
 
 class TestOfflineFilmetrics:
 
     def test_is_base_instrument(self):
-        fm = Filmetrics(offline=True)
+        fm = KLAFilmetrics(offline=True)
         assert isinstance(fm, BaseInstrument)
 
     def test_connect_disconnect_cycle(self):
-        fm = Filmetrics(offline=True)
+        fm = KLAFilmetrics(offline=True)
         fm.connect()
         assert fm.health_check() is True
         fm.disconnect()  # safe no-op in offline mode
 
     def test_measure_returns_default_result(self):
-        fm = Filmetrics(offline=True)
+        fm = KLAFilmetrics(offline=True)
         fm.connect()
         result = fm.measure()
         assert isinstance(result, MeasurementResult)
         assert result.is_valid is True
 
     def test_measure_returns_custom_result(self):
-        fm = Filmetrics(
+        fm = KLAFilmetrics(
             offline=True,
             default_thickness_nm=42.0,
             default_goodness_of_fit=0.5,
@@ -380,5 +380,5 @@ class TestOfflineFilmetrics:
         assert result.is_valid is False
 
     def test_disconnect_safe_when_not_connected(self):
-        fm = Filmetrics(offline=True)
+        fm = KLAFilmetrics(offline=True)
         fm.disconnect()  # Should not raise

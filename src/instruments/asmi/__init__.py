@@ -1,5 +1,6 @@
-from instruments.asmi.driver import ASMI
+from instruments.asmi.interface import ASMIInstrument
 from instruments.asmi.models import ASMIStatus, MeasurementResult
+from instruments.asmi.vendors.vernier import VernierASMI
 from instruments.asmi.exceptions import (
     ASMIError,
     ASMIConnectionError,
@@ -8,7 +9,8 @@ from instruments.asmi.exceptions import (
 )
 
 __all__ = [
-    "ASMI",
+    "ASMIInstrument",
+    "VernierASMI",
     "ASMIStatus",
     "MeasurementResult",
     "ASMIError",

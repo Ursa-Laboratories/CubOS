@@ -35,16 +35,16 @@ def _plate() -> WellPlate:
 
 
 def _instrument(name: str = "asmi"):
-    """Return an offline ASMI instance.
+    """Return an offline VernierASMI instance.
 
     A real subclass (not a MagicMock) is needed because
     ``_validate_asmi_indentation`` matches by type — the depth-bound
     check should fire whether the user names this instrument ``asmi``,
     ``force_sensor``, or anything else.
     """
-    from instruments.asmi.driver import ASMI
+    from instruments.asmi.vendors.vernier import VernierASMI
 
-    instr = ASMI(name=name, offline=True)
+    instr = VernierASMI(name=name, offline=True)
     return instr
 
 
@@ -212,11 +212,11 @@ def test_asmi_indentation_non_finite_indentation_limit_height_violates(bad_value
 
 
 def test_asmi_indentation_depth_bound_matches_by_instrument_type_not_name():
-    """A user-named ASMI (e.g. 'force_sensor') still triggers the
+    """A user-named VernierASMI (e.g. 'force_sensor') still triggers the
     depth-bound check — the validator matches on the driver type, not
     the instrument key in the instrumented_gantry config. This is the only thing
     protecting against driving the gantry through the deck on a
-    misconfigured ASMI scan."""
+    misconfigured VernierASMI scan."""
     instrument = _instrument(name="force_sensor")
     instrumented_gantry = InstrumentedGantry(controller=MagicMock(), instruments={"force_sensor": instrument})
     deck = Deck({"plate": _plate()})

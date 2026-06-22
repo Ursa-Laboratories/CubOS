@@ -5,7 +5,7 @@ import statistics
 import time
 from typing import Optional
 
-from instruments.base_instrument import BaseInstrument
+from instruments.asmi.interface import ASMIInstrument
 from instruments.asmi.exceptions import (
     ASMICommandError,
     ASMIConnectionError,
@@ -32,7 +32,7 @@ def _step_count_bound(z_upper: float, z_lower: float, step_size: float) -> int:
     return raw_steps + _STEP_COUNT_SAFETY_MARGIN
 
 
-class ASMI(BaseInstrument):
+class VernierASMI(ASMIInstrument):
     """Driver for the ASMI force sensor (Vernier GoDirect).
 
     Connects to a GoDirect force sensor over USB and provides force

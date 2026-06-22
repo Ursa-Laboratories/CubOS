@@ -360,8 +360,8 @@ instruments:
                 f.gantry_path, f.deck_path, f.protocol_path,
                 mock_mode=True,
             )
-            from instruments.pipette.driver import Pipette
-            assert isinstance(context.gantry.instruments["pipette"], Pipette)
+            from instruments.pipette.vendors.opentrons import OpentronsPipette
+            assert isinstance(context.gantry.instruments["pipette"], OpentronsPipette)
             assert context.gantry.instruments["pipette"]._offline is True
 
 

@@ -2,7 +2,7 @@ import ctypes as C
 import time
 from typing import Optional
 
-from instruments.base_instrument import BaseInstrument
+from instruments.uvvis_ccs.interface import UVVisCCSInstrument
 from instruments.uvvis_ccs.exceptions import (
     UVVisCCSConnectionError,
     UVVisCCSMeasurementError,
@@ -28,7 +28,7 @@ def _synthetic_spectrum(integration_time_s: float = 0.24) -> UVVisSpectrum:
     )
 
 
-class UVVisCCS(BaseInstrument):
+class ThorlabsUVVisCCS(UVVisCCSInstrument):
     """Driver for the Thorlabs CCS-series compact spectrometer.
 
     Communicates via the Thorlabs TLCCS DLL (ctypes).

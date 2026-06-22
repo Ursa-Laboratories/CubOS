@@ -5,7 +5,7 @@ from typing import Optional
 
 import serial
 
-from instruments.base_instrument import BaseInstrument
+from instruments.pipette.interface import PipetteInstrument
 from instruments.pipette.exceptions import (
     PipetteCommandError,
     PipetteConfigError,
@@ -31,7 +31,7 @@ _CMD_DRIP_STOP = 28
 _ARDUINO_SETTLE_TIME = 2.0
 
 
-class Pipette(BaseInstrument):
+class OpentronsPipette(PipetteInstrument):
     """Driver for Opentrons pipettes via Arduino serial (Pawduino firmware).
 
     Pass ``offline=True`` for dry runs — simulates plunger state in memory.
@@ -307,7 +307,7 @@ class Pipette(BaseInstrument):
 
     @staticmethod
     def _parse_position(response: str) -> float:
-        parsed = Pipette._parse_key_value(response)
+        parsed = OpentronsPipette._parse_key_value(response)
         return float(parsed.get("pos", 0.0))
 
     def _close_serial(self) -> None:

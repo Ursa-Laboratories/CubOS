@@ -20,7 +20,7 @@ from typing import Optional
 
 import serial
 
-from instruments.base_instrument import BaseInstrument
+from instruments.uv_curing.interface import UVCuringInstrument
 from instruments.uv_curing.exceptions import (
     UVCuringCommandError,
     UVCuringConnectionError,
@@ -29,7 +29,7 @@ from instruments.uv_curing.exceptions import (
 from instruments.uv_curing.models import CureResult, UVCuringStatus
 
 
-class UVCuring(BaseInstrument):
+class ExcelitasUVCuring(UVCuringInstrument):
     """Driver for the Excelitas OmniCure S1500 PRO.
 
     Pass ``offline=True`` for dry runs — no serial connection, cure()
