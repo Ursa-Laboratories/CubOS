@@ -6,6 +6,7 @@
 
 ## Submodules
 
-- [instruments.asmi.driver](driver.md)
 - [instruments.asmi.exceptions](exceptions.md)
+- [instruments.asmi.interface](interface.md)
 - [instruments.asmi.models](models.md)
+- [instruments.asmi.vendors](vendors/index.md)

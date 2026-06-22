@@ -69,7 +69,7 @@ def _instantiate_instruments(
         validate_instrument(type_key, vendor)
         if mock_mode:
             kwargs["offline"] = True
-        cls = get_instrument_class(type_key)
+        cls = get_instrument_class(type_key, vendor)
         instruments[name] = cls(**kwargs)
     return instruments
 

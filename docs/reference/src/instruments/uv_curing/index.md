@@ -6,6 +6,7 @@
 
 ## Submodules
 
-- [instruments.uv_curing.driver](driver.md)
 - [instruments.uv_curing.exceptions](exceptions.md)
+- [instruments.uv_curing.interface](interface.md)
 - [instruments.uv_curing.models](models.md)
+- [instruments.uv_curing.vendors](vendors/index.md)

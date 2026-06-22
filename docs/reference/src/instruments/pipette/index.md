@@ -6,6 +6,7 @@
 
 ## Submodules
 
-- [instruments.pipette.driver](driver.md)
 - [instruments.pipette.exceptions](exceptions.md)
+- [instruments.pipette.interface](interface.md)
 - [instruments.pipette.models](models.md)
+- [instruments.pipette.vendors](vendors/index.md)

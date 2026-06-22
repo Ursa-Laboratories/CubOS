@@ -1,5 +1,6 @@
-from instruments.uv_curing.driver import UVCuring
+from instruments.uv_curing.interface import UVCuringInstrument
 from instruments.uv_curing.models import CureResult, UVCuringStatus
+from instruments.uv_curing.vendors.excelitas import ExcelitasUVCuring
 from instruments.uv_curing.exceptions import (
     UVCuringError,
     UVCuringConnectionError,
@@ -8,7 +9,8 @@ from instruments.uv_curing.exceptions import (
 )
 
 __all__ = [
-    "UVCuring",
+    "UVCuringInstrument",
+    "ExcelitasUVCuring",
     "CureResult",
     "UVCuringStatus",
     "UVCuringError",

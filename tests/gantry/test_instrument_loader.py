@@ -12,11 +12,13 @@ from gantry.instrument_loader import (
 )
 from gantry.instrument_mount import InstrumentedGantry
 from gantry.loader import load_gantry_from_yaml
-from instruments.asmi.driver import ASMI
-from instruments.filmetrics.driver import Filmetrics
-from instruments.pipette.driver import Pipette
-from instruments.rpi_camera.driver import RPiCamera
-from instruments.uvvis_ccs.driver import UVVisCCS
+from instruments.asmi.vendors.vernier import VernierASMI
+from instruments.filmetrics.vendors.kla import KLAFilmetrics
+from instruments.pipette.vendors.opentrons import OpentronsPipette
+from instruments.camera.vendors.mount_only import MountOnlyCamera
+from instruments.camera.vendors.raspberry_pi import RaspberryPiCamera
+from instruments.mounted_tool.vendors.mount_only import MountOnlyTool
+from instruments.uvvis_ccs.vendors.thorlabs import ThorlabsUVVisCCS
 from instruments.yaml_schema import InstrumentYamlEntry
 
 
@@ -113,7 +115,7 @@ class TestLoadInstrumentedGantryFromConfig:
         )
 
         assert isinstance(mounted, InstrumentedGantry)
-        assert isinstance(mounted.instruments["asmi"], ASMI)
+        assert isinstance(mounted.instruments["asmi"], VernierASMI)
         assert mounted.instruments["asmi"]._offline is True
         assert mounted.expected_grbl_settings == {"$10": 0.0, "$22": 1.0}
         assert mounted.safe_z == 80.0
@@ -176,7 +178,7 @@ class TestLoadInstrumentedGantryFromYaml:
         )
         mounted = load_instrumented_gantry_from_yaml(gantry_path, _mock_controller())
         instr = mounted.instruments["uvvis"]
-        assert isinstance(instr, UVVisCCS)
+        assert isinstance(instr, ThorlabsUVVisCCS)
         assert instr.offset_x == 15.0
         assert instr.offset_y == 0.0
         assert instr.depth == 5.0
@@ -201,8 +203,8 @@ class TestLoadInstrumentedGantryFromYaml:
         )
         mounted = load_instrumented_gantry_from_yaml(gantry_path, _mock_controller())
         assert len(mounted.instruments) == 2
-        assert isinstance(mounted.instruments["uvvis"], UVVisCCS)
-        assert isinstance(mounted.instruments["pipette"], Pipette)
+        assert isinstance(mounted.instruments["uvvis"], ThorlabsUVVisCCS)
+        assert isinstance(mounted.instruments["pipette"], OpentronsPipette)
         assert mounted.instruments["pipette"].offset_x == 10.0
 
     def test_loads_filmetrics(self, tmp_path):
@@ -219,7 +221,7 @@ class TestLoadInstrumentedGantryFromYaml:
         )
         mounted = load_instrumented_gantry_from_yaml(gantry_path, _mock_controller())
         instr = mounted.instruments["film"]
-        assert isinstance(instr, Filmetrics)
+        assert isinstance(instr, KLAFilmetrics)
         assert instr.offset_x == 20.0
 
     def test_loads_rpi_camera(self, tmp_path):
@@ -228,7 +230,7 @@ class TestLoadInstrumentedGantryFromYaml:
             _gantry_yaml(
                 """
                 camera:
-                  type: rpi_camera
+                  type: camera
                   vendor: raspberry_pi
                   offset_x: -12.0
                   offset_y: -4.0
@@ -239,10 +241,54 @@ class TestLoadInstrumentedGantryFromYaml:
         )
         mounted = load_instrumented_gantry_from_yaml(gantry_path, _mock_controller())
         instr = mounted.instruments["camera"]
-        assert isinstance(instr, RPiCamera)
+        assert isinstance(instr, RaspberryPiCamera)
         assert instr.offset_x == -12.0
         assert instr.offset_y == -4.0
         assert instr.depth == 3.0
+
+    def test_loads_mount_only_camera(self, tmp_path):
+        gantry_path = _write_gantry_yaml(
+            tmp_path,
+            _gantry_yaml(
+                """
+                camera:
+                  type: camera
+                  vendor: mount_only
+                  offset_x: -12.0
+                  offset_y: -4.0
+                  depth: 3.0
+                  offline: true
+                """
+            ),
+        )
+        mounted = load_instrumented_gantry_from_yaml(gantry_path, _mock_controller())
+        instr = mounted.instruments["camera"]
+        assert isinstance(instr, MountOnlyCamera)
+        assert instr.offset_x == -12.0
+        assert instr.offset_y == -4.0
+        assert instr.depth == 3.0
+
+    def test_loads_mount_only_tool(self, tmp_path):
+        gantry_path = _write_gantry_yaml(
+            tmp_path,
+            _gantry_yaml(
+                """
+                capper:
+                  type: mounted_tool
+                  vendor: mount_only
+                  offset_x: 8.0
+                  offset_y: 1.5
+                  depth: 12.0
+                  offline: true
+                """
+            ),
+        )
+        mounted = load_instrumented_gantry_from_yaml(gantry_path, _mock_controller())
+        instr = mounted.instruments["capper"]
+        assert isinstance(instr, MountOnlyTool)
+        assert instr.offset_x == 8.0
+        assert instr.offset_y == 1.5
+        assert instr.depth == 12.0
 
     def test_invalid_vendor_raises_value_error(self, tmp_path):
         gantry_path = _write_gantry_yaml(
@@ -278,7 +324,10 @@ class TestLoadInstrumentedGantryFromYaml:
     def test_all_valid_vendor_combos_load(self, tmp_path):
         pairs = [
             ("asmi", "vernier"),
+            ("camera", "mount_only"),
+            ("camera", "raspberry_pi"),
             ("filmetrics", "kla"),
+            ("mounted_tool", "mount_only"),
             ("pipette", "opentrons"),
             ("uv_curing", "excelitas"),
             ("uvvis_ccs", "thorlabs"),
@@ -319,7 +368,7 @@ class TestLoadInstrumentedGantryMockMode:
             _mock_controller(),
             mock_mode=True,
         )
-        assert isinstance(mounted.instruments["pip"], Pipette)
+        assert isinstance(mounted.instruments["pip"], OpentronsPipette)
         assert mounted.instruments["pip"]._offline is True
 
     def test_mock_mode_false_keeps_online(self, tmp_path):
@@ -338,7 +387,7 @@ class TestLoadInstrumentedGantryMockMode:
             _mock_controller(),
             mock_mode=False,
         )
-        assert isinstance(mounted.instruments["uvvis"], UVVisCCS)
+        assert isinstance(mounted.instruments["uvvis"], ThorlabsUVVisCCS)
         assert mounted.instruments["uvvis"]._offline is False
 
     def test_mock_mode_swaps_all_instruments(self, tmp_path):
@@ -363,9 +412,9 @@ class TestLoadInstrumentedGantryMockMode:
             _mock_controller(),
             mock_mode=True,
         )
-        assert isinstance(mounted.instruments["pip"], Pipette)
+        assert isinstance(mounted.instruments["pip"], OpentronsPipette)
         assert mounted.instruments["pip"]._offline is True
-        assert isinstance(mounted.instruments["uvvis"], UVVisCCS)
+        assert isinstance(mounted.instruments["uvvis"], ThorlabsUVVisCCS)
         assert mounted.instruments["uvvis"]._offline is True
-        assert isinstance(mounted.instruments["film"], Filmetrics)
+        assert isinstance(mounted.instruments["film"], KLAFilmetrics)
         assert mounted.instruments["film"]._offline is True

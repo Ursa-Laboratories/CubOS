@@ -17,7 +17,7 @@ from instruments.pipette.exceptions import (
     PipetteTimeoutError,
     PipetteConfigError,
 )
-from instruments.pipette.driver import Pipette
+from instruments.pipette.vendors.opentrons import OpentronsPipette
 
 
 # --- Model tests --------------------------------------------------------------
@@ -145,31 +145,31 @@ class TestParsing:
 
     def test_parse_key_value_typical(self):
         response = "OK:{homed:1,pos:10.5,max_vol:200}"
-        result = Pipette._parse_key_value(response)
+        result = OpentronsPipette._parse_key_value(response)
         assert result["homed"] == 1.0
         assert result["pos"] == pytest.approx(10.5)
         assert result["max_vol"] == 200.0
 
     def test_parse_key_value_empty_body(self):
-        result = Pipette._parse_key_value("OK:{}")
+        result = OpentronsPipette._parse_key_value("OK:{}")
         assert result == {}
 
     def test_parse_key_value_single_pair(self):
-        result = Pipette._parse_key_value("OK:{pos:36.0}")
+        result = OpentronsPipette._parse_key_value("OK:{pos:36.0}")
         assert result["pos"] == pytest.approx(36.0)
 
     def test_parse_key_value_non_numeric_skipped(self):
-        result = Pipette._parse_key_value("OK:{status:ready,pos:10.0}")
+        result = OpentronsPipette._parse_key_value("OK:{status:ready,pos:10.0}")
         assert "status" not in result
         assert result["pos"] == pytest.approx(10.0)
 
     def test_parse_position(self):
         response = "OK:{pos:36.5,homed:1}"
-        assert Pipette._parse_position(response) == pytest.approx(36.5)
+        assert OpentronsPipette._parse_position(response) == pytest.approx(36.5)
 
     def test_parse_position_missing(self):
         response = "OK:{homed:1}"
-        assert Pipette._parse_position(response) == 0.0
+        assert OpentronsPipette._parse_position(response) == 0.0
 
 
 # --- Driver constructor tests -------------------------------------------------
@@ -178,18 +178,18 @@ class TestPipetteConstructor:
 
     def test_unknown_model_raises_config_error(self):
         with pytest.raises(PipetteConfigError, match="Unknown pipette model"):
-            Pipette(pipette_model="p9999_fake", port="/dev/null")
+            OpentronsPipette(pipette_model="p9999_fake", port="/dev/null")
 
     def test_known_model_accepted(self):
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/null")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/null")
         assert pip.config.name == "p300_single_gen2"
 
     def test_is_base_instrument(self):
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/null")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/null")
         assert isinstance(pip, BaseInstrument)
 
     def test_custom_name(self):
-        pip = Pipette(
+        pip = OpentronsPipette(
             pipette_model="p300_single_gen2", port="/dev/null", name="my_pip"
         )
         assert pip.name == "my_pip"
@@ -208,13 +208,13 @@ class TestPipetteLifecycle:
         mock_ser.readline.side_effect = [r.encode() for r in responses]
         return mock_ser
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_connect_opens_serial(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial()
         mock_serial_cls.return_value = mock_ser
 
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
         pip.connect()
 
         mock_serial_cls.assert_called_once_with(
@@ -222,53 +222,53 @@ class TestPipetteLifecycle:
         )
         mock_sleep.assert_called_once()
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_connect_raises_on_serial_error(self, mock_sleep, mock_serial_cls):
         import serial as real_serial
         mock_serial_cls.side_effect = real_serial.SerialException("port busy")
 
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
         with pytest.raises(PipetteConnectionError, match="Cannot open serial"):
             pip.connect()
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_connect_raises_on_no_response(self, mock_sleep, mock_serial_cls):
         mock_ser = MagicMock()
         mock_ser.is_open = True
         mock_ser.readline.return_value = b""
         mock_serial_cls.return_value = mock_ser
 
-        pip = Pipette(
+        pip = OpentronsPipette(
             pipette_model="p300_single_gen2", port="/dev/ttyUSB0",
             command_timeout=0.1,
         )
         with pytest.raises(PipetteConnectionError, match="did not respond"):
             pip.connect()
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_disconnect_closes_serial(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial()
         mock_serial_cls.return_value = mock_ser
 
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
         pip.connect()
         pip.disconnect()
 
         mock_ser.close.assert_called_once()
 
     def test_disconnect_safe_when_not_connected(self):
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/null")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/null")
         pip.disconnect()  # Should not raise
 
     def test_health_check_false_when_not_connected(self):
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/null")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/null")
         assert pip.health_check() is False
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_health_check_true_when_connected(self, mock_sleep, mock_serial_cls):
         # Two status calls: one for connect, one for health_check
         responses = [
@@ -278,7 +278,7 @@ class TestPipetteLifecycle:
         mock_ser = self._make_mock_serial(responses)
         mock_serial_cls.return_value = mock_ser
 
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
         pip.connect()
         assert pip.health_check() is True
 
@@ -288,19 +288,19 @@ class TestPipetteLifecycle:
 class TestPipetteCommands:
 
     def _make_connected_pipette(self, mock_serial_cls, mock_sleep, responses):
-        """Helper: create a connected Pipette with mocked serial."""
+        """Helper: create a connected OpentronsPipette with mocked serial."""
         all_responses = ["OK:{homed:1,pos:0.0,max_vol:200}\n"] + responses
         mock_ser = MagicMock()
         mock_ser.is_open = True
         mock_ser.readline.side_effect = [r.encode() for r in all_responses]
         mock_serial_cls.return_value = mock_ser
 
-        pip = Pipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
         pip.connect()
         return pip, mock_ser
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_home(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -310,8 +310,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
         assert any("10" in cmd for cmd in written)
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_prime(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -321,8 +321,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
         assert any("11" in cmd for cmd in written)
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_aspirate_returns_result(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -334,8 +334,8 @@ class TestPipetteCommands:
         assert result.volume_ul == 100.0
         assert result.position_mm == pytest.approx(46.98)
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_dispense_returns_result(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -346,8 +346,8 @@ class TestPipetteCommands:
         assert result.success is True
         assert result.volume_ul == 100.0
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_mix_returns_result(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -359,8 +359,8 @@ class TestPipetteCommands:
         assert result.volume_ul == 50.0
         assert result.repetitions == 5
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_get_status(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -372,8 +372,8 @@ class TestPipetteCommands:
         assert status.position_mm == pytest.approx(36.0)
         assert status.is_primed is True
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_pick_up_tip_sets_flag(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -383,8 +383,8 @@ class TestPipetteCommands:
         status = pip.get_status()
         assert status.has_tip is True
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_drop_tip_clears_flag(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -395,8 +395,8 @@ class TestPipetteCommands:
         status = pip.get_status()
         assert status.has_tip is False
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_command_error_on_err_response(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -405,8 +405,8 @@ class TestPipetteCommands:
         with pytest.raises(PipetteCommandError, match="motor stall"):
             pip.home()
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_blowout(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -416,8 +416,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
         assert any("46.0" in cmd for cmd in written)
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_drip_stop(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -427,8 +427,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
         assert any("28" in cmd for cmd in written)
 
-    @patch("instruments.pipette.driver.serial.Serial")
-    @patch("instruments.pipette.driver.time.sleep")
+    @patch("instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("instruments.pipette.vendors.opentrons.time.sleep")
     def test_warm_up_homes_and_primes(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -441,26 +441,26 @@ class TestPipetteCommands:
         assert "11" in codes  # move_to (prime)
 
 
-# --- Offline Pipette tests ----------------------------------------------------
+# --- Offline OpentronsPipette tests ----------------------------------------------------
 
 class TestOfflinePipette:
 
     def test_is_base_instrument(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         assert isinstance(pip, BaseInstrument)
 
     def test_unknown_model_raises_config_error(self):
         with pytest.raises(PipetteConfigError):
-            Pipette(pipette_model="p9999_fake", offline=True)
+            OpentronsPipette(pipette_model="p9999_fake", offline=True)
 
     def test_connect_disconnect_cycle(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         pip.connect()
         assert pip.health_check() is True
         pip.disconnect()  # safe no-op in offline mode
 
     def test_aspirate_returns_result(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         pip.connect()
         result = pip.aspirate(100.0)
         assert isinstance(result, AspirateResult)
@@ -468,21 +468,21 @@ class TestOfflinePipette:
         assert result.volume_ul == 100.0
 
     def test_dispense_returns_result(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         pip.connect()
         result = pip.dispense(100.0)
         assert isinstance(result, AspirateResult)
         assert result.success is True
 
     def test_mix_returns_result(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         pip.connect()
         result = pip.mix(50.0, repetitions=5)
         assert isinstance(result, MixResult)
         assert result.repetitions == 5
 
     def test_get_status_returns_status(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         pip.connect()
         pip.home()
         pip.prime()
@@ -493,7 +493,7 @@ class TestOfflinePipette:
         assert status.max_volume == 200.0
 
     def test_tip_tracking(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         pip.connect()
         pip.pick_up_tip()
         status = pip.get_status()
@@ -503,7 +503,7 @@ class TestOfflinePipette:
         assert status.has_tip is False
 
     def test_attached_tip_extension_changes_effective_depth(self):
-        pip = Pipette(offline=True, depth=-17.0)
+        pip = OpentronsPipette(offline=True, depth=-17.0)
 
         assert pip.effective_depth == pytest.approx(-17.0)
 
@@ -516,7 +516,7 @@ class TestOfflinePipette:
         assert pip.effective_depth == pytest.approx(-17.0)
 
     def test_warm_up_homes_and_primes(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         pip.connect()
         pip.warm_up()
         status = pip.get_status()
@@ -524,10 +524,10 @@ class TestOfflinePipette:
         assert status.is_primed is True
 
     def test_disconnect_safe_when_not_connected(self):
-        pip = Pipette(offline=True)
+        pip = OpentronsPipette(offline=True)
         pip.disconnect()  # Should not raise
 
     def test_config_property(self):
-        pip = Pipette(pipette_model="flex_1channel_1000", offline=True)
+        pip = OpentronsPipette(pipette_model="flex_1channel_1000", offline=True)
         assert pip.config.family == PipetteFamily.FLEX
         assert pip.config.max_volume == 1000.0

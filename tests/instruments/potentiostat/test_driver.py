@@ -1,4 +1,4 @@
-"""Tests for Potentiostat driver: constructor, offline mode, and mocked online mode.
+"""Tests for AdmiralPotentiostat driver: constructor, offline mode, and mocked online mode.
 
 The online-mode tests never touch the real SquidstatPyLibrary. They replace
 ``_load_qt_bindings`` with a helper that returns a ``_QtBindings`` assembled
@@ -12,7 +12,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from instruments.potentiostat.driver import Potentiostat, _QtBindings
+from instruments.potentiostat.vendors.admiral import AdmiralPotentiostat, _QtBindings
 from instruments.potentiostat.exceptions import (
     PotentiostatCommandError,
     PotentiostatConfigError,
@@ -33,26 +33,26 @@ from instruments.potentiostat.models import (
 class TestConstructor:
 
     def test_defaults(self):
-        p = Potentiostat()
-        assert p.name == "Potentiostat"
+        p = AdmiralPotentiostat()
+        assert p.name == "AdmiralPotentiostat"
         assert p._channel == 0
         assert p._port == ""
         assert p._offline is False
         assert p.vendor == "admiral"
 
     def test_name_override(self):
-        p = Potentiostat(name="station_a")
+        p = AdmiralPotentiostat(name="station_a")
         assert p.name == "station_a"
 
     def test_offsets_propagate_to_base(self):
-        p = Potentiostat(offset_x=1.5, offset_y=-2.0, depth=3.0)
+        p = AdmiralPotentiostat(offset_x=1.5, offset_y=-2.0, depth=3.0)
         assert p.offset_x == 1.5
         assert p.offset_y == -2.0
         assert p.depth == 3.0
 
     def test_negative_channel_rejected(self):
         with pytest.raises(PotentiostatConfigError, match="channel"):
-            Potentiostat(channel=-1)
+            AdmiralPotentiostat(channel=-1)
 
 
 # --- Offline mode -------------------------------------------------------------
@@ -61,16 +61,16 @@ class TestConstructor:
 class TestOfflineLifecycle:
 
     def test_connect_and_disconnect_are_noops(self):
-        p = Potentiostat(offline=True)
+        p = AdmiralPotentiostat(offline=True)
         p.connect()
         p.disconnect()  # must not raise
 
     def test_health_check_true_in_offline(self):
-        p = Potentiostat(offline=True)
+        p = AdmiralPotentiostat(offline=True)
         assert p.health_check() is True
 
     def test_run_cv_offline_returns_result_with_aligned_arrays(self):
-        p = Potentiostat(offline=True)
+        p = AdmiralPotentiostat(offline=True)
         p.connect()
         result = p.run_cv(
             CVParams(
@@ -89,15 +89,15 @@ class TestOfflineLifecycle:
         assert result.technique == "cv"
 
     def test_run_cv_offline_is_deterministic(self):
-        p1 = Potentiostat(offline=True)
-        p2 = Potentiostat(offline=True)
+        p1 = AdmiralPotentiostat(offline=True)
+        p2 = AdmiralPotentiostat(offline=True)
         params = CVParams(0.0, 0.2, -0.2, 0.0, 0.05, cycles=1, sampling_interval_s=0.1)
         r1 = p1.run_cv(params)
         r2 = p2.run_cv(params)
         assert r1.current_a == r2.current_a
 
     def test_run_ocp_offline(self):
-        p = Potentiostat(offline=True)
+        p = AdmiralPotentiostat(offline=True)
         result = p.run_ocp(OCPParams(duration_s=1.0, sampling_interval_s=0.1))
         assert isinstance(result, OCPResult)
         assert len(result.voltage_v) == len(result.time_s) == 10
@@ -107,7 +107,7 @@ class TestOfflineLifecycle:
         assert result.technique == "ocp"
 
     def test_run_ca_offline(self):
-        p = Potentiostat(offline=True)
+        p = AdmiralPotentiostat(offline=True)
         result = p.run_ca(CAParams(potential_V=0.6, duration_s=0.5, sampling_interval_s=0.05))
         assert isinstance(result, CAResult)
         assert all(v == 0.6 for v in result.voltage_v)
@@ -116,7 +116,7 @@ class TestOfflineLifecycle:
         assert result.technique == "ca"
 
     def test_run_cp_offline(self):
-        p = Potentiostat(offline=True)
+        p = AdmiralPotentiostat(offline=True)
         result = p.run_cp(CPParams(current_A=1e-3, duration_s=0.5, sampling_interval_s=0.05))
         assert isinstance(result, CPResult)
         assert all(c == 1e-3 for c in result.current_a)
@@ -257,10 +257,10 @@ class TestConnectMissingDependency:
             )
 
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             side_effect=_raise,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             with pytest.raises(PotentiostatConnectionError, match=r"\[potentiostat\]"):
                 p.connect()
 
@@ -270,10 +270,10 @@ class TestConnectOnline:
     def test_connects_and_stores_handler(self):
         bindings, tracker, handler = _make_qt_mock_bindings()
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             p.connect()
         assert p._handler is handler
         assert p._tracker is tracker
@@ -285,15 +285,15 @@ class TestConnectOnline:
             schedule_device_connected=False,
         )
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3", command_timeout=0.01)
+            p = AdmiralPotentiostat(port="COM3", command_timeout=0.01)
             with pytest.raises(PotentiostatConnectionError, match="No SquidStat device"):
                 p.connect()
 
     def test_health_check_false_before_connect(self):
-        p = Potentiostat(port="COM3")
+        p = AdmiralPotentiostat(port="COM3")
         assert p.health_check() is False
 
 
@@ -311,10 +311,10 @@ class TestRunCVOnline:
         ]
         bindings, _tracker, handler = _make_qt_mock_bindings(dc_samples=samples)
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             p.connect()
             result = p.run_cv(
                 CVParams(0.0, 0.5, -0.5, 0.0, 0.05, cycles=2, sampling_interval_s=0.01)
@@ -334,7 +334,7 @@ class TestRunCVOnline:
         handler.startUploadedExperiment.assert_called_once_with(0)
 
     def test_run_without_connect_raises_command_error(self):
-        p = Potentiostat()
+        p = AdmiralPotentiostat()
         with pytest.raises(PotentiostatCommandError, match="not connected"):
             p.run_cv(CVParams(0.0, 0.5, -0.5, 0.0, 0.05))
 
@@ -353,10 +353,10 @@ class TestRunOCPOnline:
         samples = [(0.0, 0.35, 0.0), (0.1, 0.36, 0.0)]
         bindings, _tracker, handler = _make_qt_mock_bindings(dc_samples=samples)
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             p.connect()
             result = p.run_ocp(OCPParams(duration_s=1.0, sampling_interval_s=0.1))
 
@@ -379,10 +379,10 @@ class TestRunCAOnline:
         samples = [(0.0, 0.5, 1e-6), (0.01, 0.5, 2e-6)]
         bindings, _tracker, handler = _make_qt_mock_bindings(dc_samples=samples)
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             p.connect()
             result = p.run_ca(
                 CAParams(potential_V=0.5, duration_s=1.0, sampling_interval_s=0.01)
@@ -404,10 +404,10 @@ class TestRunCPOnline:
         samples = [(0.0, 0.1, 1e-3), (0.01, 0.11, 1e-3)]
         bindings, _tracker, handler = _make_qt_mock_bindings(dc_samples=samples)
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             p.connect()
             result = p.run_cp(
                 CPParams(current_A=1e-3, duration_s=1.0, sampling_interval_s=0.01)
@@ -432,10 +432,10 @@ class TestVendorErrorCodes:
         bindings, _tracker, handler = _make_qt_mock_bindings()
         handler.uploadExperimentToChannel.return_value = "E_BUSY"
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             p.connect()
             with pytest.raises(PotentiostatCommandError, match="E_BUSY"):
                 p.run_ocp(OCPParams(duration_s=1.0))
@@ -446,10 +446,10 @@ class TestVendorErrorCodes:
         bindings, _tracker, handler = _make_qt_mock_bindings()
         handler.startUploadedExperiment.return_value = "E_NOT_READY"
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             p.connect()
             with pytest.raises(PotentiostatCommandError, match="E_NOT_READY"):
                 p.run_ocp(OCPParams(duration_s=1.0))
@@ -465,10 +465,10 @@ class TestExperimentTimeout:
             schedule_experiment_stopped=False,
         )
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3", command_timeout=0.01)
+            p = AdmiralPotentiostat(port="COM3", command_timeout=0.01)
             p.connect()
             with pytest.raises(PotentiostatTimeoutError, match="timeout"):
                 p.run_ocp(OCPParams(duration_s=1.0))
@@ -483,10 +483,10 @@ class TestDisconnect:
     def test_clears_state_and_calls_tracker(self):
         bindings, tracker, _handler = _make_qt_mock_bindings()
         with patch(
-            "instruments.potentiostat.driver._load_qt_bindings",
+            "instruments.potentiostat.vendors.admiral._load_qt_bindings",
             return_value=bindings,
         ):
-            p = Potentiostat(port="COM3")
+            p = AdmiralPotentiostat(port="COM3")
             p.connect()
             p.disconnect()
         tracker.disconnectFromDevice.assert_called_once_with("SquidStatMock")

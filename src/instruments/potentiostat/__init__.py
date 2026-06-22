@@ -1,4 +1,5 @@
-from instruments.potentiostat.driver import Potentiostat
+from instruments.potentiostat.interface import PotentiostatInstrument
+from instruments.potentiostat.vendors.admiral import AdmiralPotentiostat
 from instruments.potentiostat.exceptions import (
     PotentiostatCommandError,
     PotentiostatConfigError,
@@ -18,7 +19,8 @@ from instruments.potentiostat.models import (
 )
 
 __all__ = [
-    "Potentiostat",
+    "PotentiostatInstrument",
+    "AdmiralPotentiostat",
     "CVParams",
     "OCPParams",
     "CAParams",

@@ -40,8 +40,9 @@ After schema/config changes: focused tests, then `setup/validate_setup.py` for a
 
 ## Instruments
 
-- `src/instruments/<instrument>/driver.py`, `mock.py`, `models.py`, `exceptions.py`.
-- `src/instruments/registry.yaml`, `src/instruments/yaml_schema.py`.
+- `src/instruments/<type>/interface.py`, `vendors/<vendor>.py`, `models.py`, `exceptions.py`.
+- `src/instruments/registry.yaml`, `src/instruments/registry.py`, `src/instruments/yaml_schema.py`.
+- Gantry YAML keeps `type` + `vendor`; `registry.py` resolves the concrete class, merges installed `cubos.instrument_registries` entry points, and then merges `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlays.
 - `src/protocol_engine/measurements.py`, `data/data_store.py` - persisted measurements.
 - `data/protocol_runs.py`, `data/exports.py` - campaign creation for CubOS-owned protocol sessions and Zoo-compatible result summaries/ZIP exports.
 - Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.

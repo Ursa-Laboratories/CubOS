@@ -10,7 +10,7 @@ one protocol file.
 - `pip`
 - Git
 - For hardware runs: a GRBL-compatible gantry connected over serial
-- For real instruments: the vendor SDKs required by those instrument drivers
+- For real instruments: the vendor SDKs required by those vendor drivers
 
 If you bought a CubOS system through [ursalabs.ai](https://ursalabs.ai), gantry
 controller bring-up should already be handled. If you are setting up your own
@@ -32,8 +32,13 @@ Instrument vendor SDKs are optional. Install only the extras for hardware you
 actually use, for example:
 
 ```bash
-pip install -e ".[asmi]"
+pip install -e ".[asmi-vernier]"
 ```
+
+Customer/proprietary instruments are supplied as normal Python packages that
+register CubOS instrument drivers through the `cubos.instrument_registries`
+entry point group, or as explicit registry overlay YAMLs listed in
+`CUBOS_INSTRUMENT_REGISTRY_PATHS`.
 
 ## Setup Path
 

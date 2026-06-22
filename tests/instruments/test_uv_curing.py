@@ -4,7 +4,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from instruments.base_instrument import BaseInstrument, InstrumentError
-from instruments.uv_curing.driver import UVCuring
+from instruments.uv_curing.vendors.excelitas import ExcelitasUVCuring
 from instruments.uv_curing.models import CureResult, UVCuringStatus
 from instruments.uv_curing.exceptions import (
     UVCuringError,
@@ -40,13 +40,13 @@ class TestCureResult(unittest.TestCase):
 class TestUVCuringIsBaseInstrument(unittest.TestCase):
 
     def test_is_subclass(self):
-        self.assertTrue(issubclass(UVCuring, BaseInstrument))
+        self.assertTrue(issubclass(ExcelitasUVCuring, BaseInstrument))
 
 
 class TestUVCuringOffline(unittest.TestCase):
 
     def setUp(self):
-        self.uv = UVCuring(offline=True, default_intensity=50.0,
+        self.uv = ExcelitasUVCuring(offline=True, default_intensity=50.0,
                            default_exposure_time=2.0)
 
     def test_connect_disconnect(self):
@@ -92,64 +92,64 @@ class TestUVCuringOffline(unittest.TestCase):
 class TestUVCuringOnlineGuards(unittest.TestCase):
 
     def test_health_check_false_without_connect(self):
-        uv = UVCuring(offline=False)
+        uv = ExcelitasUVCuring(offline=False)
         self.assertFalse(uv.health_check())
 
     def test_send_command_raises_without_connect(self):
-        uv = UVCuring(offline=False)
+        uv = ExcelitasUVCuring(offline=False)
         with self.assertRaises(UVCuringCommandError):
             uv._send_command("CONN")
 
 
 class TestUVCuringMockedSerial(unittest.TestCase):
 
-    @patch('instruments.uv_curing.driver.serial.Serial')
+    @patch('instruments.uv_curing.vendors.excelitas.serial.Serial')
     def test_connect_opens_serial_and_handshakes(self, mock_serial_cls):
         mock_ser = mock_serial_cls.return_value
         mock_ser.readline.return_value = b"READY\r\n"
         mock_ser.is_open = True
-        uv = UVCuring(port="/dev/ttyACM0", offline=False)
+        uv = ExcelitasUVCuring(port="/dev/ttyACM0", offline=False)
         uv.connect()
         mock_serial_cls.assert_called_once()
         # CONN was sent during handshake
         mock_ser.write.assert_called()
 
-    @patch('instruments.uv_curing.driver.serial.Serial')
+    @patch('instruments.uv_curing.vendors.excelitas.serial.Serial')
     def test_connect_raises_on_serial_error(self, mock_serial_cls):
         mock_serial_cls.side_effect = serial.SerialException("no port")
-        uv = UVCuring(port="/dev/fake", offline=False)
+        uv = ExcelitasUVCuring(port="/dev/fake", offline=False)
         with self.assertRaises(UVCuringConnectionError):
             uv.connect()
 
-    @patch('instruments.uv_curing.driver.serial.Serial')
+    @patch('instruments.uv_curing.vendors.excelitas.serial.Serial')
     def test_send_command_format(self, mock_serial_cls):
         mock_ser = mock_serial_cls.return_value
         mock_ser.is_open = True
         mock_ser.readline.return_value = b"READY\r\n"
-        uv = UVCuring(offline=False)
+        uv = ExcelitasUVCuring(offline=False)
         uv.connect()
         mock_ser.reset_mock()
         mock_ser.readline.return_value = b"OK\r\n"
         uv._send_command("SIL50")
         mock_ser.write.assert_called_with(b"SIL50XX\r")
 
-    @patch('instruments.uv_curing.driver.serial.Serial')
+    @patch('instruments.uv_curing.vendors.excelitas.serial.Serial')
     def test_send_command_timeout(self, mock_serial_cls):
         mock_ser = mock_serial_cls.return_value
         mock_ser.is_open = True
         mock_ser.readline.return_value = b"READY\r\n"
-        uv = UVCuring(offline=False)
+        uv = ExcelitasUVCuring(offline=False)
         uv.connect()
         mock_ser.readline.return_value = b""
         with self.assertRaises(UVCuringTimeoutError):
             uv._send_command("SIL50")
 
-    @patch('instruments.uv_curing.driver.serial.Serial')
+    @patch('instruments.uv_curing.vendors.excelitas.serial.Serial')
     def test_disconnect_closes_serial(self, mock_serial_cls):
         mock_ser = mock_serial_cls.return_value
         mock_ser.is_open = True
         mock_ser.readline.return_value = b"READY\r\n"
-        uv = UVCuring(offline=False)
+        uv = ExcelitasUVCuring(offline=False)
         uv.connect()
         uv.disconnect()
         mock_ser.close.assert_called_once()

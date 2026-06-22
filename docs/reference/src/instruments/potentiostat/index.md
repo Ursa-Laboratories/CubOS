@@ -6,6 +6,7 @@
 
 ## Submodules
 
-- [instruments.potentiostat.driver](driver.md)
 - [instruments.potentiostat.exceptions](exceptions.md)
+- [instruments.potentiostat.interface](interface.md)
 - [instruments.potentiostat.models](models.md)
+- [instruments.potentiostat.vendors](vendors/index.md)

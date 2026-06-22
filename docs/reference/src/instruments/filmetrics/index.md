@@ -6,6 +6,7 @@
 
 ## Submodules
 
-- [instruments.filmetrics.driver](driver.md)
 - [instruments.filmetrics.exceptions](exceptions.md)
+- [instruments.filmetrics.interface](interface.md)
 - [instruments.filmetrics.models](models.md)
+- [instruments.filmetrics.vendors](vendors/index.md)

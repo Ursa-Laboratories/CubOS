@@ -1,4 +1,5 @@
-from instruments.pipette.driver import Pipette
+from instruments.pipette.interface import PipetteInstrument
+from instruments.pipette.vendors.opentrons import OpentronsPipette
 from instruments.pipette.models import (
     PipetteConfig,
     PipetteFamily,
@@ -16,7 +17,8 @@ from instruments.pipette.exceptions import (
 )
 
 __all__ = [
-    "Pipette",
+    "PipetteInstrument",
+    "OpentronsPipette",
     "PipetteConfig",
     "PipetteFamily",
     "PipetteStatus",

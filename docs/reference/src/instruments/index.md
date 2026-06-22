@@ -8,7 +8,9 @@
 
 - [instruments.asmi](asmi/index.md)
 - [instruments.base_instrument](base_instrument.md)
+- [instruments.camera](camera/index.md)
 - [instruments.filmetrics](filmetrics/index.md)
+- [instruments.mounted_tool](mounted_tool/index.md)
 - [instruments.pipette](pipette/index.md)
 - [instruments.potentiostat](potentiostat/index.md)
 - [instruments.registry](registry.md)

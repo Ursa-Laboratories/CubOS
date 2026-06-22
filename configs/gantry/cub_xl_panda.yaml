@@ -51,21 +51,19 @@ instruments:
     layout_note: Left red probe; approximate offset from center camera mount.
 
   camera:
-    type: placeholder_camera
-    vendor: placeholder
+    type: camera
+    vendor: mount_only
     offline: true
     offset_x: 0.0
     offset_y: 0.0
     depth: 32.0
-    placeholder_driver_required: true
     layout_note: Center mount; estimated imaging standoff above deck targets.
 
   vial_capper_decapper:
-    type: placeholder_vial_capper_decapper
-    vendor: placeholder
+    type: mounted_tool
+    vendor: mount_only
     offline: true
     offset_x: 58.0
     offset_y: 0.0
     depth: 48.0
-    placeholder_driver_required: true
     layout_note: Right white tool; approximate capper/decapper centerline.

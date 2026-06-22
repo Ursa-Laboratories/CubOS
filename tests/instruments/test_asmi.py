@@ -1,18 +1,18 @@
-"""Tests for the ASMI instrument driver (offline mode)."""
+"""Tests for the VernierASMI instrument driver (offline mode)."""
 
 import unittest
 from unittest.mock import patch
 
-from instruments.asmi.driver import ASMI
+from instruments.asmi.vendors.vernier import VernierASMI
 from instruments.asmi.exceptions import ASMICommandError
 from instruments.asmi.models import ASMIStatus, MeasurementResult
 
 
 class TestASMIOffline(unittest.TestCase):
-    """Verify ASMI(offline=True) behaves correctly without hardware."""
+    """Verify VernierASMI(offline=True) behaves correctly without hardware."""
 
     def setUp(self):
-        self.asmi = ASMI(offline=True, default_force=1.5)
+        self.asmi = VernierASMI(offline=True, default_force=1.5)
 
     def test_connect_disconnect_are_noops(self):
         self.asmi.connect()
@@ -222,7 +222,7 @@ class TestASMIOffline(unittest.TestCase):
 
 
 class _FakeOnlineGantry:
-    """Minimal gantry stub for exercising ASMI online indentation loops."""
+    """Minimal gantry stub for exercising VernierASMI online indentation loops."""
 
     def __init__(self, start_z: float):
         self._z = start_z
@@ -240,13 +240,13 @@ class _FakeOnlineGantry:
 class TestASMIOnlineIndentation(unittest.TestCase):
     """Exercise the non-offline indentation code path with mocked hardware I/O."""
 
-    def _make_online_asmi(self) -> ASMI:
-        asmi = ASMI(offline=False, default_force=0.0)
+    def _make_online_asmi(self) -> VernierASMI:
+        asmi = VernierASMI(offline=False, default_force=0.0)
         asmi._offline = False
         return asmi
 
     def test_move_z_raises_when_gantry_never_goes_idle(self):
-        asmi = ASMI(offline=False, idle_timeout=0.0)
+        asmi = VernierASMI(offline=False, idle_timeout=0.0)
         gantry = _FakeOnlineGantry(start_z=10.0)
         gantry.get_status = lambda: "Run"
 
@@ -319,18 +319,18 @@ class TestASMIOnlineIndentation(unittest.TestCase):
 
 
 class TestASMIOnlineRequiresHardware(unittest.TestCase):
-    """Verify ASMI(offline=False) raises without hardware."""
+    """Verify VernierASMI(offline=False) raises without hardware."""
 
     def test_measure_without_connect_raises(self):
-        asmi = ASMI(offline=False)
+        asmi = VernierASMI(offline=False)
         from instruments.asmi.exceptions import ASMICommandError
         with self.assertRaises(ASMICommandError):
             asmi.measure()
 
     def test_health_check_without_connect_returns_false(self):
-        asmi = ASMI(offline=False)
+        asmi = VernierASMI(offline=False)
         self.assertFalse(asmi.health_check())
 
     def test_is_connected_without_connect_returns_false(self):
-        asmi = ASMI(offline=False)
+        asmi = VernierASMI(offline=False)
         self.assertFalse(asmi.is_connected())

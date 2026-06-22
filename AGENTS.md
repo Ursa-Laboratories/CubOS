@@ -56,8 +56,9 @@ python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
 ```
 
 ### Instruments
-- `src/instruments/<instrument>/driver.py`, `mock.py`, `models.py`, `exceptions.py`.
-- `src/instruments/registry.yaml`, `src/instruments/yaml_schema.py`.
+- `src/instruments/<type>/interface.py`, `vendors/<vendor>.py`, `models.py`, `exceptions.py`.
+- `src/instruments/registry.yaml`, `src/instruments/registry.py`, `src/instruments/yaml_schema.py`.
+- Gantry YAML uses `type` + `vendor`; registry lookup is by that pair. External driver packages register via `cubos.instrument_registries` entry points or `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlays.
 - `src/protocol_engine/measurements.py`, `data/data_store.py` — persisted measurements.
 - Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
 
