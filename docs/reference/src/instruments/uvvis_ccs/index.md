@@ -6,7 +6,6 @@
 
 ## Submodules
 
+- [instruments.uvvis_ccs.driver](driver.md)
 - [instruments.uvvis_ccs.exceptions](exceptions.md)
-- [instruments.uvvis_ccs.interface](interface.md)
 - [instruments.uvvis_ccs.models](models.md)
-- [instruments.uvvis_ccs.vendors](vendors/index.md)

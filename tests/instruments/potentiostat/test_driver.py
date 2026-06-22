@@ -69,10 +69,10 @@ class TestOfflineLifecycle:
         p = AdmiralPotentiostat(offline=True)
         assert p.health_check() is True
 
-    def test_run_cv_offline_returns_result_with_aligned_arrays(self):
+    def test_run_CV_offline_returns_result_with_aligned_arrays(self):
         p = AdmiralPotentiostat(offline=True)
         p.connect()
-        result = p.run_cv(
+        result = p.run_CV(
             CVParams(
                 start_V=0.0, vertex1_V=0.5, vertex2_V=-0.5, end_V=0.0,
                 scan_rate_V_per_s=0.1, cycles=2, sampling_interval_s=0.05,
@@ -88,17 +88,17 @@ class TestOfflineLifecycle:
         assert result.metadata["device_id"] == "offline"
         assert result.technique == "cv"
 
-    def test_run_cv_offline_is_deterministic(self):
+    def test_run_CV_offline_is_deterministic(self):
         p1 = AdmiralPotentiostat(offline=True)
         p2 = AdmiralPotentiostat(offline=True)
         params = CVParams(0.0, 0.2, -0.2, 0.0, 0.05, cycles=1, sampling_interval_s=0.1)
-        r1 = p1.run_cv(params)
-        r2 = p2.run_cv(params)
+        r1 = p1.run_CV(params)
+        r2 = p2.run_CV(params)
         assert r1.current_a == r2.current_a
 
-    def test_run_ocp_offline(self):
+    def test_run_OCP_offline(self):
         p = AdmiralPotentiostat(offline=True)
-        result = p.run_ocp(OCPParams(duration_s=1.0, sampling_interval_s=0.1))
+        result = p.run_OCP(OCPParams(duration_s=1.0, sampling_interval_s=0.1))
         assert isinstance(result, OCPResult)
         assert len(result.voltage_v) == len(result.time_s) == 10
         assert result.duration_s == 1.0
@@ -106,18 +106,18 @@ class TestOfflineLifecycle:
         assert result.metadata["aborted"] is False
         assert result.technique == "ocp"
 
-    def test_run_ca_offline(self):
+    def test_run_CA_offline(self):
         p = AdmiralPotentiostat(offline=True)
-        result = p.run_ca(CAParams(potential_V=0.6, duration_s=0.5, sampling_interval_s=0.05))
+        result = p.run_CA(CAParams(potential_V=0.6, duration_s=0.5, sampling_interval_s=0.05))
         assert isinstance(result, CAResult)
         assert all(v == 0.6 for v in result.voltage_v)
         assert len(result.current_a) == 10
         assert result.step_potential_v == 0.6
         assert result.technique == "ca"
 
-    def test_run_cp_offline(self):
+    def test_run_CP_offline(self):
         p = AdmiralPotentiostat(offline=True)
-        result = p.run_cp(CPParams(current_A=1e-3, duration_s=0.5, sampling_interval_s=0.05))
+        result = p.run_CP(CPParams(current_A=1e-3, duration_s=0.5, sampling_interval_s=0.05))
         assert isinstance(result, CPResult)
         assert all(c == 1e-3 for c in result.current_a)
         assert len(result.voltage_v) == 10
@@ -297,7 +297,7 @@ class TestConnectOnline:
         assert p.health_check() is False
 
 
-# --- Online run_cv ------------------------------------------------------------
+# --- Online run_CV ------------------------------------------------------------
 
 
 class TestRunCVOnline:
@@ -316,7 +316,7 @@ class TestRunCVOnline:
         ):
             p = AdmiralPotentiostat(port="COM3")
             p.connect()
-            result = p.run_cv(
+            result = p.run_CV(
                 CVParams(0.0, 0.5, -0.5, 0.0, 0.05, cycles=2, sampling_interval_s=0.01)
             )
 
@@ -336,10 +336,10 @@ class TestRunCVOnline:
     def test_run_without_connect_raises_command_error(self):
         p = AdmiralPotentiostat()
         with pytest.raises(PotentiostatCommandError, match="not connected"):
-            p.run_cv(CVParams(0.0, 0.5, -0.5, 0.0, 0.05))
+            p.run_CV(CVParams(0.0, 0.5, -0.5, 0.0, 0.05))
 
 
-# --- Online run_ocp / run_ca / run_cp ---------------------------------------
+# --- Online run_OCP / run_CA / run_CP ---------------------------------------
 #
 # These tests guard against argument-order regressions on the vendor element
 # classes (AisOpenCircuitElement / AisConstantPotElement /
@@ -358,7 +358,7 @@ class TestRunOCPOnline:
         ):
             p = AdmiralPotentiostat(port="COM3")
             p.connect()
-            result = p.run_ocp(OCPParams(duration_s=1.0, sampling_interval_s=0.1))
+            result = p.run_OCP(OCPParams(duration_s=1.0, sampling_interval_s=0.1))
 
         assert isinstance(result, OCPResult)
         assert result.time_s == (0.0, 0.1)
@@ -384,7 +384,7 @@ class TestRunCAOnline:
         ):
             p = AdmiralPotentiostat(port="COM3")
             p.connect()
-            result = p.run_ca(
+            result = p.run_CA(
                 CAParams(potential_V=0.5, duration_s=1.0, sampling_interval_s=0.01)
             )
 
@@ -409,7 +409,7 @@ class TestRunCPOnline:
         ):
             p = AdmiralPotentiostat(port="COM3")
             p.connect()
-            result = p.run_cp(
+            result = p.run_CP(
                 CPParams(current_A=1e-3, duration_s=1.0, sampling_interval_s=0.01)
             )
 
@@ -438,7 +438,7 @@ class TestVendorErrorCodes:
             p = AdmiralPotentiostat(port="COM3")
             p.connect()
             with pytest.raises(PotentiostatCommandError, match="E_BUSY"):
-                p.run_ocp(OCPParams(duration_s=1.0))
+                p.run_OCP(OCPParams(duration_s=1.0))
         # When upload fails, start must NOT be called.
         handler.startUploadedExperiment.assert_not_called()
 
@@ -452,7 +452,7 @@ class TestVendorErrorCodes:
             p = AdmiralPotentiostat(port="COM3")
             p.connect()
             with pytest.raises(PotentiostatCommandError, match="E_NOT_READY"):
-                p.run_ocp(OCPParams(duration_s=1.0))
+                p.run_OCP(OCPParams(duration_s=1.0))
 
 
 # --- Timeout -----------------------------------------------------------------
@@ -471,7 +471,7 @@ class TestExperimentTimeout:
             p = AdmiralPotentiostat(port="COM3", command_timeout=0.01)
             p.connect()
             with pytest.raises(PotentiostatTimeoutError, match="timeout"):
-                p.run_ocp(OCPParams(duration_s=1.0))
+                p.run_OCP(OCPParams(duration_s=1.0))
         handler.stopExperiment.assert_called_once_with(0)
 
 

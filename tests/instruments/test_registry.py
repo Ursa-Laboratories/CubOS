@@ -3,8 +3,10 @@ import textwrap
 import pytest
 
 import instruments.registry as registry_module
+from instruments.asmi.models import ASMIStatus, MeasurementResult
 from instruments.asmi.interface import ASMIInstrument
 from instruments.base_instrument import BaseInstrument
+from instruments.pipette.models import AspirateResult, MixResult, PipetteStatus
 from instruments.pipette.interface import PipetteInstrument
 from instruments.registry import (
     get_calibration_mode,
@@ -39,8 +41,82 @@ class FakeCustomerASMI(ASMIInstrument):
     def health_check(self) -> bool:
         return True
 
+    def measure(self, n_samples: int = 1) -> MeasurementResult:
+        return MeasurementResult(readings=(), mean_n=0.0, std_n=0.0, timestamp=0.0)
+
+    def get_status(self) -> ASMIStatus:
+        return ASMIStatus(is_connected=True, sensor_description="fake")
+
+    def get_force_reading(self) -> float:
+        return 0.0
+
+    def get_baseline_force(self, samples: int = 10) -> tuple[float, float]:
+        return (0.0, 0.0)
+
+    def indentation(self, gantry, **kwargs) -> dict:
+        return {}
+
 
 class FakeCustomerPipette(PipetteInstrument):
+    def connect(self) -> None:
+        pass
+
+    def disconnect(self) -> None:
+        pass
+
+    def health_check(self) -> bool:
+        return True
+
+    @property
+    def attached_tip_extension(self) -> float:
+        return 0.0
+
+    def set_attached_tip_extension(self, extension_mm: float) -> None:
+        pass
+
+    def clear_attached_tip_extension(self) -> None:
+        pass
+
+    def home(self) -> None:
+        pass
+
+    def prime(self, speed: float = 50.0) -> None:
+        pass
+
+    def aspirate(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
+        return AspirateResult(success=True, volume_ul=volume_ul, position_mm=0.0)
+
+    def dispense(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
+        return AspirateResult(success=True, volume_ul=volume_ul, position_mm=0.0)
+
+    def blowout(self, speed: float = 50.0) -> None:
+        pass
+
+    def mix(
+        self,
+        volume_ul: float,
+        repetitions: int = 3,
+        speed: float = 50.0,
+    ) -> MixResult:
+        return MixResult(success=True, volume_ul=volume_ul, repetitions=repetitions)
+
+    def pick_up_tip(self, speed: float = 50.0) -> None:
+        pass
+
+    def drop_tip(self, speed: float = 50.0) -> None:
+        pass
+
+    def get_status(self) -> PipetteStatus:
+        return PipetteStatus(
+            is_homed=True,
+            position_mm=0.0,
+            max_volume=300.0,
+            has_tip=False,
+            is_primed=True,
+        )
+
+
+class IncompleteCustomerASMI(ASMIInstrument):
     def connect(self) -> None:
         pass
 
@@ -123,6 +199,27 @@ class TestLoadRegistry:
 
         assert "customer_xyz" in get_supported_vendors("asmi")
         assert get_instrument_class("asmi", "customer_xyz") is FakeCustomerASMI
+
+    def test_overlay_vendor_must_implement_interface(self, tmp_path, monkeypatch):
+        overlay = tmp_path / "instrument_registry.yaml"
+        overlay.write_text(
+            textwrap.dedent(
+                """
+                instruments:
+                  asmi:
+                    vendors:
+                      incomplete:
+                        module: tests.instruments.test_registry
+                        class_name: IncompleteCustomerASMI
+                """
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CUBOS_INSTRUMENT_REGISTRY_PATHS", str(overlay))
+        registry_module._cache = None
+
+        with pytest.raises(TypeError, match="missing required interface methods"):
+            get_instrument_class("asmi", "incomplete")
 
     def test_entry_point_adds_vendor(self, monkeypatch):
         monkeypatch.setattr(

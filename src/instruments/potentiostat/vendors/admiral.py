@@ -24,7 +24,7 @@ from __future__ import annotations
 import math
 import random
 from datetime import datetime, timezone
-from typing import Any, Callable, List, Optional
+from typing import Any, Callable, Optional
 
 from instruments.potentiostat.interface import PotentiostatInstrument
 from instruments.potentiostat.exceptions import (
@@ -192,133 +192,161 @@ class AdmiralPotentiostat(PotentiostatInstrument):
 
     # ── Experiment methods ────────────────────────────────────────────────
 
-    def run_cv(self, params: CVParams) -> CVResult:
+    def run_CV(self, params: CVParams) -> CVResult:
         if self._offline:
-            return self._offline_cv(params)
-        element_factory = lambda mod: mod.AisCyclicVoltammetryElement(
-            params.start_V, params.vertex1_V, params.vertex2_V,
-            params.end_V, params.scan_rate_V_per_s,
-            params.sampling_interval_s,
-        )
-        time_buf: List[float] = []
-        voltage_buf: List[float] = []
-        current_buf: List[float] = []
-        meta = self._run_experiment(
-            element_factory,
+            return self._simulate_CV(params)
+
+        def build_CV_element(vendor_sdk: Any) -> Any:
+            return vendor_sdk.AisCyclicVoltammetryElement(
+                params.start_V,
+                params.vertex1_V,
+                params.vertex2_V,
+                params.end_V,
+                params.scan_rate_V_per_s,
+                params.sampling_interval_s,
+            )
+
+        time_points: list[float] = []
+        voltages: list[float] = []
+        currents: list[float] = []
+
+        def record_sample(sample: Any) -> None:
+            time_points.append(float(sample.timestamp))
+            voltages.append(float(sample.workingElectrodeVoltage))
+            currents.append(float(sample.current))
+
+        metadata = self._run_experiment(
+            build_CV_element,
             cycles=params.cycles,
-            dc_sink=lambda sample: (
-                time_buf.append(float(sample.timestamp)),
-                voltage_buf.append(float(sample.workingElectrodeVoltage)),
-                current_buf.append(float(sample.current)),
-            ),
+            record_sample=record_sample,
         )
         return CVResult(
-            time_s=tuple(time_buf),
-            voltage_v=tuple(voltage_buf),
-            current_a=tuple(current_buf),
+            time_s=tuple(time_points),
+            voltage_v=tuple(voltages),
+            current_a=tuple(currents),
             scan_rate_v_s=params.scan_rate_V_per_s,
             step_size_v=params.scan_rate_V_per_s * params.sampling_interval_s,
             cycles=params.cycles,
             vendor=self.vendor,
-            metadata=meta,
+            metadata=metadata,
         )
 
-    def run_ocp(self, params: OCPParams) -> OCPResult:
+    def run_OCP(self, params: OCPParams) -> OCPResult:
         if self._offline:
-            return self._offline_ocp(params)
-        element_factory = lambda mod: mod.AisOpenCircuitElement(
-            params.duration_s, params.sampling_interval_s,
-        )
-        time_buf: List[float] = []
-        voltage_buf: List[float] = []
-        meta = self._run_experiment(
-            element_factory,
+            return self._simulate_OCP(params)
+
+        def build_OCP_element(vendor_sdk: Any) -> Any:
+            return vendor_sdk.AisOpenCircuitElement(
+                params.duration_s,
+                params.sampling_interval_s,
+            )
+
+        time_points: list[float] = []
+        voltages: list[float] = []
+
+        def record_sample(sample: Any) -> None:
+            time_points.append(float(sample.timestamp))
+            voltages.append(float(sample.workingElectrodeVoltage))
+
+        metadata = self._run_experiment(
+            build_OCP_element,
             cycles=1,
-            dc_sink=lambda sample: (
-                time_buf.append(float(sample.timestamp)),
-                voltage_buf.append(float(sample.workingElectrodeVoltage)),
-            ),
+            record_sample=record_sample,
         )
         return OCPResult(
-            time_s=tuple(time_buf),
-            voltage_v=tuple(voltage_buf),
+            time_s=tuple(time_points),
+            voltage_v=tuple(voltages),
             sample_period_s=params.sampling_interval_s,
             duration_s=params.duration_s,
             vendor=self.vendor,
-            metadata=meta,
+            metadata=metadata,
         )
 
-    def run_ca(self, params: CAParams) -> CAResult:
+    def run_CA(self, params: CAParams) -> CAResult:
         if self._offline:
-            return self._offline_ca(params)
-        element_factory = lambda mod: mod.AisConstantPotElement(
-            params.potential_V, params.sampling_interval_s, params.duration_s,
-        )
-        time_buf: List[float] = []
-        voltage_buf: List[float] = []
-        current_buf: List[float] = []
-        meta = self._run_experiment(
-            element_factory,
+            return self._simulate_CA(params)
+
+        def build_CA_element(vendor_sdk: Any) -> Any:
+            return vendor_sdk.AisConstantPotElement(
+                params.potential_V,
+                params.sampling_interval_s,
+                params.duration_s,
+            )
+
+        time_points: list[float] = []
+        voltages: list[float] = []
+        currents: list[float] = []
+
+        def record_sample(sample: Any) -> None:
+            time_points.append(float(sample.timestamp))
+            voltages.append(float(sample.workingElectrodeVoltage))
+            currents.append(float(sample.current))
+
+        metadata = self._run_experiment(
+            build_CA_element,
             cycles=1,
-            dc_sink=lambda sample: (
-                time_buf.append(float(sample.timestamp)),
-                voltage_buf.append(float(sample.workingElectrodeVoltage)),
-                current_buf.append(float(sample.current)),
-            ),
+            record_sample=record_sample,
         )
         return CAResult(
-            time_s=tuple(time_buf),
-            voltage_v=tuple(voltage_buf),
-            current_a=tuple(current_buf),
+            time_s=tuple(time_points),
+            voltage_v=tuple(voltages),
+            current_a=tuple(currents),
             sample_period_s=params.sampling_interval_s,
             duration_s=params.duration_s,
             step_potential_v=params.potential_V,
             vendor=self.vendor,
-            metadata=meta,
+            metadata=metadata,
         )
 
-    def run_cp(self, params: CPParams) -> CPResult:
+    def run_CP(self, params: CPParams) -> CPResult:
         if self._offline:
-            return self._offline_cp(params)
-        element_factory = lambda mod: mod.AisConstantCurrentElement(
-            params.current_A, params.sampling_interval_s, params.duration_s,
-        )
-        time_buf: List[float] = []
-        voltage_buf: List[float] = []
-        current_buf: List[float] = []
-        meta = self._run_experiment(
-            element_factory,
+            return self._simulate_CP(params)
+
+        def build_CP_element(vendor_sdk: Any) -> Any:
+            return vendor_sdk.AisConstantCurrentElement(
+                params.current_A,
+                params.sampling_interval_s,
+                params.duration_s,
+            )
+
+        time_points: list[float] = []
+        voltages: list[float] = []
+        currents: list[float] = []
+
+        def record_sample(sample: Any) -> None:
+            time_points.append(float(sample.timestamp))
+            voltages.append(float(sample.workingElectrodeVoltage))
+            currents.append(float(sample.current))
+
+        metadata = self._run_experiment(
+            build_CP_element,
             cycles=1,
-            dc_sink=lambda sample: (
-                time_buf.append(float(sample.timestamp)),
-                voltage_buf.append(float(sample.workingElectrodeVoltage)),
-                current_buf.append(float(sample.current)),
-            ),
+            record_sample=record_sample,
         )
         return CPResult(
-            time_s=tuple(time_buf),
-            voltage_v=tuple(voltage_buf),
-            current_a=tuple(current_buf),
+            time_s=tuple(time_points),
+            voltage_v=tuple(voltages),
+            current_a=tuple(currents),
             sample_period_s=params.sampling_interval_s,
             duration_s=params.duration_s,
             step_current_a=params.current_A,
             vendor=self.vendor,
-            metadata=meta,
+            metadata=metadata,
         )
 
     # ── Shared online experiment plumbing ─────────────────────────────────
 
     def _run_experiment(
         self,
-        element_factory: Callable[[Any], Any],
+        build_element: Callable[[Any], Any],
         *,
         cycles: int,
-        dc_sink: Callable[[Any], None],
+        record_sample: Callable[[Any], None],
     ) -> dict[str, Any]:
         """Run one experiment to completion, collecting DC samples.
 
-        ``element_factory(mod)`` builds the SquidstatPyLibrary experiment
-        element from the vendor module. ``dc_sink`` receives each DC sample
+        ``build_element(mod)`` builds the SquidstatPyLibrary experiment
+        element from the vendor module. ``record_sample`` receives each DC sample
         as it arrives.
         """
         if self._handler is None or self._qt is None:
@@ -327,9 +355,9 @@ class AdmiralPotentiostat(PotentiostatInstrument):
             )
 
         qt = self._qt
-        mod = qt.squidstat
-        experiment = mod.AisExperiment()
-        element = element_factory(mod)
+        vendor_sdk = qt.squidstat
+        experiment = vendor_sdk.AisExperiment()
+        element = build_element(vendor_sdk)
         try:
             experiment.appendElement(element, cycles)
         except Exception as exc:
@@ -342,7 +370,7 @@ class AdmiralPotentiostat(PotentiostatInstrument):
         stopped_reason: dict[str, Any] = {}
 
         def _on_dc(_channel: int, sample: Any) -> None:
-            dc_sink(sample)
+            record_sample(sample)
 
         def _on_stopped(_channel: int, reason: Any) -> None:
             stopped_reason["reason"] = reason
@@ -424,42 +452,47 @@ class AdmiralPotentiostat(PotentiostatInstrument):
     # perfectly adequate — the numpy dependency would only be justified for
     # large-N matrix operations that don't happen in synthetic data.
 
-    def _offline_cv(self, params: CVParams) -> CVResult:
+    def _simulate_CV(self, params: CVParams) -> CVResult:
         # One full cycle: start → v1 → v2 → end. Span is distance traversed.
-        span = (
+        voltage_span = (
             abs(params.vertex1_V - params.start_V)
             + abs(params.vertex2_V - params.vertex1_V)
             + abs(params.end_V - params.vertex2_V)
         )
-        cycle_duration = span / params.scan_rate_V_per_s
-        per_cycle = max(
+        cycle_duration = voltage_span / params.scan_rate_V_per_s
+        samples_per_cycle = max(
             int(math.ceil(cycle_duration / params.sampling_interval_s)), 2
         )
 
-        voltage: List[float] = []
-        time: List[float] = []
-        for c in range(params.cycles):
+        voltages: list[float] = []
+        time_points: list[float] = []
+        for cycle_index in range(params.cycles):
             sweep = self._triangular_sweep(
-                params.start_V, params.vertex1_V,
-                params.vertex2_V, params.end_V, per_cycle,
+                params.start_V,
+                params.vertex1_V,
+                params.vertex2_V,
+                params.end_V,
+                samples_per_cycle,
             )
-            voltage.extend(sweep)
-            offset = c * cycle_duration
-            time.extend(
-                offset + i * cycle_duration / per_cycle
-                for i in range(per_cycle)
+            voltages.extend(sweep)
+            cycle_start_time = cycle_index * cycle_duration
+            time_points.extend(
+                cycle_start_time
+                + sample_index * cycle_duration / samples_per_cycle
+                for sample_index in range(samples_per_cycle)
             )
 
         # Simple Butler-Volmer-ish synthetic current: scaled sinh around 0V.
-        current = [
-            1e-6 * math.sinh(v / 0.05) + self._offline_rng.gauss(0.0, 5e-9)
-            for v in voltage
+        currents = [
+            1e-6 * math.sinh(voltage / 0.05)
+            + self._offline_rng.gauss(0.0, 5e-9)
+            for voltage in voltages
         ]
 
         return CVResult(
-            time_s=tuple(time),
-            voltage_v=tuple(voltage),
-            current_a=tuple(current),
+            time_s=tuple(time_points),
+            voltage_v=tuple(voltages),
+            current_a=tuple(currents),
             scan_rate_v_s=params.scan_rate_V_per_s,
             step_size_v=params.scan_rate_V_per_s * params.sampling_interval_s,
             cycles=params.cycles,
@@ -467,43 +500,49 @@ class AdmiralPotentiostat(PotentiostatInstrument):
             metadata=self._offline_metadata(aborted=False),
         )
 
-    def _offline_ocp(self, params: OCPParams) -> OCPResult:
-        n = max(
+    def _simulate_OCP(self, params: OCPParams) -> OCPResult:
+        sample_count = max(
             int(math.ceil(params.duration_s / params.sampling_interval_s)), 1
         )
-        time = tuple(i * params.duration_s / n for i in range(n))
+        time_points = tuple(
+            sample_index * params.duration_s / sample_count
+            for sample_index in range(sample_count)
+        )
         # Slow exponential settle toward a stable OCV of ~0.35 V.
         decay = max(params.duration_s / 4.0, 1e-6)
-        voltage = tuple(
+        voltages = tuple(
             0.35 + 0.05 * math.exp(-t / decay)
             + self._offline_rng.gauss(0.0, 1e-4)
-            for t in time
+            for t in time_points
         )
         return OCPResult(
-            time_s=time,
-            voltage_v=voltage,
+            time_s=time_points,
+            voltage_v=voltages,
             sample_period_s=params.sampling_interval_s,
             duration_s=params.duration_s,
             vendor=self.vendor,
             metadata=self._offline_metadata(aborted=False),
         )
 
-    def _offline_ca(self, params: CAParams) -> CAResult:
-        n = max(
+    def _simulate_CA(self, params: CAParams) -> CAResult:
+        sample_count = max(
             int(math.ceil(params.duration_s / params.sampling_interval_s)), 1
         )
-        time = tuple(i * params.duration_s / n for i in range(n))
+        time_points = tuple(
+            sample_index * params.duration_s / sample_count
+            for sample_index in range(sample_count)
+        )
         # Cottrell-like t^-1/2 decay, clipped near t=0.
-        current = tuple(
+        currents = tuple(
             1e-5 / math.sqrt(max(t, params.sampling_interval_s))
             + self._offline_rng.gauss(0.0, 1e-8)
-            for t in time
+            for t in time_points
         )
-        voltage = tuple(params.potential_V for _ in range(n))
+        voltages = tuple(params.potential_V for _ in range(sample_count))
         return CAResult(
-            time_s=time,
-            voltage_v=voltage,
-            current_a=current,
+            time_s=time_points,
+            voltage_v=voltages,
+            current_a=currents,
             sample_period_s=params.sampling_interval_s,
             duration_s=params.duration_s,
             step_potential_v=params.potential_V,
@@ -511,21 +550,24 @@ class AdmiralPotentiostat(PotentiostatInstrument):
             metadata=self._offline_metadata(aborted=False),
         )
 
-    def _offline_cp(self, params: CPParams) -> CPResult:
-        n = max(
+    def _simulate_CP(self, params: CPParams) -> CPResult:
+        sample_count = max(
             int(math.ceil(params.duration_s / params.sampling_interval_s)), 1
         )
-        time = tuple(i * params.duration_s / n for i in range(n))
-        current = tuple(params.current_A for _ in range(n))
+        time_points = tuple(
+            sample_index * params.duration_s / sample_count
+            for sample_index in range(sample_count)
+        )
+        currents = tuple(params.current_A for _ in range(sample_count))
         # Faradaic-ish drift on the working electrode potential.
-        voltage = tuple(
+        voltages = tuple(
             0.1 + 0.002 * t + self._offline_rng.gauss(0.0, 1e-4)
-            for t in time
+            for t in time_points
         )
         return CPResult(
-            time_s=time,
-            voltage_v=voltage,
-            current_a=current,
+            time_s=time_points,
+            voltage_v=voltages,
+            current_a=currents,
             sample_period_s=params.sampling_interval_s,
             duration_s=params.duration_s,
             step_current_a=params.current_A,
@@ -535,32 +577,52 @@ class AdmiralPotentiostat(PotentiostatInstrument):
 
     @staticmethod
     def _triangular_sweep(
-        start: float, v1: float, v2: float, end: float, n: int,
-    ) -> List[float]:
-        """Distribute ``n`` samples across three linear legs weighted by span.
+        start_voltage: float,
+        first_vertex_voltage: float,
+        second_vertex_voltage: float,
+        end_voltage: float,
+        sample_count: int,
+    ) -> list[float]:
+        """Distribute samples across three linear legs weighted by span.
 
         Legs are endpoint-exclusive except the final one, which closes the
-        sweep at ``end``. Returned list is exactly ``n`` long.
+        sweep at ``end_voltage``. Returned list is exactly ``sample_count`` long.
         """
-        legs = [(start, v1), (v1, v2), (v2, end)]
-        lengths = [abs(b - a) for a, b in legs]
-        total = sum(lengths) or 1.0
-        counts = [max(int(round(n * (L / total))), 1) for L in lengths]
-        # Adjust final leg so the total is exactly n, clamping to at least 1.
-        counts[-1] = max(n - (counts[0] + counts[1]), 1)
+        voltage_legs = [
+            (start_voltage, first_vertex_voltage),
+            (first_vertex_voltage, second_vertex_voltage),
+            (second_vertex_voltage, end_voltage),
+        ]
+        leg_lengths = [abs(end - start) for start, end in voltage_legs]
+        total_length = sum(leg_lengths) or 1.0
+        samples_by_leg = [
+            max(int(round(sample_count * (leg_length / total_length))), 1)
+            for leg_length in leg_lengths
+        ]
+        samples_by_leg[-1] = max(
+            sample_count - (samples_by_leg[0] + samples_by_leg[1]), 1
+        )
 
-        result: List[float] = []
-        for i, ((a, b), c) in enumerate(zip(legs, counts)):
-            if i < 2:
-                # endpoint-exclusive leg
-                result.extend(a + (b - a) * k / c for k in range(c))
+        voltages: list[float] = []
+        for leg_index, ((start, end), leg_sample_count) in enumerate(
+            zip(voltage_legs, samples_by_leg)
+        ):
+            if leg_index < 2:
+                voltages.extend(
+                    start
+                    + (end - start) * sample_index / leg_sample_count
+                    for sample_index in range(leg_sample_count)
+                )
             else:
-                # endpoint-inclusive final leg
-                if c == 1:
-                    result.append(b)
+                if leg_sample_count == 1:
+                    voltages.append(end)
                 else:
-                    result.extend(a + (b - a) * k / (c - 1) for k in range(c))
-        return result[:n]
+                    voltages.extend(
+                        start
+                        + (end - start) * sample_index / (leg_sample_count - 1)
+                        for sample_index in range(leg_sample_count)
+                    )
+        return voltages[:sample_count]
 
     def _offline_metadata(self, *, aborted: bool) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()

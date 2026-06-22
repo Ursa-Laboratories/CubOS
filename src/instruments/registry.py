@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import importlib
 import os
 from importlib import metadata as importlib_metadata
@@ -98,6 +99,13 @@ def get_instrument_class(
             f"Driver {vendor_entry['module']}.{vendor_entry['class_name']} "
             f"for '{instrument_type}/{vendor}' does not implement "
             f"{get_instrument_interface(instrument_type).__name__}."
+        )
+    if inspect.isabstract(cls):
+        missing_methods = sorted(getattr(cls, "__abstractmethods__", set()))
+        raise TypeError(
+            f"Driver {vendor_entry['module']}.{vendor_entry['class_name']} "
+            f"for '{instrument_type}/{vendor}' is missing required interface "
+            f"methods: {missing_methods}."
         )
     return cls
 
