@@ -13,8 +13,9 @@ travel settings. Keep the E-stop reachable and clear the deck before starting.
 2. Connect the gantry to the computer over USB/serial.
 3. Make sure mounted instruments, cables, fixtures, and samples have clear
    travel paths.
-4. Confirm the gantry YAML has the correct `serial_port`,
-   `cnc.factory_z_travel_mm`, and mounted `instruments`.
+4. Confirm the gantry YAML has the correct `cnc.factory_z_travel_mm` and
+   mounted `instruments`. The YAML schema still requires `serial_port`, but
+   calibration connects through the gantry driver's serial auto-scan.
 5. Put the calibration block and any board placement markers within reach.
 
 ![Calibration block aligned to a board placement marker](images/calibration-block-marker.webp){ width="420" }
