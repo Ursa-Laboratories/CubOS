@@ -26,13 +26,19 @@ from validation.errors import SetupValidationError
 @pytest.fixture(autouse=True)
 def _ensure_commands_registered():
     """Ensure protocol commands are registered (may be cleared by other test fixtures)."""
-    if not CommandRegistry.instance().command_names:
+    command_names = CommandRegistry.instance().command_names
+    if not command_names:
+        import protocol_engine.commands.measure
         import protocol_engine.commands.move
         import protocol_engine.commands.pipette
         import protocol_engine.commands.scan
+        importlib.reload(protocol_engine.commands.measure)
         importlib.reload(protocol_engine.commands.move)
         importlib.reload(protocol_engine.commands.pipette)
         importlib.reload(protocol_engine.commands.scan)
+    elif "measure" not in command_names:
+        import protocol_engine.commands.measure
+        importlib.reload(protocol_engine.commands.measure)
 
 
 # ── YAML templates ──────────────────────────────────────────────────────
