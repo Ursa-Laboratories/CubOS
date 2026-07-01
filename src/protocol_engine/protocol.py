@@ -125,22 +125,19 @@ class Protocol:
         the full hardware lifecycle (load gantry, connect, prepare, connect
         instruments, health check, execute, disconnect).
 
-        Data persistence is opt-in by naming a campaign. With ``campaign``
-        given, measurements are saved: a campaign is created (recording this
-        protocol's own gantry/deck paths from its setup metadata) and the run
-        writes to it. Without ``campaign``, nothing is persisted.
+        Measurement data is persisted by default. A campaign is created for the
+        run, recording this protocol's gantry/deck paths from its setup
+        metadata. ``campaign`` optionally supplies the campaign description.
 
         Args:
-            campaign: Campaign description. When set, measurements are saved.
+            campaign: Optional campaign description.
             data_store: Optional :class:`data.DataStore` to write into. When
-                omitted (and ``campaign`` is set), a default store is created
-                and closed automatically.
+                omitted, a default store is created and closed automatically.
             protocol_config: Optional identifier recorded on the campaign for
                 the source that built this protocol (e.g. a module path).
 
         Raises:
-            ValueError: If the protocol has no setup metadata, or if a
-                persistence argument is given without ``campaign``.
+            ValueError: If the protocol has no setup metadata.
         """
         if self.setup is None:
             raise ValueError(
@@ -152,39 +149,14 @@ class Protocol:
 
         from .setup import run_on_hardware
 
-        if campaign is None:
-            if data_store is not None or protocol_config is not None:
-                raise ValueError(
-                    "Pass campaign=\"...\" to persist measurements; "
-                    "data_store/protocol_config require a named campaign."
-                )
-            return run_on_hardware(
-                self.setup.gantry_path,
-                self.setup.deck_path,
-                self,
-            )
-
-        from data import DataStore
-
-        owns_store = data_store is None
-        store = data_store if data_store is not None else DataStore()
-        try:
-            campaign_id = store.create_campaign(
-                campaign,
-                gantry_config=str(self.setup.gantry_path),
-                deck_config=str(self.setup.deck_path),
-                protocol_config=protocol_config,
-            )
-            return run_on_hardware(
-                self.setup.gantry_path,
-                self.setup.deck_path,
-                self,
-                data_store=store,
-                campaign_id=campaign_id,
-            )
-        finally:
-            if owns_store:
-                store.close()
+        return run_on_hardware(
+            self.setup.gantry_path,
+            self.setup.deck_path,
+            self,
+            data_store=data_store,
+            campaign_description=campaign,
+            protocol_config=protocol_config,
+        )
 
     def __repr__(self) -> str:
         cmds = ", ".join(s.command_name for s in self._steps)

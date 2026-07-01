@@ -27,6 +27,7 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
+from data import default_database_path
 from protocol_engine.setup import run_on_hardware
 from protocol_engine.setup_validator import run_setup_validation
 
@@ -76,6 +77,7 @@ def main() -> None:
     print()
     print(SEPARATOR)
     print(f"Protocol complete — {len(results)} steps executed.")
+    print(f"Measurement data store: {default_database_path()}")
     print(SEPARATOR)
 
 

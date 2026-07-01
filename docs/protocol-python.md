@@ -77,9 +77,9 @@ protocol.validate()   # offline preflight
 protocol.run()        # connect, run, disconnect
 ```
 
-To save measurements, name a campaign. `run()` creates the campaign for you —
-recording the protocol's own gantry and deck paths from its setup metadata —
-writes the run into it, and closes the data store automatically:
+Measurement results are saved by default. `run()` creates the campaign for you,
+recording the protocol's own gantry and deck paths from its setup metadata,
+writes the run into it, and closes the default data store automatically:
 
 ```python
 protocol.run(campaign="ASMI indentation run")
@@ -87,12 +87,13 @@ protocol.run(campaign="ASMI indentation run")
 
 | `run(...)` argument | Effect |
 | --- | --- |
-| *(none)* | Execute on hardware; persist nothing. |
-| `campaign="..."` | Create a campaign and save measurements to the default data store. |
-| `data_store=DataStore("runs/my.db")` | Save to a specific store (you own its lifecycle). Requires `campaign`. |
-| `protocol_config="..."` | Record the source that built the protocol on the campaign. Requires `campaign`. |
+| *(none)* | Execute on hardware and save measurements to the default data store. |
+| `campaign="..."` | Use this text as the campaign description. |
+| `data_store=DataStore("runs/my.db")` | Save to a specific store; caller owns its lifecycle. |
+| `protocol_config="..."` | Record the source that built the protocol on the campaign. |
 
-Passing a persistence argument without `campaign` raises a clear error.
+The default store path is `data/databases/panda_data.db`; override it with
+`CUBOS_DATA_DB_PATH`.
 
 ## Builder method arguments
 
