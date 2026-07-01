@@ -27,7 +27,12 @@ project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
-from data import default_database_path
+from data import (
+    DataStore,
+    create_campaign_for_protocol_run,
+    default_database_path,
+    export_campaign_results_csvs,
+)
 from protocol_engine.setup import run_on_hardware
 from protocol_engine.setup_validator import run_setup_validation
 
@@ -64,8 +69,29 @@ def main() -> None:
     print(SEPARATOR)
     print()
 
+    db_path = default_database_path()
+    data_store = DataStore(db_path)
+    campaign_id = create_campaign_for_protocol_run(
+        data_store,
+        gantry_path=gantry_path,
+        deck_path=deck_path,
+        gantry_file=gantry_path,
+        deck_file=deck_path,
+        protocol_file=protocol_path,
+        description=(
+            f"Protocol run: gantry={gantry_path}, deck={deck_path}, "
+            f"protocol={protocol_path}"
+        ),
+    )
+
     try:
-        results = run_on_hardware(gantry_path, deck_path, protocol_path)
+        results = run_on_hardware(
+            gantry_path,
+            deck_path,
+            protocol_path,
+            data_store=data_store,
+            campaign_id=campaign_id,
+        )
     except KeyboardInterrupt:
         print("\nAborted by user.")
         sys.exit(130)
@@ -73,11 +99,22 @@ def main() -> None:
         print(f"\nERROR during execution: {exc}")
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        data_store.close()
+
+    result_files = export_campaign_results_csvs(
+        db_path,
+        campaign_id,
+        output_dir=project_root / "data" / "results",
+    )
 
     print()
     print(SEPARATOR)
     print(f"Protocol complete — {len(results)} steps executed.")
-    print(f"Measurement data store: {default_database_path()}")
+    print(f"Measurement data store: {db_path}")
+    print("Result CSV files:")
+    for path in result_files:
+        print(f"  {path}")
     print(SEPARATOR)
 
 

@@ -12,6 +12,7 @@ from .exports import (
     MeasurementExportNotFoundError,
     export_campaign_asmi_zip,
     export_campaign_measurements_zip,
+    export_campaign_results_csvs,
     list_campaign_summaries,
 )
 from .protocol_runs import create_campaign_for_protocol_run, register_deck_labware
@@ -30,6 +31,7 @@ __all__ = [
     "MeasurementExportNotFoundError",
     "export_campaign_asmi_zip",
     "export_campaign_measurements_zip",
+    "export_campaign_results_csvs",
     "list_campaign_summaries",
     "create_campaign_for_protocol_run",
     "register_deck_labware",

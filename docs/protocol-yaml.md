@@ -76,6 +76,9 @@ python setup/run_protocol.py \
 
 By default, measurement rows are written to `data/databases/panda_data.db`.
 Set `CUBOS_DATA_DB_PATH` to choose a different SQLite file for a run.
+After a successful run, the CLI also writes analysis-friendly CSV exports under
+`data/results/`. Array-based instruments such as UV-Vis, ASMI, and potentiostat
+are flattened into one row per wavelength/sample point.
 
 ## Protocol command reference
 

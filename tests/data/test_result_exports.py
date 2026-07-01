@@ -13,9 +13,12 @@ from data.exports import (
     MeasurementDataError,
     export_campaign_asmi_zip,
     export_campaign_measurements_zip,
+    export_campaign_results_csvs,
     list_campaign_summaries,
     _json_array,
 )
+from instruments.filmetrics.models import MeasurementResult
+from instruments.uv_curing.models import CureResult
 from protocol_engine.measurements import InstrumentMeasurement, MeasurementType
 
 
@@ -75,6 +78,88 @@ def _seed_store(path):
         ("2026-06-11 10:02:00", asmi_id),
     )
     store._conn.commit()
+    store.close()
+    return campaign_id
+
+
+def _seed_all_instruments_store(path):
+    store = DataStore(db_path=path)
+    campaign_id = store.create_campaign(
+        description="Filesystem export test",
+        deck_config="deck.yaml",
+        gantry_config="gantry.yaml",
+        protocol_config="protocol.yaml",
+    )
+    store._conn.execute(
+        "UPDATE campaigns SET created_at = ? WHERE id = ?",
+        ("2026-06-12 11:00:00", campaign_id),
+    )
+    uvvis_experiment = store.create_experiment(campaign_id, "plate", "A1", "[]")
+    asmi_experiment = store.create_experiment(campaign_id, "plate", "B2", "[]")
+    filmetrics_experiment = store.create_experiment(campaign_id, "plate", "C3", "[]")
+    uv_curing_experiment = store.create_experiment(campaign_id, "plate", "D4", "[]")
+    potentiostat_experiment = store.create_experiment(campaign_id, "plate", "E5", "[]")
+
+    store.log_measurement(
+        uvvis_experiment,
+        InstrumentMeasurement(
+            measurement_type=MeasurementType.UVVIS_SPECTRUM,
+            payload={
+                "wavelength_nm": [400.0, 500.0],
+                "intensity_au": [0.1, 0.2],
+            },
+            metadata={"integration_time_s": 0.24},
+        ),
+    )
+    store.log_measurement(
+        asmi_experiment,
+        InstrumentMeasurement(
+            measurement_type=MeasurementType.ASMI_INDENTATION,
+            payload={
+                "sample_timestamps": [1.0, 1.1],
+                "z_positions_mm": [-74.0, -74.1],
+                "raw_forces_n": [0.5, 0.6],
+                "corrected_forces_n": [0.1, 0.2],
+                "directions": ["down", "up"],
+            },
+            metadata={
+                "baseline_avg": 0.4,
+                "baseline_std": 0.01,
+                "force_exceeded": False,
+                "data_points": 2,
+                "step_size_mm": 0.01,
+                "z_target_mm": -80.0,
+                "force_limit_n": 10.0,
+            },
+        ),
+    )
+    store.log_measurement(
+        filmetrics_experiment,
+        MeasurementResult(thickness_nm=151.2, goodness_of_fit=0.96),
+    )
+    store.log_measurement(
+        uv_curing_experiment,
+        CureResult(intensity_percent=60.0, exposure_time_s=1.5, timestamp=123.4),
+    )
+    store.log_measurement(
+        potentiostat_experiment,
+        InstrumentMeasurement(
+            measurement_type=MeasurementType.POTENTIOSTAT_CA,
+            payload={
+                "time_s": [0.0, 0.1],
+                "voltage_v": [0.5, 0.5],
+                "current_a": [1e-6, 2e-6],
+            },
+            metadata={
+                "technique": "ca",
+                "vendor": "admiral",
+                "sample_period_s": 0.1,
+                "duration_s": 0.2,
+                "step_potential_v": 0.5,
+                "device_id": "dev-1",
+            },
+        ),
+    )
     store.close()
     return campaign_id
 
@@ -181,3 +266,75 @@ def test_export_campaign_asmi_zip_preserves_raw_archive_shape(tmp_path):
 def test_json_array_reports_malformed_asmi_rows():
     with pytest.raises(MeasurementDataError, match="must be a JSON array"):
         _json_array("{}", "raw_forces")
+
+
+def test_export_campaign_results_csvs_writes_sane_flat_files(tmp_path):
+    db_path = tmp_path / "panda_data.db"
+    campaign_id = _seed_all_instruments_store(db_path)
+
+    written = export_campaign_results_csvs(
+        db_path,
+        campaign_id,
+        output_dir=tmp_path / "results",
+    )
+
+    run_dir = tmp_path / "results" / "campaign_1_20260612_110000"
+    assert {path.name for path in written} == {
+        "campaign.csv",
+        "experiments.csv",
+        "manifest.csv",
+        "uvvis.csv",
+        "asmi.csv",
+        "filmetrics.csv",
+        "uv_curing.csv",
+        "potentiostat.csv",
+    }
+    assert run_dir.is_dir()
+
+    uvvis_rows = list(csv.DictReader((run_dir / "uvvis.csv").open()))
+    assert uvvis_rows == [
+        {
+            "measurement_id": "1",
+            "experiment_id": "1",
+            "labware_name": "plate",
+            "well_id": "A1",
+            "measurement_timestamp": uvvis_rows[0]["measurement_timestamp"],
+            "experiment_created_at": uvvis_rows[0]["experiment_created_at"],
+            "sample_index": "0",
+            "wavelength_nm": "400.0",
+            "intensity_au": "0.1",
+            "integration_time_s": "0.24",
+        },
+        {
+            "measurement_id": "1",
+            "experiment_id": "1",
+            "labware_name": "plate",
+            "well_id": "A1",
+            "measurement_timestamp": uvvis_rows[1]["measurement_timestamp"],
+            "experiment_created_at": uvvis_rows[1]["experiment_created_at"],
+            "sample_index": "1",
+            "wavelength_nm": "500.0",
+            "intensity_au": "0.2",
+            "integration_time_s": "0.24",
+        },
+    ]
+
+    asmi_rows = list(csv.DictReader((run_dir / "asmi.csv").open()))
+    assert [row["z_position_mm"] for row in asmi_rows] == ["-74.0", "-74.1"]
+    assert [row["corrected_force_n"] for row in asmi_rows] == ["0.1", "0.2"]
+
+    potentiostat_rows = list(csv.DictReader((run_dir / "potentiostat.csv").open()))
+    assert [row["time_s"] for row in potentiostat_rows] == ["0.0", "0.1"]
+    assert [row["current_a"] for row in potentiostat_rows] == ["1e-06", "2e-06"]
+
+    filmetrics_rows = list(csv.DictReader((run_dir / "filmetrics.csv").open()))
+    assert filmetrics_rows[0]["thickness_nm"] == "151.2"
+
+    manifest = (run_dir / "manifest.csv").read_text()
+    assert "uvvis,2,uvvis.csv" in manifest
+    assert "asmi,2,asmi.csv" in manifest
+    assert "potentiostat,2,potentiostat.csv" in manifest
+
+
+def test_results_directory_is_gitignored():
+    assert "data/results/" in open(".gitignore", encoding="utf-8").read()
