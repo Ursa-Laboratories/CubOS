@@ -1,8 +1,8 @@
 # Data
 
 CubOS stores campaign state, experiment rows, measurement results, and labware
-contents in a local SQLite database when a `DataStore` is attached to the
-runtime context. No external database server is required.
+contents in a local SQLite database. Standard hardware runs attach a `DataStore`
+automatically. No external database server is required.
 
 ## Database Path
 
@@ -42,10 +42,14 @@ Measurement arrays are stored as JSON text inside SQLite columns.
 
 ## Runtime Persistence
 
-Protocol commands persist data only when both fields are present:
+Protocol commands persist data when both runtime fields are present:
 
 - `ProtocolContext.data_store`
 - `ProtocolContext.campaign_id`
+
+`setup/run_protocol.py`, `protocol_engine.setup.run_on_hardware()`, and
+`Protocol.run()` create and attach those fields automatically when the caller
+does not supply them.
 
 `scan` creates one experiment row per well and logs each normalized
 measurement. `measure` creates one experiment row for the target position and
@@ -56,7 +60,8 @@ Normalized measurement persistence covers ASMI indentation, UV-Vis spectra,
 Filmetrics thickness, potentiostat traces, and UV curing exposure results.
 Boolean status checks and other non-data method results are not persisted.
 
-Without a `DataStore`, protocol execution is unchanged and nothing is saved.
+Low-level `protocol.execute(context)` only saves data if the caller prepared a
+context with a `DataStore` and `campaign_id`.
 
 ## Write API
 

@@ -68,6 +68,69 @@ class MeasurementDataError(DataExportError):
     """Raised when stored measurement rows are malformed."""
 
 
+def export_campaign_results_csvs(
+    db_path: str | Path,
+    campaign_id: int,
+    output_dir: str | Path = "data/results",
+) -> list[Path]:
+    """Export one campaign to analysis-friendly CSV files in *output_dir*.
+
+    The generic ZIP export preserves table shape. This filesystem export is for
+    operators and analysis scripts: array-heavy instruments are flattened into
+    one row per physical sample point rather than a JSON array in one cell.
+    """
+    db = Path(db_path).expanduser().resolve()
+    if not db.is_file():
+        raise DataDatabaseNotFoundError(f"Data database not found: {db}")
+
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
+
+    written: list[Path] = []
+    with closing(_connect(db)) as conn:
+        _ensure_tables(conn, ("campaigns", "experiments"))
+        campaign = conn.execute(
+            "SELECT * FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        ).fetchone()
+        if campaign is None:
+            raise CampaignNotFoundError(f"Campaign {campaign_id} not found")
+
+        run_dir = output_root / _result_dir_name(campaign)
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        written.append(_write_csv_path(
+            run_dir / "campaign.csv",
+            _rows_csv(list(campaign.keys()), [campaign]),
+        ))
+        written.append(_write_csv_path(
+            run_dir / "experiments.csv",
+            _experiments_csv(conn, campaign_id),
+        ))
+
+        manifest_rows: list[dict[str, Any]] = []
+        for table in MEASUREMENT_TABLES:
+            if table.table not in _present_tables(conn):
+                continue
+            rows = _measurement_table_rows(conn, table, campaign_id)
+            if not rows:
+                continue
+            filename = f"{table.instrument}.csv"
+            csv_text = _sane_measurement_csv(table.instrument, rows)
+            written.append(_write_csv_path(run_dir / filename, csv_text))
+            manifest_rows.append({
+                "instrument": table.instrument,
+                "row_count": _csv_data_row_count(csv_text),
+                "file": filename,
+            })
+
+        written.append(_write_csv_path(
+            run_dir / "manifest.csv",
+            _result_manifest_csv(manifest_rows),
+        ))
+    return written
+
+
 def list_campaign_summaries(db_path: str | Path) -> list[CampaignSummary]:
     """Return campaign rows with measurement metadata for the CubOS UI/API."""
     path = Path(db_path).expanduser().resolve()
@@ -370,6 +433,243 @@ def _rows_csv(columns: list[str], rows: list[sqlite3.Row]) -> str:
     writer.writerow(columns)
     for row in rows:
         writer.writerow([_format_cell(row[column]) for column in columns])
+    return handle.getvalue()
+
+
+def _write_csv_path(path: Path, content: str) -> Path:
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def _result_dir_name(campaign: sqlite3.Row) -> str:
+    timestamp = _timestamp_suffix(str(campaign["created_at"]))
+    return f"campaign_{campaign['id']}_{timestamp}"
+
+
+def _csv_data_row_count(csv_text: str) -> int:
+    lines = [line for line in csv_text.splitlines() if line.strip()]
+    return max(0, len(lines) - 1)
+
+
+def _result_manifest_csv(rows: list[dict[str, Any]]) -> str:
+    columns = ["instrument", "row_count", "file"]
+    handle = io.StringIO()
+    writer = csv.DictWriter(handle, columns, lineterminator="\n")
+    writer.writeheader()
+    writer.writerows(rows)
+    return handle.getvalue()
+
+
+def _sane_measurement_csv(instrument: str, rows: list[sqlite3.Row]) -> str:
+    if instrument == "uvvis":
+        return _uvvis_results_csv(rows)
+    if instrument == "asmi":
+        return _asmi_results_csv(rows)
+    if instrument == "potentiostat":
+        return _potentiostat_results_csv(rows)
+    if instrument == "filmetrics":
+        return _scalar_results_csv(
+            rows,
+            [
+                "thickness_nm",
+                "goodness_of_fit",
+            ],
+        )
+    if instrument == "uv_curing":
+        return _scalar_results_csv(
+            rows,
+            [
+                "intensity_percent",
+                "exposure_time_s",
+                "cure_timestamp_s",
+            ],
+        )
+    if instrument == "camera":
+        return _scalar_results_csv(rows, ["image_path"])
+    raise MeasurementDataError(f"Unsupported instrument export: {instrument}")
+
+
+def _common_result_fields(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "measurement_id": row["id"],
+        "experiment_id": row["experiment_id"],
+        "labware_name": row["experiment_labware_name"],
+        "well_id": row["experiment_well_id"] or "",
+        "measurement_timestamp": row["timestamp"],
+        "experiment_created_at": row["experiment_created_at"],
+    }
+
+
+def _uvvis_results_csv(rows: list[sqlite3.Row]) -> str:
+    columns = [
+        "measurement_id",
+        "experiment_id",
+        "labware_name",
+        "well_id",
+        "measurement_timestamp",
+        "experiment_created_at",
+        "sample_index",
+        "wavelength_nm",
+        "intensity_au",
+        "integration_time_s",
+    ]
+    output_rows: list[dict[str, Any]] = []
+    for row in rows:
+        wavelengths = _json_array(row["wavelengths"], "wavelengths")
+        intensities = _json_array(row["intensities"], "intensities")
+        _validate_equal_lengths(wavelengths=wavelengths, intensities=intensities)
+        for index, (wavelength, intensity) in enumerate(zip(wavelengths, intensities)):
+            output_rows.append({
+                **_common_result_fields(row),
+                "sample_index": index,
+                "wavelength_nm": wavelength,
+                "intensity_au": intensity,
+                "integration_time_s": row["integration_time_s"],
+            })
+    return _dict_rows_csv(columns, output_rows)
+
+
+def _asmi_results_csv(rows: list[sqlite3.Row]) -> str:
+    columns = [
+        "measurement_id",
+        "experiment_id",
+        "labware_name",
+        "well_id",
+        "measurement_timestamp",
+        "experiment_created_at",
+        "sample_index",
+        "sample_timestamp_s",
+        "z_position_mm",
+        "raw_force_n",
+        "corrected_force_n",
+        "direction",
+        "baseline_avg_n",
+        "baseline_std_n",
+        "force_exceeded",
+        "data_points",
+        "step_size_mm",
+        "z_target_mm",
+        "force_limit_n",
+    ]
+    output_rows: list[dict[str, Any]] = []
+    for row in rows:
+        timestamps, z_positions, raw_forces, corrected_forces, directions = _sample_arrays(row)
+        for index, (timestamp, z_pos, raw_force, corrected_force, direction) in enumerate(zip(
+            timestamps,
+            z_positions,
+            raw_forces,
+            corrected_forces,
+            directions,
+        )):
+            output_rows.append({
+                **_common_result_fields(row),
+                "sample_index": index,
+                "sample_timestamp_s": timestamp,
+                "z_position_mm": z_pos,
+                "raw_force_n": raw_force,
+                "corrected_force_n": corrected_force,
+                "direction": "" if direction is None else direction,
+                "baseline_avg_n": row["baseline_avg"],
+                "baseline_std_n": row["baseline_std"],
+                "force_exceeded": bool(row["force_exceeded"]),
+                "data_points": row["data_points"],
+                "step_size_mm": row["step_size_mm"],
+                "z_target_mm": row["z_target_mm"],
+                "force_limit_n": row["force_limit_n"],
+            })
+    return _dict_rows_csv(columns, output_rows)
+
+
+def _potentiostat_results_csv(rows: list[sqlite3.Row]) -> str:
+    columns = [
+        "measurement_id",
+        "experiment_id",
+        "labware_name",
+        "well_id",
+        "measurement_timestamp",
+        "experiment_created_at",
+        "sample_index",
+        "technique",
+        "time_s",
+        "voltage_v",
+        "current_a",
+        "sample_period_s",
+        "duration_s",
+        "step_potential_v",
+        "step_current_a",
+        "scan_rate_v_s",
+        "step_size_v",
+        "cycles",
+        "vendor",
+        "device_id",
+        "channel",
+        "started_at",
+        "stopped_at",
+        "aborted",
+        "stop_reason",
+    ]
+    output_rows: list[dict[str, Any]] = []
+    for row in rows:
+        times = _json_array(row["time_s"], "time_s")
+        voltages = _json_array(row["voltage_v"], "voltage_v")
+        currents = (
+            _json_array(row["current_a"], "current_a")
+            if row["current_a"] not in (None, "")
+            else [None] * len(times)
+        )
+        _validate_equal_lengths(time_s=times, voltage_v=voltages, current_a=currents)
+        for index, (time_s, voltage, current) in enumerate(zip(times, voltages, currents)):
+            output_rows.append({
+                **_common_result_fields(row),
+                "sample_index": index,
+                "technique": row["technique"],
+                "time_s": time_s,
+                "voltage_v": voltage,
+                "current_a": "" if current is None else current,
+                "sample_period_s": row["sample_period_s"],
+                "duration_s": row["duration_s"],
+                "step_potential_v": row["step_potential_v"],
+                "step_current_a": row["step_current_a"],
+                "scan_rate_v_s": row["scan_rate_v_s"],
+                "step_size_v": row["step_size_v"],
+                "cycles": row["cycles"],
+                "vendor": row["vendor"],
+                "device_id": row["device_id"],
+                "channel": row["channel"],
+                "started_at": row["started_at"],
+                "stopped_at": row["stopped_at"],
+                "aborted": "" if row["aborted"] is None else bool(row["aborted"]),
+                "stop_reason": row["stop_reason"],
+            })
+    return _dict_rows_csv(columns, output_rows)
+
+
+def _scalar_results_csv(rows: list[sqlite3.Row], value_columns: list[str]) -> str:
+    columns = [
+        "measurement_id",
+        "experiment_id",
+        "labware_name",
+        "well_id",
+        "measurement_timestamp",
+        "experiment_created_at",
+        *value_columns,
+    ]
+    output_rows = [
+        {
+            **_common_result_fields(row),
+            **{column: row[column] for column in value_columns},
+        }
+        for row in rows
+    ]
+    return _dict_rows_csv(columns, output_rows)
+
+
+def _dict_rows_csv(columns: list[str], rows: list[dict[str, Any]]) -> str:
+    handle = io.StringIO()
+    writer = csv.DictWriter(handle, columns, lineterminator="\n")
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({column: _format_cell(row.get(column)) for column in columns})
     return handle.getvalue()
 
 

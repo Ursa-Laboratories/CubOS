@@ -8,6 +8,7 @@ import tempfile
 
 import pytest
 
+from data.data_store import DataStore
 from deck.errors import DeckLoaderError
 from gantry.errors import GantryLoaderError
 from gantry.gantry import Gantry
@@ -25,13 +26,19 @@ from validation.errors import SetupValidationError
 @pytest.fixture(autouse=True)
 def _ensure_commands_registered():
     """Ensure protocol commands are registered (may be cleared by other test fixtures)."""
-    if not CommandRegistry.instance().command_names:
+    command_names = CommandRegistry.instance().command_names
+    if not command_names:
+        import protocol_engine.commands.measure
         import protocol_engine.commands.move
         import protocol_engine.commands.pipette
         import protocol_engine.commands.scan
+        importlib.reload(protocol_engine.commands.measure)
         importlib.reload(protocol_engine.commands.move)
         importlib.reload(protocol_engine.commands.pipette)
         importlib.reload(protocol_engine.commands.scan)
+    elif "measure" not in command_names:
+        import protocol_engine.commands.measure
+        importlib.reload(protocol_engine.commands.measure)
 
 
 # ── YAML templates ──────────────────────────────────────────────────────
@@ -78,6 +85,64 @@ protocol:
   - move:
       instrument: pipette
       position: vial_1
+"""
+
+UVVIS_GANTRY_YAML = """\
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+cnc:
+  factory_z_travel_mm: 90.0
+working_volume:
+  x_min: 0.0
+  x_max: 300.0
+  y_min: 0.0
+  y_max: 200.0
+  z_min: 0.0
+  z_max: 80.0
+instruments:
+  uvvis:
+    type: uvvis_ccs
+    vendor: thorlabs
+    serial_number: TEST123
+    dll_path: fake.dll
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+"""
+
+PLATE_DECK_YAML = """\
+labware:
+  plate_1:
+    type: well_plate
+    name: test_96_well
+    model_name: test_96_well
+    rows: 1
+    columns: 2
+    length: 50.0
+    width: 30.0
+    height: 14.0
+    calibration:
+      a1:
+        x: 100.0
+        y: 100.0
+        z: 15.0
+      a2:
+        x: 109.0
+        y: 100.0
+        z: 15.0
+    x_offset: 9.0
+    y_offset: 9.0
+    capacity_ul: 200.0
+    working_volume_ul: 150.0
+"""
+
+UVVIS_MEASURE_PROTOCOL_YAML = """\
+protocol:
+  - measure:
+      instrument: uvvis
+      position: plate_1.A1
+      measurement_height: 0.0
+      method: measure
 """
 
 
@@ -379,6 +444,7 @@ class TestRunOnHardwareLifecycle:
                 f.gantry_path, f.deck_path, f.protocol_path,
                 gantry=Gantry(offline=True),
                 mock_mode=True,
+                data_store=DataStore(":memory:"),
             )
             assert isinstance(results, list)
 
@@ -395,6 +461,7 @@ protocol:
                     f.gantry_path, f.deck_path, f.protocol_path,
                     gantry=Gantry(offline=True),
                     mock_mode=True,
+                    data_store=DataStore(":memory:"),
                 )
 
     def test_run_on_hardware_mock_mode(self):
@@ -412,8 +479,39 @@ instruments:
                 f.gantry_path, f.deck_path, f.protocol_path,
                 gantry=Gantry(offline=True),
                 mock_mode=True,
+                data_store=DataStore(":memory:"),
             )
             assert isinstance(results, list)
+
+    def test_run_on_hardware_auto_creates_campaign_and_persists_uvvis_measure(self):
+        store = DataStore(":memory:")
+        with _TempYamlFiles(
+            gantry=UVVIS_GANTRY_YAML,
+            deck=PLATE_DECK_YAML,
+            protocol=UVVIS_MEASURE_PROTOCOL_YAML,
+        ) as f:
+            results = run_on_hardware(
+                f.gantry_path,
+                f.deck_path,
+                f.protocol_path,
+                gantry=Gantry(offline=True),
+                mock_mode=True,
+                data_store=store,
+            )
+
+        assert len(results) == 1
+        campaign_count = store._conn.execute(
+            "SELECT COUNT(*) FROM campaigns"
+        ).fetchone()[0]
+        experiment_count = store._conn.execute(
+            "SELECT COUNT(*) FROM experiments"
+        ).fetchone()[0]
+        uvvis_count = store._conn.execute(
+            "SELECT COUNT(*) FROM uvvis_measurements"
+        ).fetchone()[0]
+        assert campaign_count == 1
+        assert experiment_count == 1
+        assert uvvis_count == 1
 
     def test_run_on_hardware_full_lifecycle_order(self, monkeypatch):
         calls = []
@@ -469,6 +567,7 @@ instruments:
                 built_protocol,
                 gantry=Gantry(offline=True),
                 mock_mode=True,
+                data_store=DataStore(":memory:"),
             )
 
         assert isinstance(results, list)

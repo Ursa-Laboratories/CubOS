@@ -42,7 +42,7 @@ Run `setup/validate_setup.py` before connecting hardware, using the exact
 gantry, deck, and protocol files intended for the run:
 
 ```bash
-PYTHONPATH=src python setup/validate_setup.py \
+python setup/validate_setup.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
   configs/protocol/asmi/move_a1.yaml
@@ -59,7 +59,7 @@ fixture, cable, tool, and sample clearance before running.
 After calibration, jog checks, and offline validation:
 
 ```bash
-PYTHONPATH=src python setup/run_protocol.py \
+python setup/run_protocol.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
   configs/protocol/asmi/move_a1.yaml
@@ -71,11 +71,14 @@ PYTHONPATH=src python setup/run_protocol.py \
 2. The hardware run: construct the gantry from YAML, re-load and re-validate the
    configs, connect the gantry, clear any startup alarm, connect instruments,
    run the health check, execute the steps, and disconnect the instruments and
-   gantry in cleanup.
+   gantry in cleanup. Persistable measurement results are saved to a SQLite
+   data campaign automatically.
 
-The CLI focuses on hardware execution and does not create a data campaign. To
-persist measurements, author the protocol [in Python](protocol-python.md) and
-run it with `protocol.run(campaign="...")`.
+By default, measurement rows are written to `data/databases/panda_data.db`.
+Set `CUBOS_DATA_DB_PATH` to choose a different SQLite file for a run.
+After a successful run, the CLI also writes analysis-friendly CSV exports under
+`data/results/`. Array-based instruments such as UV-Vis, ASMI, and potentiostat
+are flattened into one row per wavelength/sample point.
 
 ## Protocol command reference
 

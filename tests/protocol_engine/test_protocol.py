@@ -161,8 +161,9 @@ class TestProtocolRun:
     def test_run_with_setup_delegates_to_run_on_hardware(self, monkeypatch):
         calls = {}
 
-        def fake_run_on_hardware(gantry_path, deck_path, protocol):
+        def fake_run_on_hardware(gantry_path, deck_path, protocol, **kwargs):
             calls["args"] = (gantry_path, deck_path, protocol)
+            calls["kwargs"] = kwargs
             return ["ok"]
 
         monkeypatch.setattr(protocol_setup, "run_on_hardware", fake_run_on_hardware)
@@ -175,8 +176,13 @@ class TestProtocolRun:
 
         assert results == ["ok"]
         assert calls["args"] == ("g.yaml", "d.yaml", protocol)
+        assert calls["kwargs"] == {
+            "data_store": None,
+            "campaign_description": None,
+            "protocol_config": None,
+        }
 
-    def test_run_without_campaign_does_not_persist(self, monkeypatch):
+    def test_run_without_campaign_uses_default_persistence(self, monkeypatch):
         passed = {}
 
         def fake_run_on_hardware(gantry_path, deck_path, protocol, **kwargs):
@@ -191,38 +197,39 @@ class TestProtocolRun:
         )
         protocol.run()
 
-        # No campaign named -> no DataStore / campaign_id threaded through.
-        assert "data_store" not in passed
-        assert "campaign_id" not in passed
+        assert passed == {
+            "data_store": None,
+            "campaign_description": None,
+            "protocol_config": None,
+        }
 
-    def test_run_persistence_arg_without_campaign_raises(self):
+    def test_run_accepts_data_store_without_campaign(self, monkeypatch):
+        passed = {}
+
+        def fake_run_on_hardware(gantry_path, deck_path, protocol, **kwargs):
+            passed.update(kwargs)
+            return []
+
+        monkeypatch.setattr(protocol_setup, "run_on_hardware", fake_run_on_hardware)
+
+        store = object()
         protocol = Protocol(
             steps=[],
             setup=ProtocolSetup(gantry_path="g.yaml", deck_path="d.yaml"),
         )
-        with pytest.raises(ValueError, match="campaign"):
-            protocol.run(data_store=object())
+        protocol.run(data_store=store)
 
-    def test_run_with_campaign_auto_creates_campaign_and_persists(self, monkeypatch):
+        assert passed["data_store"] is store
+        assert passed["campaign_description"] is None
+
+    def test_run_with_campaign_passes_description_to_hardware_runner(self, monkeypatch):
         passed = {}
 
         def fake_run_on_hardware(gantry_path, deck_path, protocol, **kwargs):
             passed.update(kwargs)
             return ["ok"]
 
-        class FakeStore:
-            def __init__(self):
-                self.create_args = None
-                self.closed = False
-
-            def create_campaign(self, description, **kwargs):
-                self.create_args = (description, kwargs)
-                return 77
-
-            def close(self):
-                self.closed = True
-
-        store = FakeStore()
+        store = object()
         monkeypatch.setattr(protocol_setup, "run_on_hardware", fake_run_on_hardware)
 
         protocol = Protocol(
@@ -232,13 +239,5 @@ class TestProtocolRun:
         results = protocol.run(campaign="My run", data_store=store)
 
         assert results == ["ok"]
-        # Campaign auto-created from the protocol's own setup metadata.
-        description, kwargs = store.create_args
-        assert description == "My run"
-        assert kwargs["gantry_config"] == "g.yaml"
-        assert kwargs["deck_config"] == "d.yaml"
-        # data_store + campaign_id threaded into the run.
         assert passed["data_store"] is store
-        assert passed["campaign_id"] == 77
-        # Caller-provided store is not closed by run().
-        assert store.closed is False
+        assert passed["campaign_description"] == "My run"

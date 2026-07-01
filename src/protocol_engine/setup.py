@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 import yaml
 
@@ -142,20 +145,26 @@ def run_on_hardware(
     mock_mode: bool = False,
     data_store: Any | None = None,
     campaign_id: int | None = None,
+    campaign_description: str | None = None,
+    protocol_config: str | None = None,
 ) -> List[Any]:
     """Load configs, validate, and run the protocol as a full hardware session.
 
     This is the single orchestration path shared by the YAML CLI
-    (``setup/run_protocol.py``) and ``Protocol.run()``. The lifecycle is:
+    (``setup/run_protocol.py``) and ``Protocol.run()``. Measurement-producing
+    commands are persisted by default: when no ``data_store``/``campaign_id`` is
+    supplied, this function creates a default ``DataStore`` campaign for the
+    run and attaches it to the runtime context. The lifecycle is:
 
         1. construct a ``Gantry`` from the gantry YAML (when ``gantry`` is None)
-        2. ``setup_protocol`` — load/validate configs, build the context
-        3. ``gantry.connect()``
-        4. ``gantry.prepare_for_protocol_run()`` — clear any startup alarm
-        5. ``connect_instruments()``
-        6. ``gantry.is_healthy()`` health check (abort if unhealthy)
-        7. ``protocol.execute(context)`` — run the steps
-        8. disconnect instruments and gantry in ``finally``, even on error
+        2. create a protocol-run campaign if one was not supplied
+        3. ``setup_protocol`` — load/validate configs, build the context
+        4. ``gantry.connect()``
+        5. ``gantry.prepare_for_protocol_run()`` — clear any startup alarm
+        6. ``connect_instruments()``
+        7. ``gantry.is_healthy()`` health check (abort if unhealthy)
+        8. ``protocol.execute(context)`` — run the steps
+        9. disconnect instruments and gantry in ``finally``, even on error
 
     Args:
         gantry_path: Path to gantry machine YAML config.
@@ -165,7 +174,12 @@ def run_on_hardware(
             ``gantry_path``. Tests pass an offline Gantry to stay off hardware.
         mock_mode: If True, instantiate real driver classes in offline mode.
         data_store: Optional persistence store attached to the runtime context.
-        campaign_id: Optional campaign ID used with ``data_store``.
+        campaign_id: Optional campaign ID used with ``data_store``. If omitted,
+            a campaign is created automatically.
+        campaign_description: Optional campaign description for auto-created
+            campaigns.
+        protocol_config: Optional identifier recorded for in-memory protocol
+            objects; YAML path inputs use their own path by default.
 
     Returns:
         List of step results from protocol execution.
@@ -178,13 +192,36 @@ def run_on_hardware(
             raw_config = yaml.safe_load(f)
         gantry = Gantry(config=raw_config)
 
-    protocol, context = setup_protocol(
-        gantry_path, deck_path, protocol_path,
-        gantry=gantry, mock_mode=mock_mode,
-        data_store=data_store, campaign_id=campaign_id,
-    )
+    owns_data_store = False
+    if data_store is None:
+        from data import DataStore
 
+        data_store = DataStore()
+        owns_data_store = True
+
+    context = None
     try:
+        protocol, context = setup_protocol(
+            gantry_path, deck_path, protocol_path,
+            gantry=gantry, mock_mode=mock_mode,
+            data_store=data_store, campaign_id=campaign_id,
+        )
+        if campaign_id is None:
+            from data import register_deck_labware
+
+            protocol_file = _protocol_config_label(protocol_path, protocol_config)
+            campaign_id = data_store.create_campaign(
+                description=campaign_description or (
+                    f"Protocol run: gantry={gantry_path}, deck={deck_path}, "
+                    f"protocol={protocol_file}"
+                ),
+                deck_config=str(deck_path),
+                gantry_config=str(gantry_path),
+                protocol_config=protocol_file,
+            )
+            register_deck_labware(data_store, campaign_id, context.deck)
+            context.data_store = data_store
+            context.campaign_id = campaign_id
         gantry.connect()
         gantry.prepare_for_protocol_run()
         context.gantry.connect_instruments()
@@ -194,5 +231,25 @@ def run_on_hardware(
             )
         return protocol.execute(context)
     finally:
-        context.gantry.disconnect_instruments()
-        gantry.disconnect()
+        if context is not None:
+            try:
+                context.gantry.disconnect_instruments()
+            except Exception as exc:
+                logger.error("disconnect_instruments failed: %s", exc, exc_info=True)
+            gantry.disconnect()
+        if owns_data_store:
+            data_store.close()
+
+
+def _protocol_config_label(
+    protocol_input: ProtocolInput,
+    explicit: str | None,
+) -> str:
+    if explicit is not None:
+        return explicit
+    if isinstance(protocol_input, (str, os.PathLike)):
+        return str(protocol_input)
+    source_path = getattr(protocol_input, "source_path", None)
+    if source_path is not None:
+        return str(source_path)
+    return "<in-memory protocol>"
