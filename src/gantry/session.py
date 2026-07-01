@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import math
 import re
 import threading
@@ -110,6 +111,7 @@ class GantrySession:
         self._calibration_restore_soft_limits = False
         self._calibration_jog_bypass_working_volume = False
         self._move_error: str | None = None
+        self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     @property
     def connected(self) -> bool:
@@ -624,6 +626,7 @@ class GantrySession:
             with self._lock:
                 self._require_connected().move_to(x=x, y=y, z=z)
         except Exception as exc:
+            self.logger.error("Background move to (%s, %s, %s) failed: %s", x, y, z, exc, exc_info=True)
             self._move_error = str(exc)
 
     def _load_config_from_yaml(self, path: str | Path) -> dict[str, Any]:

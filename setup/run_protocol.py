@@ -71,20 +71,19 @@ def main() -> None:
 
     db_path = default_database_path()
     data_store = DataStore(db_path)
-    campaign_id = create_campaign_for_protocol_run(
-        data_store,
-        gantry_path=gantry_path,
-        deck_path=deck_path,
-        gantry_file=gantry_path,
-        deck_file=deck_path,
-        protocol_file=protocol_path,
-        description=(
-            f"Protocol run: gantry={gantry_path}, deck={deck_path}, "
-            f"protocol={protocol_path}"
-        ),
-    )
-
     try:
+        campaign_id = create_campaign_for_protocol_run(
+            data_store,
+            gantry_path=gantry_path,
+            deck_path=deck_path,
+            gantry_file=gantry_path,
+            deck_file=deck_path,
+            protocol_file=protocol_path,
+            description=(
+                f"Protocol run: gantry={gantry_path}, deck={deck_path}, "
+                f"protocol={protocol_path}"
+            ),
+        )
         results = run_on_hardware(
             gantry_path,
             deck_path,

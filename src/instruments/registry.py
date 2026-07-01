@@ -10,9 +10,13 @@ from importlib import metadata as importlib_metadata
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Type
 
+import logging
+
 import yaml
 
 from instruments.base_instrument import BaseInstrument
+
+logger = logging.getLogger(__name__)
 
 _REGISTRY_PATH = Path(__file__).parent / "registry.yaml"
 _ENTRY_POINT_GROUP = "cubos.instrument_registries"
@@ -152,7 +156,8 @@ def _load_registry_file(path: str | Path) -> dict[str, Any]:
 def _entry_point_registries() -> Iterable[tuple[str, dict[str, Any]]]:
     try:
         entry_points = importlib_metadata.entry_points()
-    except Exception:
+    except Exception as exc:
+        logger.warning("Failed to enumerate instrument registry entry points: %s", exc)
         return []
 
     if hasattr(entry_points, "select"):

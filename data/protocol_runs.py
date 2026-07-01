@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from deck.deck import Deck
 from deck.loader import load_deck_from_yaml_safe
@@ -59,8 +62,8 @@ def _register_labware_path(
 ) -> None:
     try:
         data_store.register_labware(campaign_id, labware_key, labware)
-    except TypeError:
-        pass
+    except TypeError as exc:
+        logger.warning("Skipping labware registration for %r: %s", labware_key, exc)
 
     for child_name, child in getattr(labware, "contained_labware", {}).items():
         _register_labware_path(

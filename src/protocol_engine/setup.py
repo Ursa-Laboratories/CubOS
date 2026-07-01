@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Any, List, Tuple
+
+logger = logging.getLogger(__name__)
 
 import yaml
 
@@ -229,7 +232,10 @@ def run_on_hardware(
         return protocol.execute(context)
     finally:
         if context is not None:
-            context.gantry.disconnect_instruments()
+            try:
+                context.gantry.disconnect_instruments()
+            except Exception as exc:
+                logger.error("disconnect_instruments failed: %s", exc, exc_info=True)
             gantry.disconnect()
         if owns_data_store:
             data_store.close()
