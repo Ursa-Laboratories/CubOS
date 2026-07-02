@@ -1,171 +1,76 @@
 # Gantry Bring-Up
 
-This admin page is for controller setup before normal deck-origin calibration.
-Use it when a machine is new, controller settings are unknown, homing direction
-is wrong, or WPos/MPos behavior has not been recorded.
+Use this page only when the controller itself needs first-time setup: a new
+machine, unknown GRBL settings, wrong homing direction, wrong jog direction, or
+status lines that do not report `WPos`.
 
-For normal operator calibration after the controller is already normalized, use
-[Calibration](../calibration.md).
+If you bought a pre-configured device through [ursalabs.ai](https://ursalabs.ai),
+this should already be done. Go straight to [Calibration](../calibration.md).
 
-## Target Behavior
+Bring-up uses [Universal Gcode Sender (UGS)](https://github.com/winder/Universal-G-Code-Sender)
+connected directly to the controller. Do not use CubOS for this page.
 
-CubOS expects the controller and WPos frame to match the deck frame used by
-protocols:
+!!! warning "This moves real hardware"
+    Clear the deck, keep cables out of the travel path, and keep a hand near
+    the E-stop or controller reset. Stop immediately if an axis moves toward a
+    collision.
 
-- `$H` homes to the back-right-top machine corner
-- `+X` jogs right from the operator perspective
-- `+Y` jogs back, away from the operator
-- `+Z` jogs up, away from the deck
-- GRBL status reports WPos for CubOS runtime reads
+## Goal
 
-The gantry boundary does not apply a hidden Z sign flip. Controller settings
-and work-coordinate calibration must make WPos match the CubOS deck frame.
+At the end of bring-up, the controller must match the CubOS deck frame:
 
-## Snapshot First
+- `$H` homes to the back-right-top corner.
+- Jogging `+X` moves right from the operator perspective.
+- Jogging `+Y` moves back, away from the operator.
+- Jogging `+Z` moves up, away from the deck.
+- GRBL status reports `WPos:`, not `MPos:`.
 
-Before changing settings, save the current controller state and a rollback note.
+CubOS does not hide or flip these directions in software. The controller
+settings must make the reported work position match the physical deck.
+
+![CubOS deck coordinate frame shown on the gantry](../images/orientation.webp){ width="520" }
+
+## Connect With UGS
+
+1. Open UGS.
+2. Select the controller serial port from the dropdown near the top of the
+   window.
+   - Windows ports look like `COM3`, `COM4`, etc.
+   - macOS ports look like `/dev/tty.usbserial-XXXX` or
+     `/dev/tty.usbmodemXXXX`.
+   - If you are not sure which one is the controller, unplug the USB cable,
+     reopen the dropdown, and look for the port that disappeared.
+3. Set the baud rate to `115200`.
+4. Click **Connect**.
+
+To send a command, type it into the command line at the bottom of UGS and press
+Enter. GRBL replies `ok` after it accepts the command.
+
+To jog, use the UGS jog panel. Use a small step size while checking directions.
+
+## Save The Current Settings
+
+Before changing anything, copy the current controller settings and status into
+your setup notes:
 
 ```text
 $$
 ?
 ```
 
-Record at least:
+Record these values:
 
 - `$3` direction invert mask
+- `$23` homing direction invert mask
 - `$10` status report mode
 - `$27` homing pull-off distance
-- `$23` homing direction invert mask
-- homing enable and hard/soft limit settings
-- raw status line showing WPos or MPos
-- whether WCO appears in status after a few `?` queries
+- `$22` homing enable
+- `$20` soft limits
+- `$21` hard limits
+- the status line, especially whether it shows `WPos:` or `MPos:`
 
-If any value is changed, write down the original value and the reason for the
-change before continuing.
-
-## Status Reporting
-
-CubOS expects WPos reporting during normal operation. `$10=0` is the expected
-GRBL status-report mode for WPos:
-
-```text
-$10=0
-```
-
-After setting it, query status:
-
-```text
-?
-```
-
-The status line should include `WPos:`. If the controller reports `MPos:`,
-capture WCO behavior before debugging CubOS. GRBL defines the relationship as:
-
-```text
-MPos = WPos + WCO
-```
-
-Deck-origin calibration depends on WPos. If calibration reads MPos, the
-homing pull-off reserve and WCO can be mistaken for usable deck travel.
-
-## Homing Direction
-
-Run homing only when the tool is clear of fixtures, stock, samples, and cables.
-Keep a hand on the E-stop or controller reset.
-
-```text
-$H
-```
-
-The target homing corner is back-right-top. If homing goes to the wrong corner,
-adjust `$23`.
-
-GRBL bitmask values:
-
-```text
-X = 1
-Y = 2
-Z = 4
-```
-
-Example: invert X and Y homing.
-
-```text
-$23=3
-```
-
-Run `$H` again after each `$23` change. Stop if any axis heads toward a hard
-collision.
-
-## Homing Pull-Off
-
-Record the machine's `$27` homing pull-off and save it in gantry YAML as
-`grbl_settings.homing_pull_off`.
-
-```text
-$27=10
-```
-
-Calibration writes the configured `$27` before homing and adds that distance to
-GRBL `$130/$131/$132` soft-limit spans. The pull-off reserve is outside the
-usable deck WPos range: if homed WPos Z is `91` and `$27=10`, the deck
-`working_volume.z_max` is `91`, while controller `max_travel_z` is `101`.
-
-Changing `$27` without recalculating max travel can make the controller soft
-limits too small or too large.
-
-## Jog Direction
-
-After homing reaches back-right-top, jog each axis slowly and confirm physical
-direction:
-
-- `+X` moves right
-- `+Y` moves back
-- `+Z` moves up
-
-If jogging direction is wrong, adjust `$3` with the same GRBL bitmask:
-
-```text
-$3=2
-```
-
-`$3` and `$23` interact. After changing `$3`, run `$H` again and re-check
-homing direction.
-
-Repeat until both are true:
-
-- `$H` always homes to back-right-top
-- positive jogs move right, back, and up
-
-## Save Expected Settings
-
-Save the final controller expectations in the gantry config used by
-the machine. For example:
-
-```yaml
-grbl_settings:
-  dir_invert_mask: 2
-  status_report: 0
-  homing_enable: true
-  homing_dir_mask: 3
-  homing_pull_off: 10.0
-```
-
-Use the exact values measured on the machine, not these example values.
-
-## Rollback Notes
-
-For each setting changed, record:
-
-- original value
-- new value
-- date
-- machine/controller
-- operator
-- reason for the change
-- how to restore the original value
-
-Example:
+For every value you change, write down the old value, new value, date, machine,
+operator, and reason. Example:
 
 ```text
 2026-04-28 Cub XL ASMI
@@ -174,14 +79,131 @@ Reason: normalize homing to back-right-top.
 Rollback: send $23=0, then re-home and re-check jog directions.
 ```
 
-## Hand Off To Calibration
+## Set WPos Reporting
 
-Once homing, jog direction, and WPos reporting match the target behavior, run
-the operator calibration tutorial:
+CubOS expects GRBL status lines to report work position (`WPos`). Set:
 
-```bash
-PYTHONPATH=src python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
+```text
+$10=0
 ```
 
-Do not run protocols on a real setup until deck-origin calibration and minimal
-hardware validation pass.
+Then query status:
+
+```text
+?
+```
+
+The response should contain `WPos:`:
+
+```text
+<Idle|WPos:0.000,0.000,0.000|FS:0,0>
+```
+
+If it still shows `MPos:`, send `$10=0` again and query `?` again before
+continuing.
+
+## Fix Jog And Homing Direction
+
+Two GRBL settings control the direction behavior:
+
+- `$3` controls which way each axis moves during normal jogging and motion.
+- `$23` controls which way each axis moves during homing.
+
+Both settings use the same axis values:
+
+```text
+X = 1
+Y = 2
+Z = 4
+```
+
+To invert more than one axis, add the values together. For example, X + Y is
+`1 + 2 = 3`, so the command is `$3=3` or `$23=3`.
+
+### 1. Check Jog Direction
+
+Use a small UGS jog step and check one axis at a time:
+
+| Jog problem | Change |
+|---|---|
+| `+X` moves left instead of right | Toggle X bit `1` in `$3` |
+| `+Y` moves toward the operator instead of back | Toggle Y bit `2` in `$3` |
+| `+Z` moves down instead of up | Toggle Z bit `4` in `$3` |
+
+Example: if `$3=0` and only `+Y` is wrong, set:
+
+```text
+$3=2
+```
+
+Repeat until positive jogs move right, back, and up.
+
+### 2. Check Homing
+
+After jogging is correct, run homing:
+
+```text
+$H
+```
+
+The target homing corner is back-right-top. If homing heads toward the wrong
+end of an axis, stop and toggle that axis in `$23`.
+
+| Homing problem | Change |
+|---|---|
+| X homes left instead of right | Toggle X bit `1` in `$23` |
+| Y homes front instead of back | Toggle Y bit `2` in `$23` |
+| Z homes down instead of up | Toggle Z bit `4` in `$23` |
+
+Example: if `$23=0` and X and Y home in the wrong directions, set:
+
+```text
+$23=3
+```
+
+Run `$H` again after each `$23` change. Do not continue until homing reliably
+goes to back-right-top.
+
+If you change `$23`, jog again afterward. `$3` and `$23` affect the same
+physical axes, so changing one can reveal that the other also needs an
+adjustment.
+
+Repeat until both checks pass:
+
+- `$H` always homes to back-right-top.
+- Positive jogs move right, back, and up.
+
+## Set Homing Pull-Off
+
+`$27` is how far GRBL backs away from a limit switch after homing. The normal
+bring-up value is:
+
+```text
+$27=10
+```
+
+You do not need to copy `$27` into the gantry YAML by hand. During calibration,
+CubOS reads the live `$27` value and writes it into the output gantry YAML as
+`grbl_settings.homing_pull_off`.
+
+Calibration also keeps this pull-off distance outside the usable deck range.
+For example, if homed WPos Z is `91` and `$27=10`, the deck
+`working_volume.z_max` is `91`, while controller `max_travel_z` is `101`.
+
+## Final Checklist
+
+Before leaving UGS, confirm:
+
+- `?` reports `WPos:`.
+- `$H` homes to back-right-top.
+- `+X` jogs right.
+- `+Y` jogs back, away from the operator.
+- `+Z` jogs up.
+- Your setup notes include the original and final values for `$3`, `$23`,
+  `$10`, and `$27`.
+
+Then close UGS. The serial port can only be used by one program at a time, so
+UGS must be closed before running CubOS calibration.
+
+Continue to [Calibration](../calibration.md). Do not run real protocols until
+deck-origin calibration and the minimal hardware validation steps pass.
