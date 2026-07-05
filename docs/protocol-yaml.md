@@ -3,6 +3,24 @@
 YAML is the standard operator-facing protocol format and the path used by the
 stock validation and run scripts.
 
+## Before You Validate and Run
+
+Check these before every run, not just the first one of the day:
+
+- [ ] Candle, Universal Gcode Sender, or any other GRBL serial terminal is
+      **closed** — only one program can hold the serial port.
+- [ ] **Only the CUB you intend to run is connected** to this computer —
+      connection is auto-scan with no way to target a specific device today,
+      so a second connected CUB can get picked up instead (see
+      [Calibration: Multi-CUB Serial Ports](calibration.md#multi-cub-serial-ports)).
+- [ ] The gantry is **homed** (or you're about to home as the first protocol
+      step) — don't run motion on an unhomed or previously-alarmed gantry.
+- [ ] The **deck YAML matches the physical deck** — labware placement,
+      holder nesting, and calibration anchors reflect what's actually on the
+      bench right now.
+- [ ] Mounted **instruments are powered on** and, where applicable,
+      connected/initialized before the run starts.
+
 ## High-level workflow
 
 The YAML path has three user-facing steps:
@@ -79,6 +97,160 @@ Set `CUBOS_DATA_DB_PATH` to choose a different SQLite file for a run.
 After a successful run, the CLI also writes analysis-friendly CSV exports under
 `data/results/`. Array-based instruments such as UV-Vis, ASMI, and potentiostat
 are flattened into one row per wavelength/sample point.
+
+## Defining Instrument Drivers
+
+Instruments aren't declared in the protocol YAML — they're declared in the
+**gantry YAML**, under the top-level `instruments:` map (see
+[Gantry: Config](gantry.md#config)). The map key is the name protocol
+commands reference via `instrument: <name>`.
+
+Every instrument entry needs at minimum:
+
+- `type` *(str, required)* — a type from `src/instruments/registry.yaml`
+  (`asmi`, `filmetrics`, `pipette`, `potentiostat`, `uv_curing`, `uvvis_ccs`,
+  `camera`, `mounted_tool`).
+- `vendor` *(str, required)* — a vendor registered for that type. The
+  `type`/`vendor` pair is how CubOS resolves which Python driver class to
+  load — you don't give a driver path directly unless you're registering an
+  external driver package (via the `cubos.instrument_registries` entry point
+  group or a `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlay — see
+  [Getting Started](getting-started.md#instrument-extras)).
+- `offset_x`, `offset_y`, `depth` *(float, default `0.0`)* — physical
+  mounting offsets from the gantry's reference point.
+
+Everything else is driver-specific and passes straight through to the
+vendor driver's constructor (`extra="allow"` in the schema) — this is where
+a **device serial number**, COM/serial **port**, or a **driver file path**
+(e.g. a vendor DLL) shows up, when the driver needs one. Set `offline: true`
+to run a driver in its synthetic/no-hardware mode.
+
+One worked example per instrument type:
+
+**`asmi` / `vernier`** — Vernier Go Direct force sensor. No serial number
+needed; the `godirect` SDK auto-detects the sensor over USB.
+
+```yaml
+instruments:
+  asmi:
+    type: asmi
+    vendor: vernier
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    force_threshold: -50
+    sensor_channels: [1]
+```
+
+**`filmetrics` / `kla`** — KLA Filmetrics thin-film measurement, driven
+through a vendor executable and recipe file:
+
+```yaml
+instruments:
+  filmetrics:
+    type: filmetrics
+    vendor: kla
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    exe_path: "C:\\Filmetrics\\Filmeasure.exe"
+    recipe_name: "my_recipe"
+```
+
+**`pipette` / `opentrons`** — Opentrons pipette over a serial connection:
+
+```yaml
+instruments:
+  pipette:
+    type: pipette
+    vendor: opentrons
+    pipette_model: p300_single_gen2
+    port: "COM7"
+    baud_rate: 115200
+    offline: true
+    offset_x: 180.0
+    offset_y: -25.0
+    depth: 0.0
+```
+
+**`potentiostat` / `admiral`** — Admiral SquidStat, addressed by serial port
+and channel number:
+
+```yaml
+instruments:
+  potentiostat:
+    type: potentiostat
+    vendor: admiral
+    port: "/dev/ttyACM1"
+    channel: 0
+    offline: true
+    offset_x: -55.0
+    offset_y: 0.0
+    depth: 58.0
+```
+
+**`uv_curing` / `excelitas`** — Excelitas UV curing lamp over serial:
+
+```yaml
+instruments:
+  uv_curing:
+    type: uv_curing
+    vendor: excelitas
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    port: "/dev/ttyACM0"
+    baud_rate: 19200
+    default_intensity: 100.0
+    default_exposure_time: 1.0
+```
+
+**`uvvis_ccs` / `thorlabs`** — Thorlabs CCS spectrometer, addressed by
+**device serial number** plus the vendor **driver DLL path**:
+
+```yaml
+instruments:
+  uvvis_ccs:
+    type: uvvis_ccs
+    vendor: thorlabs
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    serial_number: "M00123456"
+    dll_path: "TLCCS_64.dll"
+    default_integration_time_s: 0.24
+```
+
+**`camera` / `mount_only`** (or `raspberry_pi`) — a fixed-mount camera with
+no active driver, used as a positional reference:
+
+```yaml
+instruments:
+  camera:
+    type: camera
+    vendor: mount_only
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 32.0
+```
+
+**`mounted_tool` / `mount_only`** — any other passive mounted tool (e.g. a
+vial capper/decapper) tracked for offsets only:
+
+```yaml
+instruments:
+  vial_capper_decapper:
+    type: mounted_tool
+    vendor: mount_only
+    offline: true
+    offset_x: 58.0
+    offset_y: 0.0
+    depth: 48.0
+```
 
 ## Protocol command reference
 

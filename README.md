@@ -19,23 +19,10 @@ before running scans, indentation, dispensing, or other instrument actions.
 
 ## Installation
 
-CubOS requires Python 3.10 or newer.
-
-```bash
-git clone https://github.com/Ursa-Laboratories/CubOS.git
-cd CubOS
-python -m venv .venv
-source .venv/bin/activate
-pip install -U pip
-pip install -e ".[dev]"
-```
-
-Install optional vendor SDKs only for the instruments you use:
-
-```bash
-pip install -e ".[asmi]"          # Vernier Go Direct force sensor
-pip install -e ".[potentiostat]"  # Admiral Instruments SquidStat
-```
+See [Getting Started](docs/getting-started.md) for full, OS-specific
+installation instructions (Windows/macOS/Linux prerequisites, venv setup,
+instrument extras, serial port discovery). Docs are the source of truth for
+installation steps — this README doesn't duplicate them.
 
 ## Quick Start
 
@@ -105,9 +92,11 @@ full documentation instead of treating this README as the source of truth.
 - [Calibration](docs/calibration.md)
 - [Gantry](docs/gantry.md)
 - [Deck](docs/deck.md)
-- [Protocol](docs/protocol.md)
+- [Run a Protocol with YAML](docs/protocol-yaml.md)
+- [Python Protocols](docs/protocol-python.md)
 - [Data](docs/data.md)
 - [Gantry Bring-Up](docs/admin/gantry-bring-up.md)
+- [Troubleshooting & Recovery](docs/troubleshooting.md)
 - [API Reference](docs/reference/index.md)
 
 Build and serve the documentation locally:

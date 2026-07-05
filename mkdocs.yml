@@ -7,10 +7,12 @@ nav:
   - Home: index.md
   - Set Up and Use CubOS:
     - Getting Started: getting-started.md
+    - Gantry Bring-Up: admin/gantry-bring-up.md
     - Calibrate Gantry: calibration.md
     - Set Up Deck and Labware: deck.md
     - Run a Protocol with YAML: protocol-yaml.md
     - Data: data.md
+    - Troubleshooting & Recovery: troubleshooting.md
   - Contributing to CubOS:
     - Overview: contributing.md
     - Development Setup: development.md
@@ -38,7 +40,6 @@ nav:
 
 not_in_nav: |
   agent-index.md
-  admin/**
   reference/src/**
   reference/data/**
 

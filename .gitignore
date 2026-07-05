@@ -187,3 +187,7 @@ PANDA-BEAR/
 .pi/
 .codegraph/
 .cursor/
+
+# Local doc-review tool (ephemeral review state + node deps)
+docs/.review/
+tools/doc-review/node_modules/
