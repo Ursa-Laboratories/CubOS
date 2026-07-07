@@ -1,3 +1,5 @@
+> Org-wide baseline: [`AGENTS.org.md`](./AGENTS.org.md) — this file takes precedence where they overlap.
+
 # CubOS Agent Guide
 
 CubOS controls real lab hardware: a GRBL CNC gantry plus mounted instruments.
