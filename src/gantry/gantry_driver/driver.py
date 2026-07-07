@@ -67,6 +67,7 @@ class Mill:
 
     def _init_state(self):
         """Initialize state attributes for a fresh, unconnected mill."""
+        self.config = {}
         self.homed = False
         self.auto_home = False
         self.active_connection = False
@@ -139,8 +140,6 @@ class Mill:
                 if found:
                     break
 
-        self._cache_port(found_on)
-
         return ser_mill, found_on
 
     def _get_available_ports(self):
@@ -195,11 +194,6 @@ class Mill:
                 return True
         return False
 
-    def _cache_port(self, port: str):
-         """Cache the port to a file for future connections."""
-         with open(Path(__file__).parent / "mill_port.txt", "w") as file:
-            file.write(port)
-
     def connect(
         self,
         port: Optional[str] = None,
@@ -207,6 +201,8 @@ class Mill:
         timeout=3,
     ) -> serial.Serial:
         """Open the serial connection and initialize the controller."""
+        self._init_state()
+        self.ser_mill = None
         try:
             ser_mill, port_name = self._locate_over_serial(port)
 
@@ -241,9 +237,17 @@ class Mill:
 
         # Quick alarm check before sending any commands — GRBL rejects
         # everything except $X and $H while in alarm state.
-        self.ser_mill.write(b"?")
-        time.sleep(0.2)
-        initial_status = self._read_serial()
+        initial_status = ""
+        for _ in range(3):
+            self.ser_mill.write(b"?")
+            time.sleep(0.2)
+            initial_status = self._read_serial()
+            if initial_status:
+                break
+        if not initial_status:
+            raise MillConnectionError(
+                "No initial GRBL status response; cannot enforce WPos mode"
+            )
         if initial_status and "alarm" in initial_status.lower():
             self.logger.warning(
                 "Mill is in alarm state — skipping config/setup. "
@@ -254,15 +258,9 @@ class Mill:
 
         self.read_config()
         self.clear_buffers()
-        if initial_status:
-            self.enforce_wpos_mode()
-        else:
-            self.logger.warning(
-                "No initial GRBL status response; skipping WPos enforcement during connect"
-            )
+        self.enforce_wpos_mode()
         self.set_feed_rate(DEFAULT_FEED_RATE)
-        if initial_status:
-            self.seed_wco()
+        self.seed_wco()
         return self.ser_mill
 
     def disconnect(self):
@@ -277,10 +275,11 @@ class Mill:
                 raise MillConnectionError("Error closing serial connection to mill")
             else:
                 self.logger.info("Serial connection to mill closed successfully")
-                self.active_connection = False
+                self._init_state()
                 self.ser_mill = None
         else:
              self.logger.info("Serial connection was already closed or never opened.")
+             self._init_state()
         return
 
     def connected_port(self) -> str | None:
@@ -295,11 +294,15 @@ class Mill:
         if self.ser_mill is not None:
             self.ser_mill.timeout = timeout
 
+    def get_read_timeout(self) -> float | None:
+        """Return the serial read timeout when a connection exists."""
+        if self.ser_mill is None:
+            return None
+        return self.ser_mill.timeout
+
     def read_config(self):
         """Read the live mill config from the connected controller."""
-        if self.ser_mill is None or not self.ser_mill.is_open:
-            self.logger.error("Serial connection to mill is not open")
-            raise MillConnectionError("Serial connection to mill is not open")
+        self._require_open_serial()
 
         self.logger.info("Reading mill config")
         mill_config = self.read_grbl_settings()
@@ -310,7 +313,8 @@ class Mill:
     def _collect_grbl_settings_response(self) -> dict:
         """Drain serial until ``ok`` arrives, then parse the $$ block."""
         deadline = time.time() + 5
-        lines = [self.ser_mill.readline().decode(encoding="ascii").rstrip()]
+        self._require_open_serial()
+        lines = [self.ser_mill.readline().decode(encoding="ascii", errors="replace").rstrip()]
         while lines[-1] != "ok":
             if time.time() > deadline:
                 raise StatusReturnError("Timed out waiting for GRBL settings response")
@@ -318,7 +322,7 @@ class Mill:
                 raise StatusReturnError(
                     f"Error in settings response: {lines[-1]}"
                 )
-            lines.append(self.ser_mill.readline().decode(encoding="ascii").rstrip())
+            lines.append(self.ser_mill.readline().decode(encoding="ascii", errors="replace").rstrip())
         self.logger.debug("Returned %s", lines[:-1])
         return self._parse_grbl_settings_response(lines[:-1])
 
@@ -355,8 +359,7 @@ class Mill:
         raises after :data:`ERROR_22_MAX_RETRIES` attempts.
         """
         try:
-            if self.ser_mill is None:
-                raise MillConnectionError("Serial connection to mill is not open")
+            self._require_open_serial()
             self.logger.debug("Command sent: %s", command)
             self.command_logger.debug("%s", command)
 
@@ -404,8 +407,23 @@ class Mill:
         return mill_response
 
     def stop(self):
-        """Stop the mill."""
-        self.execute_command("!")
+        """Send GRBL feed hold and verify the controller entered Hold."""
+        self.feed_hold_realtime()
+        self.ser_mill.write(b"?")
+        time.sleep(0.05)
+        status = self._read_serial()
+        if "hold" not in status.lower():
+            raise StatusReturnError(f"Feed hold was not acknowledged: {status}")
+
+    def feed_hold_realtime(self) -> None:
+        """Send GRBL realtime feed hold without line protocol or reads."""
+        self._require_open_serial()
+        self.ser_mill.write(b"!")
+
+    def resume(self) -> None:
+        """Resume a feed-held GRBL controller with realtime cycle start."""
+        self._require_open_serial()
+        self.ser_mill.write(b"~")
 
     def jog(self, x: float = 0, y: float = 0, z: float = 0,
             feed_rate: float = DEFAULT_FEED_RATE) -> None:
@@ -420,8 +438,7 @@ class Mill:
             z: Relative Z distance.
             feed_rate: Feed rate in mm/min.
         """
-        if not self.ser_mill:
-            raise MillConnectionError("Serial connection not available")
+        self._require_open_serial()
         parts = []
         if x != 0:
             parts.append(f"X{x:.3f}")
@@ -449,31 +466,31 @@ class Mill:
 
     def jog_cancel(self) -> None:
         """Cancel any in-progress jog motion immediately."""
-        if not self.ser_mill:
-            raise MillConnectionError("Serial connection not available")
+        self._require_open_serial()
         self.ser_mill.write(b"\x85")
 
     def unlock(self):
         """Unlock the mill by sending $X directly over serial."""
-        if not self.ser_mill:
-            raise MillConnectionError("Serial connection not available")
+        self._require_open_serial()
         self.logger.info("Sending unlock ($X)")
         self.ser_mill.write(b"$X\n")
-        time.sleep(0.5)
-        # Drain and check response
-        response_lines = []
-        while self.ser_mill.in_waiting:
+        deadline = time.time() + 2
+        while time.time() < deadline:
             line = self.ser_mill.readline().decode("ascii", errors="replace").strip()
+            if not line:
+                time.sleep(0.05)
+                continue
             self.logger.debug("Unlock response: %s", line)
-            response_lines.append(line)
-        for line in response_lines:
-            if "error" in line.lower():
+            lowered = line.lower()
+            if lowered == "ok":
+                return
+            if lowered.startswith(("error", "alarm")):
                 raise CommandExecutionError(f"Unlock ($X) failed: {line}")
+        raise CommandExecutionError("Unlock ($X) timed out waiting for ok")
 
     def soft_reset(self):
         """Soft reset the mill (GRBL Ctrl-X / 0x18)."""
-        if not self.ser_mill:
-            raise MillConnectionError("Serial connection not available")
+        self._require_open_serial()
         self.logger.info("Sending soft reset (0x18)")
         self.ser_mill.write(b"\x18")
         time.sleep(1.0)
@@ -516,9 +533,14 @@ class Mill:
                 self.homed = True
                 break
 
-            if "Alarm" in status or "alarm" in status:
+            if "alarm" in status.lower():
                 self.logger.warning("Homing failed, trying again...")
-                self.execute_command("$H")
+                self.clear_buffers()
+                try:
+                    self.execute_command("$H")
+                except CommandExecutionError as exc:
+                    last_status_error = exc
+                    self.logger.warning("Homing retry command failed: %s", exc)
 
             time.sleep(0.5)
 
@@ -526,14 +548,15 @@ class Mill:
         """Wait for the mill to complete the previous command."""
         status = incoming_status
         start_time = time.time()
-        while "Idle" not in status:
-            if "<Run" in status:
+        while "idle" not in status.lower():
+            lowered = status.lower()
+            if "<run" in lowered:
                 start_time = time.time()
-            if "error" in status:
+            if "error" in lowered:
                 if not suppress_errors:
                     self.logger.error("Error in status: %s", status)
                 raise StatusReturnError(f"Error in status: {status}")
-            if "alarm" in status:
+            if "alarm" in lowered:
                 if not suppress_errors:
                     self.logger.error("Alarm in status: %s", status)
                 raise StatusReturnError(f"Alarm in status: {status}")
@@ -547,10 +570,11 @@ class Mill:
 
     def current_status(self) -> str:
         """Get the current status of the mill."""
+        self._require_open_serial()
         attempt_limit = 5
         status = self._read_serial()
 
-        while status in ["", "ok"] and attempt_limit > 0:
+        while status.strip().lower() in ["", "ok"] and attempt_limit > 0:
             self.ser_mill.write(b"?")
             time.sleep(0.05)
             status = self._read_serial()
@@ -558,7 +582,7 @@ class Mill:
 
         if not status:
             raw_lines = self.ser_mill.readlines()
-            lines = [item.decode().rstrip() for item in raw_lines]
+            lines = [item.decode(errors="replace").rstrip() for item in raw_lines]
             if not lines:
                 self.logger.error("Failed to get status from the mill")
                 raise StatusReturnError("Failed to get status from the mill")
@@ -572,12 +596,31 @@ class Mill:
         return status
 
     def _read_serial(self):
-        msg = self.ser_mill.read(1)
-        if msg == b"":
-            return ""
-        msg += self.ser_mill.read_all()
-        msg = msg.decode(encoding="ascii")
-        return msg
+        self._require_open_serial()
+        status_fragment = ""
+        for _ in range(10):
+            raw = self.ser_mill.readline()
+            if raw == b"":
+                return ""
+            if isinstance(raw, str):
+                line = raw
+            else:
+                line = raw.decode(encoding="ascii", errors="replace")
+            line = line.strip()
+            if not line:
+                continue
+            if status_fragment:
+                status_fragment += line
+                if ">" in status_fragment:
+                    return status_fragment[: status_fragment.index(">") + 1]
+                continue
+            if line.startswith("<") and ">" not in line:
+                status_fragment = line
+                continue
+            if line.startswith("<") and ">" in line:
+                return line[: line.index(">") + 1]
+            return line
+        return ""
 
     def set_feed_rate(self, rate):
         """Set the feed rate."""
@@ -585,13 +628,13 @@ class Mill:
 
     def clear_buffers(self):
         """Clear input and output buffers."""
+        self._require_open_serial()
         self.ser_mill.flush()
         self.ser_mill.read_all()
 
     def read_grbl_settings(self) -> dict:
         """Return live GRBL settings from the connected controller."""
-        if self.ser_mill is None or not self.ser_mill.is_open:
-            raise MillConnectionError("Serial connection to mill is not open")
+        self._require_open_serial()
         settings = self.execute_command("$$")
         self.config = settings
         return settings
@@ -624,6 +667,7 @@ class Mill:
         repeatedly so that we have the offset cached for any MPos→WPos
         conversion that might be needed.
         """
+        self._require_open_serial()
         for _ in range(15):
             self.ser_mill.write(b"?")
             time.sleep(0.15)
@@ -678,6 +722,7 @@ class Mill:
         Returns:
             Coordinates: current GRBL WPos in the CubOS deck frame.
         """
+        self._require_open_serial()
         self.ser_mill.write(b"?")
         time.sleep(0.05)
         status = self._read_serial()
@@ -759,6 +804,11 @@ class Mill:
                     retry_attempts += 1
 
         return Coordinates(x_coord, y_coord, z_coord)
+
+    def _require_open_serial(self) -> None:
+        if self.ser_mill is None or not getattr(self.ser_mill, "is_open", False):
+            self.logger.error("Serial connection to mill is not open")
+            raise MillConnectionError("Serial connection to mill is not open")
 
     def move_to(
         self,

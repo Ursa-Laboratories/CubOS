@@ -215,7 +215,7 @@ def main():
 
     # Cleanup
     print("\nDisconnecting...")
-    mill.stop()
+    mill.disconnect()
 
     sys.exit(0 if all_passed else 1)
 

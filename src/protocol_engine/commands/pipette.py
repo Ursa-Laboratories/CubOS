@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from deck.labware.tip_rack import (
@@ -77,10 +76,38 @@ def _record_dispense_to_store(
             context.data_store.record_dispense(
                 context.campaign_id, labware_key, well_id, source_name, volume_ul,
             )
-        except (sqlite3.Error, ValueError, KeyError) as exc:
+        except Exception as exc:
             logger.warning(
                 "Failed to record dispense for %s well %s: %s",
                 labware_key, well_id, exc,
+                exc_info=True,
+            )
+
+
+def _record_transfer_to_store(
+    context: ProtocolContext,
+    source_key: str,
+    source_well: Optional[str],
+    dest_key: str,
+    dest_well: Optional[str],
+    volume_ul: float,
+) -> None:
+    """Persist a transfer to the DataStore if one is configured."""
+    if context.data_store is not None and context.campaign_id is not None:
+        try:
+            context.data_store.record_transfer(
+                context.campaign_id,
+                source_key,
+                source_well,
+                dest_key,
+                dest_well,
+                volume_ul,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to record transfer from %s well %s to %s well %s: %s",
+                source_key, source_well, dest_key, dest_well, exc,
+                exc_info=True,
             )
 
 
@@ -149,7 +176,12 @@ def pick_up_tip(
     position: str,
     speed: float = 50.0,
 ) -> None:
-    """Move pipette to *position*, then pick up a tip."""
+    """Move pipette to *position*, then pick up a tip.
+
+    Tip-rack consumption is currently in-memory only. Re-running a protocol
+    cannot know which physical slots were emptied by an earlier run; operators
+    must refresh/replace racks or update the deck definition before reruns.
+    """
     pipette = _get_pipette(context)
     try:
         rack, tip_id = resolve_tip_rack_slot(context.deck, position)
@@ -194,9 +226,11 @@ def transfer(
     )
     pipette.dispense(volume_ul, speed)
 
-    source_key, _ = _parse_position(source)
+    source_key, source_well = _parse_position(source)
     dest_key, dest_well = _parse_position(destination)
-    _record_dispense_to_store(context, dest_key, dest_well, source_key, volume_ul)
+    _record_transfer_to_store(
+        context, source_key, source_well, dest_key, dest_well, volume_ul,
+    )
 
 
 @protocol_command("drop_tip")

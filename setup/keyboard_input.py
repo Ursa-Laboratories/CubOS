@@ -32,6 +32,7 @@ _ARROW_MAP_WINDOWS = {
 }
 
 _REPEAT_BATCH_TIMEOUT_S = 0.03
+_ESC_SEQUENCE_TIMEOUT_S = 0.01
 _PENDING_KEYS = deque()
 
 
@@ -65,7 +66,14 @@ def _unix_read_one_key():
     if ch == "\x03":
         raise KeyboardInterrupt
     if ch == "\x1b":
-        seq = sys.stdin.read(2)
+        seq = ""
+        if select.select([sys.stdin], [], [], _ESC_SEQUENCE_TIMEOUT_S)[0]:
+            seq += sys.stdin.read(1)
+        if seq and select.select([sys.stdin], [], [], _ESC_SEQUENCE_TIMEOUT_S)[0]:
+            seq += sys.stdin.read(1)
+        if seq.startswith("[") and seq[-1:].isdigit():
+            if select.select([sys.stdin], [], [], _ESC_SEQUENCE_TIMEOUT_S)[0]:
+                seq += sys.stdin.read(1)
         return _ARROW_MAP_UNIX.get(seq, ch)
     return ch.upper()
 

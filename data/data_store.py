@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
-from instruments.asmi.models import MeasurementResult as ASMIMeasurementResult
 from instruments.filmetrics.models import MeasurementResult
 from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
@@ -16,6 +16,14 @@ from protocol_engine.measurements import InstrumentMeasurement, MeasurementType
 
 DATA_DB_PATH_ENV = "CUBOS_DATA_DB_PATH"
 SQLITE_MEMORY_DATABASE = ":memory:"
+LEGACY_PACKAGE_DATABASE_PATH = Path(__file__).resolve().parent / "databases" / "panda_data.db"
+logger = logging.getLogger(__name__)
+
+
+def _optional_float(value: Any) -> float | None:
+    if value is None:
+        return None
+    return float(value)
 
 
 def default_database_path() -> Path:
@@ -23,7 +31,7 @@ def default_database_path() -> Path:
     override = os.environ.get(DATA_DB_PATH_ENV)
     if override:
         return Path(override).expanduser()
-    return Path(__file__).resolve().parent / "databases" / "panda_data.db"
+    return Path.home() / ".cubos" / "panda_data.db"
 
 _SCHEMA_SQL = """\
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -34,12 +42,14 @@ CREATE TABLE IF NOT EXISTS campaigns (
     gantry_config   TEXT,
     protocol_config TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-    status          TEXT    NOT NULL DEFAULT 'running'
+    status          TEXT    NOT NULL DEFAULT 'running',
+    finished_at     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS experiments (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     campaign_id  INTEGER NOT NULL REFERENCES campaigns(id),
+    labware_key  TEXT    NOT NULL,
     labware_name TEXT    NOT NULL,
     well_id      TEXT,
     contents     TEXT,
@@ -91,9 +101,9 @@ CREATE TABLE IF NOT EXISTS asmi_measurements (
     baseline_std    REAL    NOT NULL,
     force_exceeded  INTEGER NOT NULL DEFAULT 0,
     data_points     INTEGER NOT NULL,
-    step_size_mm    REAL    NOT NULL,
-    z_target_mm     REAL    NOT NULL,
-    force_limit_n   REAL    NOT NULL,
+    step_size_mm    REAL,
+    z_target_mm     REAL,
+    force_limit_n   REAL,
     timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -142,18 +152,110 @@ class DataStore:
 
     def __init__(self, db_path: str | Path | None = None) -> None:
         resolved_path = default_database_path() if db_path is None else db_path
+        self.db_path = resolved_path
         if str(resolved_path) == SQLITE_MEMORY_DATABASE:
             sqlite_path = SQLITE_MEMORY_DATABASE
         else:
             path = Path(resolved_path).expanduser()
-            path.parent.mkdir(parents=True, exist_ok=True)
+            if db_path is None and LEGACY_PACKAGE_DATABASE_PATH.exists() and not path.exists():
+                logger.warning(
+                    "Legacy CubOS data DB exists at %s. The default runtime DB is "
+                    "now %s; move/copy the legacy file manually if those results "
+                    "are still needed.",
+                    LEGACY_PACKAGE_DATABASE_PATH,
+                    path,
+                )
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"Cannot create CubOS data database directory for {path}: {exc}. "
+                    f"Set {DATA_DB_PATH_ENV} to a writable SQLite path."
+                ) from exc
             sqlite_path = str(path)
-        self._conn = sqlite3.connect(sqlite_path)
+        try:
+            self._conn = sqlite3.connect(sqlite_path)
+        except sqlite3.Error as exc:
+            raise RuntimeError(
+                f"Cannot open CubOS data database at {sqlite_path}: {exc}. "
+                f"Set {DATA_DB_PATH_ENV} to a writable SQLite path."
+            ) from exc
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._create_tables()
 
     def _create_tables(self) -> None:
         self._conn.executescript(_SCHEMA_SQL)
+        self._migrate_schema()
+
+    def _migrate_schema(self) -> None:
+        self._add_column_if_missing("campaigns", "finished_at", "TEXT")
+        self._add_column_if_missing("experiments", "labware_key", "TEXT")
+        self._conn.execute(
+            "UPDATE experiments SET labware_key = labware_name "
+            "WHERE labware_key IS NULL"
+        )
+        self._relax_asmi_metadata_columns()
+        self._conn.commit()
+
+    def _add_column_if_missing(
+        self,
+        table_name: str,
+        column_name: str,
+        definition: str,
+    ) -> None:
+        columns = {
+            row[1]
+            for row in self._conn.execute(f"PRAGMA table_info({table_name})")
+        }
+        if column_name not in columns:
+            self._conn.execute(
+                f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}"
+            )
+
+    def _relax_asmi_metadata_columns(self) -> None:
+        columns = {
+            row[1]: row
+            for row in self._conn.execute("PRAGMA table_info(asmi_measurements)")
+        }
+        metadata_columns = ("step_size_mm", "z_target_mm", "force_limit_n")
+        if not any(columns[name][3] for name in metadata_columns if name in columns):
+            return
+
+        self._conn.executescript(
+            """
+            CREATE TABLE asmi_measurements_new (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                experiment_id   INTEGER NOT NULL REFERENCES experiments(id),
+                sample_timestamps TEXT NOT NULL,
+                z_positions     TEXT    NOT NULL,
+                raw_forces      TEXT    NOT NULL,
+                corrected_forces TEXT   NOT NULL,
+                directions      TEXT    NOT NULL,
+                baseline_avg    REAL    NOT NULL,
+                baseline_std    REAL    NOT NULL,
+                force_exceeded  INTEGER NOT NULL DEFAULT 0,
+                data_points     INTEGER NOT NULL,
+                step_size_mm    REAL,
+                z_target_mm     REAL,
+                force_limit_n   REAL,
+                timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
+            );
+            INSERT INTO asmi_measurements_new (
+                id, experiment_id, sample_timestamps, z_positions, raw_forces,
+                corrected_forces, directions, baseline_avg, baseline_std,
+                force_exceeded, data_points, step_size_mm, z_target_mm,
+                force_limit_n, timestamp
+            )
+            SELECT
+                id, experiment_id, sample_timestamps, z_positions, raw_forces,
+                corrected_forces, directions, baseline_avg, baseline_std,
+                force_exceeded, data_points, step_size_mm, z_target_mm,
+                force_limit_n, timestamp
+            FROM asmi_measurements;
+            DROP TABLE asmi_measurements;
+            ALTER TABLE asmi_measurements_new RENAME TO asmi_measurements;
+            """
+        )
 
     def create_campaign(
         self,
@@ -163,13 +265,37 @@ class DataStore:
         gantry_config: Optional[str] = None,
         protocol_config: Optional[str] = None,
     ) -> int:
-        cursor = self._conn.execute(
-            "INSERT INTO campaigns (description, deck_config, board_config, "
-            "gantry_config, protocol_config) VALUES (?, ?, ?, ?, ?)",
-            (description, deck_config, board_config, gantry_config, protocol_config),
-        )
-        self._conn.commit()
+        with self._conn:
+            cursor = self._conn.execute(
+                "INSERT INTO campaigns (description, deck_config, board_config, "
+                "gantry_config, protocol_config) VALUES (?, ?, ?, ?, ?)",
+                (description, deck_config, board_config, gantry_config, protocol_config),
+            )
         return cursor.lastrowid
+
+    def finish_campaign(
+        self,
+        campaign_id: int,
+        status: str,
+        finished_at: Optional[str] = None,
+    ) -> None:
+        """Mark a campaign as finished with a terminal status."""
+        if status not in {"completed", "failed"}:
+            raise ValueError("Campaign status must be 'completed' or 'failed'")
+        timestamp_expr = "datetime('now')" if finished_at is None else "?"
+        params: tuple[Any, ...]
+        if finished_at is None:
+            params = (status, campaign_id)
+        else:
+            params = (status, finished_at, campaign_id)
+        with self._conn:
+            cursor = self._conn.execute(
+                f"UPDATE campaigns SET status = ?, finished_at = {timestamp_expr} "
+                "WHERE id = ?",
+                params,
+            )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Campaign {campaign_id} not found")
 
     def create_experiment(
         self,
@@ -177,14 +303,58 @@ class DataStore:
         labware_name: str,
         well_id: Optional[str],
         contents_json: Optional[str] = None,
+        labware_key: Optional[str] = None,
+    ) -> int:
+        with self._conn:
+            exp_id = self._create_experiment_row(
+                campaign_id=campaign_id,
+                labware_key=labware_key or labware_name,
+                labware_name=labware_name,
+                well_id=well_id,
+                contents_json=contents_json,
+            )
+        return exp_id
+
+    def _create_experiment_row(
+        self,
+        *,
+        campaign_id: int,
+        labware_key: str,
+        labware_name: str,
+        well_id: Optional[str],
+        contents_json: Optional[str],
     ) -> int:
         cursor = self._conn.execute(
-            "INSERT INTO experiments (campaign_id, labware_name, well_id, contents) "
-            "VALUES (?, ?, ?, ?)",
-            (campaign_id, labware_name, well_id, contents_json),
+            "INSERT INTO experiments "
+            "(campaign_id, labware_key, labware_name, well_id, contents) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (campaign_id, labware_key, labware_name, well_id, contents_json),
         )
-        self._conn.commit()
         return cursor.lastrowid
+
+    def log_experiment_measurement(
+        self,
+        *,
+        campaign_id: int,
+        labware_key: str,
+        labware_name: str,
+        well_id: Optional[str],
+        contents_json: Optional[str],
+        result: Union[
+            InstrumentMeasurement, UVVisSpectrum, MeasurementResult, CureResult, str,
+        ],
+    ) -> tuple[int, int]:
+        """Atomically create an experiment and its measurement row."""
+        with self._conn:
+            experiment_id = self._create_experiment_row(
+                campaign_id=campaign_id,
+                labware_key=labware_key,
+                labware_name=labware_name,
+                well_id=well_id,
+                contents_json=contents_json,
+            )
+            measurement_id = self._log_measurement_row(experiment_id, result)
+        return experiment_id, measurement_id
 
     def log_measurement(
         self,
@@ -205,6 +375,17 @@ class DataStore:
         Raises:
             TypeError: If *result* is not a recognised measurement type.
         """
+        with self._conn:
+            measurement_id = self._log_measurement_row(experiment_id, result)
+        return measurement_id
+
+    def _log_measurement_row(
+        self,
+        experiment_id: int,
+        result: Union[
+            InstrumentMeasurement, UVVisSpectrum, MeasurementResult, CureResult, str,
+        ],
+    ) -> int:
         if isinstance(result, InstrumentMeasurement):
             return self._log_instrument_measurement(experiment_id, result)
         if isinstance(result, UVVisSpectrum):
@@ -247,9 +428,9 @@ class DataStore:
                 baseline_std=float(measurement.metadata["baseline_std"]),
                 force_exceeded=bool(measurement.metadata["force_exceeded"]),
                 data_points=int(measurement.metadata["data_points"]),
-                step_size_mm=float(measurement.metadata["step_size_mm"]),
-                z_target_mm=float(measurement.metadata["z_target_mm"]),
-                force_limit_n=float(measurement.metadata["force_limit_n"]),
+                step_size_mm=_optional_float(measurement.metadata.get("step_size_mm")),
+                z_target_mm=_optional_float(measurement.metadata.get("z_target_mm")),
+                force_limit_n=_optional_float(measurement.metadata.get("force_limit_n")),
             )
 
         if measurement.measurement_type == MeasurementType.FILMETRICS_THICKNESS:
@@ -332,7 +513,6 @@ class DataStore:
                 integration_time_s,
             ),
         )
-        self._conn.commit()
         return cursor.lastrowid
 
     def _log_filmetrics(self, experiment_id: int, result: MeasurementResult) -> int:
@@ -353,7 +533,6 @@ class DataStore:
             "(experiment_id, thickness_nm, goodness_of_fit) VALUES (?, ?, ?)",
             (experiment_id, thickness_nm, goodness_of_fit),
         )
-        self._conn.commit()
         return cursor.lastrowid
 
     def _log_uv_curing(self, experiment_id: int, result: CureResult) -> int:
@@ -382,7 +561,6 @@ class DataStore:
                 cure_timestamp_s,
             ),
         )
-        self._conn.commit()
         return cursor.lastrowid
 
     def _log_asmi(
@@ -427,7 +605,6 @@ class DataStore:
                 "force_limit_n": force_limit_n,
             },
         )
-        self._conn.commit()
         return cursor.lastrowid
 
     def _log_potentiostat(
@@ -481,7 +658,6 @@ class DataStore:
                 stop_reason,
             ),
         )
-        self._conn.commit()
         return cursor.lastrowid
 
     def _log_camera(self, experiment_id: int, image_path: str) -> int:
@@ -523,29 +699,29 @@ class DataStore:
                 f"Labware '{labware_key}' already registered for campaign {campaign_id}"
             )
 
-        if isinstance(labware, WellPlate):
-            for well_id in labware.wells:
+        with self._conn:
+            if isinstance(labware, WellPlate):
+                for well_id in labware.wells:
+                    self._conn.execute(
+                        "INSERT INTO labware (campaign_id, labware_key, labware_type, "
+                        "well_id, total_volume_ul, working_volume_ul) "
+                        "VALUES (?, ?, 'well_plate', ?, ?, ?)",
+                        (campaign_id, labware_key, well_id,
+                         labware.capacity_ul, labware.working_volume_ul),
+                    )
+            elif isinstance(labware, Vial):
                 self._conn.execute(
                     "INSERT INTO labware (campaign_id, labware_key, labware_type, "
-                    "well_id, total_volume_ul, working_volume_ul) "
-                    "VALUES (?, ?, 'well_plate', ?, ?, ?)",
-                    (campaign_id, labware_key, well_id,
+                    "total_volume_ul, working_volume_ul) "
+                    "VALUES (?, ?, 'vial', ?, ?)",
+                    (campaign_id, labware_key,
                      labware.capacity_ul, labware.working_volume_ul),
                 )
-        elif isinstance(labware, Vial):
-            self._conn.execute(
-                "INSERT INTO labware (campaign_id, labware_key, labware_type, "
-                "total_volume_ul, working_volume_ul) "
-                "VALUES (?, ?, 'vial', ?, ?)",
-                (campaign_id, labware_key,
-                 labware.capacity_ul, labware.working_volume_ul),
-            )
-        else:
-            raise TypeError(
-                f"Unsupported labware type: {type(labware).__name__}. "
-                f"Expected WellPlate or Vial."
-            )
-        self._conn.commit()
+            else:
+                raise TypeError(
+                    f"Unsupported labware type: {type(labware).__name__}. "
+                    f"Expected WellPlate or Vial."
+                )
 
     def record_dispense(
         self,
@@ -564,7 +740,8 @@ class DataStore:
             params = (campaign_id, labware_key)
 
         row = self._conn.execute(
-            f"SELECT id, contents FROM labware WHERE {where}", params
+            f"SELECT id, contents, current_volume_ul, working_volume_ul "
+            f"FROM labware WHERE {where}", params
         ).fetchone()
 
         if row is None:
@@ -581,13 +758,136 @@ class DataStore:
                 f"in campaign {campaign_id}. Manual database inspection required."
             ) from exc
         existing.append({"source": source_name, "volume_ul": volume_ul})
+        projected_volume = float(row[2]) + volume_ul
+        working_volume = float(row[3])
+        if projected_volume > working_volume:
+            logger.warning(
+                "Dispense into labware '%s' well '%s' in campaign %s exceeds "
+                "working volume: %.3f uL > %.3f uL.",
+                labware_key,
+                well_id,
+                campaign_id,
+                projected_volume,
+                working_volume,
+            )
 
-        self._conn.execute(
-            f"UPDATE labware SET current_volume_ul = current_volume_ul + ?, "
-            f"contents = ?, updated_at = datetime('now') WHERE {where}",
-            (volume_ul, json.dumps(existing)) + params,
+        with self._conn:
+            self._conn.execute(
+                f"UPDATE labware SET current_volume_ul = current_volume_ul + ?, "
+                f"contents = ?, updated_at = datetime('now') WHERE {where}",
+                (volume_ul, json.dumps(existing)) + params,
+            )
+
+    def record_transfer(
+        self,
+        campaign_id: int,
+        source_labware_key: str,
+        source_well_id: Optional[str],
+        destination_labware_key: str,
+        destination_well_id: Optional[str],
+        volume_ul: float,
+    ) -> None:
+        """Record source depletion and destination dispense for a pipette transfer."""
+        with self._conn:
+            self._adjust_volume(
+                campaign_id,
+                source_labware_key,
+                source_well_id,
+                -volume_ul,
+                contents_json=None,
+            )
+            destination_contents = self._contents_for_update(
+                campaign_id,
+                destination_labware_key,
+                destination_well_id,
+            )
+            destination_contents.append({
+                "source": source_labware_key,
+                "volume_ul": volume_ul,
+            })
+            self._adjust_volume(
+                campaign_id,
+                destination_labware_key,
+                destination_well_id,
+                volume_ul,
+                contents_json=json.dumps(destination_contents),
+            )
+
+    def _contents_for_update(
+        self,
+        campaign_id: int,
+        labware_key: str,
+        well_id: Optional[str],
+    ) -> list[dict[str, Any]]:
+        row = self._labware_row(campaign_id, labware_key, well_id)
+        try:
+            return json.loads(row["contents"]) if row["contents"] else []
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"Corrupt contents JSON for labware '{labware_key}' well '{well_id}' "
+                f"in campaign {campaign_id}. Manual database inspection required."
+            ) from exc
+
+    def _adjust_volume(
+        self,
+        campaign_id: int,
+        labware_key: str,
+        well_id: Optional[str],
+        delta_ul: float,
+        *,
+        contents_json: Optional[str],
+    ) -> None:
+        row = self._labware_row(campaign_id, labware_key, well_id)
+        projected_volume = float(row["current_volume_ul"]) + delta_ul
+        working_volume = float(row["working_volume_ul"])
+        if delta_ul > 0 and projected_volume > working_volume:
+            logger.warning(
+                "Dispense into labware '%s' well '%s' in campaign %s exceeds "
+                "working volume: %.3f uL > %.3f uL.",
+                labware_key,
+                well_id,
+                campaign_id,
+                projected_volume,
+                working_volume,
+            )
+        if contents_json is None:
+            self._conn.execute(
+                "UPDATE labware SET current_volume_ul = current_volume_ul + ?, "
+                "updated_at = datetime('now') WHERE id = ?",
+                (delta_ul, row["id"]),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE labware SET current_volume_ul = current_volume_ul + ?, "
+                "contents = ?, updated_at = datetime('now') WHERE id = ?",
+                (delta_ul, contents_json, row["id"]),
+            )
+
+    def _labware_row(
+        self,
+        campaign_id: int,
+        labware_key: str,
+        well_id: Optional[str],
+    ) -> dict[str, Any]:
+        if well_id is not None:
+            where = "campaign_id = ? AND labware_key = ? AND well_id = ?"
+            params = (campaign_id, labware_key, well_id)
+        else:
+            where = "campaign_id = ? AND labware_key = ? AND well_id IS NULL"
+            params = (campaign_id, labware_key)
+        cursor = self._conn.execute(
+            f"SELECT id, contents, current_volume_ul, working_volume_ul "
+            f"FROM labware WHERE {where}",
+            params,
         )
-        self._conn.commit()
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(
+                f"Labware '{labware_key}' well '{well_id}' not registered "
+                f"for campaign {campaign_id}"
+            )
+        columns = [description[0] for description in cursor.description]
+        return dict(zip(columns, row))
 
     def get_contents(
         self,

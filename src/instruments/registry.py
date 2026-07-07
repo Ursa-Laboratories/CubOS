@@ -6,13 +6,15 @@ import copy
 import inspect
 import importlib
 import os
+from dataclasses import dataclass
 from importlib import metadata as importlib_metadata
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Type
+from types import NoneType, UnionType
+from typing import Any, Dict, Iterable, Mapping, Type, Union, get_args, get_origin, get_type_hints
 
 import logging
 
-import yaml
+from yaml_utils import load_yaml_file
 
 from instruments.base_instrument import BaseInstrument
 
@@ -22,8 +24,21 @@ _REGISTRY_PATH = Path(__file__).parent / "registry.yaml"
 _ENTRY_POINT_GROUP = "cubos.instrument_registries"
 _OVERLAY_ENV_VAR = "CUBOS_INSTRUMENT_REGISTRY_PATHS"
 _VALID_CALIBRATION_MODES = {"contact", "non_contact"}
+_BASE_CONFIG_PARAMS = {"name", "offset_x", "offset_y", "depth", "offline"}
+_PRIMITIVE_CONFIG_TYPES = {str, int, float, bool}
 
 _cache: Dict[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class FieldSpec:
+    """Public instrument config field metadata for UI/schema consumers."""
+
+    name: str
+    type: str
+    required: bool
+    default: Any = None
+    choices: tuple[Any, ...] | None = None
 
 
 def load_registry() -> Dict[str, Any]:
@@ -119,12 +134,82 @@ def validate_instrument(instrument_type: str, vendor: str) -> None:
     _vendor_entry(instrument_type, vendor)
 
 
+def config_fields(instrument_type: str, vendor: str) -> list[FieldSpec]:
+    """Return public config fields accepted by an instrument driver.
+
+    The result is derived from the concrete driver's ``__init__`` signature,
+    excluding CubOS's common mount fields. Drivers may expose
+    ``CONFIG_FIELD_CHOICES`` as ``field_name -> iterable`` to attach option
+    lists for UI consumers.
+    """
+    cls = get_instrument_class(instrument_type, vendor)
+    signature = inspect.signature(cls.__init__)
+    type_hints = _safe_type_hints(cls.__init__)
+    choices_by_field = getattr(cls, "CONFIG_FIELD_CHOICES", {})
+    specs: list[FieldSpec] = []
+    for param_name, param in signature.parameters.items():
+        if (
+            param_name == "self"
+            or param_name in _BASE_CONFIG_PARAMS
+            or param.kind
+            in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+        ):
+            continue
+        annotation = type_hints.get(param_name, param.annotation)
+        if annotation is inspect.Parameter.empty:
+            annotation = str
+        if not _is_config_field_type(annotation):
+            continue
+        required = param.default is inspect.Parameter.empty
+        choices = choices_by_field.get(param_name)
+        specs.append(
+            FieldSpec(
+                name=param_name,
+                type=_type_name(annotation),
+                required=required,
+                default=None if required else param.default,
+                choices=None if choices is None else tuple(choices),
+            )
+        )
+    return specs
+
+
+def list_measurement_methods(
+    instrument_type: str,
+    vendor: str | None = None,
+) -> list[str]:
+    """Return public method names whose return values CubOS can persist.
+
+    Parameters
+    ----------
+    instrument_type:
+        Registry instrument type key.
+    vendor:
+        Optional vendor key. When omitted, methods across all registered
+        vendors for the type are returned.
+    """
+    from protocol_engine.measurements import is_measurement_result
+
+    vendors = [vendor] if vendor is not None else get_supported_vendors(instrument_type)
+    methods: set[str] = set()
+    for vendor_key in vendors:
+        cls = get_instrument_class(instrument_type, vendor_key)
+        for method_name, method in inspect.getmembers(cls, predicate=inspect.isfunction):
+            if method_name.startswith("_"):
+                continue
+            annotation = _return_annotation(method)
+            if is_measurement_result(annotation):
+                methods.add(method_name)
+    return sorted(methods, key=_measurement_method_sort_key)
+
+
 def _instrument_entry(instrument_type: str) -> dict[str, Any]:
     instruments = load_registry()["instruments"]
     if instrument_type not in instruments:
         raise ValueError(
             f"Unknown instrument type '{instrument_type}'. "
-            f"Supported types: {sorted(instruments.keys())}"
+            f"Tried type/vendor pair '{instrument_type}/<any>'. "
+            f"Available pairs: {_available_pairs(instruments)}"
         )
     return instruments[instrument_type]
 
@@ -135,15 +220,68 @@ def _vendor_entry(instrument_type: str, vendor: str) -> dict[str, Any]:
     if vendor not in vendors:
         raise ValueError(
             f"'{vendor}' is not a supported vendor for '{instrument_type}'. "
-            f"Allowed vendors: {sorted(vendors.keys())}"
+            f"Tried type/vendor pair '{instrument_type}/{vendor}'. "
+            f"Available pairs: {_available_pairs(load_registry()['instruments'])}"
         )
     return vendors[vendor]
 
 
+def _available_pairs(instruments: Mapping[str, Any]) -> list[str]:
+    pairs: list[str] = []
+    for type_key, entry in instruments.items():
+        vendors = entry.get("vendors", {}) if isinstance(entry, Mapping) else {}
+        if isinstance(vendors, Mapping):
+            pairs.extend(f"{type_key}/{vendor_key}" for vendor_key in vendors)
+    return sorted(pairs)
+
+
+def _safe_type_hints(obj: Any) -> dict[str, Any]:
+    try:
+        return get_type_hints(obj)
+    except Exception:
+        return {}
+
+
+def _return_annotation(method: Any) -> Any:
+    signature = inspect.signature(method)
+    return _safe_type_hints(method).get("return", signature.return_annotation)
+
+
+def _is_config_field_type(annotation: Any) -> bool:
+    if annotation in _PRIMITIVE_CONFIG_TYPES:
+        return True
+    origin = get_origin(annotation)
+    if origin in (Union, UnionType):
+        return any(
+            arg in _PRIMITIVE_CONFIG_TYPES
+            for arg in get_args(annotation)
+            if arg is not NoneType
+        )
+    return False
+
+
+def _type_name(annotation: Any) -> str:
+    if annotation in _PRIMITIVE_CONFIG_TYPES:
+        return annotation.__name__
+    origin = get_origin(annotation)
+    if origin in (Union, UnionType):
+        non_none_args = [arg for arg in get_args(annotation) if arg is not NoneType]
+        if len(non_none_args) == 1 and non_none_args[0] in _PRIMITIVE_CONFIG_TYPES:
+            return non_none_args[0].__name__
+    return getattr(annotation, "__name__", str(annotation))
+
+
+def _measurement_method_sort_key(name: str) -> tuple[int, str]:
+    if name == "indentation":
+        return (0, name)
+    if name == "measure":
+        return (1, name)
+    return (2, name)
+
+
 def _load_registry_file(path: str | Path) -> dict[str, Any]:
     resolved = Path(path)
-    with resolved.open(encoding="utf-8") as f:
-        loaded = yaml.safe_load(f) or {}
+    loaded = load_yaml_file(resolved) or {}
     if not isinstance(loaded, dict):
         raise ValueError(f"Instrument registry {resolved} must be a mapping.")
     if "instruments" not in loaded:

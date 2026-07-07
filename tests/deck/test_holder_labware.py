@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import deck.labware.definitions.registry as definition_registry
 from deck import (
     BoundingBoxGeometry,
     Coordinate3D,
@@ -404,6 +405,85 @@ labware:
     try:
         with pytest.raises(Exception, match="no_such_definition"):
             load_deck_from_yaml(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_deck_yaml_missing_definition_config_file_has_distinct_error(monkeypatch):
+    monkeypatch.setattr(
+        definition_registry,
+        "_cache",
+        {
+            "labware": {
+                "missing_config_definition": {
+                    "module": "deck.labware.well_plate",
+                    "class_name": "WellPlate",
+                    "config": "does_not_exist.yaml",
+                }
+            }
+        },
+    )
+    yaml_str = """
+labware:
+  broken:
+    load_name: missing_config_definition
+    calibration:
+      a1: {x: 0.0, y: 0.0, z: 0.0}
+      a2: {x: 9.0, y: 0.0, z: 0.0}
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as handle:
+        handle.write(yaml_str)
+        path = handle.name
+
+    try:
+        with pytest.raises(Exception) as exc_info:
+            load_deck_from_yaml(path)
+        message = str(exc_info.value)
+        assert "Definition config file is missing" in message
+        assert "Unknown `load_name" not in message
+    finally:
+        definition_registry._reset_cache()
+        Path(path).unlink(missing_ok=True)
+
+
+def test_tip_rack_definition_requires_per_deck_calibration_and_pickup_z():
+    yaml_str = """
+labware:
+  tips:
+    load_name: ursa_tip_rack
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as handle:
+        handle.write(yaml_str)
+        path = handle.name
+
+    try:
+        with pytest.raises(Exception) as exc_info:
+            load_deck_from_yaml(path)
+        message = str(exc_info.value)
+        assert "definition provides geometry only" in message
+        assert "calibration" in message
+        assert "pickup_z" in message
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_tip_rack_definition_loads_with_per_deck_calibration_and_pickup_z():
+    yaml_str = """
+labware:
+  tips:
+    load_name: ursa_tip_rack
+    pickup_z: 43.0
+    calibration:
+      a1: {x: 168.0, y: 58.0}
+      a2: {x: 176.5, y: 58.0}
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as handle:
+        handle.write(yaml_str)
+        path = handle.name
+
+    try:
+        deck = load_deck_from_yaml(path)
+        assert deck.resolve_coordinate("tips.A1") == Coordinate3D(x=168.0, y=58.0, z=43.0)
     finally:
         Path(path).unlink(missing_ok=True)
 

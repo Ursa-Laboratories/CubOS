@@ -90,6 +90,20 @@ class TestLoadGantryFromYaml:
         finally:
             os.unlink(path)
 
+    def test_duplicate_yaml_key_names_file_and_key(self, tmp_path):
+        path = tmp_path / "duplicate_gantry.yaml"
+        path.write_text(
+            VALID_GANTRY_YAML + "serial_port: /dev/ttyUSB1\n",
+            encoding="utf-8",
+        )
+
+        with pytest.raises(Exception) as exc_info:
+            load_gantry_from_yaml(path)
+
+        message = str(exc_info.value)
+        assert str(path) in message
+        assert "duplicate YAML key 'serial_port'" in message
+
     def test_machine_structures_yaml_is_rejected(self):
         yaml_content = VALID_GANTRY_YAML + """\
 machine_structures:

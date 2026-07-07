@@ -32,7 +32,7 @@ Validate an example setup without moving hardware:
 PYTHONPATH=src python setup/validate_setup.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_move_a1.yaml
+  configs/protocol/asmi/move_a1.yaml
 ```
 
 For real hardware, calibrate the gantry YAML before running protocols:
@@ -54,7 +54,7 @@ Then run a minimal protocol:
 PYTHONPATH=src python setup/run_protocol.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_move_a1.yaml
+  configs/protocol/asmi/move_a1.yaml
 ```
 
 ## How CubOS Is Organized
@@ -122,7 +122,7 @@ affected gantry, deck, and protocol combination:
 PYTHONPATH=src python setup/validate_setup.py \
   configs/gantry/cub_xl_asmi.yaml \
   configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi_indentation.yaml
+  configs/protocol/asmi/indentation.yaml
 ```
 
 Run `mkdocs build --strict` before publishing documentation changes.

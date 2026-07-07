@@ -62,8 +62,13 @@ def _register_labware_path(
 ) -> None:
     try:
         data_store.register_labware(campaign_id, labware_key, labware)
-    except TypeError as exc:
-        logger.warning("Skipping labware registration for %r: %s", labware_key, exc)
+    except Exception as exc:
+        logger.warning(
+            "Skipping labware registration for %r: %s",
+            labware_key,
+            exc,
+            exc_info=True,
+        )
 
     for child_name, child in getattr(labware, "contained_labware", {}).items():
         _register_labware_path(

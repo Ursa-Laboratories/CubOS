@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 import subprocess
+import time
 
 from instruments.base_instrument import BaseInstrument, InstrumentError
 from instruments.filmetrics.models import MeasurementResult
@@ -88,6 +89,13 @@ class TestParsing:
     def test_parse_thickness_no_match(self):
         lines = ["No relevant data here", "Measurement Complete"]
         assert KLAFilmetrics._parse_thickness(lines) is None
+
+    def test_parse_thickness_custom_material_label(self):
+        lines = ["Layer 1: Silicon Dioxide    88.4 nm"]
+        assert KLAFilmetrics._parse_thickness(
+            lines,
+            material_label="Silicon Dioxide",
+        ) == pytest.approx(88.4)
 
     def test_parse_thickness_multiple_polyimide_lines(self):
         """When multiple Polyimide lines exist, take the last nm value."""
@@ -298,6 +306,32 @@ class TestFilmetricsCommands:
         assert result.is_valid is True
 
     @patch("subprocess.Popen")
+    def test_measure_raises_parse_error_when_material_missing(self, mock_popen):
+        fm, _ = self._make_connected_filmetrics(mock_popen, [
+            "Starting measurement...",
+            "Measurement Results (System):",
+            "Layer 1: Silicon Dioxide    150.23 nm",
+            "Goodness of fit 0.98765",
+            "Measurement Complete",
+        ])
+
+        with pytest.raises(FilmetricsParseError, match="Polyimide"):
+            fm.measure()
+
+    @patch("subprocess.Popen")
+    def test_measure_parses_configured_material_label(self, mock_popen):
+        fm, _ = self._make_connected_filmetrics(mock_popen, [
+            "Starting measurement...",
+            "Measurement Results (System):",
+            "Layer 1: Silicon Dioxide    150.23 nm",
+            "Goodness of fit 0.98765",
+            "Measurement Complete",
+        ])
+        fm._material_label = "Silicon Dioxide"
+
+        assert fm.measure().thickness_nm == pytest.approx(150.23)
+
+    @patch("subprocess.Popen")
     def test_measure_error_raises(self, mock_popen):
         """C# error responses should raise FilmetricsCommandError."""
         fm, proc = self._make_connected_filmetrics(mock_popen, [
@@ -344,6 +378,23 @@ class TestFilmetricsCommands:
 
         with pytest.raises(FilmetricsCommandError):
             fm.acquire_sample()
+
+    def test_blocking_readline_times_out(self):
+        proc = MagicMock()
+        proc.stdin = MagicMock()
+
+        def block_forever():
+            time.sleep(10)
+            return ""
+
+        proc.stdout.readline.side_effect = block_forever
+        fm = KLAFilmetrics(command_timeout=0.01)
+        fm._process = proc
+
+        start = time.monotonic()
+        with pytest.raises(FilmetricsCommandError, match="Timed out"):
+            fm.acquire_sample()
+        assert time.monotonic() - start < 1.0
 
 
 # --- Offline KLAFilmetrics tests -------------------------------------------------

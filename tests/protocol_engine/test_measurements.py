@@ -5,11 +5,15 @@ from __future__ import annotations
 import pytest
 
 from instruments.filmetrics.models import MeasurementResult
+from instruments.potentiostat.models import CAResult, CPResult, CVResult, OCPResult
 from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
+from protocol_engine import is_measurement_result as exported_is_measurement_result
 from protocol_engine.measurements import (
     InstrumentMeasurement,
+    MEASUREMENT_RESULT_TYPES,
     MeasurementType,
+    is_measurement_result,
     normalize_measurement,
 )
 
@@ -167,3 +171,28 @@ class TestNormalizeMeasurement:
                 method_name="indentation",
                 raw_result=raw_result,
             )
+
+
+class TestIsMeasurementResult:
+
+    def test_true_for_every_concrete_class_normalized_by_measurements(self):
+        assert set(MEASUREMENT_RESULT_TYPES) == {
+            UVVisSpectrum,
+            MeasurementResult,
+            CureResult,
+        }
+        for cls in MEASUREMENT_RESULT_TYPES:
+            assert is_measurement_result(cls) is True
+            assert exported_is_measurement_result(cls) is True
+
+    @pytest.mark.parametrize("cls", [OCPResult, CAResult, CPResult, CVResult])
+    def test_true_for_potentiostat_result_classes(self, cls):
+        assert is_measurement_result(cls) is True
+
+    def test_true_for_asmi_indentation_dict_shape(self):
+        assert is_measurement_result({"measurements": []}) is True
+        assert is_measurement_result(dict) is True
+
+    def test_false_for_plain_dict_object_and_unknown_class(self):
+        assert is_measurement_result({}) is False
+        assert is_measurement_result(object) is False

@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
+from data.data_store import DataStore
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.tip_rack import DEFAULT_TIP_LENGTH_MM, TipRack
@@ -533,6 +534,56 @@ class TestTransferCommand:
         ctx = _mock_context_multi_resolve(has_pipette=False)
         with pytest.raises(ProtocolExecutionError, match="[Nn]o pipette"):
             transfer(ctx, source="plate_1.A1", destination="plate_1.B1", volume_ul=100.0)
+
+    def test_transfer_updates_datastore_source_and_destination_volumes(self):
+        from protocol_engine.commands.pipette import transfer
+
+        source = Vial(
+            name="vial_1",
+            model_name="standard",
+            height=10.0,
+            diameter=5.0,
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            capacity_ul=1000.0,
+            working_volume_ul=800.0,
+        )
+        plate = WellPlate(
+            name="plate_1",
+            model_name="test",
+            rows=1,
+            columns=1,
+            wells={"A1": Coordinate3D(x=10.0, y=20.0, z=75.0)},
+            capacity_ul=200.0,
+            working_volume_ul=150.0,
+        )
+        board = MagicMock()
+        pipette = MagicMock()
+        board.instruments = {"pipette": pipette}
+        store = DataStore(db_path=":memory:")
+        campaign_id = store.create_campaign(description="transfer")
+        store.register_labware(campaign_id, "vial_1", source)
+        store.register_labware(campaign_id, "plate_1", plate)
+        store._conn.execute(
+            "UPDATE labware SET current_volume_ul = 100.0 "
+            "WHERE labware_key = 'vial_1'"
+        )
+        store._conn.commit()
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=Deck({"vial_1": source, "plate_1": plate}),
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+
+        transfer(ctx, source="vial_1", destination="plate_1.A1", volume_ul=25.0)
+
+        rows = dict(store._conn.execute(
+            "SELECT labware_key || COALESCE('.' || well_id, ''), current_volume_ul "
+            "FROM labware"
+        ).fetchall())
+        assert rows["vial_1"] == pytest.approx(75.0)
+        assert rows["plate_1.A1"] == pytest.approx(25.0)
+        store.close()
 
 
 # ─── serial_transfer tests ───────────────────────────────────────────────────

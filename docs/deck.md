@@ -55,6 +55,11 @@ Use this guide when labware is moved, recalibrated, or replaced.
     directions. The measured A1 and A2 points define the plate orientation on
     the deck.
 
+    By default, CubOS keeps the legacy convention: when columns advance in +X,
+    rows advance in -Y; when columns advance in +Y, rows advance in +X. If your
+    physical plate uses the opposite row side, set `row_direction: positive` or
+    `row_direction: negative` to choose the signed deck axis for row B from A1.
+
     The `z` value on `calibration.a1` and `calibration.a2` is the labware
     reference surface for those wells, not the physical plate height.
 

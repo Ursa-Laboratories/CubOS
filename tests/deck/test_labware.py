@@ -352,6 +352,20 @@ def test_generate_wells_from_offsets():
     assert wells["B2"].y == pytest.approx(5.0)
 
 
+def test_generate_wells_from_offsets_accepts_negative_row_direction():
+    wells = generate_wells_from_offsets(
+        row_labels=["A", "B"],
+        column_indices=[1, 2],
+        a1_center=Coordinate3D(x=0.0, y=0.0, z=15.0),
+        x_offset=10.0,
+        y_offset=5.0,
+        row_direction="negative",
+    )
+
+    assert wells["B1"].x == pytest.approx(0.0)
+    assert wells["B1"].y == pytest.approx(-5.0)
+
+
 def test_coordinate3d_rejects_non_finite_values():
     """Coordinate3D must reject NaN and infinite values."""
     with pytest.raises(ValidationError):

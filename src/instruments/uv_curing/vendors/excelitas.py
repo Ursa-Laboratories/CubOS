@@ -89,7 +89,11 @@ class ExcelitasUVCuring(UVCuringInstrument):
                 f"Cannot open OmniCure serial port {self._port}: {exc}"
             ) from exc
 
-        self._handshake()
+        try:
+            self._handshake()
+        except Exception:
+            self.disconnect()
+            raise
         self.logger.info("Connected to OmniCure on %s", self._port)
 
     def disconnect(self) -> None:
@@ -134,8 +138,8 @@ class ExcelitasUVCuring(UVCuringInstrument):
 
         if not (1 <= intensity <= 100):
             raise UVCuringCommandError("Intensity must be between 1 and 100%")
-        if exposure_time <= 0:
-            raise UVCuringCommandError("Exposure time must be > 0 seconds")
+        if exposure_time < 0.1:
+            raise UVCuringCommandError("Exposure time must be >= 0.1 seconds")
 
         if self._offline:
             self.logger.info(
@@ -147,8 +151,8 @@ class ExcelitasUVCuring(UVCuringInstrument):
                 timestamp=time.time(),
             )
 
-        self._send_command(f"SIL{int(intensity)}")
-        self._send_command(f"STM{int(exposure_time * 10)}")
+        self._send_command_expect_ok(f"SIL{int(intensity)}")
+        self._send_command_expect_ok(f"STM{round(exposure_time * 10)}")
         self._send_command("RUN")
         time.sleep(exposure_time + 0.05)
 
@@ -197,4 +201,12 @@ class ExcelitasUVCuring(UVCuringInstrument):
                 f"No response to '{command}'"
             )
         self.logger.debug(">> %s  << %s", command, response)
+        return response
+
+    def _send_command_expect_ok(self, command: str) -> str:
+        response = self._send_command(command)
+        if response.upper().startswith(("ERR", "NACK")):
+            raise UVCuringCommandError(
+                f"OmniCure rejected '{command}': {response}"
+            )
         return response

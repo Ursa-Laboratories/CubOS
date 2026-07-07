@@ -44,6 +44,11 @@ labware:
   A1.
 - `x_offset` and `y_offset` are positive pitch magnitudes. The A1 to A2 delta
   determines orientation.
+- `row_direction` is optional. When omitted, the loader preserves the legacy
+  convention: columns in +X imply rows in -Y, columns in -X imply rows in +Y,
+  columns in +Y imply rows in +X, and columns in -Y imply rows in -X. Set
+  `row_direction: positive` or `row_direction: negative` to choose the signed
+  row axis explicitly.
 - Well plate and tip rack surface Z comes from `calibration.a1.z` and
   `calibration.a2.z`.
 - Vials and holders use `location.z`.

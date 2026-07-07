@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 
 from gantry.session import (
+    CalibrationBlockedError,
+    GantryAlarmError,
+    GantryNotConnectedError,
     GantrySession,
+    GantrySessionError,
     GantrySessionHealthCheckError,
     InterruptFeedHoldTimeoutError,
     MovementOutOfBoundsError,
@@ -100,6 +104,12 @@ class FakeGantry:
     def home(self):
         self.calls.append(("home", None))
 
+    def unlock(self):
+        self.calls.append(("unlock", None))
+
+    def reset_and_unlock(self):
+        self.calls.append(("reset_and_unlock", None))
+
     def enforce_work_position_reporting(self):
         self.calls.append(("enforce_work_position_reporting", None))
 
@@ -142,8 +152,24 @@ class FakeGantry:
     def stop(self):
         self.calls.append(("stop", None))
 
+    def feed_hold_realtime(self):
+        self.calls.append(("feed_hold_realtime", None))
+
     def jog_cancel(self):
         self.calls.append(("jog_cancel", None))
+
+    def set_work_coordinates(self, **kwargs):
+        self.calls.append(("set_work_coordinates", kwargs))
+
+    def finalize_deck_origin_calibration(self, **kwargs):
+        self.calls.append(("finalize_deck_origin_calibration", kwargs))
+        return {
+            "measured_volume": {"x": 300.0, "y": 200.0, "z": 80.0},
+            "z_calibration": {"block_height": 10.0},
+            "max_travel": {"x": 310.0, "y": 210.0, "z": 90.0},
+            "position": {"x": 300.0, "y": 200.0, "z": 80.0},
+            "homing_pull_off_mm": 10.0,
+        }
 
 
 def _write_gantry(path: Path) -> Path:
@@ -195,9 +221,67 @@ def test_connect_failure_preserves_existing_session(tmp_path):
     with pytest.raises(RuntimeError, match="serial failure"):
         session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
 
-    assert session.connected is True
-    assert session._gantry is existing
+    assert existing.disconnect_calls == 1
+    assert session.connected is False
     assert session.operation_lock.locked() is False
+
+
+def test_double_connect_disconnects_previous_gantry(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    first = FakeGantry.instances[-1]
+
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    second = FakeGantry.instances[-1]
+
+    assert first.disconnect_calls == 1
+    assert second is not first
+    assert session._gantry is second
+
+
+def test_disconnect_without_connection_returns_disconnected_snapshot():
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+
+    snapshot = session.disconnect()
+
+    assert snapshot.connected is False
+    assert snapshot.status == "Disconnected"
+
+
+def test_disconnect_reports_restore_and_disconnect_errors(tmp_path):
+    class BadDisconnectGantry(FakeGantry):
+        def soft_limits_enabled(self):
+            return False
+
+        def disconnect(self):
+            super().disconnect()
+            raise RuntimeError("close failed")
+
+    session = GantrySession(gantry_factory=BadDisconnectGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    session._calibration_restore_soft_limits = True
+
+    with pytest.raises(GantrySessionError, match="Soft-limit restore and disconnect both failed"):
+        session.disconnect()
+
+    assert session.connected is False
+
+
+def test_refresh_connected_config_only_for_matching_filename(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    session.refresh_connected_config("other.yaml", {"serial_port": "/dev/ignored"})
+    assert fake.config["serial_port"] == "/dev/test"
+
+    session.refresh_connected_config(
+        "gantry.yaml",
+        {"serial_port": "/dev/new", "grbl_settings": {"status_report": 0}},
+    )
+
+    assert session._connected_gantry_config["serial_port"] == "/dev/new"
+    assert fake.config == {"serial_port": "/dev/new"}
 
 
 def test_connect_handshake_failure_disconnects_staged_gantry(tmp_path):
@@ -233,6 +317,57 @@ def test_position_returns_cached_status_while_operation_lock_is_held(tmp_path):
     assert snapshot.status == "Run"
 
 
+def test_position_uses_alarm_status_when_read_raises_alarm(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    FakeGantry.instances[-1].get_position_info = lambda: (_ for _ in ()).throw(
+        RuntimeError("ALARM:1 hard limit")
+    )
+
+    snapshot = session.position()
+
+    assert snapshot.status == "ALARM:1"
+
+
+def test_simple_locked_wrappers_call_gantry_and_return_position(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    assert session.home().connected
+    assert session.unlock().connected
+    assert session.reset_and_unlock().connected
+    assert session.feed_hold().connected
+    assert session.jog_cancel().connected
+    assert session.set_work_coordinates(x=1.0, y=None, z=2.0).connected
+
+    assert ("home", None) in fake.calls
+    assert ("unlock", None) in fake.calls
+    assert ("reset_and_unlock", None) in fake.calls
+    assert ("stop", None) in fake.calls
+    assert ("jog_cancel", None) in fake.calls
+    assert ("set_work_coordinates", {"x": 1.0, "y": None, "z": 2.0}) in fake.calls
+
+
+def test_grbl_setting_helpers_normalize_and_parse_values(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    settings = session.set_grbl_setting("20", "0")
+
+    assert ("set_grbl_setting", ("$20", 0.0)) in fake.calls
+    assert settings["$20"] == "1"
+    assert session.read_grbl_settings()["$10"] == "0"
+
+    for bad_setting in ("abc", "$x", "20.5"):
+        with pytest.raises(ValueError, match="numeric code"):
+            session.set_grbl_setting(bad_setting, "1")
+    for bad_value in ("", "1\n2", "abc"):
+        with pytest.raises(ValueError):
+            session.set_grbl_setting("$20", bad_value)
+
+
 def test_move_and_jog_reject_invalid_targets(tmp_path):
     session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
     session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
@@ -242,6 +377,86 @@ def test_move_and_jog_reject_invalid_targets(tmp_path):
 
     with pytest.raises(ValueError, match="finite"):
         session.jog(x=0.0, y=0.0, z=math.nan)
+
+
+def test_movement_error_marks_reconnect_required_for_missing_working_volume(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    session._connected_gantry_config.pop("working_volume")
+
+    with pytest.raises(MovementOutOfBoundsError) as exc_info:
+        session.move_to_blocking(x=10.0, y=20.0, z=30.0)
+
+    assert exc_info.value.requires_reconnect is True
+
+
+def test_movement_error_marks_reconnect_required_for_missing_current_position(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    FakeGantry.instances[-1].get_position_info = lambda: {
+        "coords": None,
+        "work_pos": None,
+        "status": "Idle",
+    }
+
+    with pytest.raises(MovementOutOfBoundsError) as exc_info:
+        session.jog(x=1.0)
+
+    assert exc_info.value.requires_reconnect is True
+
+
+def test_movement_error_does_not_mark_reconnect_required_for_bounds_violation(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    with pytest.raises(MovementOutOfBoundsError) as exc_info:
+        session.jog(x=500.0)
+
+    assert exc_info.value.requires_reconnect is False
+
+
+def test_move_worker_publishes_and_resets_errors(tmp_path):
+    class OneFailureGantry(FakeGantry):
+        def __init__(self, config=None):
+            super().__init__(config=config)
+            self.fail_next = True
+
+        def move_to(self, *args, **kwargs):
+            if self.fail_next:
+                self.fail_next = False
+                raise RuntimeError("out of bounds")
+            return super().move_to(*args, **kwargs)
+
+    session = GantrySession(gantry_factory=OneFailureGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    session._move_worker(1.0, 2.0, 3.0)
+    assert session.position().move_error == "out of bounds"
+
+    session._move_worker(4.0, 5.0, 6.0)
+    snapshot = session.position()
+    assert snapshot.move_error is None
+    assert (snapshot.x, snapshot.y, snapshot.z) == (4.0, 5.0, 6.0)
+
+
+def test_move_to_background_rejects_out_of_bounds_before_thread(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    with pytest.raises(MovementOutOfBoundsError):
+        session.move_to(x=-1.0, y=0.0, z=0.0)
+
+
+def test_calibration_active_reflects_calibration_flags(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    assert session.calibration_active is False
+
+    session.prepare_calibration_origin()
+    assert session.calibration_active is True
+
+    session.restore_calibration_soft_limits()
+    assert session.calibration_active is False
 
 
 def test_calibration_prepare_disables_and_restore_reenables_soft_limits(tmp_path):
@@ -269,12 +484,13 @@ def test_feed_hold_interrupt_does_not_wait_for_operation_lock(tmp_path):
     finally:
         session.operation_lock.release()
 
-    assert ("stop", None) in fake.calls
+    assert ("feed_hold_realtime", None) in fake.calls
+    assert ("stop", None) not in fake.calls
 
 
 def test_feed_hold_interrupt_reports_timeout(tmp_path):
     class TimeoutGantry(FakeGantry):
-        def stop(self):
+        def feed_hold_realtime(self):
             raise RuntimeError("Error executing command !: Command execution timed out")
 
     session = GantrySession(gantry_factory=TimeoutGantry, sleep=lambda _seconds: None)
@@ -282,6 +498,80 @@ def test_feed_hold_interrupt_reports_timeout(tmp_path):
 
     with pytest.raises(InterruptFeedHoldTimeoutError):
         session.feed_hold_interrupt()
+
+
+def test_interrupt_helpers_require_connection():
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+
+    with pytest.raises(GantryNotConnectedError):
+        session.feed_hold_interrupt()
+    with pytest.raises(GantryNotConnectedError):
+        session.jog_cancel_interrupt()
+
+
+def test_jog_zero_delta_is_noop_and_alarm_is_wrapped(tmp_path):
+    class AlarmJogGantry(FakeGantry):
+        def jog(self, **kwargs):
+            raise RuntimeError("ALARM:1")
+
+    session = GantrySession(gantry_factory=AlarmJogGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    session.jog()
+    with pytest.raises(GantryAlarmError):
+        session.jog(x=1.0)
+
+
+def test_jog_blocking_idle_alarm_and_timeout_paths(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    assert session.jog_blocking(x=1.0, timeout_s=0.1).connected
+
+    fake.status = "<Alarm|WPos:0,0,0>"
+    with pytest.raises(GantryAlarmError):
+        session.jog_blocking(x=1.0, timeout_s=0.1)
+
+    fake.status = "<Run|WPos:0,0,0>"
+    with pytest.raises(GantrySessionError, match="Timed out"):
+        session._wait_until_idle_locked(timeout_s=0.0)
+
+
+def test_finalize_calibration_failure_restores_soft_limits_and_keeps_flag_if_unverified(tmp_path):
+    class FailingFinalizeGantry(FakeGantry):
+        def __init__(self, config=None):
+            super().__init__(config=config)
+            self.soft_limits_verified = False
+            self.soft_limit_reads = 0
+
+        def finalize_deck_origin_calibration(self, **kwargs):
+            self.calls.append(("finalize_deck_origin_calibration", kwargs))
+            raise RuntimeError("calibration failed")
+
+        def soft_limits_enabled(self):
+            self.calls.append(("soft_limits_enabled", None))
+            self.soft_limit_reads += 1
+            if self.soft_limit_reads == 1:
+                return True
+            return self.soft_limits_verified
+
+    session = GantrySession(gantry_factory=FailingFinalizeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FailingFinalizeGantry.instances[-1]
+    session.prepare_calibration_origin()
+
+    with pytest.raises(RuntimeError, match="calibration failed"):
+        session.finalize_calibration_origin(
+            home_z=80.0,
+            block_touch_z=10.0,
+            block_height=5.0,
+            factory_z_travel=90.0,
+        )
+
+    assert ("set_soft_limits_enabled", True) in fake.calls
+    assert ("set_soft_limits_enabled", False) in fake.calls
+    assert session._calibration_restore_soft_limits is True
 
 
 def test_run_protocol_uses_existing_gantry_and_preserves_connection(monkeypatch, tmp_path):
@@ -354,6 +644,41 @@ def test_run_protocol_uses_existing_gantry_and_preserves_connection(monkeypatch,
         "instruments.disconnect",
         "store.close",
     ]
+
+
+def test_run_protocol_blocks_when_calibration_warning_active(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    session._calibration_warning = "settings differ"
+
+    with pytest.raises(CalibrationBlockedError):
+        session.run_protocol(
+            gantry_path=tmp_path / "gantry.yaml",
+            deck_path=tmp_path / "deck.yaml",
+            protocol_path=tmp_path / "protocol.yaml",
+            gantry_file="gantry.yaml",
+            deck_file="deck.yaml",
+            protocol_file="protocol.yaml",
+        )
+
+
+def test_run_protocol_blocks_initial_unhealthy_gantry(tmp_path):
+    class UnhealthyGantry(FakeGantry):
+        def is_healthy(self):
+            return False
+
+    session = GantrySession(gantry_factory=UnhealthyGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    with pytest.raises(GantrySessionHealthCheckError, match="not connected"):
+        session.run_protocol(
+            gantry_path=tmp_path / "gantry.yaml",
+            deck_path=tmp_path / "deck.yaml",
+            protocol_path=tmp_path / "protocol.yaml",
+            gantry_file="gantry.yaml",
+            deck_file="deck.yaml",
+            protocol_file="protocol.yaml",
+        )
 
 
 def test_run_protocol_disconnects_instruments_on_failure(monkeypatch, tmp_path):

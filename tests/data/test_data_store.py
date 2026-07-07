@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
+from pathlib import Path
 
 import pytest
 
-from data.data_store import DataStore
+from data.data_store import DATA_DB_PATH_ENV, DataStore, default_database_path
+from deck.labware.labware import Coordinate3D
+from deck.labware.vial import Vial
+from deck.labware.well_plate import WellPlate
 from instruments.filmetrics.models import MeasurementResult
 from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
@@ -76,12 +81,30 @@ class TestSchemaCreation:
 
     def test_default_db_path_uses_env_override(self, monkeypatch, tmp_path):
         db_path = tmp_path / "runtime" / "panda_data.db"
-        monkeypatch.setenv("CUBOS_DATA_DB_PATH", str(db_path))
+        monkeypatch.setenv(DATA_DB_PATH_ENV, str(db_path))
 
         store = DataStore()
         store.close()
 
         assert db_path.is_file()
+
+    def test_default_db_path_uses_user_data_dir(self, monkeypatch, tmp_path):
+        monkeypatch.delenv(DATA_DB_PATH_ENV, raising=False)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        assert default_database_path() == tmp_path / ".cubos" / "panda_data.db"
+
+    def test_default_db_creation_error_names_override(self, monkeypatch, tmp_path):
+        monkeypatch.delenv(DATA_DB_PATH_ENV, raising=False)
+        monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+        def fail_mkdir(self, *args, **kwargs):
+            raise PermissionError("read only")
+
+        monkeypatch.setattr(Path, "mkdir", fail_mkdir)
+
+        with pytest.raises(RuntimeError, match=DATA_DB_PATH_ENV):
+            DataStore()
 
     def test_foreign_key_enforcement(self):
         store = _make_store()
@@ -143,6 +166,18 @@ class TestCampaignCRUD:
         assert row[0] == "running"
         store.close()
 
+    def test_finish_campaign_sets_status_and_finished_at(self):
+        store = _make_store()
+        cid = store.create_campaign(description="test")
+
+        store.finish_campaign(cid, "completed", finished_at="2026-07-07 12:00:00")
+
+        row = store._conn.execute(
+            "SELECT status, finished_at FROM campaigns WHERE id = ?", (cid,)
+        ).fetchone()
+        assert row == ("completed", "2026-07-07 12:00:00")
+        store.close()
+
 
 # ─── Experiment CRUD ──────────────────────────────────────────────────────────
 
@@ -167,17 +202,20 @@ class TestExperimentCRUD:
         cid = store.create_campaign(description="test")
         eid = store.create_experiment(
             campaign_id=cid,
+            labware_key="plate_key",
             labware_name="plate_1",
             well_id="B3",
             contents_json='[{"source_name": "vial_1", "volume_ul": 50.0}]',
         )
         row = store._conn.execute(
-            "SELECT labware_name, well_id, contents FROM experiments WHERE id = ?",
+            "SELECT labware_key, labware_name, well_id, contents "
+            "FROM experiments WHERE id = ?",
             (eid,),
         ).fetchone()
-        assert row[0] == "plate_1"
-        assert row[1] == "B3"
-        parsed = json.loads(row[2])
+        assert row[0] == "plate_key"
+        assert row[1] == "plate_1"
+        assert row[2] == "B3"
+        parsed = json.loads(row[3])
         assert parsed[0]["source_name"] == "vial_1"
         store.close()
 
@@ -500,6 +538,138 @@ class TestASMIInstrumentMeasurementLogging:
         assert row[5] == pytest.approx(0.1)
         assert row[6] == pytest.approx(-2.0)
         assert row[7] == pytest.approx(10.0)
+        store.close()
+
+    def test_missing_asmi_scalar_metadata_persists_nulls(self):
+        store = _make_store()
+        cid = store.create_campaign(description="asmi test")
+        eid = store.create_experiment(cid, "film_plate", "B1", "[]")
+
+        measurement = InstrumentMeasurement(
+            measurement_type=MeasurementType.ASMI_INDENTATION,
+            payload={
+                "sample_timestamps": [1.0],
+                "z_positions_mm": [0.0],
+                "raw_forces_n": [0.01],
+                "corrected_forces_n": [0.005],
+                "directions": ["down"],
+            },
+            metadata={
+                "baseline_avg": 0.005,
+                "baseline_std": 0.001,
+                "force_exceeded": False,
+                "data_points": 1,
+            },
+        )
+        mid = store.log_measurement(eid, measurement)
+
+        row = store._conn.execute(
+            "SELECT step_size_mm, z_target_mm, force_limit_n "
+            "FROM asmi_measurements WHERE id = ?",
+            (mid,),
+        ).fetchone()
+        assert row == (None, None, None)
+        store.close()
+
+
+class TestLabwareTracking:
+
+    def test_register_labware_mid_loop_failure_rolls_back(self):
+        class BrokenWells(dict):
+            def __iter__(self):
+                yield "A1"
+                raise RuntimeError("boom")
+
+        plate = WellPlate(
+            name="plate",
+            model_name="test",
+            rows=1,
+            columns=2,
+            wells={
+                "A1": Coordinate3D(x=0.0, y=0.0, z=0.0),
+                "A2": Coordinate3D(x=1.0, y=0.0, z=0.0),
+            },
+            capacity_ul=200.0,
+            working_volume_ul=150.0,
+        )
+        plate.wells = BrokenWells(plate.wells)
+        store = _make_store()
+        cid = store.create_campaign(description="labware")
+
+        with pytest.raises(RuntimeError, match="boom"):
+            store.register_labware(cid, "plate", plate)
+
+        count = store._conn.execute("SELECT COUNT(*) FROM labware").fetchone()[0]
+        assert count == 0
+        store.close()
+
+    def test_record_transfer_decrements_source_and_increments_destination(self):
+        store = _make_store()
+        cid = store.create_campaign(description="transfer")
+        vial = Vial(
+            name="source",
+            model_name="standard",
+            height=10.0,
+            diameter=5.0,
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            capacity_ul=1000.0,
+            working_volume_ul=800.0,
+        )
+        plate = WellPlate(
+            name="plate",
+            model_name="test",
+            rows=1,
+            columns=1,
+            wells={"A1": Coordinate3D(x=1.0, y=0.0, z=0.0)},
+            capacity_ul=200.0,
+            working_volume_ul=150.0,
+        )
+        store.register_labware(cid, "vial_1", vial)
+        store.register_labware(cid, "plate_1", plate)
+        store._conn.execute(
+            "UPDATE labware SET current_volume_ul = 100.0 "
+            "WHERE labware_key = 'vial_1'"
+        )
+        store._conn.commit()
+
+        store.record_transfer(cid, "vial_1", None, "plate_1", "A1", 30.0)
+
+        rows = dict(store._conn.execute(
+            "SELECT labware_key || COALESCE('.' || well_id, ''), current_volume_ul "
+            "FROM labware"
+        ).fetchall())
+        assert rows["vial_1"] == pytest.approx(70.0)
+        assert rows["plate_1.A1"] == pytest.approx(30.0)
+        store.close()
+
+    def test_record_transfer_overfill_warns(self, caplog):
+        store = _make_store()
+        cid = store.create_campaign(description="transfer")
+        vial = Vial(
+            name="source",
+            model_name="standard",
+            height=10.0,
+            diameter=5.0,
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            capacity_ul=1000.0,
+            working_volume_ul=800.0,
+        )
+        plate = WellPlate(
+            name="plate",
+            model_name="test",
+            rows=1,
+            columns=1,
+            wells={"A1": Coordinate3D(x=1.0, y=0.0, z=0.0)},
+            capacity_ul=200.0,
+            working_volume_ul=10.0,
+        )
+        store.register_labware(cid, "vial_1", vial)
+        store.register_labware(cid, "plate_1", plate)
+
+        with caplog.at_level(logging.WARNING, logger="data.data_store"):
+            store.record_transfer(cid, "vial_1", None, "plate_1", "A1", 20.0)
+
+        assert "exceeds working volume" in caplog.text
         store.close()
 
 

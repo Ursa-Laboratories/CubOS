@@ -71,6 +71,9 @@ def main() -> None:
 
     db_path = default_database_path()
     data_store = DataStore(db_path)
+    campaign_id = None
+    results = []
+    exit_code = 0
     try:
         campaign_id = create_campaign_for_protocol_run(
             data_store,
@@ -93,28 +96,42 @@ def main() -> None:
         )
     except KeyboardInterrupt:
         print("\nAborted by user.")
-        sys.exit(130)
+        exit_code = 130
     except Exception as exc:
         print(f"\nERROR during execution: {exc}")
         traceback.print_exc()
-        sys.exit(1)
+        exit_code = 1
     finally:
         data_store.close()
 
-    result_files = export_campaign_results_csvs(
-        db_path,
-        campaign_id,
-        output_dir=project_root / "data" / "results",
-    )
+    result_files = []
+    if campaign_id is not None:
+        try:
+            result_files = export_campaign_results_csvs(
+                db_path,
+                campaign_id,
+                output_dir=project_root / "data" / "results",
+            )
+        except Exception as exc:
+            print(f"\nERROR exporting result CSVs for campaign {campaign_id}: {exc}")
+            traceback.print_exc()
+            if exit_code == 0:
+                exit_code = 1
 
     print()
     print(SEPARATOR)
-    print(f"Protocol complete — {len(results)} steps executed.")
+    if exit_code == 0:
+        print(f"Protocol complete — {len(results)} steps executed.")
+    else:
+        print(f"Protocol did not complete — {len(results)} steps executed before exit.")
     print(f"Measurement data store: {db_path}")
-    print("Result CSV files:")
-    for path in result_files:
-        print(f"  {path}")
+    if campaign_id is not None:
+        print("Result CSV files:")
+        for path in result_files:
+            print(f"  {path}")
     print(SEPARATOR)
+    if exit_code:
+        sys.exit(exit_code)
 
 
 if __name__ == "__main__":

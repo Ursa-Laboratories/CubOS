@@ -467,6 +467,16 @@ class TestOfflinePipette:
         assert result.success is True
         assert result.volume_ul == 100.0
 
+    def test_aspirate_rejects_negative_volume(self):
+        pip = OpentronsPipette(offline=True)
+        with pytest.raises(PipetteCommandError, match="outside"):
+            pip.aspirate(-50.0)
+
+    def test_aspirate_rejects_over_capacity_volume(self):
+        pip = OpentronsPipette(offline=True)
+        with pytest.raises(PipetteCommandError, match="outside"):
+            pip.aspirate(pip.config.max_volume + 1.0)
+
     def test_dispense_returns_result(self):
         pip = OpentronsPipette(offline=True)
         pip.connect()

@@ -16,8 +16,9 @@ project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 from gantry import Gantry, load_gantry_from_yaml_safe
+from gantry.errors import CommandExecutionError, StatusReturnError
 from gantry.origin import validate_deck_origin_minima
-from setup.keyboard_input import read_keypress
+from setup.keyboard_input import flush_stdin, read_keypress
 
 STEP = 1.0
 
@@ -33,6 +34,28 @@ Controls:
 
 def print_position(coords: dict) -> None:
     print(f"  Position -> X: {coords['x']:.1f}  Y: {coords['y']:.1f}  Z: {coords['z']:.1f}")
+
+
+def _looks_like_startup_alarm(gantry: Gantry) -> bool:
+    try:
+        status = gantry.get_status()
+    except StatusReturnError as exc:
+        status = str(exc)
+    except CommandExecutionError as exc:
+        status = str(exc)
+    return "alarm" in str(status).lower()
+
+
+def _looks_like_soft_limit_jog_rejection(exc: Exception) -> bool:
+    message = str(exc).lower()
+    return any(
+        token in message
+        for token in (
+            "error:15",
+            "travel exceeded",
+            "jog target exceeds machine travel",
+        )
+    )
 
 
 def main() -> None:
@@ -65,10 +88,13 @@ def main() -> None:
     gantry.connect()
     print(f"Connected in {time.monotonic() - t0:.1f}s")
 
-    if not gantry.is_healthy():
+    healthy = gantry.is_healthy()
+    if not healthy and not _looks_like_startup_alarm(gantry):
         print("Error: Gantry is not healthy. Check the connection and try again.")
         gantry.disconnect()
         sys.exit(1)
+    if not healthy:
+        print("Controller is in startup alarm; homing clears it.")
 
     print("Connected successfully.")
 
@@ -77,6 +103,7 @@ def main() -> None:
         print("Homing... (this may take a moment)")
         gantry.home()
         print("Homing complete.")
+        flush_stdin()
 
         coords = gantry.get_coordinates()
         print_position(coords)
@@ -85,24 +112,32 @@ def main() -> None:
         while True:
             key = read_keypress()
 
-            if key == "LEFT":
-                gantry.jog(x=-STEP)
-            elif key == "RIGHT":
-                gantry.jog(x=STEP)
-            elif key == "UP":
-                gantry.jog(y=STEP)
-            elif key == "DOWN":
-                gantry.jog(y=-STEP)
-            elif key == "Z":
-                gantry.jog(z=-STEP)
-            elif key == "X":
-                gantry.jog(z=STEP)
-            elif key == "Q":
-                print("\nExiting...")
-                break
-            else:
+            try:
+                if key == "LEFT":
+                    gantry.jog(x=-STEP)
+                elif key == "RIGHT":
+                    gantry.jog(x=STEP)
+                elif key == "UP":
+                    gantry.jog(y=STEP)
+                elif key == "DOWN":
+                    gantry.jog(y=-STEP)
+                elif key == "Z":
+                    gantry.jog(z=-STEP)
+                elif key == "X":
+                    gantry.jog(z=STEP)
+                elif key == "Q":
+                    print("\nExiting...")
+                    break
+                else:
+                    continue
+            except (CommandExecutionError, StatusReturnError) as exc:
+                if not _looks_like_soft_limit_jog_rejection(exc):
+                    raise
+                print(
+                    "GRBL rejected that jog because it exceeds current travel. "
+                    "Try the other direction or home/recheck the calibrated bounds."
+                )
                 continue
-
             coords = gantry.get_coordinates()
             print_position(coords)
 

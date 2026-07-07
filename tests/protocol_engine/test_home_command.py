@@ -15,6 +15,7 @@ from protocol_engine.commands.home import home
 
 def _context(gantry_config: GantryConfig | None):
     gantry = MagicMock()
+    gantry.get_serial_timeout.return_value = 1.25
     return SimpleNamespace(
         gantry=SimpleNamespace(controller=gantry),
         gantry_config=gantry_config,
@@ -44,7 +45,7 @@ def test_home_preserves_calibrated_wpos_for_deck_origin_config():
     gantry.clear_g92_offsets.assert_not_called()
     gantry.set_work_coordinates.assert_not_called()
     assert gantry.set_serial_timeout.call_args_list[0].args == (10,)
-    assert gantry.set_serial_timeout.call_args_list[-1].args == (0.05,)
+    assert gantry.set_serial_timeout.call_args_list[-1].args == (1.25,)
 
 
 def test_home_preserves_calibrated_wpos_for_one_instrument_nonzero_z_min():

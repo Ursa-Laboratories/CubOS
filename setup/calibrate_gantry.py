@@ -39,6 +39,10 @@ from setup.calibration.multi_instrument_calibration import (  # noqa: E402
 InstrumentInfo = tuple[str, str | None]
 
 
+class CalibrationCancelled(Exception):
+    """Operator intentionally cancelled before opening hardware."""
+
+
 def _load_gantry_config(gantry_path: Path) -> dict[str, Any]:
     if not gantry_path.exists():
         raise ValueError(f"Input gantry YAML does not exist: {gantry_path}")
@@ -94,6 +98,10 @@ def _confirm(prompt: str, *, input_reader: Callable[[str], str]) -> bool:
     return input_reader(prompt).strip().lower() in {"y", "yes"}
 
 
+def _is_operator_abort(value: str) -> bool:
+    return value.strip().lower() in {"n", "no", "q", "quit", "abort"}
+
+
 def _preflight(
     *,
     input_path: Path,
@@ -113,6 +121,7 @@ def _preflight(
     for line in _format_instruments(instruments):
         output(line)
     output(f"Chosen flow:             {flow_name}")
+    explicit_output = not overwrite_input
     output("")
     output("Before continuing:")
     output("  - Keep E-stop reachable.")
@@ -128,10 +137,26 @@ def _preflight(
             f"No --output-gantry was provided; calibration will overwrite {input_path}. Continue? [y/N]: ",
             input_reader=input_reader,
         ):
-            raise RuntimeError("Calibration cancelled before hardware connection.")
+            output("Calibration cancelled before hardware connection.")
+            raise CalibrationCancelled
 
-    if input_reader("Press ENTER to connect to hardware and start calibration, or Ctrl-C to abort: ") != "":
-        output("Starting calibration...")
+    if (
+        explicit_output
+        and output_path.exists()
+        and output_path.resolve() != input_path.resolve()
+        and not _confirm(
+            f"{output_path} already exists and will be overwritten. Continue? [y/N]: ",
+            input_reader=input_reader,
+        )
+    ):
+        output("Calibration cancelled before hardware connection.")
+        raise CalibrationCancelled
+
+    start_response = input_reader("Press ENTER to connect to hardware and start calibration, or Ctrl-C to abort: ")
+    if _is_operator_abort(start_response):
+        output("Calibration cancelled before hardware connection.")
+        raise CalibrationCancelled
+    output("Starting calibration...")
 
 
 def _print_end_summary(
@@ -228,6 +253,7 @@ def run_auto_calibration(
             z_reference_mode="block",
             write_gantry_yaml=True,
             output_gantry_path=resolved_output_path,
+            backup_existing_output=resolved_output_path == gantry_path,
             output=output,
             input_reader=input_reader,
         )
@@ -237,6 +263,7 @@ def run_auto_calibration(
             gantry_path,
             write_gantry_yaml=True,
             output_gantry_path=resolved_output_path,
+            backup_existing_output=resolved_output_path == gantry_path,
             output=output,
             input_reader=input_reader,
         )
@@ -275,6 +302,10 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nAborted.")
         sys.exit(130)
+    except CalibrationCancelled as exc:
+        if str(exc):
+            print(str(exc))
+        sys.exit(0)
     except Exception as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         sys.exit(1)

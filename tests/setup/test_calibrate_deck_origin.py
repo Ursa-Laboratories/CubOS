@@ -241,6 +241,18 @@ class _SoftLimitAwareFailingJogFakeGantry(_SoftLimitAwareFakeGantry):
         raise CommandExecutionError("Jog failed: unexpected controller error")
 
 
+class _SoftLimitProgrammingFailsFakeGantry(_FakeGantry):
+    def configure_soft_limits_from_spans(self, **kwargs) -> None:
+        self.calls.append(("configure_soft_limits_from_spans_failed", kwargs))
+        raise RuntimeError("GRBL soft-limit settings did not verify")
+
+
+class _IdleTrackingFakeGantry(_FakeGantry):
+    def get_status(self) -> str:
+        self.calls.append(("get_status",))
+        return "Idle"
+
+
 def _key_reader(keys):
     iterator = iter(keys)
 
@@ -304,6 +316,7 @@ def test_run_calibration_sets_xy_then_z_and_measures_home(tmp_path):
         ("get_coordinates",),
         ("homing_pull_off_mm",),
         ("configure_soft_limits_from_spans", 398.5, 299.25, 96.75, 0, 0.0, None, 0.25),
+        ("jog_cancel",),
         ("set_serial_timeout", 0.05),
         ("disconnect",),
     ]
@@ -385,6 +398,41 @@ def test_run_calibration_block_mode_prompts_for_missing_block_height_and_writes_
     assert "calibration_block_height_mm: 35.0" in written
 
 
+def test_run_calibration_reprompts_when_block_height_exceeds_factory_travel(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+    prompts: list[str] = []
+    messages: list[str] = []
+    responses = iter(["500.0", "35.0"])
+
+    def input_reader(prompt: str) -> str:
+        prompts.append(prompt)
+        return next(responses)
+
+    result = run_calibration(
+        path,
+        output=messages.append,
+        input_reader=input_reader,
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader(
+            [
+                ("Z", 50),
+                ("\r", 1),
+            ]
+        ),
+        stdin_flusher=lambda: None,
+        z_reference_mode="block",
+        skip_soft_limit_config=True,
+    )
+
+    assert isinstance(result, DeckOriginCalibrationResult)
+    assert result.block_height_mm == 35.0
+    assert prompts == [
+        "Reference height above the deck in mm: ",
+        "Reference height above the deck in mm: ",
+    ]
+    assert any("factory Z travel" in message for message in messages)
+
+
 def test_calibration_block_height_prompts_when_reader_and_output_supplied():
     prompts: list[str] = []
 
@@ -397,6 +445,22 @@ def test_calibration_block_height_prompts_when_reader_and_output_supplied():
 
     assert value == 18.125
     assert prompts == ["Reference height above the deck in mm: "]
+
+
+def test_calibration_block_height_reprompts_for_out_of_range_value():
+    responses = iter(["101", "99"])
+    messages: list[str] = []
+
+    value = _calibration_block_height_mm(
+        {},
+        explicit_block_height_mm=None,
+        max_height_mm=100.0,
+        input_reader=lambda _prompt: next(responses),
+        output=messages.append,
+    )
+
+    assert value == 99.0
+    assert any("factory Z travel" in message for message in messages)
 
 
 def test_updated_gantry_yaml_writes_block_height_and_requires_cnc_mapping():
@@ -539,6 +603,55 @@ def test_run_calibration_can_prompt_and_write_gantry_yaml(tmp_path):
     assert "factory_z_travel_mm: 100.0" in written
     assert "z_max: 96.75" in written
     assert "max_travel_z: 96.75" in written
+
+
+def test_run_calibration_in_place_write_creates_timestamped_backup(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+    original = path.read_text(encoding="utf-8")
+
+    run_calibration(
+        path,
+        output=lambda message: None,
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader([("\r", 1)]),
+        stdin_flusher=lambda: None,
+        write_gantry_yaml=True,
+        output_gantry_path=path,
+        backup_existing_output=True,
+        skip_soft_limit_config=True,
+    )
+
+    backups = list(tmp_path.glob("gantry.yaml.*.bak"))
+    assert len(backups) == 1
+    assert backups[0].read_text(encoding="utf-8") == original
+    assert "grbl_settings:" in path.read_text(encoding="utf-8")
+
+
+def test_run_calibration_writes_yaml_before_soft_limit_programming_failure(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+    output_path = tmp_path / "calibrated.yaml"
+    messages: list[str] = []
+
+    with pytest.raises(RuntimeError, match="soft-limit settings did not verify"):
+        run_calibration(
+            path,
+            output=messages.append,
+            gantry_factory=_SoftLimitProgrammingFailsFakeGantry,
+            key_reader=_key_reader([("\r", 1)]),
+            stdin_flusher=lambda: None,
+            write_gantry_yaml=True,
+            output_gantry_path=output_path,
+        )
+
+    assert output_path.exists()
+    assert "grbl_settings:" in output_path.read_text(encoding="utf-8")
+    output_text = "\n".join(messages)
+    assert "Full gantry YAML to copy/paste:" in output_text
+    assert f"was written to: {output_path}" in output_text
+    assert any(
+        call[0] == "configure_soft_limits_from_spans_failed"
+        for call in _SoftLimitProgrammingFailsFakeGantry.instance.calls
+    )
 
 
 def test_run_calibration_prompts_for_tip_gap_when_omitted(tmp_path):
@@ -708,7 +821,6 @@ def test_run_calibration_continues_after_error_15_jog_rejection(tmp_path):
     assert isinstance(result, DeckOriginCalibrationResult)
     calls = _SoftLimitRejectingFakeGantry.instance.calls
     assert ("jog", -1.0, 0.0, 0.0, 2500.0) in calls
-    assert ("jog_cancel",) not in calls
     assert ("unlock",) not in calls
     assert any("target exceeds the current soft-limit travel" in m for m in messages)
 
@@ -733,6 +845,61 @@ def test_run_calibration_restores_soft_limits_when_jog_aborts(tmp_path):
         ("set_soft_limits_enabled", True)
     )
     assert ("disconnect",) in calls
+
+
+def test_run_calibration_q_abort_cancels_jog_before_disconnect(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+
+    with pytest.raises(KeyboardInterrupt):
+        run_calibration(
+            path,
+            output=lambda _message: None,
+            gantry_factory=_FakeGantry,
+            key_reader=_key_reader([("Q", 1)]),
+            stdin_flusher=lambda: None,
+        )
+
+    calls = _FakeGantry.instance.calls
+    assert ("jog_cancel",) in calls
+    assert calls.index(("jog_cancel",)) < calls.index(("disconnect",))
+
+
+def test_run_calibration_keyboard_interrupt_cancels_jog_before_disconnect(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+
+    def interrupting_key_reader():
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_calibration(
+            path,
+            output=lambda _message: None,
+            gantry_factory=_FakeGantry,
+            key_reader=interrupting_key_reader,
+            stdin_flusher=lambda: None,
+        )
+
+    calls = _FakeGantry.instance.calls
+    assert ("jog_cancel",) in calls
+    assert calls.index(("jog_cancel",)) < calls.index(("disconnect",))
+
+
+def test_run_calibration_waits_for_idle_before_confirmed_coordinate_read(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+
+    run_calibration(
+        path,
+        output=lambda _message: None,
+        gantry_factory=_IdleTrackingFakeGantry,
+        key_reader=_key_reader([("RIGHT", 1), ("\r", 1)]),
+        stdin_flusher=lambda: None,
+    )
+
+    calls = _IdleTrackingFakeGantry.instance.calls
+    first_echo_read = calls.index(("get_coordinates",))
+    assert calls[first_echo_read - 1] == ("get_status",)
+    confirm_read = calls.index(("get_coordinates",), first_echo_read + 1)
+    assert calls[confirm_read - 1] == ("get_status",)
 
 
 def test_run_calibration_aborts_when_recovery_readback_is_unavailable(tmp_path):

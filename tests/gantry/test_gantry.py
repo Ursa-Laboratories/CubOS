@@ -65,6 +65,9 @@ class TestGantry(unittest.TestCase):
         mock_mill.current_status.return_value = "<Alarm|MPos:0,0,0|FS:0,0>"
         self.assertFalse(gantry.is_healthy())
 
+        mock_mill.current_status.return_value = "ALARM:1"
+        self.assertFalse(gantry.is_healthy())
+
     @patch("gantry.gantry.Mill")
     def test_connect_raises_mill_connection_error(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
@@ -252,6 +255,17 @@ class TestGantry(unittest.TestCase):
         gantry = Gantry(config=self.config)
         with self.assertRaises(RuntimeError):
             gantry.stop()
+
+    @patch("gantry.gantry.Mill")
+    def test_feed_hold_realtime_and_resume_delegate_to_mill(self, mock_mill_cls):
+        mock_mill = mock_mill_cls.return_value
+        gantry = Gantry(config=self.config)
+
+        gantry.feed_hold_realtime()
+        gantry.resume()
+
+        mock_mill.feed_hold_realtime.assert_called_once()
+        mock_mill.resume.assert_called_once()
 
     @patch("gantry.gantry.Mill")
     def test_get_coordinates_raises_on_known_error(self, mock_mill_cls):

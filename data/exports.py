@@ -6,6 +6,7 @@ import base64
 import csv
 import io
 import json
+import os
 import re
 import sqlite3
 import zipfile
@@ -377,6 +378,7 @@ def _measurement_table_rows(
         f"""
         SELECT
             m.*,
+            e.labware_key AS experiment_labware_key,
             e.labware_name AS experiment_labware_name,
             e.well_id AS experiment_well_id,
             e.contents AS experiment_contents,
@@ -398,6 +400,7 @@ def _measurement_table_csv(
     table_columns = _table_columns(conn, table_name)
     columns = [
         *table_columns,
+        "experiment_labware_key",
         "experiment_labware_name",
         "experiment_well_id",
         "experiment_contents",
@@ -437,7 +440,9 @@ def _rows_csv(columns: list[str], rows: list[sqlite3.Row]) -> str:
 
 
 def _write_csv_path(path: Path, content: str) -> Path:
-    path.write_text(content, encoding="utf-8")
+    tmp_path = path.with_name(f".{path.name}.tmp")
+    tmp_path.write_text(content, encoding="utf-8")
+    os.replace(tmp_path, path)
     return path
 
 
@@ -493,6 +498,7 @@ def _common_result_fields(row: sqlite3.Row) -> dict[str, Any]:
     return {
         "measurement_id": row["id"],
         "experiment_id": row["experiment_id"],
+        "labware_key": row["experiment_labware_key"],
         "labware_name": row["experiment_labware_name"],
         "well_id": row["experiment_well_id"] or "",
         "measurement_timestamp": row["timestamp"],
@@ -504,6 +510,7 @@ def _uvvis_results_csv(rows: list[sqlite3.Row]) -> str:
     columns = [
         "measurement_id",
         "experiment_id",
+        "labware_key",
         "labware_name",
         "well_id",
         "measurement_timestamp",
@@ -533,6 +540,7 @@ def _asmi_results_csv(rows: list[sqlite3.Row]) -> str:
     columns = [
         "measurement_id",
         "experiment_id",
+        "labware_key",
         "labware_name",
         "well_id",
         "measurement_timestamp",
@@ -584,6 +592,7 @@ def _potentiostat_results_csv(rows: list[sqlite3.Row]) -> str:
     columns = [
         "measurement_id",
         "experiment_id",
+        "labware_key",
         "labware_name",
         "well_id",
         "measurement_timestamp",
@@ -648,6 +657,7 @@ def _scalar_results_csv(rows: list[sqlite3.Row], value_columns: list[str]) -> st
     columns = [
         "measurement_id",
         "experiment_id",
+        "labware_key",
         "labware_name",
         "well_id",
         "measurement_timestamp",

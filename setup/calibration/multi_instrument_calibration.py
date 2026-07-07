@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import copy
 import sys
-import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
@@ -28,17 +27,18 @@ from setup.calibration.single_instrument_calibration import (  # noqa: E402
     _calculate_block_z_calibration,
     _calculate_grbl_max_travel,
     _calibration_block_height_mm,
+    _cancel_jog_if_available,
     _factory_z_travel_mm,
     _configured_grbl_setting,
     _interactive_jog_to_reference,
     _load_raw_config,
     _maybe_write_gantry_yaml,
     _print_yaml_block,
-    _prompt_block_height,
     _restore_soft_limits_after_origin_jog,
     _round_mm,
     _set_serial_timeout_if_available,
     _temporarily_disable_soft_limits_for_origin_jog,
+    _wait_until_idle_if_available,
 )
 from setup.keyboard_input import flush_stdin, read_keypress_batch  # noqa: E402
 
@@ -287,6 +287,7 @@ def _prompt_z_reference_height(
     *,
     input_reader: Callable[[str], str],
     output: Callable[[str], None],
+    max_height_mm: float | None = None,
 ) -> float:
     output("")
     output(
@@ -302,6 +303,12 @@ def _prompt_z_reference_height(
             continue
         if value <= 0:
             output("Calibration block height must be > 0 mm.")
+            continue
+        if max_height_mm is not None and value > max_height_mm:
+            output(
+                "Calibration block height must be <= configured factory Z travel "
+                f"({max_height_mm:g} mm)."
+            )
             continue
         return value
 
@@ -378,31 +385,8 @@ def _move_to_xy_center(
         f"X={center_x:.3f} Y={center_y:.3f} while keeping Z={z:.3f}."
     )
     gantry.move_to(center_x, center_y, z)
+    _wait_until_idle_if_available(gantry)
     return dict(gantry.get_coordinates())
-
-
-def _wait_until_idle_if_available(
-    gantry: Gantry,
-    *,
-    timeout_s: float = 10.0,
-    poll_interval_s: float = 0.1,
-) -> None:
-    status_reader = getattr(gantry, "get_status", None)
-    if not callable(status_reader):
-        return
-
-    deadline = time.monotonic() + timeout_s
-    last_status = ""
-    while time.monotonic() < deadline:
-        last_status = str(status_reader())
-        if "idle" in last_status.lower():
-            return
-        time.sleep(poll_interval_s)
-
-    raise RuntimeError(
-        "Timed out waiting for gantry to become idle after jog; "
-        f"last status: {last_status}"
-    )
 
 
 def _retract_up_after_contact(
@@ -435,6 +419,7 @@ def run_multi_instrument_calibration(
     skip_soft_limit_config: bool = False,
     write_gantry_yaml: bool = False,
     output_gantry_path: Path | None = None,
+    backup_existing_output: bool = False,
     homing_serial_timeout_s: float = 10.0,
     jog_serial_timeout_s: float = 1.0,
     output: Callable[[str], None] = print,
@@ -516,10 +501,12 @@ def run_multi_instrument_calibration(
 
     z_reference_height = _calibration_block_height_mm(
         raw_config,
-        explicit_block_height_mm=_prompt_block_height(
+        explicit_block_height_mm=_prompt_z_reference_height(
             input_reader=input_reader,
             output=output,
+            max_height_mm=factory_z_travel_mm,
         ),
+        max_height_mm=factory_z_travel_mm,
     )
 
     output("Preflight:")
@@ -560,7 +547,6 @@ def run_multi_instrument_calibration(
                 output=output,
             )
         )
-        stdin_flusher()
 
         output(
             f"Attach {reference_instrument!r} at the homed BRT pose before jogging. "
@@ -580,6 +566,7 @@ def run_multi_instrument_calibration(
                 "The script will not change WPos Z in this step."
             ),
             key_reader=key_reader,
+            stdin_flusher=stdin_flusher,
             output=output,
             feed_rate=jog_feed_rate,
             initial_step_mm=jog_step_mm,
@@ -587,13 +574,20 @@ def run_multi_instrument_calibration(
         )
         output("Setting current physical pose to WPos X=0, Y=0 only...")
         gantry.set_work_coordinates(x=0.0, y=0.0)
+        _wait_until_idle_if_available(gantry)
         xy_origin_coords = dict(gantry.get_coordinates())
         _assert_near_xy_origin(xy_origin_coords, tolerance_mm=tolerance_mm)
+
+        if restore_soft_limits_after_calibration:
+            restore_soft_limits_after_calibration = False
+            _restore_soft_limits_after_origin_jog(gantry, output=output)
 
         output("Re-homing after XY origining to measure machine-derived X/Y bounds...")
         _set_serial_timeout_if_available(gantry, homing_serial_timeout_s)
         _home_with_serial_reconnect(gantry, output=output)
         _set_serial_timeout_if_available(gantry, jog_serial_timeout_s)
+        stdin_flusher()
+        _wait_until_idle_if_available(gantry)
         xy_bounds_coords = dict(gantry.get_coordinates())
 
         center_before_z_coords = _move_to_xy_center(
@@ -602,6 +596,7 @@ def run_multi_instrument_calibration(
             output=output,
             label="lowest-instrument Z calibration",
         )
+        stdin_flusher()
         output(
             "Attach/verify all mounted instruments at the deck XY center before setting Z."
         )
@@ -614,7 +609,7 @@ def run_multi_instrument_calibration(
                 output=output,
             )
             _validate_instrument_names(raw_config, (lowest_instrument,))
-        _interactive_jog_to_reference(
+        block_touch_coords = _interactive_jog_to_reference(
             gantry,
             target_description=(
                 f"Step 2: from the deck XY center "
@@ -629,12 +624,12 @@ def run_multi_instrument_calibration(
                 "instrument will not be requested again in the per-instrument pass."
             ),
             key_reader=key_reader,
+            stdin_flusher=stdin_flusher,
             output=output,
             feed_rate=jog_feed_rate,
             initial_step_mm=jog_step_mm,
             limit_pull_off_mm=5.0,
         )
-        block_touch_coords = dict(gantry.get_coordinates())
         block_z_calibration = _calculate_block_z_calibration(
             initial_home_z_mm=float(xy_bounds_coords["z"]),
             block_touch_wpos_z_mm=float(block_touch_coords["z"]),
@@ -646,6 +641,7 @@ def run_multi_instrument_calibration(
             f"Setting current physical pose to WPos Z={z_reference_height:g} only..."
         )
         gantry.set_work_coordinates(z=z_reference_height)
+        _wait_until_idle_if_available(gantry)
         z_origin_coords = dict(gantry.get_coordinates())
         _assert_near_xyz(
             z_origin_coords,
@@ -687,7 +683,7 @@ def run_multi_instrument_calibration(
         non_contact_calibrations: dict[str, dict[str, float]] = {}
         for instrument in calibration_sequence:
             if instrument in non_contact_instruments:
-                _interactive_jog_to_reference(
+                non_contact_coords = _interactive_jog_to_reference(
                     gantry,
                     target_description=(
                         f"Step 3: calibrate non-contact instrument {instrument!r}. "
@@ -699,12 +695,12 @@ def run_multi_instrument_calibration(
                         "Press ENTER when the instrument is centered over the block mark."
                     ),
                     key_reader=key_reader,
+                    stdin_flusher=stdin_flusher,
                     output=output,
                     feed_rate=jog_feed_rate,
                     initial_step_mm=jog_step_mm,
                     limit_pull_off_mm=5.0,
                 )
-                non_contact_coords = dict(gantry.get_coordinates())
                 output(
                     f"Non-contact pose recorded for {instrument}: "
                     f"X={non_contact_coords['x']:.3f}, "
@@ -737,7 +733,7 @@ def run_multi_instrument_calibration(
                     f"distance from block={height_above_block:.3f} mm"
                 )
                 continue
-            _interactive_jog_to_reference(
+            block_coordinates[instrument] = _interactive_jog_to_reference(
                 gantry,
                 target_description=(
                     f"Step 3: calibrate {instrument!r}. Jog this tool's active tip/probe point "
@@ -750,12 +746,12 @@ def run_multi_instrument_calibration(
                     "instruments."
                 ),
                 key_reader=key_reader,
+                stdin_flusher=stdin_flusher,
                 output=output,
                 feed_rate=jog_feed_rate,
                 initial_step_mm=jog_step_mm,
                 limit_pull_off_mm=5.0,
             )
-            block_coordinates[instrument] = dict(gantry.get_coordinates())
             output(
                 f"Recorded block WPos for {instrument}: "
                 f"X={block_coordinates[instrument]['x']:.3f}, "
@@ -773,6 +769,8 @@ def run_multi_instrument_calibration(
         _set_serial_timeout_if_available(gantry, homing_serial_timeout_s)
         _home_with_serial_reconnect(gantry, output=output)
         _set_serial_timeout_if_available(gantry, jog_serial_timeout_s)
+        stdin_flusher()
+        _wait_until_idle_if_available(gantry)
         measured_coords = dict(gantry.get_coordinates())
         homing_pull_off_mm = gantry.homing_pull_off_mm()
         z_min_mm = block_z_calibration.z_min_mm
@@ -785,20 +783,6 @@ def run_multi_instrument_calibration(
             z_span_mm=z_span_mm,
             homing_pull_off_mm=homing_pull_off_mm,
         )
-        if skip_soft_limit_config:
-            output("Skipping GRBL soft-limit programming by request.")
-        else:
-            gantry.configure_soft_limits_from_spans(
-                max_travel_x=max_travel["max_travel_x"],
-                max_travel_y=max_travel["max_travel_y"],
-                max_travel_z=max_travel["max_travel_z"],
-                status_report=0,
-                homing_pull_off=homing_pull_off_mm,
-                hard_limits=_configured_grbl_setting(raw_config, "hard_limits"),
-                tolerance_mm=tolerance_mm,
-            )
-            restore_soft_limits_after_calibration = False
-
         all_calibrations = compute_relative_instrument_calibrations(
             block_coordinates=block_coordinates,
             reference_instrument=reference_instrument,
@@ -832,13 +816,40 @@ def run_multi_instrument_calibration(
             yaml_text=yaml_text,
             output=output,
         )
-        _maybe_write_gantry_yaml(
+        written_yaml_path = _maybe_write_gantry_yaml(
             yaml_text=yaml_text,
             output_path=output_gantry_path,
             write_requested=write_gantry_yaml,
             input_reader=input_reader,
             output=output,
+            backup_existing_output=backup_existing_output,
         )
+        if skip_soft_limit_config:
+            output("Skipping GRBL soft-limit programming by request.")
+        else:
+            try:
+                gantry.configure_soft_limits_from_spans(
+                    max_travel_x=max_travel["max_travel_x"],
+                    max_travel_y=max_travel["max_travel_y"],
+                    max_travel_z=max_travel["max_travel_z"],
+                    status_report=0,
+                    homing_pull_off=homing_pull_off_mm,
+                    hard_limits=_configured_grbl_setting(raw_config, "hard_limits"),
+                    tolerance_mm=tolerance_mm,
+                )
+            except Exception:
+                if written_yaml_path is not None:
+                    output(
+                        "Soft-limit programming failed after the calibrated YAML "
+                        f"was written to: {written_yaml_path}"
+                    )
+                else:
+                    output(
+                        "Soft-limit programming failed after the calibrated YAML "
+                        "was printed above; copy those values before retrying."
+                    )
+                raise
+            restore_soft_limits_after_calibration = False
 
         return MultiInstrumentCalibrationResult(
             measured_working_volume=(
@@ -868,6 +879,7 @@ def run_multi_instrument_calibration(
                 restore_soft_limits_after_calibration = False
                 _restore_soft_limits_after_origin_jog(gantry, output=output)
         finally:
+            _cancel_jog_if_available(gantry, output=output)
             _set_serial_timeout_if_available(gantry, 0.05)
             output("Disconnecting...")
             gantry.disconnect()

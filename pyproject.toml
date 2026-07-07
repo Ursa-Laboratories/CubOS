@@ -37,6 +37,12 @@ docs = [
     "pymdown-extensions>=10.0",
 ]
 
+[tool.setuptools]
+# yaml_utils is a single top-level module in src/, so packages.find never
+# discovers it; without this, any `pip install cubos` breaks deck.loader.
+package-dir = {"" = "src", "data" = "data"}
+py-modules = ["yaml_utils"]
+
 [tool.setuptools.packages.find]
 where = ["src", "."]
 include = ["data", "data.*", "deck", "deck.*",

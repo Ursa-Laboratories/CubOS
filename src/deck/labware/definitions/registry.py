@@ -13,7 +13,7 @@ import importlib
 from pathlib import Path
 from typing import Any, Dict, List, Type
 
-import yaml
+from yaml_utils import load_yaml_file
 
 from ..labware import Labware
 
@@ -27,8 +27,7 @@ def load_registry() -> Dict[str, Any]:
     """Load and cache the labware registry from ``registry.yaml``."""
     global _cache
     if _cache is None:
-        with _REGISTRY_PATH.open() as handle:
-            _cache = yaml.safe_load(handle) or {}
+        _cache = load_yaml_file(_REGISTRY_PATH) or {}
     return _cache
 
 
@@ -72,8 +71,7 @@ def load_definition_config(definition: str) -> Dict[str, Any]:
     """
     entry = _require_entry(definition)
     config_path = _DEFINITIONS_DIR / entry["config"]
-    with config_path.open() as handle:
-        data = yaml.safe_load(handle) or {}
+    data = load_yaml_file(config_path) or {}
     if not isinstance(data, dict):
         raise ValueError(
             f"Config file '{config_path}' must be a YAML mapping; got {type(data).__name__}."

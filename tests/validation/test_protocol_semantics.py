@@ -113,13 +113,17 @@ def _measure_args(
     *,
     measurement_height: float = -1.0,
     method: str = "measure",
+    indentation_limit_height: float | None = None,
 ) -> dict:
-    return {
+    args = {
         "instrument": "asmi",
         "position": "plate.A1",
         "method": method,
         "measurement_height": measurement_height,
     }
+    if indentation_limit_height is not None:
+        args["indentation_limit_height"] = indentation_limit_height
+    return args
 
 
 def _move_step(*, position, instrument: str = "asmi", travel_z: float | None = None,
@@ -387,6 +391,99 @@ def test_measure_with_command_measurement_height_passes():
     protocol = _protocol(_measure_args(), command_name="measure")
 
     assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
+
+
+def test_measure_indentation_below_z_min_violates():
+    instrumented_gantry, deck = _board_and_deck()
+    gantry = _gantry_config(z_max=100.0)
+    protocol = _protocol(
+        _measure_args(
+            method="indentation",
+            indentation_limit_height=-20.0,
+        ),
+        command_name="measure",
+    )
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
+
+    assert any("indentation deepest" in v.message for v in violations), violations
+
+
+def test_measure_indentation_limit_height_above_measurement_violates():
+    instrumented_gantry, deck = _board_and_deck()
+    gantry = _gantry_config(z_max=100.0)
+    protocol = _protocol(
+        _measure_args(
+            measurement_height=-1.0,
+            method="indentation",
+            indentation_limit_height=2.0,
+        ),
+        command_name="measure",
+    )
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
+
+    assert any(
+        "indentation_limit_height" in v.message and "above" in v.message
+        for v in violations
+    ), violations
+
+
+def test_measure_unknown_position_emits_violation():
+    instrumented_gantry, deck = _board_and_deck()
+    args = _measure_args()
+    args["position"] = "plate.Z99"
+    protocol = _protocol(args, command_name="measure")
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert any("cannot be resolved" in v.message for v in violations), violations
+
+
+def test_measure_unknown_instrument_emits_violation():
+    instrumented_gantry, deck = _board_and_deck()
+    args = _measure_args()
+    args["instrument"] = "missing"
+    protocol = _protocol(args, command_name="measure")
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert any("unknown instrument" in v.message for v in violations), violations
+
+
+def test_scan_unknown_plate_emits_violation():
+    instrumented_gantry, deck = _board_and_deck()
+    args = _scan_args()
+    args["plate"] = "missing_plate"
+    protocol = _protocol(args)
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert any("cannot be resolved" in v.message for v in violations), violations
+
+
+def test_scan_unknown_instrument_emits_violation():
+    instrumented_gantry, deck = _board_and_deck()
+    args = _scan_args()
+    args["instrument"] = "missing"
+    protocol = _protocol(args)
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert any("unknown instrument" in v.message for v in violations), violations
+
+
+@pytest.mark.parametrize("command_name,args", [
+    ("pause", {"seconds": 0.1}),
+    ("breakpoint", {"message": "continue"}),
+])
+def test_no_motion_commands_pass_semantic_validation(command_name, args):
+    instrumented_gantry, deck = _board_and_deck()
+    protocol = _protocol(args, command_name=command_name)
+
+    assert validate_protocol_semantics(
+        protocol, instrumented_gantry, deck, _gantry_config(),
+    ) == []
 
 
 # ─── working-volume bound checks for `move` ──────────────────────────────────

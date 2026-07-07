@@ -3,9 +3,9 @@
 A 3D-printed rack for holding disposable pipette tips on the PANDA-BEAR deck.
 Maps to `cubos.src.deck.labware.tip_rack.TipRack`, which inherits from
 `HolderLabware` and exposes a per-tip `tip_present` boolean flag for tracking
-which tips are still loaded vs. consumed. `tip_length` defaults to the 59.3 mm
-Opentrons 300 uL tip length used by the current pipette fixtures; update it if
-the physical tips differ.
+which tips are still loaded vs. consumed. `tip_length` is required because the
+active tip length is collision-critical; set it to the measured length for the
+physical tips in use.
 
 ## Files
 

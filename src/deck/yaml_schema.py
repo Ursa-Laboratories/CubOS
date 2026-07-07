@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Annotated, Dict, Literal, Optional, Union
+from types import MappingProxyType
+from typing import Annotated, Dict, Literal, Mapping, Optional, Type, Union
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -45,6 +46,7 @@ class WellPlateYamlEntry(BaseModel):
     calibration: _YamlCalibrationPoints
     x_offset: float = Field(..., gt=0)
     y_offset: float = Field(..., gt=0)
+    row_direction: Optional[Literal["positive", "negative"]] = None
     # Volume — optional metadata.
     capacity_ul: Optional[float] = None
     working_volume_ul: Optional[float] = None
@@ -148,6 +150,7 @@ class NestedWellPlateYamlEntry(BaseModel):
     calibration: _YamlCalibrationPoints
     x_offset: float = Field(..., gt=0)
     y_offset: float = Field(..., gt=0)
+    row_direction: Optional[Literal["positive", "negative"]] = None
     capacity_ul: Optional[float] = None
     working_volume_ul: Optional[float] = None
 
@@ -285,18 +288,26 @@ class WallYamlEntry(BaseModel):
     corner_1: _YamlPoint3D
     corner_2: _YamlPoint3D
 
+    @model_validator(mode="after")
+    def _validate_explicit_z(self) -> "WallYamlEntry":
+        missing = []
+        if self.corner_1.z is None:
+            missing.append("corner_1.z")
+        if self.corner_2.z is None:
+            missing.append("corner_2.z")
+        if missing:
+            raise ValueError(
+                "Wall corners must include explicit Z values; set "
+                f"{', '.join(missing)} to the obstacle's lower/upper deck-frame Z."
+            )
+        return self
+
 
 class WellPlateHolderYamlEntry(_BaseHolderYamlEntry):
     type: Literal["well_plate_holder"] = "well_plate_holder"
     model_name: str = "SlideHolder_Top"
     well_plate_surface_height_from_bottom: float = Field(default=5.0, gt=0)
     well_plate: Optional[NestedWellPlateYamlEntry] = None
-
-    @model_validator(mode="after")
-    def _validate_single_nested_plate(self) -> "WellPlateHolderYamlEntry":
-        if self.well_plate is None:
-            return self
-        return self
 
 
 class VialHolderYamlEntry(_BaseHolderYamlEntry):
@@ -327,6 +338,21 @@ LabwareYamlEntry = Annotated[
     Field(discriminator="type"),
 ]
 
+LABWARE_YAML_ENTRY_MODELS: Mapping[str, Type[BaseModel]] = MappingProxyType({
+    "well_plate": WellPlateYamlEntry,
+    "vial": VialYamlEntry,
+    "tip_rack": TipRackYamlEntry,
+    "tip_disposal": TipDisposalYamlEntry,
+    "wall": WallYamlEntry,
+    "well_plate_holder": WellPlateHolderYamlEntry,
+    "vial_holder": VialHolderYamlEntry,
+})
+"""Public mapping from deck labware ``type`` strings to YAML entry models.
+
+Consumers can validate a single labware config or inspect
+``model_fields`` without maintaining per-type field lists.
+"""
+
 
 class DeckYamlSchema(BaseModel):
     """Root deck YAML schema: only 'labware' key allowed."""
@@ -336,3 +362,13 @@ class DeckYamlSchema(BaseModel):
     labware: Dict[str, LabwareYamlEntry] = Field(
         ..., description="Mapping of labware key to well_plate or vial entry."
     )
+
+    @model_validator(mode="after")
+    def _validate_labware_keys(self) -> "DeckYamlSchema":
+        invalid = sorted(key for key in self.labware if "." in key)
+        if invalid:
+            raise ValueError(
+                "Deck labware keys cannot contain '.' because dots separate "
+                f"nested labware and locations; rename {invalid}."
+            )
+        return self

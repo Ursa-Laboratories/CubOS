@@ -86,7 +86,8 @@ class TestBreakpointCommand:
         from protocol_engine.commands.pause import breakpoint_cmd
 
         ctx = _make_context()
-        with patch("builtins.input", return_value="") as mock_input:
+        with patch("protocol_engine.commands.pause.sys.stdin.isatty", return_value=True), \
+             patch("builtins.input", return_value="") as mock_input:
             breakpoint_cmd(ctx)
             mock_input.assert_called_once()
 
@@ -94,7 +95,8 @@ class TestBreakpointCommand:
         from protocol_engine.commands.pause import breakpoint_cmd
 
         ctx = _make_context()
-        with patch("builtins.input", return_value="") as mock_input:
+        with patch("protocol_engine.commands.pause.sys.stdin.isatty", return_value=True), \
+             patch("builtins.input", return_value="") as mock_input:
             breakpoint_cmd(ctx, message="Check plate alignment")
             call_arg = mock_input.call_args[0][0]
             assert "Check plate alignment" in call_arg
@@ -103,7 +105,8 @@ class TestBreakpointCommand:
         from protocol_engine.commands.pause import breakpoint_cmd
 
         ctx = _make_context()
-        with patch("builtins.input", return_value="") as mock_input:
+        with patch("protocol_engine.commands.pause.sys.stdin.isatty", return_value=True), \
+             patch("builtins.input", return_value="") as mock_input:
             breakpoint_cmd(ctx)
             call_arg = mock_input.call_args[0][0]
             assert "Press Enter" in call_arg
@@ -112,6 +115,18 @@ class TestBreakpointCommand:
         from protocol_engine.commands.pause import breakpoint_cmd
 
         ctx = _make_context()
-        with patch("builtins.input", return_value=""):
+        with patch("protocol_engine.commands.pause.sys.stdin.isatty", return_value=True), \
+             patch("builtins.input", return_value=""):
             breakpoint_cmd(ctx, message="test")
         ctx.logger.info.assert_called()
+
+    def test_breakpoint_non_tty_logs_and_continues_without_input(self):
+        from protocol_engine.commands.pause import breakpoint_cmd
+
+        ctx = _make_context()
+        with patch("protocol_engine.commands.pause.sys.stdin.isatty", return_value=False), \
+             patch("builtins.input") as mock_input:
+            breakpoint_cmd(ctx, message="headless")
+
+        mock_input.assert_not_called()
+        ctx.logger.warning.assert_called()

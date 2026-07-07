@@ -36,6 +36,7 @@ class InstrumentedGantry:
             dict(expected_grbl_settings) if expected_grbl_settings else None
         )
         self.safe_z = safe_z
+        self.last_commanded_pose: dict[str, Any] | None = None
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     def move(
@@ -72,6 +73,12 @@ class InstrumentedGantry:
             "Moving %s to (%.3f, %.3f, %.3f) -> gantry (%.3f, %.3f, %.3f)",
             instr.name, x, y, z, gantry_x, gantry_y, gantry_z,
         )
+        self.last_commanded_pose = {
+            "instrument": instr.name,
+            "instrument_position": (x, y, z),
+            "gantry_position": (gantry_x, gantry_y, gantry_z),
+            "travel_z": gantry_travel_z,
+        }
         self.controller.move_to(
             gantry_x, gantry_y, gantry_z, travel_z=gantry_travel_z,
         )

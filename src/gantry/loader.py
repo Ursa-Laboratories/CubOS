@@ -7,6 +7,8 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
+from yaml_utils import load_yaml_file
+
 from .errors import GantryLoaderError
 from .gantry_config import (
     GantryConfig,
@@ -69,8 +71,7 @@ def load_gantry_from_yaml(path: str | Path) -> GantryConfig:
         ValidationError: If the YAML does not match the schema.
     """
     path = Path(path)
-    with path.open() as f:
-        raw = yaml.safe_load(f)
+    raw = load_yaml_file(path)
     if raw is None:
         raw = {}
 

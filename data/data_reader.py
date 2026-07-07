@@ -44,6 +44,7 @@ class CampaignRecord:
     protocol_config: Optional[str]
     created_at: str
     status: str
+    finished_at: Optional[str]
 
 
 @dataclass(frozen=True)
@@ -52,6 +53,7 @@ class ExperimentRecord:
 
     id: int
     campaign_id: int
+    labware_key: str
     labware_name: str
     well_id: Optional[str]
     contents: Optional[str]
@@ -95,7 +97,7 @@ class DataReader:
     def get_campaign(self, campaign_id: int) -> Optional[CampaignRecord]:
         row = self._conn.execute(
             "SELECT id, description, deck_config, board_config, "
-            "gantry_config, protocol_config, created_at, status "
+            "gantry_config, protocol_config, created_at, status, finished_at "
             "FROM campaigns WHERE id = ?",
             (campaign_id,),
         ).fetchone()
@@ -106,7 +108,7 @@ class DataReader:
     def list_campaigns(self) -> List[CampaignRecord]:
         rows = self._conn.execute(
             "SELECT id, description, deck_config, board_config, "
-            "gantry_config, protocol_config, created_at, status "
+            "gantry_config, protocol_config, created_at, status, finished_at "
             "FROM campaigns ORDER BY id",
         ).fetchall()
         return [CampaignRecord(**dict(r)) for r in rows]
@@ -120,7 +122,8 @@ class DataReader:
         well_id: Optional[str] = None,
     ) -> List[ExperimentRecord]:
         query = (
-            "SELECT id, campaign_id, labware_name, well_id, contents, created_at "
+            "SELECT id, campaign_id, labware_key, labware_name, well_id, "
+            "contents, created_at "
             "FROM experiments WHERE campaign_id = ?"
         )
         params: list[Any] = [campaign_id]
@@ -201,7 +204,7 @@ class DataReader:
                 f"Valid tables: {', '.join(sorted(_VALID_MEASUREMENT_TABLES))}"
             )
         rows = self._conn.execute(
-            f"SELECT m.*, e.well_id, e.labware_name "
+            f"SELECT m.*, e.well_id, e.labware_key, e.labware_name "
             f"FROM {table} m "
             f"JOIN experiments e ON m.experiment_id = e.id "
             f"WHERE e.campaign_id = ? ORDER BY m.id",

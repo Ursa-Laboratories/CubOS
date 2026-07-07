@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-from typing import Any, Callable, Dict, Type
+from typing import Any, Callable, Dict, Type, get_type_hints
 
 from pydantic import BaseModel, ConfigDict, create_model
 
@@ -69,6 +69,12 @@ def _build_schema_from_signature(
     default values in the function signature.
     """
     sig = inspect.signature(func)
+    globalns = dict(getattr(func, "__globals__", {}))
+    if "ProtocolContext" not in globalns:
+        from .runtime import ProtocolContext
+
+        globalns["ProtocolContext"] = ProtocolContext
+    type_hints = get_type_hints(func, globalns=globalns, localns=globalns)
     field_definitions: Dict[str, Any] = {}
 
     skip_params = {"self", "context"}
@@ -77,9 +83,13 @@ def _build_schema_from_signature(
         if param_name in skip_params:
             continue
 
-        annotation = (
-            param.annotation if param.annotation != inspect.Parameter.empty else str
-        )
+        annotation = type_hints.get(param_name)
+        if annotation is None:
+            annotation = (
+                param.annotation
+                if param.annotation != inspect.Parameter.empty
+                else str
+            )
 
         if param.default != inspect.Parameter.empty:
             field_definitions[param_name] = (annotation, param.default)

@@ -46,7 +46,3 @@ instruments:
     offset_x: 180.0
     offset_y: -25.0
     depth: 0.0
-    # Labware-relative motion heights live on the protocol scan/measure command.
-    force_threshold: -50
-    sensor_channels:
-      - 1

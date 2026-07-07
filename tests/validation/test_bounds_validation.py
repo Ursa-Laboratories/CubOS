@@ -478,3 +478,23 @@ class TestValidateProtocolMotionBounds:
             "A2.approach_z",
             "A2.action_z",
         ]
+
+    def test_collector_reports_measure_indentation_limit_target(self):
+        gantry = _make_gantry(safe_z=80.0)
+        deck = _make_deck(plate=_make_plate(rows=1, columns=1, a1_z=20.0))
+        protocol = _make_protocol(
+            "measure",
+            instrument="probe",
+            position="plate.A1",
+            measurement_height=-1.0,
+            indentation_limit_height=-5.0,
+        )
+
+        targets = collect_protocol_motion_targets(gantry, protocol, deck)
+
+        assert [target.position_id for target in targets] == [
+            "A1.safe_z",
+            "A1.action_z",
+            "A1.indentation_limit_z",
+        ]
+        assert targets[-1].z == 15.0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
 import pytest
@@ -129,7 +130,7 @@ def test_auto_calibration_prompts_before_overwriting_input(monkeypatch, tmp_path
         lambda *args, **kwargs: calls.append((args, kwargs)),
     )
 
-    with pytest.raises(RuntimeError, match="cancelled"):
+    with pytest.raises(calibrate_gantry.CalibrationCancelled):
         calibrate_gantry.run_auto_calibration(
             path,
             output=lambda message: None,
@@ -162,7 +163,36 @@ def test_auto_calibration_overwrites_input_after_confirmation(monkeypatch, tmp_p
     assert calls[0][1]["output_gantry_path"] == path.resolve()
 
 
-def test_auto_calibration_does_not_prompt_for_explicit_output(monkeypatch, tmp_path):
+def test_auto_calibration_prompts_before_overwriting_existing_explicit_output(monkeypatch, tmp_path):
+    path = _write_gantry(
+        tmp_path / "single.yaml",
+        "  asmi:\n    type: asmi\n    vendor: vernier\n",
+    )
+    out_path = tmp_path / "existing.yaml"
+    out_path.write_text("existing", encoding="utf-8")
+    calls: list[tuple] = []
+    prompts: list[str] = []
+    responses = iter(["n"])
+
+    monkeypatch.setattr(
+        calibrate_gantry,
+        "run_calibration",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(calibrate_gantry.CalibrationCancelled):
+        calibrate_gantry.run_auto_calibration(
+            path,
+            output_gantry_path=out_path,
+            output=lambda message: None,
+            input_reader=lambda prompt: prompts.append(prompt) or next(responses),
+        )
+
+    assert calls == []
+    assert prompts == [f"{out_path.resolve()} already exists and will be overwritten. Continue? [y/N]: "]
+
+
+def test_auto_calibration_allows_existing_explicit_output_after_confirmation(monkeypatch, tmp_path):
     path = _write_gantry(
         tmp_path / "single.yaml",
         "  asmi:\n    type: asmi\n    vendor: vernier\n",
@@ -170,6 +200,7 @@ def test_auto_calibration_does_not_prompt_for_explicit_output(monkeypatch, tmp_p
     out_path = tmp_path / "existing.yaml"
     out_path.write_text("existing", encoding="utf-8")
     prompts: list[str] = []
+    responses = iter(["y", ""])
 
     monkeypatch.setattr(
         calibrate_gantry,
@@ -181,8 +212,86 @@ def test_auto_calibration_does_not_prompt_for_explicit_output(monkeypatch, tmp_p
         path,
         output_gantry_path=out_path,
         output=lambda message: None,
-        input_reader=lambda prompt: prompts.append(prompt) or "",
+        input_reader=lambda prompt: prompts.append(prompt) or next(responses),
     )
 
     assert result == "single-result"
-    assert prompts == ["Press ENTER to connect to hardware and start calibration, or Ctrl-C to abort: "]
+    assert prompts == [
+        f"{out_path.resolve()} already exists and will be overwritten. Continue? [y/N]: ",
+        "Press ENTER to connect to hardware and start calibration, or Ctrl-C to abort: ",
+    ]
+
+
+def test_auto_calibration_start_prompt_no_aborts_before_connect(monkeypatch, tmp_path):
+    path = _write_gantry(
+        tmp_path / "single.yaml",
+        "  asmi:\n    type: asmi\n    vendor: vernier\n",
+    )
+    calls: list[tuple] = []
+    messages: list[str] = []
+
+    monkeypatch.setattr(
+        calibrate_gantry,
+        "run_calibration",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(calibrate_gantry.CalibrationCancelled):
+        calibrate_gantry.run_auto_calibration(
+            path,
+            output_gantry_path=tmp_path / "out.yaml",
+            output=messages.append,
+            input_reader=lambda _prompt: "no",
+        )
+
+    assert calls == []
+    assert any("cancelled before hardware connection" in message for message in messages)
+
+
+def test_auto_calibration_enter_start_prompt_prints_starting_message(monkeypatch, tmp_path):
+    path = _write_gantry(
+        tmp_path / "single.yaml",
+        "  asmi:\n    type: asmi\n    vendor: vernier\n",
+    )
+    messages: list[str] = []
+
+    monkeypatch.setattr(
+        calibrate_gantry,
+        "run_calibration",
+        lambda *args, **kwargs: "single-result",
+    )
+
+    result = calibrate_gantry.run_auto_calibration(
+        path,
+        output_gantry_path=tmp_path / "out.yaml",
+        output=messages.append,
+        input_reader=lambda _prompt: "",
+    )
+
+    assert result == "single-result"
+    assert "Starting calibration..." in messages
+
+
+def test_declined_overwrite_exits_zero(monkeypatch, tmp_path, capsys):
+    path = _write_gantry(
+        tmp_path / "single.yaml",
+        "  asmi:\n    type: asmi\n    vendor: vernier\n",
+    )
+    calls: list[tuple] = []
+
+    monkeypatch.setattr(sys, "argv", ["calibrate_gantry.py", str(path)])
+
+    def fake_run_auto(*args, **kwargs):
+        calls.append((args, kwargs))
+        raise calibrate_gantry.CalibrationCancelled(
+            "Calibration cancelled before hardware connection."
+        )
+
+    monkeypatch.setattr(calibrate_gantry, "run_auto_calibration", fake_run_auto)
+
+    with pytest.raises(SystemExit) as exc_info:
+        calibrate_gantry.main()
+
+    assert exc_info.value.code == 0
+    assert len(calls) == 1
+    assert "ERROR:" not in capsys.readouterr().err

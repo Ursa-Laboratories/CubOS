@@ -171,8 +171,8 @@ protocol commands that consume them:
 Pipette commands default to the labware reference Z (`height = 0`), and
 transfer commands may set separate source/destination heights. Once a tip is
 picked up, validation adds the rack `tip_length` to pipette depth for gantry
-bounds checks. Omitted `tip_length` defaults to 59.3 mm for the current
-Opentrons 300 uL tips.
+bounds checks. Each tip rack must declare `tip_length`; CubOS has no safe
+default for this collision-critical dimension.
 - `park_position` is an explicit rest pose (absolute coords, not relative).
 - ASMI `indentation_limit_height` is a *signed* labware-relative offset
   (mm above the well surface; negative = below). It must be at or below

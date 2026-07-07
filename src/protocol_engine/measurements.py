@@ -45,6 +45,36 @@ _POTENTIOSTAT_TECHNIQUES = {
     "cv": MeasurementType.POTENTIOSTAT_CV,
 }
 
+MEASUREMENT_RESULT_TYPES = (UVVisSpectrum, MeasurementResult, CureResult)
+"""Concrete result classes normalized by :func:`normalize_measurement`.
+
+Dictionary ASMI indentation payloads and potentiostat result objects are
+accepted by shape; use :func:`is_measurement_result` for those public checks.
+"""
+
+_POTENTIOSTAT_RESULT_CLASS_NAMES = {
+    "OCPResult",
+    "CAResult",
+    "CPResult",
+    "CVResult",
+}
+
+
+def _is_measurement_result_class(obj_or_cls: Any) -> bool:
+    if obj_or_cls is dict:
+        return True
+    module = getattr(obj_or_cls, "__module__", "")
+    name = getattr(obj_or_cls, "__name__", "")
+    if (
+        module == "instruments.potentiostat.models"
+        and name in _POTENTIOSTAT_RESULT_CLASS_NAMES
+    ):
+        return True
+    try:
+        return issubclass(obj_or_cls, MEASUREMENT_RESULT_TYPES)
+    except TypeError:
+        return False
+
 
 def _is_potentiostat_result(raw_result: Any) -> bool:
     """True if ``raw_result`` quacks like an ``instruments.potentiostat`` result."""
@@ -55,6 +85,23 @@ def _is_potentiostat_result(raw_result: Any) -> bool:
         if not hasattr(raw_result, attr):
             return False
     return True
+
+
+def is_measurement_result(obj_or_cls: Any) -> bool:
+    """Return whether CubOS can persist this measurement result shape.
+
+    ``obj_or_cls`` may be a concrete result object, a concrete result class,
+    or the ``dict`` return annotation used by ASMI indentation. Plain dict
+    objects are only accepted when they contain the ASMI ``"measurements"``
+    payload key; this mirrors :func:`normalize_measurement` exactly.
+    """
+    if isinstance(obj_or_cls, dict):
+        return "measurements" in obj_or_cls
+    if isinstance(obj_or_cls, type):
+        return _is_measurement_result_class(obj_or_cls)
+    return isinstance(obj_or_cls, MEASUREMENT_RESULT_TYPES) or _is_potentiostat_result(
+        obj_or_cls
+    )
 
 
 def _potentiostat_base_metadata(

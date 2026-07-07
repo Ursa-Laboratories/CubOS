@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import difflib
+import inspect
 from pathlib import Path
 from typing import Any, Dict, Mapping, TYPE_CHECKING
 
@@ -70,8 +72,40 @@ def _instantiate_instruments(
         if mock_mode:
             kwargs["offline"] = True
         cls = get_instrument_class(type_key, vendor)
+        _validate_driver_kwargs(name, type_key, vendor, cls, kwargs)
         instruments[name] = cls(**kwargs)
     return instruments
+
+
+def _validate_driver_kwargs(
+    name: str,
+    type_key: str,
+    vendor: str,
+    cls: type[BaseInstrument],
+    kwargs: Mapping[str, Any],
+) -> None:
+    """Reject YAML keys that the resolved driver constructor will not consume."""
+    signature = inspect.signature(cls.__init__)
+    accepted = {
+        param_name
+        for param_name, parameter in signature.parameters.items()
+        if param_name != "self"
+        and parameter.kind
+        in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+    }
+    unknown = sorted(set(kwargs) - accepted)
+    if not unknown:
+        return
+
+    details = []
+    for key in unknown:
+        matches = difflib.get_close_matches(key, sorted(accepted), n=1)
+        hint = f" Did you mean '{matches[0]}'?" if matches else ""
+        details.append(f"'{key}'{hint}")
+    raise ValueError(
+        f"Instrument '{name}' ({type_key}/{vendor}) has unsupported YAML "
+        f"field(s): {', '.join(details)}. Accepted fields: {sorted(accepted)}"
+    )
 
 
 def build_instrumented_gantry(

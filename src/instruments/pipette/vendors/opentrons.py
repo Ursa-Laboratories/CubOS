@@ -37,6 +37,10 @@ class OpentronsPipette(PipetteInstrument):
     Pass ``offline=True`` for dry runs — simulates plunger state in memory.
     """
 
+    CONFIG_FIELD_CHOICES = {
+        "pipette_model": sorted(PIPETTE_MODELS.keys()),
+    }
+
     def __init__(
         self,
         pipette_model: str = "p300_single_gen2",
@@ -170,6 +174,7 @@ class OpentronsPipette(PipetteInstrument):
         self._send_command(_CMD_MOVE_TO, self._config.prime_position, speed)
 
     def aspirate(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
+        self._validate_volume(volume_ul)
         mm_travel = volume_ul * self._config.mm_to_ul
         if self._offline:
             self._position_mm += mm_travel
@@ -183,6 +188,7 @@ class OpentronsPipette(PipetteInstrument):
         )
 
     def dispense(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
+        self._validate_volume(volume_ul)
         mm_travel = volume_ul * self._config.mm_to_ul
         if self._offline:
             self._position_mm -= mm_travel
@@ -204,6 +210,7 @@ class OpentronsPipette(PipetteInstrument):
     def mix(
         self, volume_ul: float, repetitions: int = 3, speed: float = 50.0
     ) -> MixResult:
+        self._validate_volume(volume_ul)
         if not self._offline:
             mm_travel = volume_ul * self._config.mm_to_ul
             self._send_command(_CMD_MIX, mm_travel, repetitions, speed)
@@ -243,6 +250,7 @@ class OpentronsPipette(PipetteInstrument):
         )
 
     def drip_stop(self, volume_ul: float = 5.0, speed: float = 50.0) -> None:
+        self._validate_positive_bounded_volume(volume_ul)
         if self._offline:
             return
         mm_travel = volume_ul * self._config.mm_to_ul
@@ -317,3 +325,27 @@ class OpentronsPipette(PipetteInstrument):
             except serial.SerialException:
                 pass
             self._serial = None
+
+    def _validate_volume(self, volume_ul: float) -> None:
+        if (
+            isinstance(volume_ul, bool)
+            or not isinstance(volume_ul, (int, float))
+            or not math.isfinite(float(volume_ul))
+            or not (self._config.min_volume <= float(volume_ul) <= self._config.max_volume)
+        ):
+            raise PipetteCommandError(
+                f"Volume {volume_ul!r} uL is outside {self._config.name} range "
+                f"{self._config.min_volume}-{self._config.max_volume} uL"
+            )
+
+    def _validate_positive_bounded_volume(self, volume_ul: float) -> None:
+        if (
+            isinstance(volume_ul, bool)
+            or not isinstance(volume_ul, (int, float))
+            or not math.isfinite(float(volume_ul))
+            or not (0.0 < float(volume_ul) <= self._config.max_volume)
+        ):
+            raise PipetteCommandError(
+                f"Volume {volume_ul!r} uL is outside {self._config.name} range "
+                f"0-{self._config.max_volume} uL"
+            )
