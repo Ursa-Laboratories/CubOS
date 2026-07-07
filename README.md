@@ -5,8 +5,6 @@ GRBL gantry motion, mounted instruments, deck labware, YAML protocols, offline
 motion validation, and SQLite-backed experiment data into one operator and
 developer workflow.
 
-![CubOS gantry demo](docs/images/cubos-demo.gif)
-
 Use CubOS to:
 
 - define gantry, deck, and protocol state in versioned YAML files
