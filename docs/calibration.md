@@ -52,8 +52,9 @@ well plate: use the front-left-most (corner) well your protocols address as
 the XY origin, and the height from the deck to the top of the plate as the Z
 reference height.
 
-<!-- TODO(alex): add image showing a well plate as the calibration reference
-     (corner-most well = XY origin, plate top height above deck = Z reference). -->
+![Annotated well plate calibration reference showing the XY origin and Z reference height](images/calibration-well-plate-reference.webp){ width="520" }
+
+![Annotated close-up of a probe touching the selected well plate reference surface](images/calibration-well-plate-touch.webp){ width="520" }
 
 Two things must hold for this to be reliable:
 
