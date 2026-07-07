@@ -5,10 +5,15 @@ from __future__ import annotations
 import importlib
 import os
 import tempfile
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
 from data.data_store import DataStore
+from deck.deck import Deck
+from deck.labware.labware import Coordinate3D
+from deck.labware.well_plate import WellPlate
 from deck.errors import DeckLoaderError
 from gantry.errors import GantryLoaderError
 from gantry.gantry import Gantry
@@ -19,6 +24,7 @@ from protocol_engine.errors import ProtocolLoaderError
 from protocol_engine.protocol import Protocol
 from protocol_engine.runtime import ProtocolContext
 from protocol_engine.registry import CommandRegistry
+from protocol_engine.commands.scan import scan
 from protocol_engine.setup import run_on_hardware, setup_protocol
 from validation.errors import SetupValidationError
 
@@ -512,6 +518,57 @@ instruments:
         assert campaign_count == 1
         assert experiment_count == 1
         assert uvvis_count == 1
+        status = store._conn.execute(
+            "SELECT status, finished_at FROM campaigns"
+        ).fetchone()
+        assert status[0] == "completed"
+        assert status[1] is not None
+
+    def test_run_on_hardware_marks_campaign_failed_on_execution_error(
+        self, monkeypatch,
+    ):
+        store = DataStore(":memory:")
+        campaign_id = store.create_campaign(description="failed run")
+
+        class FailingProtocol:
+            def execute(self, context):
+                raise RuntimeError("boom")
+
+        def fake_setup_protocol(*args, **kwargs):
+            return FailingProtocol(), ProtocolContext(
+                gantry=SimpleNamespace(
+                    safe_z=None,
+                    connect_instruments=MagicMock(),
+                    disconnect_instruments=MagicMock(),
+                ),
+                deck=MagicMock(),
+                data_store=kwargs["data_store"],
+                campaign_id=kwargs["campaign_id"],
+            )
+
+        monkeypatch.setattr(
+            "protocol_engine.setup.setup_protocol", fake_setup_protocol,
+        )
+
+        with _TempYamlFiles() as f:
+            with pytest.raises(RuntimeError, match="boom"):
+                run_on_hardware(
+                    f.gantry_path,
+                    f.deck_path,
+                    f.protocol_path,
+                    gantry=Gantry(offline=True),
+                    mock_mode=True,
+                    data_store=store,
+                    campaign_id=campaign_id,
+                )
+
+        status = store._conn.execute(
+            "SELECT status, finished_at FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        ).fetchone()
+        assert status[0] == "failed"
+        assert status[1] is not None
+        store.close()
 
     def test_run_on_hardware_full_lifecycle_order(self, monkeypatch):
         calls = []
@@ -579,3 +636,215 @@ instruments:
             "disconnect_instruments",
             "disconnect",
         ]
+
+    def test_mid_scan_failure_retracts_to_safe_z_before_disconnect(self, monkeypatch):
+        events = []
+
+        class Controller:
+            def connect(self):
+                events.append(("connect",))
+
+            def prepare_for_protocol_run(self):
+                events.append(("prepare",))
+
+            def is_healthy(self):
+                events.append(("healthy",))
+                return True
+
+            def move_to(self, x, y, z, travel_z=None):
+                events.append(("move_to", x, y, z, travel_z))
+
+            def disconnect(self):
+                events.append(("disconnect",))
+
+        class FailingInstrument:
+            name = "probe"
+            offset_x = 0.0
+            offset_y = 0.0
+            depth = 0.0
+            effective_depth = 0.0
+
+            def __init__(self):
+                self.calls = 0
+
+            def connect(self):
+                events.append(("instrument_connect",))
+
+            def disconnect(self):
+                events.append(("instrument_disconnect",))
+
+            def measure(self):
+                self.calls += 1
+                if self.calls == 2:
+                    raise RuntimeError("instrument boom")
+                return True
+
+        controller = Controller()
+        plate = WellPlate(
+            name="test_plate",
+            model_name="test_2x1",
+            rows=1,
+            columns=2,
+            wells={
+                "A1": Coordinate3D(x=10.0, y=20.0, z=5.0),
+                "A2": Coordinate3D(x=20.0, y=20.0, z=5.0),
+            },
+            capacity_ul=200.0,
+            working_volume_ul=150.0,
+        )
+        context = ProtocolContext(
+            gantry=InstrumentedGantry(
+                controller=controller,
+                instruments={"probe": FailingInstrument()},
+                safe_z=80.0,
+            ),
+            deck=Deck({"plate_1": plate}),
+        )
+
+        class ScanProtocol:
+            def execute(self, runtime_context):
+                return scan(
+                    runtime_context,
+                    plate="plate_1",
+                    instrument="probe",
+                    method="measure",
+                    measurement_height=0.0,
+                    interwell_scan_height=10.0,
+                )
+
+        def fake_setup_protocol(*args, **kwargs):
+            return ScanProtocol(), context
+
+        monkeypatch.setattr(
+            "protocol_engine.setup.setup_protocol", fake_setup_protocol,
+        )
+
+        with _TempYamlFiles() as f:
+            with pytest.raises(RuntimeError, match="instrument boom"):
+                run_on_hardware(
+                    f.gantry_path,
+                    f.deck_path,
+                    f.protocol_path,
+                    gantry=controller,
+                    mock_mode=True,
+                    data_store=DataStore(":memory:"),
+                )
+
+        retract = ("move_to", 20.0, 20.0, 80.0, 80.0)
+        assert retract in events
+        assert events.index(retract) < events.index(("disconnect",))
+
+    def test_disconnect_failure_preserves_root_exception_and_closes_store(
+        self, monkeypatch,
+    ):
+        closed = []
+
+        class ClosingStore:
+            def close(self):
+                closed.append(True)
+
+        class DisconnectFails:
+            def connect(self):
+                pass
+
+            def prepare_for_protocol_run(self):
+                pass
+
+            def is_healthy(self):
+                return True
+
+            def disconnect(self):
+                raise RuntimeError("disconnect boom")
+
+        class FailingProtocol:
+            def execute(self, context):
+                raise ValueError("root cause")
+
+        import data
+
+        store = ClosingStore()
+        monkeypatch.setattr(data, "DataStore", lambda: store)
+
+        def fake_setup_protocol(*args, **kwargs):
+            return FailingProtocol(), ProtocolContext(
+                gantry=SimpleNamespace(
+                    safe_z=None,
+                    connect_instruments=MagicMock(),
+                    disconnect_instruments=MagicMock(),
+                ),
+                deck=MagicMock(),
+                data_store=kwargs["data_store"],
+                campaign_id=1,
+            )
+
+        monkeypatch.setattr(
+            "protocol_engine.setup.setup_protocol", fake_setup_protocol,
+        )
+
+        with _TempYamlFiles() as f:
+            with pytest.raises(ValueError, match="root cause"):
+                run_on_hardware(
+                    f.gantry_path,
+                    f.deck_path,
+                    f.protocol_path,
+                    gantry=DisconnectFails(),
+                    mock_mode=True,
+                    campaign_id=1,
+                )
+
+        assert closed == [True]
+
+    def test_run_on_hardware_mock_mode_without_gantry_constructs_offline_gantry(
+        self, monkeypatch,
+    ):
+        constructed = []
+
+        class FakeGantry:
+            def __init__(self, config=None, offline=False):
+                constructed.append({"config": config, "offline": offline})
+
+            def connect(self):
+                pass
+
+            def prepare_for_protocol_run(self):
+                pass
+
+            def is_healthy(self):
+                return True
+
+            def disconnect(self):
+                pass
+
+        class EmptyProtocol:
+            def execute(self, context):
+                return []
+
+        def fake_setup_protocol(*args, **kwargs):
+            return EmptyProtocol(), ProtocolContext(
+                gantry=SimpleNamespace(
+                    safe_z=None,
+                    connect_instruments=MagicMock(),
+                    disconnect_instruments=MagicMock(),
+                ),
+                deck=MagicMock(),
+                data_store=kwargs["data_store"],
+                campaign_id=1,
+            )
+
+        monkeypatch.setattr("protocol_engine.setup.Gantry", FakeGantry)
+        monkeypatch.setattr(
+            "protocol_engine.setup.setup_protocol", fake_setup_protocol,
+        )
+
+        with _TempYamlFiles() as f:
+            results = run_on_hardware(
+                f.gantry_path,
+                f.deck_path,
+                f.protocol_path,
+                mock_mode=True,
+                data_store=DataStore(":memory:"),
+                campaign_id=1,
+            )
+
+        assert results == []
+        assert constructed == [{"config": None, "offline": True}]

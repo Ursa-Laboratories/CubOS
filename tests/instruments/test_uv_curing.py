@@ -79,6 +79,10 @@ class TestUVCuringOffline(unittest.TestCase):
         with self.assertRaises(UVCuringCommandError):
             self.uv.cure(exposure_time=0)
 
+    def test_cure_rejects_exposure_below_tenth_second(self):
+        with self.assertRaises(UVCuringCommandError):
+            self.uv.cure(exposure_time=0.05)
+
     def test_measure_is_alias(self):
         result = self.uv.measure(intensity=10.0)
         self.assertIsInstance(result, CureResult)
@@ -153,6 +157,54 @@ class TestUVCuringMockedSerial(unittest.TestCase):
         uv.connect()
         uv.disconnect()
         mock_ser.close.assert_called_once()
+
+    @patch('instruments.uv_curing.vendors.excelitas.time.sleep')
+    @patch('instruments.uv_curing.vendors.excelitas.serial.Serial')
+    def test_cure_rounds_exposure_to_tenths(self, mock_serial_cls, mock_sleep):
+        mock_ser = mock_serial_cls.return_value
+        mock_ser.is_open = True
+        mock_ser.readline.side_effect = [
+            b"READY\r\n",
+            b"OK\r\n",
+            b"OK\r\n",
+            b"OK\r\n",
+        ]
+        uv = ExcelitasUVCuring(offline=False)
+        uv.connect()
+        mock_ser.reset_mock()
+
+        uv.cure(intensity=50, exposure_time=1.99)
+
+        written = [call[0][0] for call in mock_ser.write.call_args_list]
+        self.assertIn(b"STM20XX\r", written)
+
+    @patch('instruments.uv_curing.vendors.excelitas.serial.Serial')
+    def test_failed_handshake_closes_port_and_health_check_false(self, mock_serial_cls):
+        mock_ser = mock_serial_cls.return_value
+        mock_ser.is_open = True
+        mock_ser.readline.return_value = b"NOPE\r\n"
+        uv = ExcelitasUVCuring(offline=False)
+
+        with self.assertRaises(UVCuringConnectionError):
+            uv.connect()
+
+        mock_ser.close.assert_called_once()
+        self.assertFalse(uv.health_check())
+
+    @patch('instruments.uv_curing.vendors.excelitas.time.sleep')
+    @patch('instruments.uv_curing.vendors.excelitas.serial.Serial')
+    def test_sil_nack_raises_command_error(self, mock_serial_cls, mock_sleep):
+        mock_ser = mock_serial_cls.return_value
+        mock_ser.is_open = True
+        mock_ser.readline.side_effect = [
+            b"READY\r\n",
+            b"NACK\r\n",
+        ]
+        uv = ExcelitasUVCuring(offline=False)
+        uv.connect()
+
+        with self.assertRaises(UVCuringCommandError):
+            uv.cure(intensity=50, exposure_time=1.0)
 
 
 import serial  # needed for SerialException in test

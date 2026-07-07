@@ -259,6 +259,30 @@ class TestUVVisCCSDriver:
             ccs.measure()
 
     @patch("ctypes.cdll")
+    def test_measure_raises_typed_error_on_start_scan_failure(self, mock_cdll):
+        dll = self._make_mock_dll()
+        dll.tlccs_startScan.return_value = -7
+        mock_cdll.LoadLibrary.return_value = dll
+
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+        ccs.connect()
+
+        with pytest.raises(UVVisCCSError, match="tlccs_startScan failed"):
+            ccs.measure()
+
+    def test_measure_before_connect_raises_typed_error(self):
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+
+        with pytest.raises(UVVisCCSError, match="not connected"):
+            ccs.measure()
+
+    def test_set_integration_time_before_connect_raises_typed_error(self):
+        ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
+
+        with pytest.raises(UVVisCCSError, match="not connected"):
+            ccs.set_integration_time(0.5)
+
+    @patch("ctypes.cdll")
     def test_is_base_instrument(self, mock_cdll):
         ccs = ThorlabsUVVisCCS(serial_number="TEST123", dll_path="fake.dll")
         assert isinstance(ccs, BaseInstrument)

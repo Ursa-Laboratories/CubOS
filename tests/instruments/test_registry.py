@@ -9,14 +9,18 @@ from instruments.base_instrument import BaseInstrument
 from instruments.pipette.models import AspirateResult, MixResult, PipetteStatus
 from instruments.pipette.interface import PipetteInstrument
 from instruments.registry import (
+    FieldSpec,
+    config_fields,
     get_calibration_mode,
     get_instrument_class,
     get_instrument_interface,
     get_supported_types,
     get_supported_vendors,
+    list_measurement_methods,
     load_registry,
     validate_instrument,
 )
+from gantry.instrument_loader import build_instrumented_gantry
 
 
 EXPECTED_TYPES = [
@@ -58,6 +62,24 @@ class FakeCustomerASMI(ASMIInstrument):
 
 
 class FakeCustomerPipette(PipetteInstrument):
+    def __init__(
+        self,
+        customer_gain: float = 1.0,
+        name: str | None = None,
+        offset_x: float = 0.0,
+        offset_y: float = 0.0,
+        depth: float = 0.0,
+        offline: bool = False,
+    ):
+        super().__init__(
+            name=name,
+            offset_x=offset_x,
+            offset_y=offset_y,
+            depth=depth,
+            offline=offline,
+        )
+        self.customer_gain = customer_gain
+
     def connect(self) -> None:
         pass
 
@@ -200,6 +222,36 @@ class TestLoadRegistry:
         assert "customer_xyz" in get_supported_vendors("asmi")
         assert get_instrument_class("asmi", "customer_xyz") is FakeCustomerASMI
 
+    def test_overlay_duplicate_yaml_key_names_file_and_key(self, tmp_path, monkeypatch):
+        overlay = tmp_path / "instrument_registry.yaml"
+        overlay.write_text(
+            textwrap.dedent(
+                """
+                instruments:
+                  asmi:
+                    vendors:
+                      customer_xyz:
+                        module: tests.instruments.test_registry
+                        class_name: FakeCustomerASMI
+                  asmi:
+                    vendors:
+                      customer_abc:
+                        module: tests.instruments.test_registry
+                        class_name: FakeCustomerASMI
+                """
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("CUBOS_INSTRUMENT_REGISTRY_PATHS", str(overlay))
+        registry_module._cache = None
+
+        with pytest.raises(Exception) as exc_info:
+            load_registry()
+
+        message = str(exc_info.value)
+        assert str(overlay) in message
+        assert "duplicate YAML key 'asmi'" in message
+
     def test_overlay_vendor_must_implement_interface(self, tmp_path, monkeypatch):
         overlay = tmp_path / "instrument_registry.yaml"
         overlay.write_text(
@@ -244,6 +296,86 @@ class TestLoadRegistry:
 
         assert "customer_xyz" in get_supported_vendors("pipette")
         assert get_instrument_class("pipette", "customer_xyz") is FakeCustomerPipette
+
+    def test_unknown_driver_yaml_key_names_key_and_suggestion(self):
+        with pytest.raises(ValueError) as exc_info:
+            build_instrumented_gantry(
+                {
+                    "force_probe": {
+                        "type": "asmi",
+                        "vendor": "vernier",
+                        "dept": 58.0,
+                    }
+                },
+                gantry=object(),
+            )
+
+        message = str(exc_info.value)
+        assert "force_probe" in message
+        assert "asmi/vernier" in message
+        assert "dept" in message
+        assert "depth" in message
+
+    def test_known_driver_yaml_kwargs_still_pass(self):
+        board = build_instrumented_gantry(
+            {
+                "force_probe": {
+                    "type": "asmi",
+                    "vendor": "vernier",
+                    "depth": 58.0,
+                    "sensor_channels": [1],
+                    "offline": True,
+                }
+            },
+            gantry=object(),
+        )
+
+        instrument = board.instruments["force_probe"]
+        assert instrument.depth == 58.0
+        assert instrument._sensor_channels == [1]
+
+    def test_external_registry_driver_signature_kwargs_pass(self, monkeypatch):
+        monkeypatch.setattr(
+            registry_module.importlib_metadata,
+            "entry_points",
+            lambda: _EntryPointGroup([
+                _EntryPoint({
+                    "instruments": {
+                        "pipette": {
+                            "vendors": {
+                                "customer_xyz": {
+                                    "module": "tests.instruments.test_registry",
+                                    "class_name": "FakeCustomerPipette",
+                                }
+                            }
+                        }
+                    }
+                })
+            ]),
+        )
+        registry_module._cache = None
+
+        board = build_instrumented_gantry(
+            {
+                "pipette": {
+                    "type": "pipette",
+                    "vendor": "customer_xyz",
+                    "customer_gain": 2.5,
+                    "offline": True,
+                }
+            },
+            gantry=object(),
+        )
+
+        assert board.instruments["pipette"].customer_gain == 2.5
+
+    def test_unknown_vendor_error_lists_pair_tried_and_available_pairs(self):
+        with pytest.raises(ValueError) as exc_info:
+            validate_instrument("asmi", "missing_vendor")
+
+        message = str(exc_info.value)
+        assert "asmi/missing_vendor" in message
+        assert "asmi/vernier" in message
 
     def test_duplicate_vendor_without_override_raises(self, tmp_path, monkeypatch):
         overlay = tmp_path / "instrument_registry.yaml"
@@ -331,6 +463,96 @@ class TestGetCalibrationMode:
 
     def test_contact_is_default_for_regular_instruments(self):
         assert get_calibration_mode("asmi") == "contact"
+
+
+class TestConfigFields:
+
+    def test_returns_driver_signature_fields_with_choices(self):
+        fields = config_fields("pipette", "opentrons")
+
+        assert FieldSpec(
+            name="pipette_model",
+            type="str",
+            required=False,
+            default="p300_single_gen2",
+            choices=(
+                "flex_1channel_1000",
+                "flex_1channel_50",
+                "flex_8channel_1000",
+                "flex_8channel_50",
+                "flex_96channel_1000",
+                "p1000_single_gen2",
+                "p20_multi_gen2",
+                "p20_single_gen2",
+                "p300_multi_gen2",
+                "p300_single_gen2",
+            ),
+        ) in fields
+        assert FieldSpec(
+            name="baud_rate",
+            type="int",
+            required=False,
+            default=115200,
+            choices=None,
+        ) in fields
+        assert "offset_x" not in {field.name for field in fields}
+
+    def test_config_fields_unknown_vendor_raises_clear_error(self):
+        with pytest.raises(ValueError, match="asmi/missing_vendor"):
+            config_fields("asmi", "missing_vendor")
+
+    def test_external_driver_signature_fields_are_reflected(self, monkeypatch):
+        monkeypatch.setattr(
+            registry_module.importlib_metadata,
+            "entry_points",
+            lambda: _EntryPointGroup([
+                _EntryPoint({
+                    "instruments": {
+                        "pipette": {
+                            "vendors": {
+                                "customer_xyz": {
+                                    "module": "tests.instruments.test_registry",
+                                    "class_name": "FakeCustomerPipette",
+                                }
+                            }
+                        }
+                    }
+                })
+            ]),
+        )
+        registry_module._cache = None
+
+        fields = config_fields("pipette", "customer_xyz")
+
+        assert FieldSpec(
+            name="customer_gain",
+            type="float",
+            required=False,
+            default=1.0,
+            choices=None,
+        ) in fields
+
+
+class TestListMeasurementMethods:
+
+    def test_returns_methods_using_protocol_measurement_types(self):
+        assert list_measurement_methods("asmi") == ["indentation"]
+        assert list_measurement_methods("filmetrics") == ["measure"]
+        assert list_measurement_methods("uv_curing") == ["measure", "cure"]
+        assert list_measurement_methods("uvvis_ccs") == ["measure"]
+        assert list_measurement_methods("potentiostat") == [
+            "run_CA",
+            "run_CP",
+            "run_CV",
+            "run_OCP",
+        ]
+
+    def test_list_measurement_methods_can_filter_vendor(self):
+        assert list_measurement_methods("pipette", vendor="opentrons") == []
+
+    def test_list_measurement_methods_unknown_type_raises_clear_error(self):
+        with pytest.raises(ValueError, match="Unknown instrument type"):
+            list_measurement_methods("nonexistent")
 
 
 class TestGetInstrumentClass:

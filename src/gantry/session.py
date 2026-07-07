@@ -78,6 +78,11 @@ class CalibrationBlockedError(GantrySessionError):
 class MovementOutOfBoundsError(GantrySessionError):
     """Raised when manual movement would leave the configured working volume."""
 
+    def __init__(self, message: str, *, requires_reconnect: bool = False) -> None:
+        super().__init__(message)
+        self.requires_reconnect = requires_reconnect
+        """Whether the operator should reconnect before retrying movement."""
+
 
 class GantryAlarmError(GantrySessionError):
     """Raised when a movement surfaces a GRBL alarm or active limit."""
@@ -122,6 +127,18 @@ class GantrySession:
         return self._calibration_warning
 
     @property
+    def calibration_active(self) -> bool:
+        """True while calibration bypass/restore state is active.
+
+        This is the public read-only contract for UI/runtime consumers that
+        need to warn operators before manual motion during calibration.
+        """
+        return bool(
+            self._calibration_jog_bypass_working_volume
+            or self._calibration_restore_soft_limits
+        )
+
+    @property
     def connected_gantry_filename(self) -> str | None:
         return self._connected_gantry_filename
 
@@ -138,6 +155,10 @@ class GantrySession:
     ) -> GantryPositionSnapshot:
         """Connect a gantry and publish it only after the full handshake works."""
         with self._lock:
+            if self._gantry is not None:
+                self._restore_calibration_soft_limits_if_needed_locked()
+                self._gantry.disconnect()
+                self._clear_connected_state_locked()
             config = (
                 self._load_config_from_yaml(config_path)
                 if config_path is not None
@@ -263,7 +284,7 @@ class GantrySession:
         """Send feed hold without waiting for the operation lock."""
         gantry = self._require_connected()
         try:
-            gantry.stop()
+            gantry.feed_hold_realtime()
         except Exception as exc:
             if self._looks_like_feed_hold_timeout(exc):
                 raise InterruptFeedHoldTimeoutError(
@@ -523,7 +544,9 @@ class GantrySession:
                     calibration_warning=self._calibration_warning,
                 )
             except Exception:
-                self._calibration_restore_soft_limits = False
+                self._attempt_soft_limit_restore_after_calibration_failure_locked(
+                    gantry
+                )
                 self._calibration_jog_bypass_working_volume = False
                 raise
 
@@ -764,7 +787,8 @@ class GantrySession:
         if volume is None:
             raise MovementOutOfBoundsError(
                 "Manual absolute moves require a loaded gantry working_volume. "
-                "Reconnect with a valid gantry YAML before using Move To."
+                "Reconnect with a valid gantry YAML before using Move To.",
+                requires_reconnect=True,
             )
         violations = []
         for axis, value in (("x", x), ("y", y), ("z", z)):
@@ -792,7 +816,8 @@ class GantrySession:
         if volume is None:
             raise MovementOutOfBoundsError(
                 "Manual jogs require a loaded gantry working_volume. Reconnect "
-                "with a valid gantry YAML before jogging."
+                "with a valid gantry YAML before jogging.",
+                requires_reconnect=True,
             )
         current = self._current_work_position_locked()
         violations = []
@@ -816,14 +841,16 @@ class GantrySession:
         if not isinstance(raw, dict):
             raise MovementOutOfBoundsError(
                 "Jog working-volume checks require current gantry position. "
-                "Reconnect before jogging."
+                "Reconnect before jogging.",
+                requires_reconnect=True,
             )
         try:
             return {axis: float(raw[axis]) for axis in ("x", "y", "z")}
         except (KeyError, TypeError, ValueError) as exc:
             raise MovementOutOfBoundsError(
                 "Jog working-volume checks require finite current gantry "
-                "position. Reconnect before jogging."
+                "position. Reconnect before jogging.",
+                requires_reconnect=True,
             ) from exc
 
     def _wait_until_idle_locked(
@@ -868,7 +895,26 @@ class GantrySession:
         if self._gantry is None or not self._calibration_restore_soft_limits:
             return
         self._gantry.set_soft_limits_enabled(True)
-        self._calibration_restore_soft_limits = False
+        self._calibration_restore_soft_limits = (
+            self._gantry.soft_limits_enabled() is not True
+        )
+        if self._calibration_restore_soft_limits:
+            raise GantrySessionError(
+                "Soft-limit restore did not verify $20=1 on the controller."
+            )
+
+    def _attempt_soft_limit_restore_after_calibration_failure_locked(
+        self,
+        gantry: Gantry,
+    ) -> None:
+        self._calibration_restore_soft_limits = True
+        try:
+            gantry.set_soft_limits_enabled(True)
+            self._calibration_restore_soft_limits = (
+                gantry.soft_limits_enabled() is not True
+            )
+        except Exception:
+            self._calibration_restore_soft_limits = True
 
     def _connected_grbl_setting_locked(self, field_name: str) -> float | None:
         if self._connected_gantry_config is None:

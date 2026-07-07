@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
@@ -158,6 +158,7 @@ def generate_wells_from_offsets(
     a1_center: Coordinate3D,
     x_offset: float,
     y_offset: float,
+    row_direction: Literal["positive", "negative"] = "positive",
     rounding_decimals: int = 3,
 ) -> Dict[str, Coordinate3D]:
     """
@@ -166,8 +167,15 @@ def generate_wells_from_offsets(
     This mirrors the classic well-to-XY logic:
       - row index is derived from row_labels (e.g. ['A','B',...])
       - column index is derived from column_indices (e.g. [1,2,...,12])
-      - each step in X/Y applies the configured offsets
+      - each column step applies +x_offset
+      - each row step applies +y_offset by default, or -y_offset when
+        row_direction="negative"
+
+    Deck YAML loading derives column direction from the measured A1/A2 points
+    and defaults row direction from that legacy convention. Use the deck
+    schema's explicit row_direction field when deck orientation matters.
     """
+    row_sign = 1.0 if row_direction == "positive" else -1.0
     wells: Dict[str, Coordinate3D] = {}
 
     for row_idx, row_label in enumerate(row_labels):
@@ -175,7 +183,7 @@ def generate_wells_from_offsets(
             well_id = f"{row_label}{col_num}"
 
             x = a1_center.x + x_offset * col_idx
-            y = a1_center.y + y_offset * row_idx
+            y = a1_center.y + y_offset * row_sign * row_idx
             z = a1_center.z
 
             wells[well_id] = Coordinate3D(

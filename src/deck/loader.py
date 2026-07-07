@@ -9,6 +9,8 @@ from typing import Any, Dict, Type
 import yaml
 from pydantic import BaseModel, ValidationError
 
+from yaml_utils import load_yaml_file
+
 from .deck import Deck
 from .labware import Coordinate3D, Labware
 from .labware.definitions.registry import (
@@ -149,7 +151,16 @@ def _resolve_load_names(raw: Dict[str, Any]) -> Dict[str, Any]:
         load_name = entry["load_name"]
         try:
             base = load_definition_config(load_name)
-        except (ValueError, FileNotFoundError) as exc:
+        except FileNotFoundError as exc:
+            raise DeckLoaderError(
+                f"❌ Definition config file is missing for `load_name: '{load_name}'` "
+                f"in deck entry '{deck_key}'.\n"
+                "How to fix: restore the registered config file under "
+                "`src/deck/labware/definitions/`, or update the definition registry."
+            ) from exc
+        except ValueError as exc:
+            if "Unknown labware definition" not in str(exc):
+                raise
             raise DeckLoaderError(
                 f"❌ Unknown `load_name: '{load_name}'` in deck entry "
                 f"'{deck_key}'.\n"
@@ -157,6 +168,21 @@ def _resolve_load_names(raw: Dict[str, Any]) -> Dict[str, Any]:
                 f"add a new folder + registry entry under "
                 f"`src/deck/labware/definitions/`."
             ) from exc
+
+        if base.get("type") == "tip_rack":
+            missing = [
+                field
+                for field in ("calibration", "pickup_z")
+                if field not in entry
+            ]
+            if missing:
+                raise DeckLoaderError(
+                    f"❌ Tip rack deck entry '{deck_key}' uses "
+                    f"`load_name: '{load_name}'` but is missing "
+                    f"{', '.join(missing)}.\n"
+                    "How to fix: the definition provides geometry only; measure "
+                    "and set calibration/pickup_z in your deck YAML."
+                )
 
         # Shallow merge: user fields override config fields. Drop load_name.
         merged: Dict[str, Any] = dict(base)
@@ -174,6 +200,24 @@ def _resolve_load_names(raw: Dict[str, Any]) -> Dict[str, Any]:
     new_raw = dict(raw)
     new_raw["labware"] = expanded
     return new_raw
+
+
+def resolve_load_names(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Return deck YAML with ``load_name`` entries expanded.
+
+    Parameters
+    ----------
+    raw:
+        Raw deck YAML mapping, typically loaded from a user-authored config.
+
+    Returns
+    -------
+    dict[str, Any]
+        A shallow copy of ``raw`` whose ``labware`` entries with
+        ``load_name`` have been expanded through the labware-definition
+        registry. Entries without ``load_name`` are unchanged.
+    """
+    return _resolve_load_names(raw)
 
 
 def _slot_to_model(slot_entry: _YamlHolderSlot, *, default_z: float) -> LabwareSlot:
@@ -275,7 +319,10 @@ def _resolve_plate_orientation(entry: Any) -> _PlateOrientation:
                 "Calibration A2 must match one adjacent column step from A1 "
                 "(delta x magnitude must equal x_offset magnitude)."
             )
-        row_step = -entry.y_offset if col_step > 0 else entry.y_offset
+        if getattr(entry, "row_direction", None) is None:
+            row_step = -entry.y_offset if col_step > 0 else entry.y_offset
+        else:
+            row_step = entry.y_offset if entry.row_direction == "positive" else -entry.y_offset
         return _PlateOrientation(
             col_delta_x=col_step, col_delta_y=0.0,
             row_delta_x=0.0, row_delta_y=row_step,
@@ -288,7 +335,10 @@ def _resolve_plate_orientation(entry: Any) -> _PlateOrientation:
                 "Calibration A2 must match one adjacent column step from A1 "
                 "(delta y magnitude must equal y_offset magnitude)."
             )
-        row_step = entry.x_offset if col_step > 0 else -entry.x_offset
+        if getattr(entry, "row_direction", None) is None:
+            row_step = entry.x_offset if col_step > 0 else -entry.x_offset
+        else:
+            row_step = entry.x_offset if entry.row_direction == "positive" else -entry.x_offset
         return _PlateOrientation(
             col_delta_x=0.0, col_delta_y=col_step,
             row_delta_x=row_step, row_delta_y=0.0,
@@ -318,6 +368,28 @@ def _derive_wells_from_calibration(
             )
 
     return wells
+
+
+def derive_wells_preview(
+    entry: Any,
+    resolved_z: float,
+) -> Dict[str, Coordinate3D]:
+    """Preview derived well/tip positions for a calibrated grid entry.
+
+    Parameters
+    ----------
+    entry:
+        A validated well-plate or tip-rack YAML entry exposing ``rows``,
+        ``columns``, ``calibration``, ``x_offset``, and ``y_offset``.
+    resolved_z:
+        Deck-frame Z value to assign to each generated coordinate.
+
+    Returns
+    -------
+    dict[str, Coordinate3D]
+        Mapping from well/tip ID such as ``"A1"`` to its deck-frame center.
+    """
+    return _derive_wells_from_calibration(entry, resolved_z=resolved_z)
 
 
 def _build_well_plate(
@@ -456,16 +528,8 @@ def _build_deck_from_raw(raw: dict[str, Any], *, factory_z_travel_mm: float | No
         elif isinstance(entry, WallYamlEntry):
             labware[name] = Wall(
                 name=entry.name,
-                corner_1=Coordinate3D(
-                    x=entry.corner_1.x,
-                    y=entry.corner_1.y,
-                    z=entry.corner_1.z if entry.corner_1.z is not None else 0.0,
-                ),
-                corner_2=Coordinate3D(
-                    x=entry.corner_2.x,
-                    y=entry.corner_2.y,
-                    z=entry.corner_2.z if entry.corner_2.z is not None else 0.0,
-                ),
+                corner_1=Coordinate3D(x=entry.corner_1.x, y=entry.corner_1.y, z=entry.corner_1.z),
+                corner_2=Coordinate3D(x=entry.corner_2.x, y=entry.corner_2.y, z=entry.corner_2.z),
             )
         elif isinstance(entry, WellPlateHolderYamlEntry):
             labware[name] = _build_holder(
@@ -492,8 +556,7 @@ def load_deck_from_yaml(
     Load a deck YAML file and return a Deck containing all labware.
     """
     resolved_path = Path(path)
-    with resolved_path.open() as handle:
-        raw = yaml.safe_load(handle)
+    raw = load_yaml_file(resolved_path)
     if raw is None:
         raw = {}
     return _build_deck_from_raw(raw, factory_z_travel_mm=factory_z_travel_mm)

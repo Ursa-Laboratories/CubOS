@@ -128,7 +128,7 @@ class Gantry:
                 return False
 
             status = self._mill.current_status()
-            if "Alarm" in status or "Error" in status:
+            if "alarm" in status.lower() or "error" in status.lower():
                 self.logger.warning("Health check: unhealthy status: %s", status)
                 return False
 
@@ -326,6 +326,28 @@ class Gantry:
             self.logger.error("Error stopping gantry: %s", exc)
             raise
 
+    def feed_hold_realtime(self) -> None:
+        """Send GRBL feed hold without reading the serial stream."""
+        if self._offline:
+            return
+        assert self._mill is not None
+        try:
+            self._mill.feed_hold_realtime()
+        except MillConnectionError as exc:
+            self.logger.error("Error sending realtime feed hold: %s", exc)
+            raise
+
+    def resume(self) -> None:
+        """Resume a feed-held GRBL controller."""
+        if self._offline:
+            return
+        assert self._mill is not None
+        try:
+            self._mill.resume()
+        except MillConnectionError as exc:
+            self.logger.error("Error resuming gantry: %s", exc)
+            raise
+
     def get_coordinates(self) -> Dict[str, float]:
         """Return current gantry coordinates as a dict."""
         if self._offline:
@@ -338,15 +360,15 @@ class Gantry:
         """Return coordinates, work position, and last-known status."""
         if self._offline:
             coords = dict(self._offline_coords)
-            return {"coords": coords, "work_pos": coords, "status": "Idle"}
+            return {"coords": dict(coords), "work_pos": dict(coords), "status": "Idle"}
 
         assert self._mill is not None
         coords = self._mill.current_coordinates()
         user_coords = {"x": float(coords.x), "y": float(coords.y), "z": float(coords.z)}
         status = self._extract_status()
         return {
-            "coords": user_coords,
-            "work_pos": user_coords,
+            "coords": dict(user_coords),
+            "work_pos": dict(user_coords),
             "status": status,
         }
 
@@ -356,6 +378,13 @@ class Gantry:
             return
         assert self._mill is not None
         self._mill.set_read_timeout(timeout)
+
+    def get_serial_timeout(self) -> float | None:
+        """Return the serial read timeout on the active mill connection."""
+        if self._offline:
+            return None
+        assert self._mill is not None
+        return self._mill.get_read_timeout()
 
     def clear_g92_offsets(self) -> None:
         """Clear transient G92 offsets before assigning a durable WPos."""

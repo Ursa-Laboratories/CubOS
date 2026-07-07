@@ -309,13 +309,33 @@ def _append_measure_targets(
     if not isinstance(instrument, str):
         return
     tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
+    position = step_args.get("position")
+    measurement_height = step_args.get("measurement_height")
     _append_position_engage(
         targets,
         deck=deck,
         gantry=gantry,
-        position=step_args.get("position"),
+        position=position,
         instrument=instrument,
-        measurement_height=step_args.get("measurement_height"),
+        measurement_height=measurement_height,
+        tip_extension=tip_ext,
+    )
+    if not isinstance(position, str):
+        return
+    indentation_limit_height = step_args.get("indentation_limit_height")
+    if not _is_finite_number(indentation_limit_height):
+        return
+    coord = _resolve_deck_coord(deck, position)
+    if coord is None:
+        return
+    _append_target(
+        targets,
+        target=position,
+        suffix="indentation_limit_z",
+        instrument=instrument,
+        x=coord.x,
+        y=coord.y,
+        z=coord.z + float(indentation_limit_height),
         tip_extension=tip_ext,
     )
 

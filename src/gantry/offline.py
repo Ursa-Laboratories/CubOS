@@ -30,7 +30,13 @@ class OfflineGantry:
     def unlock(self) -> None:
         pass
 
-    def move_to(self, x: float, y: float, z: float) -> None:
+    def move_to(
+        self,
+        x: float,
+        y: float,
+        z: float,
+        travel_z: float | None = None,
+    ) -> None:
         self._coords = {"x": x, "y": y, "z": z}
 
     def get_coordinates(self) -> dict[str, float]:
@@ -40,4 +46,10 @@ class OfflineGantry:
         return "Idle"
 
     def stop(self) -> None:
+        pass
+
+    def feed_hold_realtime(self) -> None:
+        pass
+
+    def resume(self) -> None:
         pass

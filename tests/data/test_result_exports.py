@@ -296,6 +296,7 @@ def test_export_campaign_results_csvs_writes_sane_flat_files(tmp_path):
         {
             "measurement_id": "1",
             "experiment_id": "1",
+            "labware_key": "plate",
             "labware_name": "plate",
             "well_id": "A1",
             "measurement_timestamp": uvvis_rows[0]["measurement_timestamp"],
@@ -308,6 +309,7 @@ def test_export_campaign_results_csvs_writes_sane_flat_files(tmp_path):
         {
             "measurement_id": "1",
             "experiment_id": "1",
+            "labware_key": "plate",
             "labware_name": "plate",
             "well_id": "A1",
             "measurement_timestamp": uvvis_rows[1]["measurement_timestamp"],
@@ -334,6 +336,31 @@ def test_export_campaign_results_csvs_writes_sane_flat_files(tmp_path):
     assert "uvvis,2,uvvis.csv" in manifest
     assert "asmi,2,asmi.csv" in manifest
     assert "potentiostat,2,potentiostat.csv" in manifest
+
+
+def test_export_campaign_results_csvs_writes_via_atomic_replace(monkeypatch, tmp_path):
+    import data.exports as exports
+
+    db_path = tmp_path / "panda_data.db"
+    campaign_id = _seed_store(db_path)
+    replaced = []
+    real_replace = exports.os.replace
+
+    def tracking_replace(src, dst):
+        replaced.append((src, dst))
+        real_replace(src, dst)
+
+    monkeypatch.setattr(exports.os, "replace", tracking_replace)
+
+    written = export_campaign_results_csvs(
+        db_path,
+        campaign_id,
+        output_dir=tmp_path / "results",
+    )
+
+    assert written
+    assert len(replaced) == len(written)
+    assert all(str(src).endswith(".tmp") for src, _dst in replaced)
 
 
 def test_results_directory_is_gitignored():

@@ -494,14 +494,15 @@ class TestScanCommand:
         ctx = _mock_context(sensor=sensor)
         ctx.data_store = MagicMock()
         ctx.data_store.get_contents.return_value = []
-        ctx.data_store.create_experiment.return_value = 101
         ctx.campaign_id = 77
 
         scan(ctx, **_scan_args())
 
-        assert ctx.data_store.log_measurement.call_count == 4
-        measurement = ctx.data_store.log_measurement.call_args_list[0].args[1]
+        assert ctx.data_store.log_experiment_measurement.call_count == 4
+        kwargs = ctx.data_store.log_experiment_measurement.call_args_list[0].kwargs
+        measurement = kwargs["result"]
         assert isinstance(measurement, InstrumentMeasurement)
+        assert kwargs["labware_key"] == "plate_1"
 
     def test_persists_filmetrics_measurements(self):
         from protocol_engine.commands.scan import scan
@@ -526,7 +527,7 @@ class TestScanCommand:
 
         rows = store._conn.execute(
             """
-            SELECT e.well_id, m.thickness_nm, m.goodness_of_fit
+            SELECT e.labware_key, e.well_id, m.thickness_nm, m.goodness_of_fit
             FROM experiments e
             JOIN filmetrics_measurements m ON m.experiment_id = e.id
             WHERE e.campaign_id = ?
@@ -534,10 +535,48 @@ class TestScanCommand:
             """,
             (campaign_id,),
         ).fetchall()
-        assert [row[0] for row in rows] == ["A1", "A2", "B1", "B2"]
-        assert all(row[1] == pytest.approx(151.2) for row in rows)
-        assert all(row[2] == pytest.approx(0.96) for row in rows)
+        assert [row[0] for row in rows] == ["plate_1"] * 4
+        assert [row[1] for row in rows] == ["A1", "A2", "B1", "B2"]
+        assert all(row[2] == pytest.approx(151.2) for row in rows)
+        assert all(row[3] == pytest.approx(0.96) for row in rows)
         store.close()
+
+    def test_malformed_asmi_measurement_warns_and_returns_results(self, caplog):
+        from protocol_engine.commands.scan import scan
+
+        sensor = _make_sensor()
+        sensor._return_value = {
+            "measurements": [
+                {
+                    "z_mm": 13.0,
+                    "raw_force_n": 0.2,
+                    "corrected_force_n": 0.1,
+                    "direction": "down",
+                }
+            ],
+            "baseline_avg": 0.1,
+            "baseline_std": 0.01,
+            "force_exceeded": False,
+            "data_points": 1,
+        }
+        ctx = _mock_context(sensor=sensor)
+        ctx.data_store = DataStore(db_path=":memory:")
+        ctx.campaign_id = ctx.data_store.create_campaign(description="scan")
+        ctx.data_store.register_labware(
+            ctx.campaign_id,
+            "plate_1",
+            ctx.deck.resolve_labware("plate_1"),
+        )
+
+        with caplog.at_level(logging.WARNING):
+            results = scan(ctx, **_scan_args())
+
+        assert set(results) == {"A1", "A2", "B1", "B2"}
+        assert "Failed to log measurement for well" in caplog.text
+        assert ctx.data_store._conn.execute(
+            "SELECT COUNT(*) FROM experiments"
+        ).fetchone()[0] == 0
+        ctx.data_store.close()
 
     def test_persists_uv_curing_measurements(self):
         from protocol_engine.commands.scan import scan

@@ -23,8 +23,12 @@ def home(context: "ProtocolContext") -> None:
     """
     context.logger.info("home: homing gantry")
     gantry = context.gantry.controller
+    previous_timeout = None
+    if hasattr(gantry, "get_serial_timeout"):
+        previous_timeout = gantry.get_serial_timeout()
     gantry.set_serial_timeout(10)
     try:
         gantry.home()
     finally:
-        gantry.set_serial_timeout(0.05)
+        if previous_timeout is not None:
+            gantry.set_serial_timeout(previous_timeout)

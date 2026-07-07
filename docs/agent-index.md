@@ -22,6 +22,9 @@ Setup bounds validation checks the concrete motion targets implied by the loaded
 
 - `src/deck/yaml_schema.py` - strict Pydantic schema.
 - `src/deck/loader.py` - load-name expansion, calibration, derived wells, nested labware.
+- Public API for UI/config consumers: `deck.resolve_load_names`,
+  `deck.derive_wells_preview`, and
+  `deck.yaml_schema.LABWARE_YAML_ENTRY_MODELS`.
 - `src/deck/labware/`, `src/deck/labware/definitions/`.
 - `configs/deck/`.
 - Tests: `tests/deck/test_deck_loader.py`,
@@ -42,6 +45,9 @@ After schema/config changes: focused tests, then `setup/validate_setup.py` for a
 
 - `src/instruments/<type>/interface.py`, `vendors/<vendor>.py`, `models.py`, `exceptions.py`.
 - `src/instruments/registry.yaml`, `src/instruments/registry.py`, `src/instruments/yaml_schema.py`.
+- Public API for UI/config consumers: `instruments.registry.config_fields`,
+  `instruments.registry.list_measurement_methods`, and
+  `protocol_engine.is_measurement_result`.
 - Gantry YAML keeps `type` + `vendor`; `registry.py` resolves the concrete class, merges installed `cubos.instrument_registries` entry points, and then merges `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlays.
 - `src/protocol_engine/measurements.py`, `data/data_store.py` - persisted measurements.
 - `data/protocol_runs.py`, `data/exports.py` - campaign creation for CubOS-owned protocol sessions and Zoo-compatible result summaries/ZIP exports.

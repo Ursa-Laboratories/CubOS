@@ -15,9 +15,15 @@ from .labware import (
     Vial,
     generate_wells_from_offsets,
 )
-from .loader import load_deck_from_yaml, load_deck_from_yaml_safe
+from .loader import (
+    derive_wells_preview,
+    load_deck_from_yaml,
+    load_deck_from_yaml_safe,
+    resolve_load_names,
+)
 from .yaml_schema import (
     DeckYamlSchema,
+    LABWARE_YAML_ENTRY_MODELS,
     TipDisposalYamlEntry,
     TipRackYamlEntry,
     VialHolderYamlEntry,
@@ -43,6 +49,7 @@ __all__ = [
     "generate_wells_from_offsets",
     "DeckLoaderError",
     "DeckYamlSchema",
+    "LABWARE_YAML_ENTRY_MODELS",
     "TipDisposalYamlEntry",
     "TipRackYamlEntry",
     "VialHolderYamlEntry",
@@ -51,4 +58,6 @@ __all__ = [
     "VialYamlEntry",
     "load_deck_from_yaml",
     "load_deck_from_yaml_safe",
+    "derive_wells_preview",
+    "resolve_load_names",
 ]

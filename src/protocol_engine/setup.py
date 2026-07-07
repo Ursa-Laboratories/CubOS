@@ -188,9 +188,12 @@ def run_on_hardware(
         GantryHealthCheckError: If the gantry health check fails.
     """
     if gantry is None:
-        with open(gantry_path) as f:
-            raw_config = yaml.safe_load(f)
-        gantry = Gantry(config=raw_config)
+        if mock_mode:
+            gantry = Gantry(offline=True)
+        else:
+            with open(gantry_path) as f:
+                raw_config = yaml.safe_load(f)
+            gantry = Gantry(config=raw_config)
 
     owns_data_store = False
     if data_store is None:
@@ -200,6 +203,7 @@ def run_on_hardware(
         owns_data_store = True
 
     context = None
+    run_failed = False
     try:
         protocol, context = setup_protocol(
             gantry_path, deck_path, protocol_path,
@@ -230,15 +234,77 @@ def run_on_hardware(
                 "Gantry health check failed before protocol execution; aborting."
             )
         return protocol.execute(context)
+    except Exception:
+        run_failed = True
+        logger.exception(
+            "Protocol run failed; last commanded pose: %s",
+            _last_commanded_pose(context),
+        )
+        raise
     finally:
-        if context is not None:
-            try:
-                context.gantry.disconnect_instruments()
-            except Exception as exc:
-                logger.error("disconnect_instruments failed: %s", exc, exc_info=True)
-            gantry.disconnect()
-        if owns_data_store:
-            data_store.close()
+        try:
+            if context is not None:
+                if run_failed:
+                    _best_effort_retract_to_safe_z(context)
+                try:
+                    context.gantry.disconnect_instruments()
+                except Exception as exc:
+                    logger.error(
+                        "disconnect_instruments failed: %s", exc, exc_info=True,
+                    )
+                try:
+                    gantry.disconnect()
+                except Exception as exc:
+                    logger.error("gantry.disconnect failed: %s", exc, exc_info=True)
+        finally:
+            if data_store is not None and campaign_id is not None:
+                try:
+                    data_store.finish_campaign(
+                        campaign_id,
+                        "failed" if run_failed else "completed",
+                    )
+                except Exception as exc:
+                    logger.error(
+                        "Failed to mark campaign %s as finished: %s",
+                        campaign_id,
+                        exc,
+                        exc_info=True,
+                    )
+            if owns_data_store:
+                try:
+                    data_store.close()
+                except Exception as exc:
+                    logger.error("data_store.close failed: %s", exc, exc_info=True)
+
+
+def _last_commanded_pose(context: Any | None) -> Any:
+    if context is None:
+        return None
+    return getattr(context.gantry, "last_commanded_pose", None)
+
+
+def _best_effort_retract_to_safe_z(context: ProtocolContext) -> None:
+    pose = _last_commanded_pose(context)
+    safe_z = getattr(context.gantry, "safe_z", None)
+    if not pose or safe_z is None:
+        logger.warning(
+            "Skipping failure retract: no last commanded pose or safe_z available."
+        )
+        return
+    try:
+        instrument = pose["instrument"]
+        x, y, _z = pose["instrument_position"]
+        logger.error(
+            "Protocol failed; retracting %s at current XY to safe_z %.3f.",
+            instrument, safe_z,
+        )
+        context.gantry.move(instrument, (x, y, safe_z), travel_z=safe_z)
+    except Exception as exc:
+        logger.error(
+            "Failure retract to safe_z failed; manual hardware check required: %s",
+            exc,
+            exc_info=True,
+        )
 
 
 def _protocol_config_label(

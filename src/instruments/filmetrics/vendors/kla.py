@@ -1,12 +1,15 @@
 import re
 import subprocess
+import threading
 import time
+from queue import Queue, Empty
 from typing import Optional
 
 from instruments.filmetrics.interface import FilmetricsInstrument
 from instruments.filmetrics.exceptions import (
     FilmetricsConnectionError,
     FilmetricsCommandError,
+    FilmetricsParseError,
 )
 from instruments.filmetrics.models import MeasurementResult
 
@@ -28,6 +31,7 @@ class KLAFilmetrics(FilmetricsInstrument):
         exe_path: str = "",
         recipe_name: str = "",
         command_timeout: float = 30.0,
+        material_label: str = "Polyimide",
         name: Optional[str] = None,
         offset_x: float = 0.0,
         offset_y: float = 0.0,
@@ -45,6 +49,7 @@ class KLAFilmetrics(FilmetricsInstrument):
         self._exe_path = exe_path
         self._recipe_name = recipe_name
         self._command_timeout = command_timeout
+        self._material_label = material_label
         self._default_result = MeasurementResult(
             thickness_nm=default_thickness_nm,
             goodness_of_fit=default_goodness_of_fit,
@@ -91,7 +96,11 @@ class KLAFilmetrics(FilmetricsInstrument):
                 self._process.stdout.close()
             except OSError:
                 pass
-            self._process.wait()
+            try:
+                self._process.wait(timeout=self._command_timeout)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+                self._process.wait(timeout=1.0)
             self.logger.info("Disconnected from Filmetrics")
             self._process = None
 
@@ -122,8 +131,14 @@ class KLAFilmetrics(FilmetricsInstrument):
         if self._offline:
             return self._default_result
         lines = self._send_command("measure")
+        thickness_nm = self._parse_thickness(lines, material_label=self._material_label)
+        if thickness_nm is None:
+            raise FilmetricsParseError(
+                f"No thickness line for material '{self._material_label}' "
+                "in Filmetrics response."
+            )
         return MeasurementResult(
-            thickness_nm=self._parse_thickness(lines),
+            thickness_nm=thickness_nm,
             goodness_of_fit=self._parse_goodness_of_fit(lines),
         )
 
@@ -137,7 +152,12 @@ class KLAFilmetrics(FilmetricsInstrument):
         buffer = ""
         deadline = time.monotonic() + self._command_timeout
         while time.monotonic() < deadline:
-            char = self._process.stdout.read(1)
+            char = self._read_stdout_with_timeout(
+                lambda: self._process.stdout.read(1),
+                timeout=max(0.0, deadline - time.monotonic()),
+                error_cls=FilmetricsConnectionError,
+                description="init",
+            )
             if not char:
                 raise FilmetricsConnectionError("Process exited during init")
             buffer += char
@@ -146,13 +166,20 @@ class KLAFilmetrics(FilmetricsInstrument):
         raise FilmetricsConnectionError("Timed out waiting for init")
 
     def _send_command(self, command: str) -> list[str]:
+        if self._process is None or self._process.stdin is None:
+            raise FilmetricsCommandError("Filmetrics process not connected")
         self._process.stdin.write(command + "\n")
         self._process.stdin.flush()
 
         lines: list[str] = []
         deadline = time.monotonic() + self._command_timeout
         while time.monotonic() < deadline:
-            line = self._process.stdout.readline()
+            line = self._read_stdout_with_timeout(
+                self._process.stdout.readline,
+                timeout=max(0.0, deadline - time.monotonic()),
+                error_cls=FilmetricsCommandError,
+                description=f"response to '{command}'",
+            )
             if not line:
                 raise FilmetricsCommandError(
                     f"Process ended while waiting for response to '{command}'"
@@ -172,10 +199,14 @@ class KLAFilmetrics(FilmetricsInstrument):
         )
 
     @staticmethod
-    def _parse_thickness(lines: list[str]) -> Optional[float]:
+    def _parse_thickness(
+        lines: list[str],
+        *,
+        material_label: str = "Polyimide",
+    ) -> Optional[float]:
         thickness = None
         for line in lines:
-            if "Polyimide" in line:
+            if material_label in line:
                 matches = re.findall(r"([-+]?\d*\.?\d+)\s*nm", line, re.IGNORECASE)
                 if matches:
                     try:
@@ -183,6 +214,34 @@ class KLAFilmetrics(FilmetricsInstrument):
                     except ValueError:
                         pass
         return thickness
+
+    def _read_stdout_with_timeout(
+        self,
+        read_func,
+        *,
+        timeout: float,
+        error_cls,
+        description: str,
+    ):
+        queue: Queue = Queue(maxsize=1)
+
+        def run_read():
+            try:
+                queue.put((True, read_func()))
+            except Exception as exc:
+                queue.put((False, exc))
+
+        thread = threading.Thread(target=run_read, daemon=True)
+        thread.start()
+        try:
+            ok, value = queue.get(timeout=timeout)
+        except Empty as exc:
+            raise error_cls(
+                f"Timed out ({self._command_timeout}s) waiting for Filmetrics {description}"
+            ) from exc
+        if ok:
+            return value
+        raise error_cls(f"Error reading Filmetrics {description}: {value}") from value
 
     @staticmethod
     def _parse_goodness_of_fit(lines: list[str]) -> Optional[float]:

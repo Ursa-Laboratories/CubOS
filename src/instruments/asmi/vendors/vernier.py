@@ -85,17 +85,22 @@ class VernierASMI(ASMIInstrument):
                 "godirect package required: pip install godirect"
             ) from exc
 
-        self._godirect = GoDirect(use_ble=False, use_usb=True)
-        device = self._godirect.get_device(threshold=self._force_threshold)
-        if device is None:
-            raise ASMIConnectionError(
-                "No GoDirect force sensor found. Check USB connection."
-            )
-        if not device.open(auto_start=False):
-            raise ASMIConnectionError("Failed to open GoDirect device")
+        try:
+            self._godirect = GoDirect(use_ble=False, use_usb=True)
+            device = self._godirect.get_device(threshold=self._force_threshold)
+            if device is None:
+                raise ASMIConnectionError(
+                    "No GoDirect force sensor found. Check USB connection."
+                )
+            if not device.open(auto_start=False):
+                raise ASMIConnectionError("Failed to open GoDirect device")
 
-        device.enable_sensors(self._sensor_channels)
-        sensors = device.get_enabled_sensors()
+            device.enable_sensors(self._sensor_channels)
+            sensors = device.get_enabled_sensors()
+        except ASMIConnectionError:
+            raise
+        except Exception as exc:
+            raise ASMIConnectionError(f"GoDirect connection failed: {exc}") from exc
         if not sensors:
             device.close()
             raise ASMIConnectionError("No sensors enabled on GoDirect device")
@@ -133,7 +138,7 @@ class VernierASMI(ASMIInstrument):
         try:
             self.measure()
             return True
-        except ASMICommandError:
+        except Exception:
             return False
 
     # ── ASMI-specific commands ────────────────────────────────────────────
@@ -155,11 +160,17 @@ class VernierASMI(ASMIInstrument):
         readings: list[float] = []
         for _ in range(n_samples):
             self._device.start()
-            value = 0.0
-            if self._device.read():
+            try:
+                if not self._device.read():
+                    raise ASMICommandError("GoDirect force sensor read failed")
                 value = self._sensor.values[0]
                 self._sensor.clear()
-            self._device.stop()
+            except ASMICommandError:
+                raise
+            except Exception as exc:
+                raise ASMICommandError(f"GoDirect force sensor read failed: {exc}") from exc
+            finally:
+                self._device.stop()
             readings.append(value)
 
         mean = statistics.mean(readings)

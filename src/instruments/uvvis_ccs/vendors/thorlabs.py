@@ -4,6 +4,7 @@ from typing import Optional
 
 from instruments.uvvis_ccs.interface import UVVisCCSInstrument
 from instruments.uvvis_ccs.exceptions import (
+    UVVisCCSError,
     UVVisCCSConnectionError,
     UVVisCCSMeasurementError,
     UVVisCCSTimeoutError,
@@ -124,13 +125,17 @@ class ThorlabsUVVisCCS(UVVisCCSInstrument):
     def set_integration_time(self, seconds: float) -> None:
         self._integration_time_s = seconds
         if not self._offline:
-            self._dll.tlccs_setIntegrationTime(self._handle, seconds)
+            self._require_connected()
+            rc = self._dll.tlccs_setIntegrationTime(self._handle, seconds)
+            self._check_rc(rc, "tlccs_setIntegrationTime", UVVisCCSError)
 
     def get_integration_time(self) -> float:
         if self._offline:
             return self._integration_time_s
+        self._require_connected()
         t = C.c_double()
-        self._dll.tlccs_getIntegrationTime(self._handle, C.byref(t))
+        rc = self._dll.tlccs_getIntegrationTime(self._handle, C.byref(t))
+        self._check_rc(rc, "tlccs_getIntegrationTime", UVVisCCSError)
         return t.value
 
     def measure(self) -> UVVisSpectrum:
@@ -138,8 +143,10 @@ class ThorlabsUVVisCCS(UVVisCCSInstrument):
         if self._offline:
             return _synthetic_spectrum(self._integration_time_s)
 
+        self._require_connected()
         self._wait_for_idle()
-        self._dll.tlccs_startScan(self._handle)
+        rc = self._dll.tlccs_startScan(self._handle)
+        self._check_rc(rc, "tlccs_startScan", UVVisCCSError)
 
         integration_time = self.get_integration_time()
         self._wait_for_scan_ready(integration_time)
@@ -161,8 +168,10 @@ class ThorlabsUVVisCCS(UVVisCCSInstrument):
     def get_device_info(self) -> list[str]:
         if self._offline:
             return ["Thorlabs", "CCS100", "OFFLINE", "1.0.0", "OfflineDriver"]
+        self._require_connected()
         buffers = [(256 * C.c_char)() for _ in range(5)]
-        self._dll.tlccs_identificationQuery(self._handle, *buffers)
+        rc = self._dll.tlccs_identificationQuery(self._handle, *buffers)
+        self._check_rc(rc, "tlccs_identificationQuery", UVVisCCSError)
         return [buf.value.decode() for buf in buffers]
 
     # ── Private helpers ───────────────────────────────────────────────────
@@ -215,10 +224,21 @@ class ThorlabsUVVisCCS(UVVisCCSInstrument):
 
     def _get_status(self) -> tuple[bool, bool]:
         status = C.c_int32()
-        self._dll.tlccs_getDeviceStatus(self._handle, C.byref(status))
+        self._require_connected()
+        rc = self._dll.tlccs_getDeviceStatus(self._handle, C.byref(status))
+        self._check_rc(rc, "tlccs_getDeviceStatus", UVVisCCSError)
         idle = bool(status.value & _STATUS_IDLE)
         scan_ready = bool(status.value & _STATUS_SCAN_READY)
         return idle, scan_ready
+
+    def _require_connected(self) -> None:
+        if self._dll is None or self._handle is None:
+            raise UVVisCCSError("CCS spectrometer not connected")
+
+    @staticmethod
+    def _check_rc(rc: int, operation: str, error_cls) -> None:
+        if rc != 0:
+            raise error_cls(f"{operation} failed with code {rc}")
 
     def _wait_for_idle(self) -> None:
         deadline = time.monotonic() + _IDLE_TIMEOUT_S

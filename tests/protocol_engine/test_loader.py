@@ -1,5 +1,6 @@
 """Tests for protocol YAML loading and compilation."""
 
+import importlib
 import tempfile
 from pathlib import Path
 
@@ -58,6 +59,15 @@ protocol:
       destination_height: -1.0
 """
 
+VALID_SERIAL_TRANSFER = """
+protocol:
+  - serial_transfer:
+      source: vial_1
+      plate: plate_1
+      axis: A
+      volumes: [5.0, 10.0]
+"""
+
 
 def _write_yaml(content: str) -> str:
     """Write YAML content to a temp file and return its path."""
@@ -65,6 +75,33 @@ def _write_yaml(content: str) -> str:
     f.write(content)
     f.close()
     return f.name
+
+
+@pytest.fixture(autouse=True)
+def _ensure_commands_registered():
+    required_commands = {
+        "home",
+        "measure",
+        "move",
+        "pause",
+        "scan",
+        "transfer",
+        "serial_transfer",
+    }
+    if required_commands.issubset(set(CommandRegistry.instance().command_names)):
+        return
+
+    modules = [
+        importlib.import_module("protocol_engine.commands.home"),
+        importlib.import_module("protocol_engine.commands.measure"),
+        importlib.import_module("protocol_engine.commands.move"),
+        importlib.import_module("protocol_engine.commands.pause"),
+        importlib.import_module("protocol_engine.commands.pipette"),
+        importlib.import_module("protocol_engine.commands.scan"),
+    ]
+    CommandRegistry.reset()
+    for module in modules:
+        importlib.reload(module)
 
 
 # ─── Valid loading ────────────────────────────────────────────────────────────
@@ -148,6 +185,21 @@ def test_transfer_accepts_source_and_destination_heights():
             "volume_ul": 50.0,
             "source_height": 2.0,
             "destination_height": -1.0,
+        }
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_serial_transfer_compiles_from_yaml():
+    path = _write_yaml(VALID_SERIAL_TRANSFER)
+    try:
+        protocol = load_protocol_from_yaml(path)
+        args = protocol.steps[0].args
+        assert args == {
+            "source": "vial_1",
+            "plate": "plate_1",
+            "axis": "A",
+            "volumes": [5.0, 10.0],
         }
     finally:
         Path(path).unlink(missing_ok=True)
@@ -351,6 +403,40 @@ protocol:
             },
             {"seconds": 0.5},
         ]
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_yaml_rejects_two_element_named_position_cleanly():
+    yaml = """
+positions:
+  bad: [1.0, 2.0]
+protocol:
+  - move:
+      instrument: pipette
+      position: bad
+"""
+    path = _write_yaml(yaml)
+    try:
+        with pytest.raises(Exception, match="exactly three finite XYZ"):
+            load_protocol_from_yaml(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_yaml_rejects_nan_named_position_cleanly():
+    yaml = """
+positions:
+  bad: [1.0, .nan, 3.0]
+protocol:
+  - move:
+      instrument: pipette
+      position: bad
+"""
+    path = _write_yaml(yaml)
+    try:
+        with pytest.raises(Exception, match="finite float"):
+            load_protocol_from_yaml(path)
     finally:
         Path(path).unlink(missing_ok=True)
 

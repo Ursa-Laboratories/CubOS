@@ -111,14 +111,15 @@ During calibration:
 - `X` jogs `+Z` up
 - `Z` jogs `-Z` down
 - number keys change step size
+- Space cancels any active jog
 - Enter confirms the current step
 - `Q` aborts
 
 !!! warning "Single presses only — do not hold jog keys down"
     Press a jog key once and wait for the move to finish before pressing
-    again. Holding a key down queues multiple jog commands; the gantry keeps
-    executing queued moves after you release the key and will overshoot past
-    where you meant to stop.
+    again. Repeated keypresses are batched into one larger jog command, so
+    holding a key can still overshoot past where you meant to stop, especially
+    at 25 mm or larger step sizes. Press Space to cancel an active jog.
 
 If a jog trips a hard limit, CubOS soft-resets, unlocks GRBL, and attempts a
 small pull-off opposite the failed jog direction. Stop and reset the controller
@@ -152,31 +153,42 @@ Every instrument must touch the same physical point, so use the calibration
 block (or another rigid, flat-topped reference all instruments can reach)
 rather than a deck feature.
 
+If more than one CUB controller is connected, disconnect the controllers you are
+not calibrating before starting. Calibration still uses auto-scan for the gantry
+connection and has no `--port` flag.
+
 ![Board placement markers used during calibration](images/calibration-marks.webp){ width="520" }
 
 1. Start `setup/calibrate_gantry.py`.
 2. Confirm the multi-instrument flow in the preflight.
 3. Select the leftmost/reference instrument when prompted.
-4. Select the lowest instrument when prompted.
+4. Enter the calibration block height when prompted.
 5. Place the first calibration block on the leftmost board mark for the red
    reference instrument.
 
    ![Red reference instrument touching the block at the leftmost mark](images/leftmost-red-instrument-block.webp){ width="420" }
 
-6. Jog the red reference instrument to touch the first block.
-7. Move the calibration block to the center board mark.
+6. Jog the red reference instrument over the first block's X/Y mark. This step
+   sets only X=0 and Y=0.
+7. After the script homes and moves to the measured X/Y center, move the
+   calibration block to the center board mark.
 
    ![Calibration block moved to the center board mark](images/center-calibration-block.webp){ width="520" }
 
-8. Jog each remaining instrument to the shared center reference point as
+8. Attach or verify all mounted instruments, then select the lowest mounted
+   contact instrument when prompted.
+9. Jog the lowest instrument to touch the shared center reference point. This
+   touch sets Z from the block height and records that instrument's X/Y/Z block
+   coordinate.
+10. Jog each remaining contact instrument to the same center reference point as
    prompted.
-9. For an RPi camera, center the camera over the same block mark, press Enter,
+11. For an RPi camera, center the camera over the same block mark, press Enter,
    then measure and enter the height from the calibration block top to the
    camera reference point.
-10. For pipette setups, jog the pipette to the center reference point on the
+12. For pipette setups, jog the pipette to the center reference point on the
    block when prompted.
-11. Let the script compute each instrument's offsets.
-12. Review the summary and calibrated YAML path.
+13. Let the script compute each instrument's offsets.
+14. Review the summary and calibrated YAML path.
 
 ## Interactive Jog Test
 

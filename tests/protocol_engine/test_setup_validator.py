@@ -39,12 +39,32 @@ labware: {}
 
 @pytest.fixture(autouse=True)
 def _ensure_commands_registered():
-    """Other protocol tests reset the singleton registry; restore real move."""
-    if "move" not in CommandRegistry.instance().command_names:
-        import importlib
-        import protocol_engine.commands.move
+    """Other protocol tests reset the singleton registry; restore real commands."""
+    required_commands = {
+        "home",
+        "measure",
+        "move",
+        "pause",
+        "scan",
+        "transfer",
+        "serial_transfer",
+    }
+    if required_commands.issubset(set(CommandRegistry.instance().command_names)):
+        return
 
-        importlib.reload(protocol_engine.commands.move)
+    import importlib
+
+    modules = [
+        importlib.import_module("protocol_engine.commands.home"),
+        importlib.import_module("protocol_engine.commands.measure"),
+        importlib.import_module("protocol_engine.commands.move"),
+        importlib.import_module("protocol_engine.commands.pause"),
+        importlib.import_module("protocol_engine.commands.pipette"),
+        importlib.import_module("protocol_engine.commands.scan"),
+    ]
+    CommandRegistry.reset()
+    for module in modules:
+        importlib.reload(module)
 
 
 def _write(path: Path, content: str) -> Path:
@@ -96,6 +116,30 @@ def test_run_setup_validation_reports_named_position_bounds_errors(tmp_path):
     assert result.stage == "validation"
     assert any("park.location.target" in error for error in result.errors)
     assert "RESULT: FAIL" in result.output
+
+
+@pytest.mark.parametrize("command_yaml", [
+    """\
+    protocol:
+      - pause:
+          seconds: 0.1
+    """,
+    """\
+    protocol:
+      - breakpoint:
+          message: Continue?
+    """,
+])
+def test_run_setup_validation_allows_no_motion_commands(tmp_path, command_yaml):
+    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML)
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(tmp_path / "protocol.yaml", command_yaml)
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    assert result.passed is True
+    assert result.errors == ()
+    assert "RESULT: PASS" in result.output
 
 
 # ---------------------------------------------------------------------------

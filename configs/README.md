@@ -103,9 +103,9 @@ sanity check, not for motion math.
 Pipette commands default to the labware reference Z (`height = 0`), but
 liquid-handling commands may set `height`, or `source_height` /
 `destination_height` for transfers. `pick_up_tip` must target a `tip_rack`
-slot; when `tip_length` is omitted, CubOS defaults to 59.3 mm for the current
-Opentrons 300 uL tips. Validation adds that extension to active pipette depth
-for safe_z and action-Z bounds until `drop_tip`.
+slot. Each tip rack must declare `tip_length`; CubOS has no safe default for
+this collision-critical dimension. Validation adds that extension to active
+pipette depth for safe_z and action-Z bounds until `drop_tip`.
 Unrecognized scan fields are rejected at protocol-load time by the command's
 Pydantic schema.
 

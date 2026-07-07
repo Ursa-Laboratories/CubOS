@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
 from .registry import CommandRegistry
 
@@ -69,3 +70,34 @@ class ProtocolYamlSchema(BaseModel):
 
     positions: Optional[Dict[str, List[float]]] = None
     protocol: List[ProtocolStepSchema]
+
+    @field_validator("positions", mode="before")
+    @classmethod
+    def _validate_positions_xyz(
+        cls,
+        positions: Any,
+    ) -> Any:
+        if positions is None:
+            return None
+        if not isinstance(positions, dict):
+            return positions
+        for name, coordinates in positions.items():
+            if not isinstance(coordinates, (list, tuple)):
+                raise ValueError(
+                    f"position {name!r} must be exactly three finite XYZ floats."
+                )
+            if len(coordinates) != 3:
+                raise ValueError(
+                    f"position {name!r} must be exactly three finite XYZ floats."
+                )
+            for index, coord in enumerate(coordinates):
+                if (
+                    isinstance(coord, bool)
+                    or not isinstance(coord, (int, float))
+                    or not math.isfinite(float(coord))
+                ):
+                    raise ValueError(
+                        f"position {name!r} coordinate {index} must be a "
+                        f"finite float, got {type(coord).__name__} {coord!r}."
+                    )
+        return positions

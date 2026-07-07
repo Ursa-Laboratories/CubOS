@@ -174,7 +174,7 @@ def test_measure_persists_single_asmi_indentation_when_campaign_is_present():
     row = store._conn.execute(
         """
         SELECT e.labware_name, e.well_id, m.sample_timestamps, m.directions,
-               m.step_size_mm, m.z_target_mm, m.force_limit_n
+               e.labware_key, m.step_size_mm, m.z_target_mm, m.force_limit_n
         FROM experiments e
         JOIN asmi_measurements m ON m.experiment_id = e.id
         WHERE e.campaign_id = ?
@@ -185,9 +185,10 @@ def test_measure_persists_single_asmi_indentation_when_campaign_is_present():
     assert row[1] == "A1"
     assert row[2] == "[1.0]"
     assert row[3] == '["down"]'
-    assert row[4] == pytest.approx(0.1)
-    assert row[5] == pytest.approx(13.0)
-    assert row[6] == pytest.approx(10.0)
+    assert row[4] == "plate_1"
+    assert row[5] == pytest.approx(0.1)
+    assert row[6] == pytest.approx(13.0)
+    assert row[7] == pytest.approx(10.0)
     store.close()
 
 
@@ -306,6 +307,42 @@ def test_measure_uv_health_check_does_not_persist_or_fail(caplog):
     store.close()
 
 
+def test_measure_persistence_failure_returns_result_and_warns(caplog):
+    plate = _plate()
+    board = MagicMock()
+    board.controller = object()
+    board.instruments = {"asmi": _FakeASMI()}
+    deck = Deck({"plate_1": plate})
+    store = DataStore(db_path=":memory:")
+    campaign_id = store.create_campaign(description="measure")
+    store.register_labware(campaign_id, "plate_1", plate)
+    store._conn.execute(
+        "UPDATE labware SET contents = ? WHERE labware_key = ? AND well_id = ?",
+        ("{bad json", "plate_1", "A1"),
+    )
+    store._conn.commit()
+    ctx = ProtocolContext(
+        gantry=board,
+        deck=deck,
+        data_store=store,
+        campaign_id=campaign_id,
+    )
+
+    with caplog.at_level(logging.WARNING):
+        result = measure(
+            ctx,
+            instrument="asmi",
+            position="plate_1.A1",
+            measurement_height=0.0,
+            method="indentation",
+            indentation_limit_height=-1.0,
+        )
+
+    assert result["data_points"] == 1
+    assert "Failed to log measurement for position plate_1.A1" in caplog.text
+    store.close()
+
+
 def test_measure_unknown_instrument_raises():
     instr = _mock_instr()
     ctx = _ctx(instr)
@@ -378,3 +415,21 @@ def test_measure_rejects_measurement_height_in_method_kwargs():
             measurement_height=0.0,
             method_kwargs={"measurement_height": 5.0},
         )
+
+
+def test_measure_rejects_inverted_indentation_height_before_motion():
+    instr = _mock_instr()
+    ctx = _ctx(instr)
+
+    with pytest.raises(ProtocolExecutionError, match="indentation_limit_height"):
+        measure(
+            ctx,
+            instrument="uvvis",
+            position="plate_1.A1",
+            measurement_height=0.0,
+            indentation_limit_height=1.0,
+        )
+
+    ctx.gantry.move_to_labware.assert_not_called()
+    ctx.gantry.move.assert_not_called()
+    instr.measure.assert_not_called()

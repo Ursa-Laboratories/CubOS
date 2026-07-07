@@ -1,10 +1,10 @@
 """Tests for the VernierASMI instrument driver (offline mode)."""
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from instruments.asmi.vendors.vernier import VernierASMI
-from instruments.asmi.exceptions import ASMICommandError
+from instruments.asmi.exceptions import ASMICommandError, ASMIConnectionError
 from instruments.asmi.models import ASMIStatus, MeasurementResult
 
 
@@ -334,3 +334,30 @@ class TestASMIOnlineRequiresHardware(unittest.TestCase):
     def test_is_connected_without_connect_returns_false(self):
         asmi = VernierASMI(offline=False)
         self.assertFalse(asmi.is_connected())
+
+    def test_failed_sensor_read_raises_command_error(self):
+        asmi = VernierASMI(offline=False)
+        asmi._device = MagicMock()
+        asmi._device.read.return_value = False
+        asmi._sensor = MagicMock()
+        asmi._sensor.values = [0.0]
+
+        with self.assertRaises(ASMICommandError):
+            asmi.measure()
+        asmi._device.stop.assert_called_once()
+
+    def test_health_check_catches_raw_sdk_exception(self):
+        asmi = VernierASMI(offline=False)
+        asmi._device = MagicMock()
+        asmi._sensor = MagicMock()
+        with patch.object(asmi, "measure", side_effect=RuntimeError("usb lost")):
+            self.assertFalse(asmi.health_check())
+
+    def test_connect_wraps_godirect_constructor_exception(self):
+        with patch.dict(
+            "sys.modules",
+            {"godirect": MagicMock(GoDirect=MagicMock(side_effect=RuntimeError("usb")))}
+        ):
+            asmi = VernierASMI(offline=False)
+            with self.assertRaises(ASMIConnectionError):
+                asmi.connect()

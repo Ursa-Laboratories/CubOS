@@ -1,6 +1,6 @@
 import inspect
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 import sys
 from pathlib import Path
 import math
@@ -11,7 +11,42 @@ sys.path.append(str(project_root))
 
 from gantry.coordinates import Coordinates
 from gantry.gantry_driver.driver import Mill, wpos_pattern, mpos_pattern
-from gantry.gantry_driver.exceptions import StatusReturnError
+from gantry.gantry_driver.exceptions import (
+    CommandExecutionError,
+    MillConnectionError,
+    StatusReturnError,
+)
+from tests.gantry.fake_serial import FakeGrblSerial
+
+
+class ScriptedSerial:
+    def __init__(self, lines=None):
+        self.lines = list(lines or [])
+        self.writes = []
+        self.is_open = True
+        self.port = "/dev/mock"
+
+    def write(self, data):
+        self.writes.append(data)
+
+    def readline(self):
+        if self.lines:
+            return self.lines.pop(0)
+        return b""
+
+    def readlines(self):
+        lines = self.lines
+        self.lines = []
+        return lines
+
+    def flush(self):
+        pass
+
+    def read_all(self):
+        return b""
+
+    def close(self):
+        self.is_open = False
 
 class TestCNCDriverLogic(unittest.TestCase):
     
@@ -38,6 +73,284 @@ class TestCNCDriverLogic(unittest.TestCase):
         invalid_status = "<Idle|FS:0,0>"
         self.assertIsNone(wpos_pattern.search(invalid_status))
         self.assertIsNone(mpos_pattern.search(invalid_status))
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_verify_connection_accepts_grbl_settings_response(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        fake = FakeGrblSerial()
+
+        self.assertTrue(mill._verify_connection(fake))
+        self.assertIn(b"?", fake.writes)
+        self.assertIn(b"$$\n", fake.writes)
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_verify_connection_opens_closed_serial_and_rejects_noise(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        fake = FakeGrblSerial(is_open=False)
+        fake.write = MagicMock(return_value=1)
+        fake.readlines = MagicMock(return_value=[b"noise\r\n"])
+
+        self.assertFalse(mill._verify_connection(fake))
+        self.assertTrue(fake.is_open)
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_locate_over_serial_uses_priority_port_before_scan(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        class _Port:
+            device = "/dev/scanned"
+
+        created: list[FakeGrblSerial] = []
+
+        def factory(port=None, baudrate=None, timeout=None):
+            if port is None:
+                return FakeGrblSerial(port="/dev/unopened")
+            fake = FakeGrblSerial(port=port, status="<Idle|WPos:0,0,0|FS:0,0>")
+            created.append(fake)
+            return fake
+
+        mock_serial.side_effect = factory
+        mill = Mill()
+        mill._get_available_ports = MagicMock(return_value=[_Port()])
+
+        serial_obj, port = mill._locate_over_serial("/dev/priority")
+
+        self.assertIs(serial_obj, created[0])
+        self.assertEqual(port, "/dev/priority")
+        self.assertEqual(created[0].port, "/dev/priority")
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_locate_over_serial_errors_when_no_ports(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        mill._get_available_ports = MagicMock(return_value=[])
+
+        with self.assertRaises(MillConnectionError):
+            mill._locate_over_serial()
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_locate_over_serial_closes_failed_candidates(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        class _Port:
+            device = "/dev/bad"
+
+        fake = FakeGrblSerial(port="/dev/bad")
+        mock_serial.side_effect = [FakeGrblSerial(), fake]
+        mill = Mill()
+        mill._get_available_ports = MagicMock(return_value=[_Port()])
+        mill._verify_connection = MagicMock(return_value=False)
+
+        with self.assertRaises(MillConnectionError):
+            mill._locate_over_serial()
+
+        self.assertFalse(fake.is_open)
+
+    @patch('gantry.gantry_driver.driver.os.name', 'posix')
+    @patch('gantry.gantry_driver.driver.serial.tools.list_ports.grep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_get_available_ports_posix_and_windows_and_unsupported(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_grep,
+    ):
+        mill = Mill()
+        mock_grep.return_value = ["port"]
+        self.assertEqual(mill._get_available_ports(), ["port"])
+        mock_grep.assert_called_with("ttyUSB|usbmodem|usbserial")
+
+        with patch('gantry.gantry_driver.driver.os.name', 'nt'):
+            self.assertEqual(mill._get_available_ports(), ["port"])
+            mock_grep.assert_called_with("COM")
+        with patch('gantry.gantry_driver.driver.os.name', 'java'):
+            with self.assertRaises(OSError):
+                mill._get_available_ports()
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_connect_boot_alarm_returns_before_config_setup(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        fake = FakeGrblSerial(status="<Alarm|WPos:0,0,0|FS:0,0>")
+        mill = Mill()
+        mill.read_config = MagicMock()
+        mill.clear_buffers = MagicMock()
+        mill.enforce_wpos_mode = MagicMock()
+        mill.set_feed_rate = MagicMock()
+        mill.seed_wco = MagicMock()
+        with patch.object(Mill, '_locate_over_serial', return_value=(fake, '/dev/test')):
+            self.assertIs(mill.connect('/dev/test'), fake)
+
+        mill.read_config.assert_not_called()
+        mill.enforce_wpos_mode.assert_not_called()
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_connect_opens_new_serial_when_detection_returns_closed(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        detected = FakeGrblSerial(is_open=False)
+        opened = FakeGrblSerial(status="<Idle|WPos:0,0,0|WCO:0,0,0|FS:0,0>")
+        mock_serial.return_value = opened
+        mill = Mill()
+        mill.read_config = MagicMock(return_value={})
+        mill.clear_buffers = MagicMock()
+        mill.enforce_wpos_mode = MagicMock()
+        mill.set_feed_rate = MagicMock()
+        mill.seed_wco = MagicMock()
+        with patch.object(Mill, '_locate_over_serial', return_value=(detected, '/dev/test')):
+            mill.connect('/dev/test')
+
+        mock_serial.assert_called_with(port='/dev/test', baudrate=115200, timeout=3)
+        self.assertIs(mill.ser_mill, opened)
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_basic_serial_helpers_and_grbl_parsing(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill(port="/dev/default")
+        self.assertEqual(mill.connected_port(), "/dev/default")
+        self.assertIsNone(mill.get_read_timeout())
+        mill.disconnect()
+
+        mill.ser_mill = FakeGrblSerial(port="/dev/live", timeout=1)
+        self.assertEqual(mill.connected_port(), "/dev/live")
+        mill.set_read_timeout(7)
+        self.assertEqual(mill.get_read_timeout(), 7)
+
+        settings = mill._parse_grbl_settings_response([
+            "",
+            "Grbl 1.1h",
+            "[MSG:hello]",
+            "not-a-setting",
+            "$10=0 (status report)",
+            "$20=1",
+        ])
+        self.assertEqual(settings, {"$10": "0", "$20": "1"})
+
+        self.assertEqual(mill.execute_command("$$")["$10"], "0")
+        self.assertEqual(mill.set_grbl_setting("20", "0"), "ok")
+        mill.clear_buffers()
+        self.assertEqual(mill.ser_mill.in_waiting, 0)
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_realtime_jog_unlock_reset_and_raw_status_paths(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial(jog_response="error:8")
+
+        mill.jog()
+        mill.jog(x=1.0, z=-2.0)
+        mill.jog_cancel()
+        mill.unlock()
+        mill.soft_reset()
+        mill.soft_reset_and_unlock()
+        raw = mill.query_raw_status()
+
+        self.assertIn("<", raw)
+        self.assertIn(b"\x85", mill.ser_mill.writes)
+        self.assertIn(b"$X\n", mill.ser_mill.writes)
+        self.assertIn(b"\x18", mill.ser_mill.writes)
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_unlock_error_timeout_stop_failure_and_settings_error(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial()
+        mill.ser_mill.queue_line("error:9")
+        with self.assertRaises(CommandExecutionError):
+            mill.unlock()
+
+        mill.ser_mill = FakeGrblSerial()
+        mill.ser_mill.write = MagicMock(return_value=1)
+        with patch('gantry.gantry_driver.driver.time.time', side_effect=[0.0, 3.0]):
+            with self.assertRaises(CommandExecutionError):
+                mill.unlock()
+
+        mill.ser_mill = FakeGrblSerial(chunks=["<Idle|WPos:0,0,0|FS:0,0>\r\n"])
+        mill.ser_mill.write = MagicMock(return_value=1)
+        with self.assertRaises(StatusReturnError):
+            mill.stop()
+
+        mill.ser_mill = FakeGrblSerial(chunks=["error:2\r\n"])
+        with self.assertRaises(StatusReturnError):
+            mill._collect_grbl_settings_response()
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_seed_wco_and_mpos_coordinate_conversion(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial(status="<Idle|MPos:11.000,22.000,33.000|WCO:1.000,2.000,3.000|FS:0,0>")
+        mill.config = {"$10": "1"}
+
+        coords = mill.current_coordinates()
+
+        self.assertEqual(coords, Coordinates(10.0, 20.0, 30.0))
+        self.assertEqual(mill._wco, Coordinates(1.0, 2.0, 3.0))
+
+        mill.ser_mill = FakeGrblSerial(status="<Idle|MPos:11.000,22.000,33.000|FS:0,0>")
+        mill.config = {"$10": "1"}
+        mill._wco = Coordinates(1.0, 2.0, 3.0)
+        self.assertEqual(mill.current_coordinates(), Coordinates(10.0, 20.0, 30.0))
+
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_current_coordinates_retries_and_invalid_modes(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial(chunks=[
+            "ok\r\n",
+            "<Idle|FS:0,0>\r\n",
+            "<Idle|WPos:1.000,2.000,3.000|FS:0,0>\r\n",
+        ])
+        mill.config = {"$10": "0"}
+        self.assertEqual(mill.current_coordinates(), Coordinates(1.0, 2.0, 3.0))
+
+        mill.ser_mill = FakeGrblSerial(status="<Idle|WPos:1,2,3|FS:0,0>")
+        mill.config = {"$10": "9"}
+        with self.assertRaises(ValueError):
+            mill.current_coordinates()
 
     def test_mill_motion_api_has_no_driver_level_instrument_offsets(self):
         """InstrumentedGantry owns instrument offsets; Mill only receives machine coordinates."""
@@ -261,6 +574,34 @@ class TestCNCDriverLogic(unittest.TestCase):
                 "<Hold|WPos:0,0,0|FS:0,0>", timeout=1,
             )
 
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_stop_sends_realtime_feed_hold_and_accepts_hold(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = ScriptedSerial([b"<Hold|WPos:0,0,0|FS:0,0>\r\n"])
+
+        mill.stop()
+
+        self.assertEqual(mill.ser_mill.writes, [b"!", b"?"])
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_feed_hold_realtime_and_resume_are_write_only(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        mill.ser_mill = ScriptedSerial()
+
+        mill.feed_hold_realtime()
+        mill.resume()
+
+        self.assertEqual(mill.ser_mill.writes, [b"!", b"~"])
+
     @patch('gantry.gantry_driver.driver.time.time', side_effect=[0.0, 6.0])
     @patch('gantry.gantry_driver.driver.serial.Serial')
     @patch('gantry.gantry_driver.driver.set_up_mill_logger')
@@ -312,6 +653,33 @@ class TestCNCDriverLogic(unittest.TestCase):
         self.assertTrue(mill.homed)
         self.assertEqual(mill.current_status.call_count, 2)
 
+    @patch('gantry.gantry_driver.driver.time.sleep')
+    @patch('gantry.gantry_driver.driver.time.time', side_effect=[0.0, 0.2, 0.4])
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_home_alarm_retry_drains_before_retrying(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_time, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = ScriptedSerial()
+        mill.execute_command = MagicMock()
+        mill.current_status = MagicMock(
+            side_effect=[
+                "<Alarm|WPos:0,0,0|FS:0,0>",
+                "<Idle|WPos:0,0,0|FS:0,0>",
+            ]
+        )
+        mill.clear_buffers = MagicMock()
+
+        mill.home(timeout=1)
+
+        self.assertEqual(mill.execute_command.call_args_list, [
+            call("$H"),
+            call("$H"),
+        ])
+        mill.clear_buffers.assert_called_once()
+
     @patch('gantry.gantry_driver.driver.serial.Serial')
     @patch('gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('gantry.gantry_driver.driver.set_up_command_logger')
@@ -319,6 +687,7 @@ class TestCNCDriverLogic(unittest.TestCase):
         """Test connecting with mocked serial port."""
         mock_serial_instance = MagicMock()
         mock_serial_instance.is_open = True
+        mock_serial_instance.readline.return_value = b"<Idle|WPos:0,0,0|FS:0,0>\r\n"
         mock_serial.return_value = mock_serial_instance
         
         # Mock the locate_over_serial to return our mock
@@ -333,6 +702,39 @@ class TestCNCDriverLogic(unittest.TestCase):
             
             self.assertTrue(mill.active_connection)
             self.assertEqual(mill.ser_mill, mock_serial_instance)
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_connect_requires_initial_status_before_wpos_enforcement(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mock_serial_instance = ScriptedSerial([b"", b"", b""])
+
+        with patch.object(Mill, '_locate_over_serial', return_value=(mock_serial_instance, '/dev/test')):
+            mill = Mill()
+            with self.assertRaises(MillConnectionError):
+                mill.connect(port='/dev/test')
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_disconnect_resets_transient_state(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        mill.ser_mill = ScriptedSerial()
+        mill.active_connection = True
+        mill.homed = True
+        mill._wco = Coordinates(1.0, 2.0, 3.0)
+        mill.config = {"$10": "0"}
+
+        mill.disconnect()
+
+        self.assertFalse(mill.active_connection)
+        self.assertFalse(mill.homed)
+        self.assertIsNone(mill._wco)
+        self.assertEqual(mill.config, {})
 
     @patch('gantry.gantry_driver.driver.serial.Serial')
     @patch('gantry.gantry_driver.driver.set_up_mill_logger')
@@ -365,6 +767,60 @@ class TestCNCDriverLogic(unittest.TestCase):
         coords = mill.current_coordinates()
 
         self.assertEqual(coords, Coordinates(1.0, 2.0, 3.0))
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_read_serial_reassembles_split_status(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        mill.ser_mill = ScriptedSerial([
+            b"<Idle|WPos:1.000,2.000,",
+            b"35.000|FS:0,0>\r\n",
+        ])
+
+        self.assertEqual(
+            mill._read_serial(),
+            "<Idle|WPos:1.000,2.000,35.000|FS:0,0>",
+        )
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_read_serial_discards_truncated_status_mid_number(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        mill.ser_mill = ScriptedSerial([b"<Idle|WPos:1.000,2.000,3"])
+
+        self.assertEqual(mill._read_serial(), "")
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_current_status_handles_unstripped_ok(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        mill.ser_mill = ScriptedSerial([
+            b"ok\r\n",
+            b"<Idle|WPos:0,0,0|FS:0,0>\r\n",
+        ])
+
+        self.assertEqual(mill.current_status(), "<Idle|WPos:0,0,0|FS:0,0>")
+        self.assertEqual(mill.ser_mill.writes, [b"?"])
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_wait_until_idle_classifies_alarm_case_insensitively(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+
+        with self.assertRaises(StatusReturnError):
+            mill._wait_until_idle("<Alarm|WPos:0,0,0|FS:0,0>")
 
     @patch('gantry.gantry_driver.driver.serial.Serial')
     @patch('gantry.gantry_driver.driver.set_up_mill_logger')
@@ -450,6 +906,23 @@ class TestCNCDriverLogic(unittest.TestCase):
         mill.ser_mill = None
         with self.assertRaises(MillConnectionError):
             mill.jog_cancel()
+
+    @patch('gantry.gantry_driver.driver.serial.Serial')
+    @patch('gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('gantry.gantry_driver.driver.set_up_command_logger')
+    def test_unguarded_read_methods_raise_mill_connection_error(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        mill = Mill()
+        for method_name in (
+            "current_status",
+            "clear_buffers",
+            "seed_wco",
+            "current_coordinates",
+        ):
+            with self.subTest(method=method_name):
+                with self.assertRaises(MillConnectionError):
+                    getattr(mill, method_name)()
 
     @patch('gantry.gantry_driver.driver.serial.Serial')
     @patch('gantry.gantry_driver.driver.set_up_mill_logger')

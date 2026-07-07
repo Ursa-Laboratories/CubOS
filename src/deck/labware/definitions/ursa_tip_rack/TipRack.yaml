@@ -2,8 +2,8 @@
 #
 # Matches the WellPlate calibration pattern: a two-point anchor (`a1`, `a2`)
 # plus per-column / per-row offsets, with the full 30-tip grid derived by
-# the loader. Override `calibration.a1` and `calibration.a2` in your deck
-# YAML to re-anchor the rack on a specific deck position.
+# the loader. The definition provides geometry only: measure and set
+# `calibration` plus `pickup_z` in each deck YAML before hardware use.
 
 type: tip_rack
 name: ursa_tip_rack
@@ -16,10 +16,6 @@ height: 22.0
 # Override with the measured disposable tip extension below the bare pipette
 # nozzle before using this definition for hardware protocols.
 tip_length: 59.3
-pickup_z: 191.0
 drop_z: 174.8
-calibration:
-  a1: { x: 111.9, y: 2.7 }
-  a2: { x: 120.4, y: 2.7 }   # same y as a1 → next column (a1.x + x_offset)
 x_offset: 8.5
 y_offset: 8.5

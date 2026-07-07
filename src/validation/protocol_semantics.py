@@ -29,6 +29,7 @@ from deck.labware.well_plate import WellPlate
 from gantry.gantry_config import GantryConfig
 from gantry.machine_geometry import FixedStructureBox, fixed_structures_for_gantry
 from protocol_engine.protocol import Protocol
+from protocol_engine.registry import CommandRegistry
 from protocol_engine.scan_args import (
     NormalizedScanArguments,
     normalize_scan_arguments,
@@ -658,14 +659,31 @@ def _validate_scan_command(
     instrument = args.get("instrument")
     plate = args.get("plate")
     if instrument not in instrumented_gantry.instruments:
+        violations.append(_violation(
+            step_index,
+            "scan",
+            f"unknown instrument {instrument!r}. Available: "
+            f"{', '.join(sorted(instrumented_gantry.instruments.keys()))}.",
+        ))
         return violations
     tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
 
     try:
         plate_obj = deck.resolve_labware(plate)
-    except KeyError:
+    except (KeyError, AttributeError, ValueError) as exc:
+        violations.append(_violation(
+            step_index,
+            "scan",
+            f"plate {plate!r} cannot be resolved on the deck: {exc}",
+        ))
         return violations
     if not isinstance(plate_obj, WellPlate):
+        violations.append(_violation(
+            step_index,
+            "scan",
+            f"plate {plate!r} must resolve to a WellPlate, got "
+            f"{type(plate_obj).__name__}.",
+        ))
         return violations
 
     try:
@@ -799,6 +817,12 @@ def _validate_measure_command(
         return violations
 
     if instrument not in instrumented_gantry.instruments:
+        violations.append(_violation(
+            step_index,
+            "measure",
+            f"unknown instrument {instrument!r}. Available: "
+            f"{', '.join(sorted(instrumented_gantry.instruments.keys()))}.",
+        ))
         return violations
 
     finite_violation = _finite_field_violation(
@@ -810,7 +834,12 @@ def _validate_measure_command(
 
     try:
         coord = deck.resolve_coordinate(position)
-    except KeyError:
+    except (KeyError, AttributeError, ValueError) as exc:
+        violations.append(_violation(
+            step_index,
+            "measure",
+            f"position {position!r} cannot be resolved on the deck: {exc}",
+        ))
         return violations
 
     action_abs = coord.z + relative_action
@@ -870,6 +899,38 @@ def _validate_measure_command(
         gantry=gantry,
     ))
     current_poses[instrument] = action
+
+    try:
+        normalized = normalize_scan_arguments(
+            method_kwargs=args.get("method_kwargs"),
+        )
+    except ValueError as exc:
+        violations.append(_violation(step_index, "measure", str(exc)))
+        return violations
+
+    violations.extend(_validate_asmi_indentation(
+        step_index=step_index,
+        args=args,
+        ref_z=coord.z,
+        relative_action=relative_action,
+        normalized=normalized,
+        instrumented_gantry=instrumented_gantry,
+        gantry=gantry,
+    ))
+    indentation_limit_height = args.get("indentation_limit_height")
+    if (
+        indentation_limit_height is not None
+        and isinstance(indentation_limit_height, (int, float))
+        and not isinstance(indentation_limit_height, bool)
+        and math.isfinite(float(indentation_limit_height))
+        and indentation_limit_height > relative_action
+    ):
+        violations.append(_violation(
+            step_index, "measure",
+            f"indentation_limit_height ({indentation_limit_height}) is above "
+            f"measurement_height ({relative_action}). The deepest descent "
+            "plane must be at or below the action plane in +Z-up.",
+        ))
     return violations
 
 
@@ -896,9 +957,37 @@ def _validate_move_waypoints(
     target_label = f"move target {position!r}"
     transit_z = travel_z
     if isinstance(position, (list, tuple)):
+        if len(position) != 3 or any(
+            _finite_field_violation(step_index, "move", "position", coord)
+            is not None
+            for coord in position
+        ):
+            violations.append(_violation(
+                step_index,
+                "move",
+                f"literal position {position!r} must be exactly three finite "
+                "XYZ numbers.",
+            ))
+            return violations
         target = (position[0], position[1], position[2])
     elif isinstance(position, str) and position in protocol.positions:
         named = protocol.positions[position]
+        if (
+            not isinstance(named, (list, tuple))
+            or len(named) != 3
+            or any(
+                _finite_field_violation(step_index, "move", "position", coord)
+                is not None
+                for coord in named
+            )
+        ):
+            violations.append(_violation(
+                step_index,
+                "move",
+                f"named position {position!r} must be exactly three finite "
+                f"XYZ numbers, got {named!r}.",
+            ))
+            return violations
         target = (named[0], named[1], named[2])
     elif isinstance(position, str):
         try:
@@ -1055,7 +1144,7 @@ def _require_attached_tip(
     )]
 
 
-_KNOWN_PIPETTE_COMMANDS = frozenset({
+_PIPETTE_COMMANDS = frozenset({
     "aspirate",
     "blowout",
     "drop_tip",
@@ -1064,6 +1153,11 @@ _KNOWN_PIPETTE_COMMANDS = frozenset({
     "transfer",
     "serial_transfer",
 })
+_NO_MOTION_COMMANDS = frozenset({"pause", "breakpoint"})
+
+
+def _known_command_names() -> frozenset[str]:
+    return frozenset(CommandRegistry.instance().command_names)
 
 
 def _validate_pipette_command(
@@ -1077,16 +1171,20 @@ def _validate_pipette_command(
     current_poses: dict[str, Point3D],
     tip_state: PipetteTipState,
 ) -> tuple[list[ProtocolSemanticViolation], PipetteTipState]:
-    if command_name not in _KNOWN_PIPETTE_COMMANDS:
+    if command_name in _NO_MOTION_COMMANDS:
+        return [], tip_state
+    known_commands = _known_command_names()
+    if command_name not in known_commands:
         return [
             _violation(
                 step_index,
                 command_name,
                 f"unknown protocol command {command_name!r}; the semantic "
-                "validator only knows: home, move, measure, scan, "
-                f"{', '.join(sorted(_KNOWN_PIPETTE_COMMANDS))}.",
+                f"validator only knows: {', '.join(sorted(known_commands))}.",
             )
         ], tip_state
+    if command_name not in _PIPETTE_COMMANDS:
+        return [], tip_state
     if "pipette" not in instrumented_gantry.instruments:
         return [], tip_state
 

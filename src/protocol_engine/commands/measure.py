@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from typing import Any, Dict, TYPE_CHECKING
 
 from ..errors import ProtocolExecutionError
@@ -12,7 +11,7 @@ from ..measurements import normalize_measurement
 from ..registry import protocol_command
 from ..scan_args import normalize_scan_arguments
 from ._dispatch import inject_runtime_args
-from ._movement import engage_at_labware
+from ._movement import _assert_finite_number, engage_at_labware
 
 if TYPE_CHECKING:
     from ..runtime import ProtocolContext
@@ -67,8 +66,35 @@ def measure(
     # rather than a generic Python TypeError or a silent overwrite.
     try:
         normalized = normalize_scan_arguments(method_kwargs=method_kwargs)
+        _assert_finite_number(
+            measurement_height,
+            field_name="measurement_height",
+            source="measure",
+        )
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
+
+    if (
+        indentation_limit_height is not None
+        and indentation_limit_height > measurement_height
+    ):
+        raise ProtocolExecutionError(
+            f"measure: indentation_limit_height ({indentation_limit_height}) "
+            f"is above measurement_height ({measurement_height}). The "
+            "deepest descent plane must be at or below the action plane "
+            "in +Z-up."
+        )
+
+    callable_method = getattr(instr, method)
+    try:
+        kwargs_probe = inject_runtime_args(
+            callable_method, normalized.method_kwargs, context,
+            well_z=0.0,
+            measurement_height=measurement_height,
+            indentation_limit_height=indentation_limit_height,
+        )
+    except ProtocolExecutionError:
+        raise
 
     try:
         well_z, action_z = engage_at_labware(
@@ -88,24 +114,14 @@ def measure(
     # offset so closed-loop instrument methods can resolve their own action /
     # target Z values. Open-loop methods that don't declare these parameters
     # receive only the YAML-supplied ``method_kwargs``.
-    if (
-        indentation_limit_height is not None
-        and indentation_limit_height > measurement_height
-    ):
-        raise ProtocolExecutionError(
-            f"measure: indentation_limit_height ({indentation_limit_height}) "
-            f"is above measurement_height ({measurement_height}). The "
-            "deepest descent plane must be at or below the action plane "
-            "in +Z-up."
-        )
-
-    callable_method = getattr(instr, method)
     kwargs = inject_runtime_args(
         callable_method, normalized.method_kwargs, context,
         well_z=well_z,
         measurement_height=measurement_height,
         indentation_limit_height=indentation_limit_height,
     )
+    if kwargs == kwargs_probe and "well_z" not in kwargs:
+        kwargs = kwargs_probe
     result = callable_method(**kwargs)
 
     if context.data_store is not None and context.campaign_id is not None:
@@ -120,22 +136,24 @@ def measure(
                 context.campaign_id, target.labware_key, target.location_id,
             )
             contents_json = json.dumps(contents) if contents else "[]"
-            exp_id = context.data_store.create_experiment(
+            context.data_store.log_experiment_measurement(
                 campaign_id=context.campaign_id,
+                labware_key=target.labware_key,
                 labware_name=target.labware_name,
                 well_id=target.location_id,
                 contents_json=contents_json,
+                result=measurement,
             )
-            context.data_store.log_measurement(exp_id, measurement)
         except TypeError as exc:
             logger.warning(
                 "Measurement result from %s.%s at position %s is not "
                 "persistable: %s",
                 instrument, method, position, exc,
             )
-        except sqlite3.Error as exc:
+        except Exception as exc:
             logger.warning(
-                "Failed to log measurement for position %s: %s", position, exc,
+                "Failed to log measurement for position %s: %s",
+                position, exc, exc_info=True,
             )
 
     return result

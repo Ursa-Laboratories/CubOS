@@ -7,7 +7,17 @@ import pytest
 
 from pydantic import ValidationError
 
-from deck import WellPlate, Vial, Coordinate3D, Deck, TipRack, Wall
+from deck import (
+    LABWARE_YAML_ENTRY_MODELS,
+    WellPlate,
+    Vial,
+    Coordinate3D,
+    Deck,
+    TipRack,
+    Wall,
+    derive_wells_preview,
+    resolve_load_names,
+)
 from deck.loader import (
     DeckLoaderError,
     _PlateOrientation,
@@ -76,6 +86,41 @@ def test_load_valid_deck_returns_deck_with_labware():
         Path(path).unlink(missing_ok=True)
 
 
+def test_duplicate_yaml_key_in_deck_file_names_file_and_key(tmp_path):
+    path = tmp_path / "duplicate_deck.yaml"
+    path.write_text(
+        """
+labware:
+  plate:
+    type: vial
+    name: first
+    model_name: vial
+    height: 10.0
+    diameter: 5.0
+    location: {x: 1.0, y: 2.0, z: 3.0}
+    capacity_ul: 10.0
+    working_volume_ul: 5.0
+  plate:
+    type: vial
+    name: second
+    model_name: vial
+    height: 10.0
+    diameter: 5.0
+    location: {x: 4.0, y: 5.0, z: 6.0}
+    capacity_ul: 10.0
+    working_volume_ul: 5.0
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(Exception) as exc_info:
+        load_deck_from_yaml(path)
+
+    message = str(exc_info.value)
+    assert str(path) in message
+    assert "duplicate YAML key 'plate'" in message
+
+
 def test_loaded_well_plate_has_derived_wells_and_volume():
     """Loaded WellPlate has correct well count, A1 anchor, and volume fields."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -95,6 +140,95 @@ def test_loaded_well_plate_has_derived_wells_and_volume():
         assert plate.working_volume_ul == pytest.approx(150.0)
     finally:
         Path(path).unlink(missing_ok=True)
+
+
+def test_public_derive_wells_preview_matches_loader_calibration_logic():
+    entry = WellPlateYamlEntry.model_validate({
+        "type": "well_plate",
+        "name": "preview_plate",
+        "rows": 2,
+        "columns": 2,
+        "calibration": {
+            "a1": {"x": 10.0, "y": 20.0, "z": 5.0},
+            "a2": {"x": 19.0, "y": 20.0, "z": 5.0},
+        },
+        "x_offset": 9.0,
+        "y_offset": 8.0,
+    })
+
+    wells = derive_wells_preview(entry, resolved_z=12.3456)
+
+    assert wells == {
+        "A1": Coordinate3D(x=10.0, y=20.0, z=12.346),
+        "A2": Coordinate3D(x=19.0, y=20.0, z=12.346),
+        "B1": Coordinate3D(x=10.0, y=12.0, z=12.346),
+        "B2": Coordinate3D(x=19.0, y=12.0, z=12.346),
+    }
+
+
+def test_public_derive_wells_preview_rejects_bad_orientation():
+    entry = WellPlateYamlEntry.model_validate({
+        "type": "well_plate",
+        "name": "preview_plate",
+        "rows": 1,
+        "columns": 2,
+        "calibration": {
+            "a1": {"x": 10.0, "y": 20.0, "z": 5.0},
+            "a2": {"x": 18.0, "y": 20.0, "z": 5.0},
+        },
+        "x_offset": 9.0,
+        "y_offset": 8.0,
+    })
+
+    with pytest.raises(ValueError, match="A2 must match"):
+        derive_wells_preview(entry, resolved_z=5.0)
+
+
+def test_public_resolve_load_names_expands_definition_defaults():
+    raw = {
+        "labware": {
+            "tiprack": {
+                "type": "tip_rack",
+                "load_name": "ursa_tip_rack",
+                "calibration": {
+                    "a1": {"x": 1.0, "y": 2.0, "z": 3.0},
+                    "a2": {"x": 10.0, "y": 2.0, "z": 3.0},
+                },
+                "pickup_z": 4.0,
+            }
+        }
+    }
+
+    resolved = resolve_load_names(raw)
+
+    assert resolved["labware"]["tiprack"]["name"] == "tiprack"
+    assert resolved["labware"]["tiprack"]["type"] == "tip_rack"
+    assert "load_name" not in resolved["labware"]["tiprack"]
+
+
+def test_public_resolve_load_names_unknown_definition_raises_clear_error():
+    with pytest.raises(DeckLoaderError, match="Unknown `load_name"):
+        resolve_load_names({
+            "labware": {
+                "thing": {
+                    "load_name": "missing_definition",
+                }
+            }
+        })
+
+
+def test_labware_yaml_entry_models_exposes_public_type_mapping():
+    assert LABWARE_YAML_ENTRY_MODELS["well_plate"] is WellPlateYamlEntry
+    assert LABWARE_YAML_ENTRY_MODELS["vial"].model_fields["diameter"].is_required()
+    assert sorted(LABWARE_YAML_ENTRY_MODELS) == [
+        "tip_disposal",
+        "tip_rack",
+        "vial",
+        "vial_holder",
+        "wall",
+        "well_plate",
+        "well_plate_holder",
+    ]
 
 
 def test_loaded_vial_has_location_and_volume():
@@ -318,6 +452,60 @@ labware:
         assert plate.get_well_center("A2").y == pytest.approx(0.0)
         assert plate.get_well_center("B1").x == pytest.approx(0.0)
         assert plate.get_well_center("B1").y == pytest.approx(-8.0)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_explicit_row_direction_positive_overrides_horizontal_default():
+    yaml = """
+labware:
+  p:
+    type: well_plate
+    name: small
+    model_name: small
+    rows: 2
+    columns: 2
+    calibration:
+      a1: { x: 0.0, y: 0.0, z: 5.0 }
+      a2: { x: 10.0, y: 0.0, z: 5.0 }
+    x_offset: 10.0
+    y_offset: 8.0
+    row_direction: positive
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml)
+        path = f.name
+    try:
+        plate = load_deck_from_yaml(path)["p"]
+        assert plate.get_well_center("B1").x == pytest.approx(0.0)
+        assert plate.get_well_center("B1").y == pytest.approx(8.0)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_explicit_row_direction_negative_overrides_vertical_default():
+    yaml = """
+labware:
+  p:
+    type: well_plate
+    name: small
+    model_name: small
+    rows: 2
+    columns: 2
+    calibration:
+      a1: { x: 0.0, y: 0.0, z: 5.0 }
+      a2: { x: 0.0, y: 8.0, z: 5.0 }
+    x_offset: 10.0
+    y_offset: 8.0
+    row_direction: negative
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml)
+        path = f.name
+    try:
+        plate = load_deck_from_yaml(path)["p"]
+        assert plate.get_well_center("B1").x == pytest.approx(-10.0)
+        assert plate.get_well_center("B1").y == pytest.approx(0.0)
     finally:
         Path(path).unlink(missing_ok=True)
 
@@ -806,6 +994,29 @@ labware:
         Path(path).unlink(missing_ok=True)
 
 
+def test_labware_key_with_dot_is_rejected_at_load_time():
+    yaml = """
+labware:
+  plate.1:
+    type: vial
+    name: dotted
+    model_name: vial
+    height: 10.0
+    diameter: 5.0
+    location: {x: 1.0, y: 2.0, z: 3.0}
+    capacity_ul: 10.0
+    working_volume_ul: 5.0
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml)
+        path = f.name
+    try:
+        with pytest.raises(ValidationError, match="cannot contain"):
+            load_deck_from_yaml(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 # ----- Type coercion and invalid types -----
 
 def test_numeric_string_coercion_allowed():
@@ -1051,6 +1262,15 @@ class TestResolvePlateOrientation:
             row_delta_x=0.0, row_delta_y=-8.0,
         )
 
+    def test_explicit_positive_row_direction_for_horizontal_columns(self):
+        entry = _make_entry(a1_x=0.0, a1_y=0.0, a2_x=10.0, a2_y=0.0)
+        entry.row_direction = "positive"
+        orient = _resolve_plate_orientation(entry)
+        assert orient == _PlateOrientation(
+            col_delta_x=10.0, col_delta_y=0.0,
+            row_delta_x=0.0, row_delta_y=8.0,
+        )
+
     def test_vertical_columns_along_y(self):
         entry = _make_entry(a1_x=0.0, a1_y=0.0, a2_x=0.0, a2_y=8.0,
                             x_offset=10.0, y_offset=8.0)
@@ -1058,6 +1278,15 @@ class TestResolvePlateOrientation:
         assert orient == _PlateOrientation(
             col_delta_x=0.0, col_delta_y=8.0,
             row_delta_x=10.0, row_delta_y=0.0,
+        )
+
+    def test_explicit_negative_row_direction_for_vertical_columns(self):
+        entry = _make_entry(a1_x=0.0, a1_y=0.0, a2_x=0.0, a2_y=8.0)
+        entry.row_direction = "negative"
+        orient = _resolve_plate_orientation(entry)
+        assert orient == _PlateOrientation(
+            col_delta_x=0.0, col_delta_y=8.0,
+            row_delta_x=-10.0, row_delta_y=0.0,
         )
 
     def test_negative_offsets_fail_schema_validation(self):
@@ -1281,6 +1510,28 @@ labware:
         try:
             with pytest.raises(Exception, match="corner_1.x must be < corner_2.x"):
                 load_deck_from_yaml(path)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+    def test_wall_missing_corner_z_has_actionable_message(self):
+        yaml_str = """
+labware:
+  bad_wall:
+    type: wall
+    name: bad_wall
+    corner_1: { x: 10.0, y: 20.0 }
+    corner_2: { x: 110.0, y: 25.0 }
+"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_str)
+            path = f.name
+        try:
+            with pytest.raises(ValidationError) as exc_info:
+                load_deck_from_yaml(path)
+            message = str(exc_info.value)
+            assert "corner_1.z" in message
+            assert "corner_2.z" in message
+            assert "explicit Z" in message
         finally:
             Path(path).unlink(missing_ok=True)
 
@@ -1541,5 +1792,33 @@ labware:
         nested = holder.contained_labware["plate"]
         assert isinstance(nested, WellPlate)
         assert nested.well_depth == pytest.approx(9.5)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_nested_well_plate_explicit_row_direction_is_honored():
+    yaml_str = """
+labware:
+  plate_holder:
+    type: well_plate_holder
+    name: plate_holder
+    location: { x: 10.0, y: 20.0, z: 30.0 }
+    well_plate:
+      model_name: nested
+      rows: 2
+      columns: 2
+      calibration:
+        a1: { x: 10.0, y: 20.0 }
+        a2: { x: 19.0, y: 20.0 }
+      x_offset: 9.0
+      y_offset: 9.0
+      row_direction: positive
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml_str)
+        path = f.name
+    try:
+        deck = load_deck_from_yaml(path)
+        assert deck.resolve_coordinate("plate_holder.plate.B1").y == pytest.approx(29.0)
     finally:
         Path(path).unlink(missing_ok=True)

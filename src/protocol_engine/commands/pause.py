@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from typing import TYPE_CHECKING
 
@@ -38,9 +39,17 @@ def breakpoint_cmd(
 ) -> None:
     """Halt protocol execution until the user presses Enter.
 
+    In non-interactive/headless runs, log a warning and continue instead
+    of holding hardware resources forever.
+
     Args:
         context: Runtime context.
         message: Prompt message displayed to the user.
     """
     context.logger.info("Breakpoint: %s", message)
+    if not sys.stdin.isatty():
+        context.logger.warning(
+            "Breakpoint skipped because stdin is not interactive: %s", message,
+        )
+        return
     input(message)

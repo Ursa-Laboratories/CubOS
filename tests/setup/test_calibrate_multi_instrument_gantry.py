@@ -257,6 +257,18 @@ class _SoftLimitEnabledFakeGantry(_FakeGantry):
         self.soft_limits_are_enabled = enabled
 
 
+class _SoftLimitProgrammingFailsFakeGantry(_FakeGantry):
+    def configure_soft_limits_from_spans(self, **kwargs) -> None:
+        self.calls.append(("configure_soft_limits_from_spans_failed", kwargs))
+        raise RuntimeError("GRBL soft-limit settings did not verify")
+
+
+class _IdleTrackingFakeGantry(_FakeGantry):
+    def get_status(self) -> str:
+        self.calls.append(("get_status",))
+        return "Idle"
+
+
 def _key_reader(keys):
     iterator = iter(keys)
 
@@ -423,8 +435,9 @@ def test_multi_instrument_calibration_disables_stale_soft_limits_during_jogs(tmp
     assert calls.index(disable_call) < calls.index(
         ("set_work_coordinates", 0.0, 0.0, None)
     )
-    assert calls.index(restore_call) > calls.index(
-        ("set_work_coordinates", None, None, 12.5)
+    assert calls.index(restore_call) < calls.index(
+        ("home",),
+        calls.index(("set_work_coordinates", 0.0, 0.0, None)),
     )
     assert any("Temporarily disabling GRBL soft limits" in m for m in messages)
 
@@ -545,6 +558,51 @@ def test_multi_instrument_calibration_sets_xy_before_z_and_updates_yaml(tmp_path
     assert written["instruments"]["camera"]["depth"] == 6.0
 
 
+def test_multi_instrument_calibration_writes_yaml_before_soft_limit_programming_failure(tmp_path):
+    path = _write_multi_gantry(tmp_path / "gantry.yaml")
+    out_path = tmp_path / "calibrated.yaml"
+    messages: list[str] = []
+
+    with pytest.raises(RuntimeError, match="soft-limit settings did not verify"):
+        run_multi_instrument_calibration(
+            path,
+            reference_instrument="left_probe",
+            lowest_instrument="left_probe",
+            instruments_to_calibrate=("left_probe", "camera"),
+            output_gantry_path=out_path,
+            write_gantry_yaml=True,
+            output=messages.append,
+            input_reader=lambda _prompt: "12.5",
+            gantry_factory=_SoftLimitProgrammingFailsFakeGantry,
+            key_reader=_key_reader(
+                [
+                    ("LEFT", 2),
+                    ("DOWN", 1),
+                    ("\r", 1),
+                    ("Z", 3),
+                    ("\r", 1),
+                    ("RIGHT", 15),
+                    ("UP", 7),
+                    ("Z", 9),
+                    ("\r", 1),
+                ]
+            ),
+            stdin_flusher=lambda: None,
+        )
+
+    assert out_path.exists()
+    written = yaml.safe_load(out_path.read_text(encoding="utf-8"))
+    assert written["grbl_settings"]["max_travel_z"] == 106.0
+    assert written["instruments"]["camera"]["offset_x"] == -15.0
+    output_text = "\n".join(messages)
+    assert "Full calibrated multi-instrument gantry YAML to copy/paste:" in output_text
+    assert f"was written to: {out_path}" in output_text
+    assert any(
+        call[0] == "configure_soft_limits_from_spans_failed"
+        for call in _SoftLimitProgrammingFailsFakeGantry.instance.calls
+    )
+
+
 def test_multi_instrument_calibration_records_rpi_camera_over_block(tmp_path):
     path = _write_rpi_camera_gantry(tmp_path / "gantry.yaml")
     out_path = tmp_path / "calibrated.yaml"
@@ -656,9 +714,139 @@ def test_multi_instrument_calibration_prompts_for_missing_block_height_and_write
 
     assert isinstance(result, MultiInstrumentCalibrationResult)
     assert result.z_origin_verification == (199.0, 149.5, 18.75)
-    assert "Reference height above the deck in mm: " in prompts
+    assert "Calibration block height in mm: " in prompts
     written = yaml.safe_load(out_path.read_text(encoding="utf-8"))
     assert written["cnc"]["calibration_block_height_mm"] == 18.75
+
+
+def test_multi_instrument_calibration_uses_multi_specific_block_prompt(tmp_path):
+    path = _write_multi_gantry(tmp_path / "gantry.yaml")
+    messages: list[str] = []
+
+    run_multi_instrument_calibration(
+        path,
+        reference_instrument="left_probe",
+        lowest_instrument="left_probe",
+        instruments_to_calibrate=("left_probe",),
+        skip_soft_limit_config=True,
+        output=messages.append,
+        input_reader=lambda _prompt: "12.5",
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader([("\r", 1), ("Z", 1), ("\r", 1), ("\r", 1)]),
+        stdin_flusher=lambda: None,
+    )
+
+    output_text = "\n".join(messages)
+    assert "use a calibration block" in output_text
+    assert "every instrument can reach" in output_text
+    assert "top of a well plate" not in output_text
+
+
+def test_multi_instrument_calibration_q_abort_cancels_jog_before_disconnect(tmp_path):
+    path = _write_multi_gantry(tmp_path / "gantry.yaml")
+
+    with pytest.raises(KeyboardInterrupt):
+        run_multi_instrument_calibration(
+            path,
+            reference_instrument="left_probe",
+            lowest_instrument="left_probe",
+            instruments_to_calibrate=("left_probe",),
+            skip_soft_limit_config=True,
+            output=lambda _message: None,
+            input_reader=lambda _prompt: "12.5",
+            gantry_factory=_FakeGantry,
+            key_reader=_key_reader([("Q", 1)]),
+            stdin_flusher=lambda: None,
+        )
+
+    calls = _FakeGantry.instance.calls
+    assert ("jog_cancel",) in calls
+    assert calls.index(("jog_cancel",)) < calls.index(("disconnect",))
+
+
+def test_multi_instrument_calibration_keyboard_interrupt_cancels_jog_before_disconnect(tmp_path):
+    path = _write_multi_gantry(tmp_path / "gantry.yaml")
+
+    def interrupting_key_reader():
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_multi_instrument_calibration(
+            path,
+            reference_instrument="left_probe",
+            lowest_instrument="left_probe",
+            instruments_to_calibrate=("left_probe",),
+            skip_soft_limit_config=True,
+            output=lambda _message: None,
+            input_reader=lambda _prompt: "12.5",
+            gantry_factory=_FakeGantry,
+            key_reader=interrupting_key_reader,
+            stdin_flusher=lambda: None,
+        )
+
+    calls = _FakeGantry.instance.calls
+    assert ("jog_cancel",) in calls
+    assert calls.index(("jog_cancel",)) < calls.index(("disconnect",))
+
+
+def test_multi_instrument_calibration_waits_for_idle_before_recorded_reads(tmp_path):
+    path = _write_multi_gantry(tmp_path / "gantry.yaml")
+
+    run_multi_instrument_calibration(
+        path,
+        reference_instrument="left_probe",
+        lowest_instrument="left_probe",
+        instruments_to_calibrate=("left_probe", "camera"),
+        skip_soft_limit_config=True,
+        output=lambda _message: None,
+        input_reader=lambda _prompt: "12.5",
+        gantry_factory=_IdleTrackingFakeGantry,
+        key_reader=_key_reader(
+            [
+                ("RIGHT", 1),
+                ("\r", 1),
+                ("Z", 1),
+                ("\r", 1),
+                ("LEFT", 1),
+                ("\r", 1),
+            ]
+        ),
+        stdin_flusher=lambda: None,
+    )
+
+    calls = _IdleTrackingFakeGantry.instance.calls
+    for index, call in enumerate(calls):
+        if call == ("get_coordinates",):
+            assert index > 0
+            assert calls[index - 1] == ("get_status",)
+
+
+def test_multi_instrument_calibration_flushes_before_each_jog_session_and_after_automated_moves(tmp_path):
+    path = _write_multi_gantry(tmp_path / "gantry.yaml")
+    flushes: list[str] = []
+
+    run_multi_instrument_calibration(
+        path,
+        reference_instrument="left_probe",
+        lowest_instrument="left_probe",
+        instruments_to_calibrate=("left_probe", "camera"),
+        skip_soft_limit_config=True,
+        output=lambda _message: None,
+        input_reader=lambda _prompt: "12.5",
+        gantry_factory=_FakeGantry,
+        key_reader=_key_reader(
+            [
+                ("\r", 1),
+                ("Z", 1),
+                ("\r", 1),
+                ("RIGHT", 1),
+                ("\r", 1),
+            ]
+        ),
+        stdin_flusher=lambda: flushes.append("flush"),
+    )
+
+    assert len(flushes) >= 5
 
 
 def test_updated_multi_instrument_yaml_writes_block_height_and_requires_cnc_mapping():

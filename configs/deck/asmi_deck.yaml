@@ -9,8 +9,9 @@
 #
 # Current physical calibration:
 # - A1 is the first well reference.
-# - A2 shares X with A1 and is one column step higher in Y.
-# - Rows advance toward lower X.
+# - A2 shares Y with A1 and is one column step lower in X.
+# - With the loader's default row-direction convention, rows advance toward
+#   higher Y from A1.
 
 labware:
   plate:
@@ -21,7 +22,7 @@ labware:
       a1:
         x: 347
         y: 42
-        z: 30.0 #actual 25
+        z: 30.0 # TODO: re-measure on hardware (bench note says 25)
       a2:
         x: 338
         y: 42.0

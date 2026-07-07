@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import time
 from typing import TYPE_CHECKING, Any, Dict
 
@@ -181,22 +180,24 @@ def scan(
                     context.campaign_id, plate, well_id,
                 )
                 contents_json = json.dumps(contents) if contents else "[]"
-                exp_id = context.data_store.create_experiment(
+                context.data_store.log_experiment_measurement(
                     campaign_id=context.campaign_id,
+                    labware_key=plate,
                     labware_name=plate_obj.name,
                     well_id=well_id,
                     contents_json=contents_json,
+                    result=measurement,
                 )
-                context.data_store.log_measurement(exp_id, measurement)
             except TypeError as exc:
                 logger.warning(
                     "Measurement result from %s.%s at well %s is not "
                     "persistable: %s",
                     instrument, method, well_id, exc,
                 )
-            except sqlite3.Error as exc:
+            except Exception as exc:
                 logger.warning(
-                    "Failed to log measurement for well %s: %s", well_id, exc,
+                    "Failed to log measurement for well %s: %s",
+                    well_id, exc, exc_info=True,
                 )
 
     if sorted_wells:

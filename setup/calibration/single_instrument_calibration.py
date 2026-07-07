@@ -7,8 +7,11 @@ Internal implementation used by the sole user-facing entrypoint:
 from __future__ import annotations
 
 import copy
+import shutil
 import sys
+import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
 
@@ -123,6 +126,7 @@ def _calibration_block_height_mm(
     raw_config: dict[str, Any],
     *,
     explicit_block_height_mm: float | None,
+    max_height_mm: float | None = None,
     input_reader: Callable[[str], str] | None = None,
     output: Callable[[str], None] | None = None,
 ) -> float:
@@ -131,7 +135,11 @@ def _calibration_block_height_mm(
     else:
         if input_reader is not None and output is not None:
             return _round_mm(
-                _prompt_block_height(input_reader=input_reader, output=output)
+                _prompt_block_height(
+                    input_reader=input_reader,
+                    output=output,
+                    max_height_mm=max_height_mm,
+                )
             )
         cnc = raw_config.get("cnc")
         if not isinstance(cnc, dict) or "calibration_block_height_mm" not in cnc:
@@ -147,6 +155,11 @@ def _calibration_block_height_mm(
             ) from exc
     if value <= 0:
         raise ValueError("cnc.calibration_block_height_mm must be > 0.")
+    if max_height_mm is not None and value > max_height_mm:
+        raise ValueError(
+            "cnc.calibration_block_height_mm must be <= "
+            f"cnc.factory_z_travel_mm ({max_height_mm:g} mm)."
+        )
     return _round_mm(value)
 
 
@@ -381,15 +394,16 @@ def _maybe_write_gantry_yaml(
     write_requested: bool,
     input_reader: Callable[[str], str],
     output: Callable[[str], None],
-) -> None:
+    backup_existing_output: bool = False,
+) -> Path | None:
     if output_path is None and not write_requested:
-        return
+        return None
     explicit_output_path = output_path is not None
     if output_path is None:
         raw = input_reader("Output gantry YAML filename: ").strip()
         if not raw:
             output("No gantry YAML filename supplied; skipping write.")
-            return
+            return None
         output_path = Path(raw)
     if not explicit_output_path:
         confirm = input_reader(
@@ -397,10 +411,16 @@ def _maybe_write_gantry_yaml(
         ).strip().lower()
         if confirm not in ("y", "yes"):
             output("Skipping gantry YAML write.")
-            return
+            return None
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if backup_existing_output and output_path.exists():
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        backup_path = output_path.with_name(f"{output_path.name}.{timestamp}.bak")
+        shutil.copy2(output_path, backup_path)
+        output(f"Backed up existing gantry YAML to: {backup_path}")
     output_path.write_text(yaml_text, encoding="utf-8")
     output(f"Wrote updated gantry YAML: {output_path}")
+    return output_path
 
 
 def _assert_near_xy_origin(
@@ -620,6 +640,7 @@ def _prompt_block_height(
     *,
     input_reader: Callable[[str], str],
     output: Callable[[str], None],
+    max_height_mm: float | None = None,
 ) -> float:
     output("")
     output("Z reference: touch the top of a surface with a known height above the deck —")
@@ -633,6 +654,12 @@ def _prompt_block_height(
             continue
         if value <= 0:
             output("Reference height must be > 0 mm.")
+            continue
+        if max_height_mm is not None and value > max_height_mm:
+            output(
+                "Reference height must be <= configured factory Z travel "
+                f"({max_height_mm:g} mm)."
+            )
             continue
         return value
 
@@ -664,6 +691,44 @@ def _set_serial_timeout_if_available(
     setter = getattr(gantry, "set_serial_timeout", None)
     if callable(setter):
         setter(timeout_s)
+
+
+def _wait_until_idle_if_available(
+    gantry: Gantry,
+    *,
+    timeout_s: float = 10.0,
+    poll_interval_s: float = 0.1,
+) -> None:
+    status_reader = getattr(gantry, "get_status", None)
+    if not callable(status_reader):
+        return
+
+    deadline = time.monotonic() + timeout_s
+    last_status = ""
+    while time.monotonic() < deadline:
+        last_status = str(status_reader())
+        if "idle" in last_status.lower():
+            return
+        time.sleep(poll_interval_s)
+
+    raise RuntimeError(
+        "Timed out waiting for gantry to become idle before coordinate read; "
+        f"last status: {last_status}"
+    )
+
+
+def _cancel_jog_if_available(
+    gantry: Gantry,
+    *,
+    output: Callable[[str], None],
+) -> None:
+    cancel = getattr(gantry, "jog_cancel", None)
+    if not callable(cancel):
+        return
+    try:
+        cancel()
+    except Exception as exc:
+        output(f"Warning: failed to cancel active jog before shutdown: {exc}")
 
 
 def _looks_like_soft_limit_jog_rejection(exc: Exception) -> bool:
@@ -745,32 +810,40 @@ def _interactive_jog_to_reference(
     target_description: str,
     confirmation_description: str,
     key_reader: KeyReader,
+    stdin_flusher: Callable[[], None],
     output: Callable[[str], None],
     feed_rate: float,
     initial_step_mm: float,
     limit_pull_off_mm: float,
 ) -> dict[str, float]:
     step_mm = initial_step_mm
+    stdin_flusher()
     output(CONTROLS_LEGEND)
     output(target_description)
     output(confirmation_description)
 
     while True:
-        key, count = key_reader()
+        try:
+            key, count = key_reader()
+        except KeyboardInterrupt:
+            _cancel_jog_if_available(gantry, output=output)
+            raise
         key = key.upper()
         count = max(1, int(count))
         distance = step_mm * count
 
         if key == "Q":
+            _cancel_jog_if_available(gantry, output=output)
             raise KeyboardInterrupt
         if key in ("\r", "\n", "ENTER"):
+            _wait_until_idle_if_available(gantry)
             coords = gantry.get_coordinates()
             output(
                 "Confirming current reported WPos "
                 f"X={coords['x']:.3f} Y={coords['y']:.3f} Z={coords['z']:.3f}"
             )
             return coords
-        if key == " ":
+        if key in (" ", "\x1b", "ESC"):
             gantry.jog_cancel()
             output("Jog canceled.")
             continue
@@ -817,11 +890,14 @@ def _interactive_jog_to_reference(
         elif key == "X":
             delta["z"] = distance
         else:
+            output("Unrecognized key. " + "Use the listed jog controls.")
+            output(CONTROLS_LEGEND)
             continue
 
         coords = None
         try:
             gantry.jog(feed_rate=feed_rate, **delta)
+            _wait_until_idle_if_available(gantry)
             coords = gantry.get_coordinates()
         except MillConnectionError:
             raise
@@ -834,6 +910,7 @@ def _interactive_jog_to_reference(
                     "this is the intended safe origin point."
                 )
                 try:
+                    _wait_until_idle_if_available(gantry)
                     coords = gantry.get_coordinates()
                 except MillConnectionError:
                     raise
@@ -896,23 +973,34 @@ def _interactive_jog_to_xy_origin(
     gantry: Gantry,
     *,
     key_reader: KeyReader,
+    stdin_flusher: Callable[[], None],
     output: Callable[[str], None],
     feed_rate: float,
     initial_step_mm: float,
     limit_pull_off_mm: float,
+    z_reference_mode: str,
 ) -> dict[str, float]:
+    if z_reference_mode == "block":
+        confirmation_description = (
+            "Press ENTER only when the current X/Y should become WPos X=0, "
+            "Y=0 and the TCP is touching the top of the known-height reference. "
+            "After confirmation, the script will set Z from that reference height."
+        )
+    else:
+        confirmation_description = (
+            "Press ENTER only when the current X/Y should become WPos X=0, "
+            "Y=0. After confirmation, the script will set Z from either true "
+            "deck-bottom contact or a ruler-measured deck-to-TCP gap."
+        )
     return _interactive_jog_to_reference(
         gantry,
         target_description=(
             "Step 1/1: jog the one reference TCP as far as appropriate toward "
             "the physical front-left XY origin and its lowest safe reachable Z."
         ),
-        confirmation_description=(
-            "Press ENTER only when the current X/Y should become WPos X=0, "
-            "Y=0. After confirmation, the script will set Z from either true "
-            "deck-bottom contact or a ruler-measured deck-to-TCP gap."
-        ),
+        confirmation_description=confirmation_description,
         key_reader=key_reader,
+        stdin_flusher=stdin_flusher,
         output=output,
         feed_rate=feed_rate,
         initial_step_mm=initial_step_mm,
@@ -934,6 +1022,7 @@ def run_calibration(
     skip_soft_limit_config: bool = False,
     write_gantry_yaml: bool = False,
     output_gantry_path: Path | None = None,
+    backup_existing_output: bool = False,
     homing_serial_timeout_s: float = 10.0,
     jog_serial_timeout_s: float = 1.0,
     output: Callable[[str], None] = print,
@@ -1010,10 +1099,12 @@ def run_calibration(
             _interactive_jog_to_xy_origin(
                 gantry,
                 key_reader=key_reader,
+                stdin_flusher=stdin_flusher,
                 output=output,
                 feed_rate=jog_feed_rate,
                 initial_step_mm=jog_step_mm,
                 limit_pull_off_mm=limit_pull_off_mm,
+                z_reference_mode=z_reference_mode,
             )
         finally:
             if restore_soft_limits_after_origin_jog:
@@ -1055,6 +1146,7 @@ def run_calibration(
             block_height_mm = _calibration_block_height_mm(
                 raw_config,
                 explicit_block_height_mm=tip_gap_mm,
+                max_height_mm=factory_z_travel_mm,
                 input_reader=input_reader,
                 output=output,
             )
@@ -1127,19 +1219,6 @@ def run_calibration(
             z_span_mm=z_span_mm,
             homing_pull_off_mm=homing_pull_off_mm,
         )
-        if skip_soft_limit_config:
-            output("Skipping GRBL soft-limit programming by request.")
-        else:
-            gantry.configure_soft_limits_from_spans(
-                max_travel_x=max_travel["max_travel_x"],
-                max_travel_y=max_travel["max_travel_y"],
-                max_travel_z=max_travel["max_travel_z"],
-                status_report=0,
-                homing_pull_off=homing_pull_off_mm,
-                hard_limits=_configured_grbl_setting(raw_config, "hard_limits"),
-                tolerance_mm=tolerance_mm,
-            )
-
         _print_config_patch(
             measured_coords,
             z_reference_coords=z_reference_coords,
@@ -1171,13 +1250,39 @@ def run_calibration(
             yaml_text=gantry_yaml_text,
             output=output,
         )
-        _maybe_write_gantry_yaml(
+        written_yaml_path = _maybe_write_gantry_yaml(
             yaml_text=gantry_yaml_text,
             output_path=output_gantry_path,
             write_requested=write_gantry_yaml,
             input_reader=input_reader,
             output=output,
+            backup_existing_output=backup_existing_output,
         )
+        if skip_soft_limit_config:
+            output("Skipping GRBL soft-limit programming by request.")
+        else:
+            try:
+                gantry.configure_soft_limits_from_spans(
+                    max_travel_x=max_travel["max_travel_x"],
+                    max_travel_y=max_travel["max_travel_y"],
+                    max_travel_z=max_travel["max_travel_z"],
+                    status_report=0,
+                    homing_pull_off=homing_pull_off_mm,
+                    hard_limits=_configured_grbl_setting(raw_config, "hard_limits"),
+                    tolerance_mm=tolerance_mm,
+                )
+            except Exception:
+                if written_yaml_path is not None:
+                    output(
+                        "Soft-limit programming failed after the calibrated YAML "
+                        f"was written to: {written_yaml_path}"
+                    )
+                else:
+                    output(
+                        "Soft-limit programming failed after the calibrated YAML "
+                        "was printed above; copy those values before retrying."
+                    )
+                raise
 
         return DeckOriginCalibrationResult(
             measured_working_volume=(
@@ -1209,6 +1314,7 @@ def run_calibration(
                 restore_soft_limits_after_origin_jog = False
                 _restore_soft_limits_after_origin_jog(gantry, output=output)
         finally:
+            _cancel_jog_if_available(gantry, output=output)
             _set_serial_timeout_if_available(gantry, 0.05)
             output("Disconnecting...")
             gantry.disconnect()
