@@ -3,6 +3,23 @@
 YAML is the standard operator-facing protocol format and the path used by the
 stock validation and run scripts.
 
+## Before You Validate and Run
+
+Check these before every run, not just the first one of the day:
+
+- [ ] Candle, Universal Gcode Sender, or any other GRBL serial terminal is
+      **closed** — only one program can hold the serial port.
+- [ ] **Only the CUB you intend to run is connected** to this computer —
+      connection is auto-scan with no way to target a specific device today,
+      so a second connected CUB can get picked up instead.
+- [ ] The gantry is **homed** (or you're about to home as the first protocol
+      step) — don't run motion on an unhomed or previously-alarmed gantry.
+- [ ] The **deck YAML matches the physical deck** — labware placement,
+      holder nesting, and calibration anchors reflect what's actually on the
+      bench right now.
+- [ ] Mounted **instruments are powered on** and, where applicable,
+      connected/initialized before the run starts.
+
 ## High-level workflow
 
 The YAML path has three user-facing steps:
@@ -65,20 +82,23 @@ python setup/run_protocol.py \
   configs/protocol/asmi/move_a1.yaml
 ```
 
-`setup/run_protocol.py` performs two phases:
-
-1. Offline setup validation.
-2. The hardware run: construct the gantry from YAML, re-load and re-validate the
-   configs, connect the gantry, clear any startup alarm, connect instruments,
-   run the health check, execute the steps, and disconnect the instruments and
-   gantry in cleanup. Persistable measurement results are saved to a SQLite
-   data campaign automatically.
+`setup/run_protocol.py` re-runs offline validation first, then connects to
+the gantry and instruments, health-checks them, runs the protocol steps, and
+disconnects when done. Measurement results are saved automatically.
 
 By default, measurement rows are written to `data/databases/panda_data.db`.
 Set `CUBOS_DATA_DB_PATH` to choose a different SQLite file for a run.
 After a successful run, the CLI also writes analysis-friendly CSV exports under
 `data/results/`. Array-based instruments such as UV-Vis, ASMI, and potentiostat
 are flattened into one row per wavelength/sample point.
+
+## Instruments
+
+Instruments aren't declared in the protocol YAML — they're declared in the
+**gantry YAML** during machine setup, under the top-level `instruments:` map.
+The map key is the name protocol commands reference via `instrument: <name>`.
+See [Set Up Gantry YAML: Define
+Instruments](gantry-setup.md#define-instruments).
 
 ## Protocol command reference
 

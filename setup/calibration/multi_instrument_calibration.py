@@ -289,7 +289,10 @@ def _prompt_z_reference_height(
     output: Callable[[str], None],
 ) -> float:
     output("")
-    output("Z reference: use a calibration block. The lowest instrument should touch the block top.")
+    output(
+        "Z reference: use a calibration block (or any rigid, flat-topped reference of known "
+        "height that every instrument can reach). The lowest instrument should touch its top."
+    )
     while True:
         raw = input_reader("Calibration block height in mm: ").strip()
         try:

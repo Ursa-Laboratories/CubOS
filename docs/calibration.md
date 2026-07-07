@@ -13,30 +13,92 @@ travel settings. Keep the E-stop reachable and clear the deck before starting.
 2. Connect the gantry to the computer over USB/serial.
 3. Make sure mounted instruments, cables, fixtures, and samples have clear
    travel paths.
-4. Confirm the gantry YAML has the correct `cnc.factory_z_travel_mm` and
-   mounted `instruments`. The YAML schema still requires `serial_port`, but
-   calibration connects through the gantry driver's serial auto-scan.
-5. Put the calibration block and any board placement markers within reach.
+4. Confirm the gantry YAML lists the instruments that are physically
+   mounted (see [Set Up Gantry YAML](gantry-setup.md)).
+5. Confirm the gantry YAML matches your machine — a CUB seed on a CUB XL
+   (or vice versa) calibrates a wrong working volume (see
+   [CUB vs CUB XL Seeds](gantry-setup.md#cub-vs-cub-xl-seeds)).
+6. Choose a calibration reference and put it within reach — see
+   [Calibration Reference Options](#calibration-reference-options).
 
 ![Calibration block aligned to a board placement marker](images/calibration-block-marker.webp){ width="420" }
 
-![Board placement markers used during calibration](images/calibration-marks.webp){ width="520" }
+## Calibration Reference Options
+
+Calibration needs two things from a physical reference:
+
+- an **XY origin point** — a repeatable spot at the front-left of your working
+  area that becomes deck `(0, 0)`
+- a **Z reference height** — the known height above the deck of the surface
+  you touch, so calibration can infer where deck `Z = 0` is
+
+Anything that provides both works. Either option produces the same
+calibration — the same values get saved to the gantry YAML no matter which
+you use.
+
+### Option A — Calibration Block (recommended)
+
+Use the Ursa calibration block — the printable model lives in
+[Cubware `mounts/calibration`](https://github.com/Ursa-Laboratories/Cubware/tree/main/mounts/calibration) —
+placed at the front-left origin mark. Its height is known and its flat top is
+easy to touch consistently. For multi-instrument calibration, where every
+instrument must touch the same physical point, always use the block (or
+another rigid, flat-topped reference every instrument can reach).
+
+### Option B — Deck Feature of Known Height
+
+Without a block, use a rigid feature already on the deck. For example, with a
+well plate: use the front-left-most (corner) well your protocols address as
+the XY origin, and the height from the deck to the top of the plate as the Z
+reference height.
+
+<!-- TODO(alex): add image showing a well plate as the calibration reference
+     (corner-most well = XY origin, plate top height above deck = Z reference). -->
+
+Two things must hold for this to be reliable:
+
+- **The XY point you pick becomes deck `(0, 0)`.** Deck YAML positions must be
+  measured from that same point, and the object must sit repeatably (in a
+  holder or against a fence). If the plate shifts, the calibration is wrong.
+- **Measure the height, don't look it up.** The reference height directly sets
+  deck `Z = 0`. Measure deck-to-plate-top with calipers; a labware datasheet
+  height is wrong as soon as the plate sits in a holder.
+
+!!! warning "Close other GRBL software first"
+    Close Candle, Universal Gcode Sender (UGS), or any other GRBL sender
+    before running calibration. A serial port can only be held open by one
+    program at a time — if another program still has it open, calibration
+    will fail to connect, or lose control of the gantry mid-run.
 
 ## Run Calibration
 
 To calibrate in place, run:
 
-```bash
-PYTHONPATH=src python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
-```
+- **macOS / Linux / Windows (Git Bash):**
+  ```bash
+  PYTHONPATH=src python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  $env:PYTHONPATH = "src"
+  python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
+  ```
 
 The script asks before overwriting the input file. To write a calibrated copy:
 
-```bash
-PYTHONPATH=src python setup/calibrate_gantry.py \
-  configs/gantry/cub_xl_sterling_3_instrument.yaml \
-  --output-gantry configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
-```
+- **macOS / Linux / Windows (Git Bash):**
+  ```bash
+  PYTHONPATH=src python setup/calibrate_gantry.py \
+    configs/gantry/cub_xl_sterling_3_instrument.yaml \
+    --output-gantry configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
+  ```
+- **Windows (PowerShell):**
+  ```powershell
+  $env:PYTHONPATH = "src"
+  python setup/calibrate_gantry.py `
+    configs/gantry/cub_xl_sterling_3_instrument.yaml `
+    --output-gantry configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
+  ```
 
 The preflight shows the input file, output file, detected instruments, and the
 chosen flow before it connects to hardware.
@@ -52,6 +114,12 @@ During calibration:
 - Enter confirms the current step
 - `Q` aborts
 
+!!! warning "Single presses only — do not hold jog keys down"
+    Press a jog key once and wait for the move to finish before pressing
+    again. Holding a key down queues multiple jog commands; the gantry keeps
+    executing queued moves after you release the key and will overshoot past
+    where you meant to stop.
+
 If a jog trips a hard limit, CubOS soft-resets, unlocks GRBL, and attempts a
 small pull-off opposite the failed jog direction. Stop and reset the controller
 if recovery fails.
@@ -62,23 +130,29 @@ Use this flow when the gantry YAML has one mounted instrument.
 
 1. Start `setup/calibrate_gantry.py`.
 2. Confirm the single-instrument flow in the preflight.
-3. Place the calibration block at the front-left origin reference point.
-4. Jog the instrument tip or probe until it touches the top of the block.
-5. Confirm the touch point when prompted.
+3. Place your calibration reference at the front-left origin point — the
+   calibration block, or a deck feature such as a plate's corner-most well
+   (see [Calibration Reference Options](#calibration-reference-options)).
+4. Jog the instrument tip or probe until it touches the top of the reference
+   surface (block top or plate top).
+5. Confirm the touch point when prompted, and enter the reference height
+   above the deck if the script asks for it.
 6. Let the script home and measure the usable work volume.
 7. Review the summary and calibrated YAML path.
 
 ![Single instrument touching the calibration block](images/single-instrument-calibration-block.webp){ width="420" }
 
-The script saves the deck-frame working volume, preserves
-`cnc.factory_z_travel_mm` as the factory safety bound, and writes
-`cnc.calibration_block_height_mm` from the prompted block height. If
-`grbl_settings.homing_pull_off` is configured, GRBL max travel values include
-that pull-off reserve.
+The script writes everything it measured back to the gantry YAML — no
+manual edits needed.
 
 ## Multi-Instrument Calibration
 
 Use this flow when the gantry YAML has more than one mounted instrument.
+Every instrument must touch the same physical point, so use the calibration
+block (or another rigid, flat-topped reference all instruments can reach)
+rather than a deck feature.
+
+![Board placement markers used during calibration](images/calibration-marks.webp){ width="520" }
 
 1. Start `setup/calibrate_gantry.py`.
 2. Confirm the multi-instrument flow in the preflight.
@@ -101,8 +175,7 @@ Use this flow when the gantry YAML has more than one mounted instrument.
    camera reference point.
 10. For pipette setups, jog the pipette to the center reference point on the
    block when prompted.
-11. Let the script compute `offset_x`, `offset_y`, and `depth` for each
-   instrument.
+11. Let the script compute each instrument's offsets.
 12. Review the summary and calibrated YAML path.
 
 ## Interactive Jog Test
