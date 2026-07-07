@@ -380,7 +380,7 @@ def test_run_calibration_block_mode_prompts_for_missing_block_height_and_writes_
 
     assert isinstance(result, DeckOriginCalibrationResult)
     assert result.block_height_mm == 35.0
-    assert "Calibration block height in mm: " in prompts
+    assert "Reference height above the deck in mm: " in prompts
     written = output_path.read_text(encoding="utf-8")
     assert "calibration_block_height_mm: 35.0" in written
 
@@ -396,7 +396,7 @@ def test_calibration_block_height_prompts_when_reader_and_output_supplied():
     )
 
     assert value == 18.125
-    assert prompts == ["Calibration block height in mm: "]
+    assert prompts == ["Reference height above the deck in mm: "]
 
 
 def test_updated_gantry_yaml_writes_block_height_and_requires_cnc_mapping():

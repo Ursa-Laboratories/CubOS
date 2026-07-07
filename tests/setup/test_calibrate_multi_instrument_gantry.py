@@ -656,7 +656,7 @@ def test_multi_instrument_calibration_prompts_for_missing_block_height_and_write
 
     assert isinstance(result, MultiInstrumentCalibrationResult)
     assert result.z_origin_verification == (199.0, 149.5, 18.75)
-    assert "Calibration block height in mm: " in prompts
+    assert "Reference height above the deck in mm: " in prompts
     written = yaml.safe_load(out_path.read_text(encoding="utf-8"))
     assert written["cnc"]["calibration_block_height_mm"] == 18.75
 

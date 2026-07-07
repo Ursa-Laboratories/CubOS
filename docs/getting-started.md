@@ -9,11 +9,13 @@ one protocol file.
 1. Install CubOS.
 2. If you are building your own machine, complete
    [Gantry Bring-Up](admin/gantry-bring-up.md).
-3. Calibrate the gantry with [Calibrate Gantry](calibration.md).
-4. Place labware and define deck YAML with [Set Up Deck and Labware](deck.md).
-5. Validate and run a protocol with
+3. Create your gantry YAML from the right seed config and define your
+   mounted instruments with [Set Up Gantry YAML](gantry-setup.md).
+4. Calibrate the gantry with [Calibrate Gantry](calibration.md).
+5. Place labware and define deck YAML with [Set Up Deck and Labware](deck.md).
+6. Validate and run a protocol with
    [Run a Protocol with YAML](protocol-yaml.md).
-6. If something goes wrong along the way, see
+7. If something goes wrong along the way, see
    [Troubleshooting & Recovery](troubleshooting.md).
 
 ## Prerequisites
@@ -120,11 +122,8 @@ pip install -e ".[asmi-vernier]"
 
 Instrument types without a dedicated extra (`filmetrics`, `pipette`,
 `uv_curing`, `uvvis_ccs`, `camera`) don't require an extra vendor SDK install
-beyond CubOS's base dependencies — see
-[Defining instrument drivers](protocol-yaml.md#defining-instrument-drivers)
-for the YAML for each.
+beyond CubOS's base dependencies.
 
-Customer/proprietary instruments are supplied as normal Python packages that
-register CubOS instrument drivers through the `cubos.instrument_registries`
-entry point group, or as explicit registry overlay YAMLs listed in
-`CUBOS_INSTRUMENT_REGISTRY_PATHS`.
+Customer/proprietary instruments ship as normal Python packages —
+`pip install` the package and its instruments become available in the gantry
+YAML like any built-in type.

@@ -25,7 +25,10 @@ does not apply `G92` or redefine work coordinates after homing.
 Gantry YAML defines:
 
 - `gantry_type`
-- calibration block height
+- calibration reference height (`cnc.calibration_block_height_mm` — the key
+  name is historical; it stores the Z reference height whether it came from
+  the calibration block or another reference, see
+  [Calibration Reference Options](calibration.md#calibration-reference-options))
 - mounted instruments, offsets, reach depths, and driver settings
 
 Representative example:

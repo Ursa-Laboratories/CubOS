@@ -117,6 +117,8 @@ def _preflight(
     output("Before continuing:")
     output("  - Keep E-stop reachable.")
     output("  - Clear the deck and mounted tools' travel path.")
+    output("  - Have a calibration reference ready: the calibration block, or a rigid")
+    output("    deck feature of known height above the deck (e.g. a well plate).")
     output("  - Use slow, careful jogs near fixtures, samples, and limits.")
     output("  - Do not run protocols from the output YAML until validation passes.")
     output("")

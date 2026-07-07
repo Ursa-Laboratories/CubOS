@@ -42,7 +42,7 @@ can still consider itself positioned correctly when it isn't.
    `$X` if you're on a direct serial terminal.
 3. **Re-home.** Run `$H` (or the CubOS script's homing step). Never trust
    WPos after a crash without re-homing first.
-4. **Re-verify calibration.** A crash can shift the calibration block,
+4. **Re-verify calibration.** A crash can shift the calibration reference,
    labware, or stress a mount out of alignment. If there's any doubt, redo
    calibration (below) rather than resuming on old calibrated values.
 5. Only resume protocols once homing and the

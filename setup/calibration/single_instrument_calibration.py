@@ -622,16 +622,17 @@ def _prompt_block_height(
     output: Callable[[str], None],
 ) -> float:
     output("")
-    output("Z reference: use a calibration block. The instrument should touch the block top.")
+    output("Z reference: touch the top of a surface with a known height above the deck —")
+    output("the calibration block, or a deck feature such as the top of a well plate.")
     while True:
-        raw = input_reader("Calibration block height in mm: ").strip()
+        raw = input_reader("Reference height above the deck in mm: ").strip()
         try:
             value = float(raw)
         except ValueError:
-            output("Enter a numeric block height in millimeters.")
+            output("Enter a numeric reference height in millimeters.")
             continue
         if value <= 0:
-            output("Calibration block height must be > 0 mm.")
+            output("Reference height must be > 0 mm.")
             continue
         return value
 
@@ -966,8 +967,9 @@ def run_calibration(
     output(f"Loaded deck-origin gantry config: {gantry_path}")
     output("Preflight:")
     output("  - Attach exactly one reference instrument/TCP for this calibration.")
-    output("  - Place a calibration block at the front-left origin point.")
-    output("  - Jog the instrument tip/probe to touch the block top at that point.")
+    output("  - Place a calibration reference at the front-left origin point:")
+    output("    the calibration block, or a deck feature such as a plate's corner-most well.")
+    output("  - Jog the instrument tip/probe to touch the top of the reference at that point.")
     output("  - This will set X=0 and Y=0 at that pose, then set Z from the selected reference mode.")
     if instrument_name:
         output(f"  - Instrument/TCP label for reach output: {instrument_name}")

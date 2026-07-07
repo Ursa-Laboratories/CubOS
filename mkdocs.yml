@@ -8,6 +8,7 @@ nav:
   - Set Up and Use CubOS:
     - Getting Started: getting-started.md
     - Gantry Bring-Up: admin/gantry-bring-up.md
+    - Set Up Gantry YAML: gantry-setup.md
     - Calibrate Gantry: calibration.md
     - Set Up Deck and Labware: deck.md
     - Run a Protocol with YAML: protocol-yaml.md
@@ -72,6 +73,8 @@ markdown_extensions:
   - attr_list
   - def_list
   - pymdownx.superfences
+  - pymdownx.tasklist:
+      custom_checkbox: false
   - tables
   - toc:
       permalink: true
