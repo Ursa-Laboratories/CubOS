@@ -21,8 +21,6 @@ nav:
     - Deck Internals: deck-internals.md
     - Python Protocols: protocol-python.md
     - YAML File Overview: configuration.md
-    - Design Proposals:
-      - Virtual GRBL Simulator: design/virtual-grbl-simulator.md
     - Appendix: appendix.md
   - API Reference:
     - Overview: reference/index.md
