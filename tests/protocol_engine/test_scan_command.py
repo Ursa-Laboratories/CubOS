@@ -13,6 +13,7 @@ The scan command's per-well motion under the labware-relative model is:
 
 from __future__ import annotations
 
+import json
 import logging
 from unittest.mock import MagicMock
 
@@ -23,6 +24,7 @@ from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
 from deck.labware.well_plate_holder import WellPlateHolder
+from deck.loader import load_deck_from_yaml_safe
 from instruments.base_instrument import BaseInstrument
 from instruments.filmetrics.models import MeasurementResult
 from instruments.uv_curing.models import CureResult
@@ -37,6 +39,38 @@ SAFE_APPROACH = 10.0
 MEASUREMENT = 1.0
 APPROACH_ABS = HEIGHT_MM + SAFE_APPROACH
 ACTION_ABS = HEIGHT_MM + MEASUREMENT
+
+
+TRACKED_SCAN_DECK_YAML = """\
+labware:
+  source:
+    type: vial
+    name: source
+    model_name: source_vial
+    height: 50.0
+    diameter: 20.0
+    location: {x: 5.0, y: 5.0, z: 20.0}
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+
+  plate:
+    type: well_plate
+    name: plate_1
+    model_name: test_2x2
+    length: 30.0
+    width: 20.0
+    height: 14.1
+    well_depth: 10.0
+    rows: 2
+    columns: 2
+    calibration:
+      a1: {x: 20.0, y: 20.0, z: 14.1}
+      a2: {x: 30.0, y: 20.0, z: 14.1}
+    x_offset: 10.0
+    y_offset: 8.0
+    capacity_ul: 200.0
+    working_volume_ul: 150.0
+"""
 
 
 def _make_2x2_plate() -> WellPlate:
@@ -560,6 +594,100 @@ class TestScanCommand:
         measurement = kwargs["result"]
         assert isinstance(measurement, InstrumentMeasurement)
         assert kwargs["labware_key"] == "plate_1"
+        ctx.data_store.get_fluid_snapshot.assert_not_called()
+
+    def test_tracked_transfer_scan_uses_current_fluid_composition(self, tmp_path):
+        from protocol_engine.commands.pipette import transfer
+        from protocol_engine.commands.scan import scan
+
+        deck_path = tmp_path / "deck.yaml"
+        deck_path.write_text(TRACKED_SCAN_DECK_YAML, encoding="utf-8")
+        deck = load_deck_from_yaml_safe(deck_path)
+        store = DataStore(db_path=":memory:")
+        state_id = store.create_fluid_state(
+            deck_path,
+            deck,
+            initial_fluids={
+                "source": {
+                    "volume_ul": 100.0,
+                    "composition": {"water": 60.0, "ethanol": 40.0},
+                },
+            },
+        )
+        campaign_id = store.create_campaign(
+            description="tracked scan",
+            fluid_state_id=state_id,
+        )
+        board = MagicMock()
+        board.instruments = {
+            "pipette": MagicMock(),
+            "filmetrics": _FakeFilmetrics(
+                name="filmetrics", offset_x=0.0, offset_y=0.0, depth=0.0,
+            ),
+        }
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=deck,
+            data_store=store,
+            campaign_id=campaign_id,
+            fluid_state_id=state_id,
+        )
+
+        transfer(
+            ctx,
+            source="source",
+            destination="plate.A1",
+            volume_ul=50.0,
+        )
+        store.get_contents = MagicMock(
+            side_effect=AssertionError("tracked scan used legacy contents"),
+        )
+        scan(
+            ctx,
+            plate="plate",
+            instrument="filmetrics",
+            method="measure",
+            measurement_height=MEASUREMENT,
+            interwell_scan_height=SAFE_APPROACH,
+        )
+
+        rows = store._conn.execute(
+            "SELECT well_id, contents FROM experiments ORDER BY id"
+        ).fetchall()
+        assert [row[0] for row in rows] == ["A1", "A2", "B1", "B2"]
+        assert json.loads(rows[0][1]) == [
+            {"source": "ethanol", "volume_ul": 20.0},
+            {"source": "water", "volume_ul": 30.0},
+        ]
+        assert all(json.loads(row[1]) == [] for row in rows[1:])
+        store.get_contents.assert_not_called()
+        store.close()
+
+    def test_tracked_scan_missing_container_fails_before_first_move(self):
+        from protocol_engine.commands.scan import scan
+
+        ctx = _mock_context()
+        ctx.data_store = MagicMock()
+        ctx.data_store.get_campaign_fluid_state_id.return_value = 9
+        ctx.data_store.get_fluid_snapshot.return_value = {
+            "containers": [
+                {
+                    "labware_key": "plate_1",
+                    "location_id": "A1",
+                    "current_volume_ul": 0.0,
+                    "composition": {},
+                }
+            ]
+        }
+        ctx.campaign_id = 13
+        ctx.fluid_state_id = 9
+
+        with pytest.raises(ProtocolExecutionError, match="has no container"):
+            scan(ctx, **_scan_args())
+
+        ctx.gantry.move_to_labware.assert_not_called()
+        ctx.gantry.move.assert_not_called()
+        assert ctx.gantry.instruments["uvvis"].call_count == 0
 
     def test_persists_filmetrics_measurements(self):
         from protocol_engine.commands.scan import scan

@@ -1,5 +1,6 @@
 """Tests for the ``measure`` protocol command."""
 
+import json
 import logging
 from unittest.mock import MagicMock
 
@@ -9,6 +10,7 @@ from data.data_store import DataStore
 from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.well_plate import WellPlate
+from deck.loader import load_deck_from_yaml_safe
 from instruments.base_instrument import BaseInstrument
 from instruments.filmetrics.models import MeasurementResult
 from instruments.uv_curing.models import CureResult
@@ -18,6 +20,30 @@ from protocol_engine.runtime import ProtocolContext
 
 
 HEIGHT_MM = 14.10
+
+
+VIAL_GRID_DECK_YAML = """\
+labware:
+  reagents:
+    type: vial_grid
+    name: reagents
+    model_name: reagent_grid
+    rows: 1
+    columns: 2
+    calibration:
+      a1: {x: 10.0, y: 20.0, z: 30.0}
+      a2: {x: 20.0, y: 20.0, z: 30.0}
+    x_offset: 10.0
+    y_offset: 10.0
+    vial_model_name: reagent_vial
+    vial_height: 40.0
+    vial_diameter: 12.0
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+    aliases:
+      buffer: A1
+      product: A2
+"""
 
 
 def _mock_instr():
@@ -229,6 +255,133 @@ def test_measure_persists_single_filmetrics_thickness_when_campaign_is_present()
     assert row[2] == pytest.approx(151.2)
     assert row[3] == pytest.approx(0.96)
     store.close()
+
+
+def test_measure_uses_current_tracked_composition_for_vial_grid_alias(tmp_path):
+    deck_path = tmp_path / "deck.yaml"
+    deck_path.write_text(VIAL_GRID_DECK_YAML, encoding="utf-8")
+    deck = load_deck_from_yaml_safe(deck_path)
+    store = DataStore(db_path=":memory:")
+    state_id = store.create_fluid_state(
+        deck_path,
+        deck,
+        initial_fluids={
+            "reagents.buffer": {
+                "volume_ul": 100.0,
+                "composition": {"water": 100.0},
+            },
+        },
+    )
+    campaign_id = store.create_campaign(
+        description="tracked vial measurement",
+        fluid_state_id=state_id,
+    )
+    source = deck.resolve_labware_target("reagents.buffer")
+    destination = deck.resolve_labware_target("reagents.product")
+    assert store.begin_fluid_transfer(
+        state_id,
+        "tracked-vial-transfer",
+        source,
+        destination,
+        25.0,
+        campaign_id=campaign_id,
+    ) is True
+    store.complete_fluid_transfer("tracked-vial-transfer")
+    store.get_contents = MagicMock(
+        side_effect=AssertionError("tracked measurement used legacy contents"),
+    )
+
+    board = MagicMock()
+    board.instruments = {"filmetrics": _FakeFilmetrics()}
+    ctx = ProtocolContext(
+        gantry=board,
+        deck=deck,
+        data_store=store,
+        campaign_id=campaign_id,
+        fluid_state_id=state_id,
+    )
+
+    measure(
+        ctx,
+        instrument="filmetrics",
+        position="reagents.product",
+        measurement_height=0.0,
+    )
+
+    row = store._conn.execute(
+        "SELECT labware_key, well_id, contents FROM experiments"
+    ).fetchone()
+    assert row[0] == "reagents"
+    assert row[1] == "A2"
+    assert json.loads(row[2]) == [{"source": "water", "volume_ul": 25.0}]
+    store.get_contents.assert_not_called()
+    store.close()
+
+
+def test_measure_untracked_campaign_keeps_legacy_contents():
+    plate = _plate()
+    board = MagicMock()
+    board.instruments = {"filmetrics": _FakeFilmetrics()}
+    deck = Deck({"plate_1": plate})
+    store = DataStore(db_path=":memory:")
+    campaign_id = store.create_campaign(description="ordinary measurement")
+    store.register_labware(campaign_id, "plate_1", plate)
+    store.record_dispense(campaign_id, "plate_1", "A1", "legacy_source", 20.0)
+    store.get_fluid_snapshot = MagicMock(
+        side_effect=AssertionError("ordinary measurement read fluid state"),
+    )
+    ctx = ProtocolContext(
+        gantry=board,
+        deck=deck,
+        data_store=store,
+        campaign_id=campaign_id,
+    )
+
+    measure(
+        ctx,
+        instrument="filmetrics",
+        position="plate_1.A1",
+        measurement_height=0.0,
+    )
+
+    contents = store._conn.execute(
+        "SELECT contents FROM experiments WHERE campaign_id = ?",
+        (campaign_id,),
+    ).fetchone()[0]
+    assert json.loads(contents) == [
+        {"source": "legacy_source", "volume_ul": 20.0}
+    ]
+    store.get_fluid_snapshot.assert_not_called()
+    store.close()
+
+
+def test_measure_active_state_missing_target_fails_before_motion():
+    plate = _plate()
+    instr = _mock_instr()
+    board = MagicMock()
+    board.instruments = {"uvvis": instr}
+    store = MagicMock()
+    store.get_campaign_fluid_state_id.return_value = 7
+    store.get_fluid_snapshot.return_value = {"containers": []}
+    ctx = ProtocolContext(
+        gantry=board,
+        deck=Deck({"plate_1": plate}),
+        data_store=store,
+        campaign_id=12,
+        fluid_state_id=7,
+    )
+
+    with pytest.raises(ProtocolExecutionError, match="has no container"):
+        measure(
+            ctx,
+            instrument="uvvis",
+            position="plate_1.A1",
+            measurement_height=0.0,
+        )
+
+    board.move_to_labware.assert_not_called()
+    board.move.assert_not_called()
+    instr.measure.assert_not_called()
 
 
 def test_measure_persists_single_uv_curing_exposure_when_campaign_is_present():

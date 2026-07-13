@@ -1,0 +1,9 @@
+fluids:
+  reagents.buffer:
+    volume_ul: 1000.0
+    composition:
+      buffer: 1000.0
+  reagents.dye:
+    volume_ul: 200.0
+    composition:
+      dye: 200.0

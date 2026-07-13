@@ -1,0 +1,53 @@
+# Offline-only deck for the persistent fluid-state example.
+#
+# Coordinates reuse the validated Cub XL pipette simulation envelope. The
+# vial and well Z values are rim/surface references; negative protocol heights
+# enter the vessel. Do not treat these values as physical calibration data.
+
+labware:
+  reagents:
+    load_name: ursa_9_vial_grid
+    label: Reagents
+    calibration:
+      a1: { x: 140.0, y: 15.0, z: 30.0 }
+      a2: { x: 140.0, y: 48.0, z: 30.0 }
+    aliases:
+      buffer: A1
+      dye: A2
+
+  assay_plate:
+    load_name: sbs_96_wellplate
+    label: Assay plate
+    calibration:
+      a1: { x: 190.0, y: 90.0, z: 30.0 }
+      a2: { x: 199.0, y: 90.0, z: 30.0 }
+
+  tip_rack:
+    load_name: ursa_tip_rack
+    name: fluid_state_tip_rack
+    tip_length: 59.3
+    pickup_z: 64.7
+    drop_z: 34.0
+    calibration:
+      a1: { x: 210.0, y: 230.0 }
+      a2: { x: 218.5, y: 230.0 }
+
+  tip_disposal:
+    type: tip_disposal
+    name: fluid_state_tip_disposal
+    model_name: fluid_state_tip_disposal
+    length: 54.0
+    width: 54.0
+    height: 38.0
+    location:
+      x: 260.0
+      y: 260.0
+      z: 38.0
+    slots:
+      discard:
+        description: Center of the offline used-tip disposal target.
+        supported_labware_types: [pipette_tip]
+        location:
+          x: 260.0
+          y: 260.0
+          z: 38.0

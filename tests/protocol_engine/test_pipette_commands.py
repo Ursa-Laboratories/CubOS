@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from types import SimpleNamespace
 from unittest.mock import MagicMock, call
 
 import pytest
@@ -75,10 +76,10 @@ class TestParsePosition:
 
         assert _parse_position("vial_1") == ("vial_1", None)
 
-    def test_dotted_well_takes_first_split(self):
+    def test_nested_labware_path_uses_last_split(self):
         from protocol_engine.commands.pipette import _parse_position
 
-        assert _parse_position("plate_1.A1.extra") == ("plate_1", "A1.extra")
+        assert _parse_position("holder.plate.A1") == ("holder.plate", "A1")
 
     def test_return_type(self):
         from protocol_engine.commands.pipette import _parse_position
@@ -167,6 +168,20 @@ class TestAspirateCommand:
         ctx = _mock_context(has_pipette=False)
         with pytest.raises(ProtocolExecutionError, match="[Nn]o pipette"):
             aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
+
+    def test_rejects_standalone_aspirate_when_fluid_tracking_is_active(self):
+        from protocol_engine.commands.pipette import aspirate
+
+        ctx = _mock_context()
+        ctx.data_store = MagicMock()
+        ctx.fluid_state_id = 3
+        ctx.campaign_id = 4
+
+        with pytest.raises(ProtocolExecutionError, match="Standalone aspirate"):
+            aspirate(ctx, position="plate_1.A1", volume_ul=25.0)
+
+        ctx.gantry.move_to_labware.assert_not_called()
+        ctx.gantry.instruments["pipette"].aspirate.assert_not_called()
 
 
 # ─── dispense tests ──────────────────────────────────────────────────────────
@@ -302,6 +317,82 @@ class TestMixCommand:
         ctx = _mock_context(has_pipette=False)
         with pytest.raises(ProtocolExecutionError, match="[Nn]o pipette"):
             mix(ctx, position="plate_1.A1", volume_ul=50.0)
+
+    def test_tracked_mix_journals_before_motion_and_applies_after_success(self):
+        from protocol_engine.commands.pipette import mix
+
+        ctx = _mock_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.deck.resolve_labware_target.return_value = SimpleNamespace(
+            labware_key="plate", location_id="A1",
+        )
+        events = []
+        store = MagicMock()
+        store.begin_fluid_mix.side_effect = (
+            lambda *args, **kwargs: events.append("begin") or True
+        )
+        store.complete_fluid_mix.side_effect = (
+            lambda operation_key: events.append("complete")
+        )
+        ctx.data_store = store
+        ctx.gantry.move_to_labware.side_effect = (
+            lambda *args, **kwargs: events.append("move")
+        )
+        _get_pipette(ctx).mix.side_effect = lambda *args: events.append("mix")
+
+        mix(
+            ctx,
+            position="plate.A1",
+            volume_ul=25.0,
+            repetitions=4,
+            speed=20.0,
+        )
+
+        assert events == ["begin", "move", "mix", "complete"]
+        store.begin_fluid_mix.assert_called_once()
+        args = store.begin_fluid_mix.call_args.args
+        assert args[0] == 11
+        assert args[1].endswith(":mix")
+        assert (args[2].labware_key, args[2].location_id) == ("plate", "A1")
+        assert args[3:] == (25.0, 4, 20.0, 0.0)
+        assert store.begin_fluid_mix.call_args.kwargs == {"campaign_id": 7}
+
+    def test_tracked_mix_skips_exact_already_applied_replay_without_motion(self):
+        from protocol_engine.commands.pipette import mix
+
+        ctx = _mock_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.deck.resolve_labware_target.return_value = SimpleNamespace(
+            labware_key="plate", location_id="A1",
+        )
+        ctx.data_store.begin_fluid_mix.return_value = False
+
+        assert mix(ctx, position="plate.A1", volume_ul=25.0) is None
+        ctx.gantry.move_to_labware.assert_not_called()
+        _get_pipette(ctx).mix.assert_not_called()
+        ctx.data_store.complete_fluid_mix.assert_not_called()
+
+    def test_tracked_mix_failure_requires_reconciliation(self):
+        from protocol_engine.commands.pipette import mix
+
+        ctx = _mock_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.deck.resolve_labware_target.return_value = SimpleNamespace(
+            labware_key="plate", location_id="A1",
+        )
+        ctx.data_store.begin_fluid_mix.return_value = True
+        _get_pipette(ctx).mix.side_effect = RuntimeError("mix uncertain")
+
+        with pytest.raises(RuntimeError, match="mix uncertain"):
+            mix(ctx, position="plate.A1", volume_ul=25.0)
+
+        ctx.data_store.mark_fluid_reconciliation_required.assert_called_once()
+        ctx.data_store.complete_fluid_mix.assert_not_called()
 
 
 # ─── pick_up_tip tests ───────────────────────────────────────────────────────
@@ -529,6 +620,158 @@ class TestTransferCommand:
 
         pip.aspirate.assert_called_once_with(100.0, 50.0)
         pip.dispense.assert_called_once_with(100.0, 50.0)
+
+    def test_tracked_transfer_journals_before_liquid_and_commits_after_dispense(self):
+        from protocol_engine.commands.pipette import transfer
+
+        ctx = _mock_context_multi_resolve()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        events = []
+
+        source_target = SimpleNamespace(labware_key="source", location_id=None)
+        destination_target = SimpleNamespace(
+            labware_key="holder.plate", location_id="A1",
+        )
+        ctx.deck.resolve_labware_target.side_effect = [
+            source_target, destination_target,
+        ]
+
+        store = MagicMock()
+        store.begin_fluid_transfer.side_effect = (
+            lambda *args, **kwargs: events.append("begin") or True
+        )
+        store.complete_fluid_transfer.side_effect = (
+            lambda operation_key: events.append("complete")
+        )
+        ctx.data_store = store
+        ctx.gantry.move_to_labware.side_effect = (
+            lambda *args, **kwargs: events.append("move")
+        )
+        pipette = ctx.gantry.instruments["pipette"]
+        pipette.aspirate.side_effect = lambda *args: events.append("aspirate")
+        pipette.dispense.side_effect = lambda *args: events.append("dispense")
+
+        transfer(
+            ctx,
+            source="source",
+            destination="holder.plate.A1",
+            volume_ul=25.0,
+        )
+
+        assert events == [
+            "begin", "move", "aspirate", "move", "dispense", "complete",
+        ]
+        args = store.begin_fluid_transfer.call_args.args
+        assert args[0] == 11
+        assert args[2:] == (
+            "source", None, "holder.plate", "A1", 25.0,
+        )
+        store.record_transfer.assert_not_called()
+
+    def test_tracked_transfer_skips_already_applied_operation(self):
+        from protocol_engine.commands.pipette import transfer
+
+        ctx = _mock_context_multi_resolve()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.deck.resolve_labware_target.side_effect = [
+            SimpleNamespace(labware_key="source", location_id=None),
+            SimpleNamespace(labware_key="plate", location_id="A1"),
+        ]
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_fluid_transfer.return_value = False
+
+        transfer(ctx, source="source", destination="plate.A1", volume_ul=25.0)
+
+        pipette = ctx.gantry.instruments["pipette"]
+        pipette.aspirate.assert_not_called()
+        pipette.dispense.assert_not_called()
+        ctx.data_store.complete_fluid_transfer.assert_not_called()
+
+    def test_tracked_transfer_preflight_failure_stops_before_aspirate(self):
+        from protocol_engine.commands.pipette import transfer
+
+        ctx = _mock_context_multi_resolve()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.deck.resolve_labware_target.side_effect = [
+            SimpleNamespace(labware_key="source", location_id=None),
+            SimpleNamespace(labware_key="plate", location_id="A1"),
+        ]
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_fluid_transfer.side_effect = ValueError(
+            "source only has 5 uL"
+        )
+
+        with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+            transfer(
+                ctx, source="source", destination="plate.A1", volume_ul=25.0,
+            )
+
+        ctx.gantry.instruments["pipette"].aspirate.assert_not_called()
+        ctx.gantry.move_to_labware.assert_not_called()
+
+    @pytest.mark.parametrize("missing", ["data_store", "campaign_id"])
+    def test_incomplete_tracked_context_fails_before_motion(self, missing):
+        from protocol_engine.commands.pipette import transfer
+
+        ctx = _mock_context_multi_resolve()
+        ctx.fluid_state_id = 11
+        ctx.data_store = None if missing == "data_store" else MagicMock()
+        ctx.campaign_id = None if missing == "campaign_id" else 7
+
+        with pytest.raises(ProtocolExecutionError, match="context is incomplete"):
+            transfer(ctx, source="source", destination="plate.A1", volume_ul=25.0)
+
+        ctx.gantry.move_to_labware.assert_not_called()
+        _get_pipette(ctx).aspirate.assert_not_called()
+
+    def test_tracked_transfer_failure_marks_reconciliation_required(self):
+        from protocol_engine.commands.pipette import transfer
+
+        ctx = _mock_context_multi_resolve()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.deck.resolve_labware_target.side_effect = [
+            SimpleNamespace(labware_key="source", location_id=None),
+            SimpleNamespace(labware_key="plate", location_id="A1"),
+        ]
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_fluid_transfer.return_value = True
+        pipette = ctx.gantry.instruments["pipette"]
+        pipette.dispense.side_effect = RuntimeError("dispense uncertain")
+
+        with pytest.raises(RuntimeError, match="dispense uncertain"):
+            transfer(
+                ctx, source="source", destination="plate.A1", volume_ul=25.0,
+            )
+
+        ctx.data_store.mark_fluid_reconciliation_required.assert_called_once()
+        ctx.data_store.complete_fluid_transfer.assert_not_called()
+
+    def test_tracked_transfer_commit_failure_is_not_silently_ignored(self):
+        from protocol_engine.commands.pipette import transfer
+
+        ctx = _mock_context_multi_resolve()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.deck.resolve_labware_target.side_effect = [
+            SimpleNamespace(labware_key="source", location_id=None),
+            SimpleNamespace(labware_key="plate", location_id="A1"),
+        ]
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_fluid_transfer.return_value = True
+        ctx.data_store.complete_fluid_transfer.side_effect = RuntimeError(
+            "database is locked"
+        )
+
+        with pytest.raises(ProtocolExecutionError, match="commit failed"):
+            transfer(
+                ctx, source="source", destination="plate.A1", volume_ul=25.0,
+            )
+
+        ctx.data_store.mark_fluid_reconciliation_required.assert_called_once()
 
     def test_raises_when_no_pipette(self):
         from protocol_engine.commands.pipette import transfer

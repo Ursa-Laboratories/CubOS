@@ -18,6 +18,7 @@ class TestProtocolContextDataStore:
         )
         assert ctx.data_store is None
         assert ctx.campaign_id is None
+        assert ctx.fluid_state_id is None
 
     def test_accepts_data_store(self):
         store = DataStore(db_path=":memory:")
@@ -27,9 +28,11 @@ class TestProtocolContextDataStore:
             deck=MagicMock(),
             data_store=store,
             campaign_id=cid,
+            fluid_state_id=12,
         )
         assert ctx.data_store is store
         assert ctx.campaign_id == cid
+        assert ctx.fluid_state_id == 12
         store.close()
 
     def test_no_errors_without_data_store(self):

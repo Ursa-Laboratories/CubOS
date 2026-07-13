@@ -7,12 +7,15 @@ import logging
 import os
 import sqlite3
 from pathlib import Path
-from typing import Any, List, Optional, Union
+from typing import TYPE_CHECKING, Any, List, Mapping, Optional, Union
 
 from instruments.filmetrics.models import MeasurementResult
 from instruments.uv_curing.models import CureResult
 from instruments.uvvis_ccs.models import UVVisSpectrum
 from protocol_engine.measurements import InstrumentMeasurement, MeasurementType
+
+if TYPE_CHECKING:
+    from .fluid_state import FluidStateSnapshot, FluidStateSummary
 
 DATA_DB_PATH_ENV = "CUBOS_DATA_DB_PATH"
 SQLITE_MEMORY_DATABASE = ":memory:"
@@ -34,6 +37,18 @@ def default_database_path() -> Path:
     return Path.home() / ".cubos" / "panda_data.db"
 
 _SCHEMA_SQL = """\
+CREATE TABLE IF NOT EXISTS fluid_state_sessions (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    deck_path          TEXT    NOT NULL,
+    deck_fingerprint   TEXT    NOT NULL,
+    deck_descriptor_json TEXT  NOT NULL DEFAULT '{}',
+    deck_snapshot_json TEXT    NOT NULL,
+    layout_json        TEXT    NOT NULL,
+    label              TEXT,
+    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS campaigns (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     description     TEXT    NOT NULL,
@@ -43,7 +58,8 @@ CREATE TABLE IF NOT EXISTS campaigns (
     protocol_config TEXT,
     created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
     status          TEXT    NOT NULL DEFAULT 'running',
-    finished_at     TEXT
+    finished_at     TEXT,
+    fluid_state_id  INTEGER REFERENCES fluid_state_sessions(id)
 );
 
 CREATE TABLE IF NOT EXISTS experiments (
@@ -144,6 +160,59 @@ CREATE TABLE IF NOT EXISTS labware (
     updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
     UNIQUE(campaign_id, labware_key, well_id)
 );
+
+CREATE TABLE IF NOT EXISTS fluid_containers (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id     INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                   ON DELETE CASCADE,
+    labware_key        TEXT    NOT NULL,
+    location_id        TEXT    NOT NULL DEFAULT '',
+    labware_type       TEXT    NOT NULL,
+    capacity_ul        REAL    NOT NULL CHECK (capacity_ul > 0),
+    working_volume_ul  REAL    NOT NULL CHECK (
+                                      working_volume_ul > 0
+                                      AND working_volume_ul <= capacity_ul
+                                  ),
+    current_volume_ul  REAL    NOT NULL DEFAULT 0.0 CHECK (current_volume_ul >= 0),
+    composition_json   TEXT    NOT NULL DEFAULT '{}',
+    version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(fluid_state_id, labware_key, location_id)
+);
+
+CREATE TABLE IF NOT EXISTS fluid_operations (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id           INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                        ON DELETE CASCADE,
+    operation_key            TEXT    NOT NULL UNIQUE,
+    operation_type           TEXT    NOT NULL CHECK (
+                                        operation_type IN ('transfer', 'mix')
+                                    ),
+    source_labware_key       TEXT    NOT NULL,
+    source_location_id       TEXT    NOT NULL DEFAULT '',
+    destination_labware_key  TEXT    NOT NULL,
+    destination_location_id  TEXT    NOT NULL DEFAULT '',
+    volume_ul                REAL    NOT NULL CHECK (volume_ul > 0),
+    composition_json         TEXT    NOT NULL,
+    parameters_json          TEXT    NOT NULL DEFAULT '{}',
+    source_version           INTEGER NOT NULL,
+    destination_version      INTEGER NOT NULL,
+    status                   TEXT    NOT NULL CHECK (
+                                        status IN (
+                                            'started',
+                                            'applied',
+                                            'reconciliation_required',
+                                            'cancelled',
+                                            'reconciled'
+                                        )
+                                    ),
+    campaign_id              INTEGER REFERENCES campaigns(id),
+    detail                   TEXT,
+    created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    applied_at               TEXT
+);
 """
 
 
@@ -189,13 +258,131 @@ class DataStore:
 
     def _migrate_schema(self) -> None:
         self._add_column_if_missing("campaigns", "finished_at", "TEXT")
+        self._add_column_if_missing(
+            "campaigns",
+            "fluid_state_id",
+            "INTEGER REFERENCES fluid_state_sessions(id)",
+        )
         self._add_column_if_missing("experiments", "labware_key", "TEXT")
+        self._add_column_if_missing(
+            "fluid_state_sessions",
+            "deck_descriptor_json",
+            "TEXT NOT NULL DEFAULT '{}'",
+        )
         self._conn.execute(
             "UPDATE experiments SET labware_key = labware_name "
             "WHERE labware_key IS NULL"
         )
         self._relax_asmi_metadata_columns()
+        self._migrate_fluid_operations_schema()
+        self._create_fluid_operation_indexes()
         self._conn.commit()
+
+    def _migrate_fluid_operations_schema(self) -> None:
+        """Expand the operation journal without weakening legacy data.
+
+        SQLite cannot alter CHECK constraints in place. Rebuild only databases
+        created by the earlier fluid-state prototype; fresh databases already
+        have the current shape from ``_SCHEMA_SQL``.
+        """
+        table_row = self._conn.execute(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'fluid_operations'"
+        ).fetchone()
+        if table_row is None:
+            return
+        columns = {
+            row[1] for row in self._conn.execute("PRAGMA table_info(fluid_operations)")
+        }
+        table_sql = (table_row[0] or "").lower()
+        if (
+            "parameters_json" in columns
+            and "'mix'" in table_sql
+            and "'cancelled'" in table_sql
+            and "'reconciled'" in table_sql
+        ):
+            return
+
+        try:
+            self._conn.executescript(
+                """
+            BEGIN IMMEDIATE;
+            DROP TABLE IF EXISTS fluid_operations_new;
+            CREATE TABLE fluid_operations_new (
+                id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+                fluid_state_id           INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                                    ON DELETE CASCADE,
+                operation_key            TEXT    NOT NULL UNIQUE,
+                operation_type           TEXT    NOT NULL CHECK (
+                                                    operation_type IN ('transfer', 'mix')
+                                                ),
+                source_labware_key       TEXT    NOT NULL,
+                source_location_id       TEXT    NOT NULL DEFAULT '',
+                destination_labware_key  TEXT    NOT NULL,
+                destination_location_id  TEXT    NOT NULL DEFAULT '',
+                volume_ul                REAL    NOT NULL CHECK (volume_ul > 0),
+                composition_json         TEXT    NOT NULL,
+                parameters_json          TEXT    NOT NULL DEFAULT '{}',
+                source_version           INTEGER NOT NULL,
+                destination_version      INTEGER NOT NULL,
+                status                   TEXT    NOT NULL CHECK (
+                                                    status IN (
+                                                        'started',
+                                                        'applied',
+                                                        'reconciliation_required',
+                                                        'cancelled',
+                                                        'reconciled'
+                                                    )
+                                                ),
+                campaign_id              INTEGER REFERENCES campaigns(id),
+                detail                   TEXT,
+                created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+                updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+                applied_at               TEXT
+            );
+            INSERT INTO fluid_operations_new (
+                id, fluid_state_id, operation_key, operation_type,
+                source_labware_key, source_location_id,
+                destination_labware_key, destination_location_id,
+                volume_ul, composition_json, parameters_json,
+                source_version, destination_version, status, campaign_id,
+                detail, created_at, updated_at, applied_at
+            )
+            SELECT
+                id, fluid_state_id, operation_key, operation_type,
+                source_labware_key, source_location_id,
+                destination_labware_key, destination_location_id,
+                volume_ul, composition_json, '{}',
+                source_version, destination_version, status, campaign_id,
+                detail, created_at, updated_at, applied_at
+            FROM fluid_operations;
+            DROP TABLE fluid_operations;
+            ALTER TABLE fluid_operations_new RENAME TO fluid_operations;
+            COMMIT;
+            """
+            )
+        except BaseException:
+            if self._conn.in_transaction:
+                self._conn.rollback()
+            raise
+
+    def _create_fluid_operation_indexes(self) -> None:
+        duplicate = self._conn.execute(
+            "SELECT fluid_state_id, COUNT(*) FROM fluid_operations "
+            "WHERE status IN ('started', 'reconciliation_required') "
+            "GROUP BY fluid_state_id HAVING COUNT(*) > 1 LIMIT 1"
+        ).fetchone()
+        if duplicate is not None:
+            raise RuntimeError(
+                "Fluid state database has multiple pending operations for state "
+                f"{duplicate[0]}; reconcile it before upgrading CubOS."
+            )
+        self._conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "fluid_operations_one_pending_per_state "
+            "ON fluid_operations(fluid_state_id) "
+            "WHERE status IN ('started', 'reconciliation_required')"
+        )
 
     def _add_column_if_missing(
         self,
@@ -264,12 +451,21 @@ class DataStore:
         board_config: Optional[str] = None,
         gantry_config: Optional[str] = None,
         protocol_config: Optional[str] = None,
+        fluid_state_id: Optional[int] = None,
     ) -> int:
         with self._conn:
             cursor = self._conn.execute(
                 "INSERT INTO campaigns (description, deck_config, board_config, "
-                "gantry_config, protocol_config) VALUES (?, ?, ?, ?, ?)",
-                (description, deck_config, board_config, gantry_config, protocol_config),
+                "gantry_config, protocol_config, fluid_state_id) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    description,
+                    deck_config,
+                    board_config,
+                    gantry_config,
+                    protocol_config,
+                    fluid_state_id,
+                ),
             )
         return cursor.lastrowid
 
@@ -296,6 +492,64 @@ class DataStore:
             )
         if cursor.rowcount == 0:
             raise ValueError(f"Campaign {campaign_id} not found")
+
+    def attach_campaign_fluid_state(
+        self,
+        campaign_id: int,
+        fluid_state_id: int,
+    ) -> None:
+        """Attach a durable fluid state to an existing campaign.
+
+        Repeating the same attachment is safe. Replacing a campaign's state is
+        rejected because its recorded operations and measurements must retain
+        one unambiguous fluid-state identity.
+        """
+        if self._conn.in_transaction:
+            raise RuntimeError(
+                "Campaign fluid-state attachment cannot start inside an existing "
+                "SQLite transaction; commit or roll it back first."
+            )
+        self._conn.execute("BEGIN IMMEDIATE")
+        try:
+            state = self._conn.execute(
+                "SELECT 1 FROM fluid_state_sessions WHERE id = ?",
+                (fluid_state_id,),
+            ).fetchone()
+            if state is None:
+                raise ValueError(f"Fluid state {fluid_state_id} not found")
+
+            campaign = self._conn.execute(
+                "SELECT fluid_state_id FROM campaigns WHERE id = ?",
+                (campaign_id,),
+            ).fetchone()
+            if campaign is None:
+                raise ValueError(f"Campaign {campaign_id} not found")
+            attached_state = campaign[0]
+            if attached_state is not None and int(attached_state) != fluid_state_id:
+                raise ValueError(
+                    f"Campaign {campaign_id} is already attached to fluid state "
+                    f"{attached_state}, not {fluid_state_id}."
+                )
+
+            self._conn.execute(
+                "UPDATE campaigns SET fluid_state_id = ? WHERE id = ?",
+                (fluid_state_id, campaign_id),
+            )
+        except BaseException:
+            self._conn.rollback()
+            raise
+        else:
+            self._conn.commit()
+
+    def get_campaign_fluid_state_id(self, campaign_id: int) -> int | None:
+        """Return the fluid-state ID linked to a campaign, if any."""
+        row = self._conn.execute(
+            "SELECT fluid_state_id FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        ).fetchone()
+        if row is None:
+            raise ValueError(f"Campaign {campaign_id} not found")
+        return None if row[0] is None else int(row[0])
 
     def create_experiment(
         self,
@@ -668,6 +922,198 @@ class DataStore:
         )
         self._conn.commit()
         return cursor.lastrowid
+
+    # ── Durable fluid state ────────────────────────────────────────────────
+
+    def create_fluid_state(
+        self,
+        deck_path: str | Path,
+        deck: Any,
+        *,
+        label: str | None = None,
+        initial_fluids: Mapping[str, Any] | None = None,
+    ) -> int:
+        """Create a deck-associated fluid-state session."""
+        from .fluid_state import create_fluid_state
+
+        return create_fluid_state(
+            self._conn,
+            deck_path,
+            deck,
+            label=label,
+            initial_fluids=initial_fluids,
+        )
+
+    def resume_fluid_state(
+        self,
+        fluid_state_id: int,
+        deck_path: str | Path,
+        deck: Any,
+    ) -> int:
+        """Validate and reopen an existing fluid-state session."""
+        from .fluid_state import resume_fluid_state
+
+        return resume_fluid_state(self._conn, fluid_state_id, deck_path, deck)
+
+    def get_fluid_snapshot(self, fluid_state_id: int) -> FluidStateSnapshot:
+        """Return a deterministic JSON-ready snapshot of fluid state."""
+        from .fluid_state import get_fluid_snapshot
+
+        return get_fluid_snapshot(self._conn, fluid_state_id)
+
+    def list_fluid_states(self) -> list[FluidStateSummary]:
+        """Return deterministic summaries of all fluid-state sessions."""
+        from .fluid_state import list_fluid_states
+
+        return list_fluid_states(self._conn)
+
+    def seed_fluid(
+        self,
+        fluid_state_id: int,
+        target: Any,
+        volume_ul: float,
+        composition: Mapping[str, float] | None = None,
+    ) -> None:
+        """Replace one container's volume/composition with an explicit seed."""
+        from .fluid_state import seed_fluid
+
+        seed_fluid(
+            self._conn,
+            fluid_state_id,
+            target,
+            volume_ul,
+            composition,
+        )
+
+    def begin_fluid_transfer(
+        self,
+        fluid_state_id: int,
+        operation_key: str,
+        source: Any,
+        *target_args: Any,
+        campaign_id: int | None = None,
+    ) -> bool:
+        """Preflight and journal a transfer before hardware acts.
+
+        ``True`` means a new started operation was written and hardware should
+        execute. ``False`` means this operation was already applied and should
+        be skipped. Targets may be passed as ``(source, destination, volume)``
+        or as resolved parts ``(source_key, source_location, destination_key,
+        destination_location, volume)``.
+        """
+        from .fluid_state import begin_fluid_transfer
+
+        if len(target_args) == 2:
+            destination, volume_ul = target_args
+        elif len(target_args) == 4:
+            source_location, destination_key, destination_location, volume_ul = (
+                target_args
+            )
+            if not isinstance(source, str) or not isinstance(destination_key, str):
+                raise TypeError("Resolved fluid target keys must be strings.")
+            source = (
+                f"{source}.{source_location}" if source_location not in (None, "")
+                else source
+            )
+            destination = (
+                f"{destination_key}.{destination_location}"
+                if destination_location not in (None, "")
+                else destination_key
+            )
+        else:
+            raise TypeError(
+                "begin_fluid_transfer expects source/destination/volume or "
+                "resolved source/destination key and location parts."
+            )
+
+        return begin_fluid_transfer(
+            self._conn,
+            fluid_state_id,
+            operation_key,
+            source,
+            destination,
+            volume_ul,
+            campaign_id,
+        )
+
+    def complete_fluid_transfer(self, operation_key: str) -> None:
+        """Atomically apply a successfully actuated transfer."""
+        from .fluid_state import complete_fluid_transfer
+
+        complete_fluid_transfer(self._conn, operation_key)
+
+    def begin_fluid_mix(
+        self,
+        fluid_state_id: int,
+        operation_key: str,
+        target: Any,
+        volume_ul: float,
+        repetitions: int,
+        speed: float,
+        height: float = 0.0,
+        *,
+        campaign_id: int | None = None,
+    ) -> bool:
+        """Preflight and journal a net-zero mix before hardware acts."""
+        from .fluid_state import begin_fluid_mix
+
+        return begin_fluid_mix(
+            self._conn,
+            fluid_state_id,
+            operation_key,
+            target,
+            volume_ul,
+            repetitions,
+            speed,
+            height,
+            campaign_id,
+        )
+
+    def complete_fluid_mix(self, operation_key: str) -> None:
+        """Mark a successfully actuated, net-zero mix as applied."""
+        from .fluid_state import complete_fluid_mix
+
+        complete_fluid_mix(self._conn, operation_key)
+
+    def mark_fluid_reconciliation_required(
+        self,
+        operation_key: str,
+        detail: str,
+    ) -> None:
+        """Flag an indeterminate physical transfer for operator review."""
+        from .fluid_state import mark_fluid_reconciliation_required
+
+        mark_fluid_reconciliation_required(self._conn, operation_key, detail)
+
+    def resolve_fluid_operation(
+        self,
+        operation_key: str,
+        resolution: str,
+        *,
+        detail: str,
+        source_volume_ul: float | None = None,
+        source_composition: Mapping[str, float] | None = None,
+        destination_volume_ul: float | None = None,
+        destination_composition: Mapping[str, float] | None = None,
+    ) -> None:
+        """Resolve an uncertain operation using an explicit operator decision.
+
+        ``resolution`` accepts ``applied``, ``not_applied``/``cancelled``, or
+        ``partial``/``reconciled``. Partial reconciliation requires exact
+        source and destination replacement volumes and compositions.
+        """
+        from .fluid_state import resolve_fluid_operation
+
+        resolve_fluid_operation(
+            self._conn,
+            operation_key,
+            resolution,
+            detail=detail,
+            source_volume_ul=source_volume_ul,
+            source_composition=source_composition,
+            destination_volume_ul=destination_volume_ul,
+            destination_composition=destination_composition,
+        )
 
     # ── Labware tracking ────────────────────────────────────────────────────
 

@@ -45,6 +45,50 @@ class TestProtocolStep:
 
         handler.assert_called_once_with(ctx)
 
+    def test_execute_scopes_fluid_operation_key_to_campaign_and_step(self):
+        observed = []
+
+        def handler(context):
+            observed.append(context.fluid_operation_key("transfer"))
+
+        step = ProtocolStep(index=3, command_name="transfer", handler=handler, args={})
+        ctx = _mock_context()
+        ctx.campaign_id = 17
+
+        step.execute(ctx)
+
+        assert observed == ["campaign:17:step:3:transfer:transfer"]
+        assert ctx.active_step_index is None
+        assert ctx.active_step_command is None
+
+    def test_execute_restores_operation_scope_after_handler_failure(self):
+        def handler(_context):
+            raise RuntimeError("boom")
+
+        step = ProtocolStep(index=4, command_name="transfer", handler=handler, args={})
+        ctx = _mock_context()
+        ctx.active_step_index = 99
+        ctx.active_step_command = "outer"
+        ctx.active_substep = "A1"
+
+        with pytest.raises(RuntimeError, match="boom"):
+            step.execute(ctx)
+
+        assert ctx.active_step_index == 99
+        assert ctx.active_step_command == "outer"
+        assert ctx.active_substep == "A1"
+
+    def test_manual_fluid_operation_keys_are_unique(self):
+        ctx = _mock_context()
+        ctx.campaign_id = 8
+
+        assert ctx.fluid_operation_key("transfer") == (
+            "campaign:8:manual:1:transfer"
+        )
+        assert ctx.fluid_operation_key("transfer") == (
+            "campaign:8:manual:2:transfer"
+        )
+
 
 # ─── Protocol ────────────────────────────────────────────────────────────────
 
@@ -180,6 +224,8 @@ class TestProtocolRun:
             "data_store": None,
             "campaign_description": None,
             "protocol_config": None,
+            "fluid_state_id": None,
+            "initial_fluids": None,
         }
 
     def test_run_without_campaign_uses_default_persistence(self, monkeypatch):
@@ -201,6 +247,8 @@ class TestProtocolRun:
             "data_store": None,
             "campaign_description": None,
             "protocol_config": None,
+            "fluid_state_id": None,
+            "initial_fluids": None,
         }
 
     def test_run_accepts_data_store_without_campaign(self, monkeypatch):
@@ -221,6 +269,27 @@ class TestProtocolRun:
 
         assert passed["data_store"] is store
         assert passed["campaign_description"] is None
+
+    def test_run_forwards_resumable_fluid_state_inputs(self, monkeypatch):
+        passed = {}
+
+        def fake_run_on_hardware(gantry_path, deck_path, protocol, **kwargs):
+            passed.update(kwargs)
+            return []
+
+        monkeypatch.setattr(protocol_setup, "run_on_hardware", fake_run_on_hardware)
+        protocol = Protocol(
+            steps=[],
+            setup=ProtocolSetup(gantry_path="g.yaml", deck_path="d.yaml"),
+        )
+
+        protocol.run(
+            fluid_state_id=42,
+            initial_fluids={"fluids": {}},
+        )
+
+        assert passed["fluid_state_id"] == 42
+        assert passed["initial_fluids"] == {"fluids": {}}
 
     def test_run_with_campaign_passes_description_to_hardware_runner(self, monkeypatch):
         passed = {}

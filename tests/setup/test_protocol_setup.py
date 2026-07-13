@@ -86,6 +86,21 @@ labware:
     working_volume_ul: 1200.0
 """
 
+TWO_VIAL_DECK_YAML = DECK_YAML + """\
+  vial_2:
+    type: vial
+    name: destination_vial
+    model_name: standard_vial
+    height: 66.75
+    diameter: 28.0
+    location:
+      x: 80.0
+      y: 40.0
+      z: 20.0
+    capacity_ul: 1500.0
+    working_volume_ul: 1200.0
+"""
+
 PROTOCOL_YAML = """\
 protocol:
   - move:
@@ -259,7 +274,7 @@ protocol:
             assert isinstance(context.gantry_config, GantryConfig)
             assert context.gantry_config.working_volume.x_min == 0.0
 
-    def test_context_carries_optional_data_store_and_campaign_id(self):
+    def test_context_carries_optional_data_and_fluid_state_ids(self):
         data_store = object()
         with _TempYamlFiles() as f:
             _, context = setup_protocol(
@@ -268,9 +283,11 @@ protocol:
                 f.protocol_path,
                 data_store=data_store,
                 campaign_id=42,
+                fluid_state_id=73,
             )
             assert context.data_store is data_store
             assert context.campaign_id == 42
+            assert context.fluid_state_id == 73
 
     def test_rejects_negative_space_gantry_config(self):
         legacy_gantry = GANTRY_YAML.replace("  x_min: 0.0\n", "  x_min: -300.0\n")
@@ -454,6 +471,274 @@ class TestRunOnHardwareLifecycle:
             )
             assert isinstance(results, list)
 
+    @pytest.mark.parametrize(
+        "initial_fluids",
+        [
+            {
+                "vial_1": {
+                    "volume_ul": 250.0,
+                    "composition": {"buffer": 250.0},
+                }
+            },
+            {
+                "fluids": {
+                    "vial_1": {
+                        "volume_ul": 250.0,
+                        "composition": {"buffer": 250.0},
+                    }
+                }
+            },
+        ],
+        ids=["direct-target-mapping", "yaml-shaped-mapping"],
+    )
+    def test_run_on_hardware_creates_state_and_attaches_context_and_campaign(
+        self,
+        initial_fluids,
+    ):
+        store = DataStore(":memory:")
+        observed = {}
+        protocol = Protocol([])
+
+        def capture_context(context):
+            observed["fluid_state_id"] = context.fluid_state_id
+            observed["campaign_id"] = context.campaign_id
+            return []
+
+        protocol.execute = capture_context
+        with _TempYamlFiles() as f:
+            results = run_on_hardware(
+                f.gantry_path,
+                f.deck_path,
+                protocol,
+                gantry=Gantry(offline=True),
+                mock_mode=True,
+                data_store=store,
+                initial_fluids=initial_fluids,
+            )
+
+        state_id = observed["fluid_state_id"]
+        assert results == []
+        assert isinstance(state_id, int)
+        assert store.get_campaign_fluid_state_id(observed["campaign_id"]) == state_id
+        snapshot = store.get_fluid_snapshot(state_id)
+        vial = next(
+            item for item in snapshot["containers"]
+            if item["labware_key"] == "vial_1"
+        )
+        assert vial["current_volume_ul"] == 250.0
+        assert vial["composition"] == {"buffer": 250.0}
+        store.close()
+
+    def test_run_on_hardware_resumes_state_and_attaches_caller_campaign(self):
+        store = DataStore(":memory:")
+        observed = {}
+        with _TempYamlFiles() as f:
+            run_on_hardware(
+                f.gantry_path,
+                f.deck_path,
+                Protocol([]),
+                gantry=Gantry(offline=True),
+                mock_mode=True,
+                data_store=store,
+                initial_fluids={
+                    "vial_1": {
+                        "volume_ul": 100.0,
+                        "composition": {"water": 100.0},
+                    }
+                },
+            )
+            first_campaign = store._conn.execute(
+                "SELECT id FROM campaigns ORDER BY id LIMIT 1"
+            ).fetchone()[0]
+            state_id = store.get_campaign_fluid_state_id(first_campaign)
+            campaign_id = store.create_campaign("resume")
+            protocol = Protocol([])
+
+            def capture_context(context):
+                observed["fluid_state_id"] = context.fluid_state_id
+                return []
+
+            protocol.execute = capture_context
+            run_on_hardware(
+                f.gantry_path,
+                f.deck_path,
+                protocol,
+                gantry=Gantry(offline=True),
+                mock_mode=True,
+                data_store=store,
+                campaign_id=campaign_id,
+                fluid_state_id=state_id,
+            )
+
+        assert observed["fluid_state_id"] == state_id
+        assert store.get_campaign_fluid_state_id(campaign_id) == state_id
+        status = store._conn.execute(
+            "SELECT status FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        ).fetchone()[0]
+        assert status == "completed"
+        store.close()
+
+    def test_run_on_hardware_inherits_linked_campaign_state_and_journals_transfer(
+        self,
+    ):
+        store = DataStore(":memory:")
+        observed = {}
+
+        with _TempYamlFiles(deck=TWO_VIAL_DECK_YAML) as f:
+            _, seed_context = setup_protocol(
+                f.gantry_path,
+                f.deck_path,
+                Protocol([]),
+                gantry=Gantry(offline=True),
+                mock_mode=True,
+            )
+            state_id = store.create_fluid_state(
+                f.deck_path,
+                seed_context.deck,
+                initial_fluids={
+                    "vial_1": {
+                        "volume_ul": 100.0,
+                        "composition": {"water": 100.0},
+                    }
+                },
+            )
+            campaign_id = store.create_campaign(
+                "linked resume",
+                fluid_state_id=state_id,
+            )
+            protocol = Protocol([])
+
+            def transfer_and_capture(context):
+                from protocol_engine.commands.pipette import transfer
+
+                observed["fluid_state_id"] = context.fluid_state_id
+                transfer(
+                    context,
+                    source="vial_1",
+                    destination="vial_2",
+                    volume_ul=25.0,
+                )
+                return []
+
+            protocol.execute = transfer_and_capture
+            run_on_hardware(
+                f.gantry_path,
+                f.deck_path,
+                protocol,
+                gantry=Gantry(offline=True),
+                mock_mode=True,
+                data_store=store,
+                campaign_id=campaign_id,
+            )
+
+        snapshot = store.get_fluid_snapshot(state_id)
+        containers = {
+            item["labware_key"]: item for item in snapshot["containers"]
+        }
+        assert observed["fluid_state_id"] == state_id
+        assert containers["vial_1"]["current_volume_ul"] == 75.0
+        assert containers["vial_2"]["current_volume_ul"] == 25.0
+        assert len(snapshot["operations"]) == 1
+        assert snapshot["operations"][0]["campaign_id"] == campaign_id
+        assert snapshot["operations"][0]["status"] == "applied"
+        store.close()
+
+    def test_run_on_hardware_rejects_seed_for_linked_campaign_before_connect(self):
+        store = DataStore(":memory:")
+
+        with _TempYamlFiles() as f:
+            _, seed_context = setup_protocol(
+                f.gantry_path,
+                f.deck_path,
+                Protocol([]),
+                gantry=Gantry(offline=True),
+                mock_mode=True,
+            )
+            state_id = store.create_fluid_state(f.deck_path, seed_context.deck)
+            campaign_id = store.create_campaign(
+                "linked seed conflict",
+                fluid_state_id=state_id,
+            )
+            gantry = Gantry(offline=True)
+            gantry.connect = MagicMock()
+            state_count_before = store._conn.execute(
+                "SELECT COUNT(*) FROM fluid_state_sessions"
+            ).fetchone()[0]
+
+            with pytest.raises(ValueError, match="already attached.*initial_fluids"):
+                run_on_hardware(
+                    f.gantry_path,
+                    f.deck_path,
+                    Protocol([]),
+                    gantry=gantry,
+                    mock_mode=True,
+                    data_store=store,
+                    campaign_id=campaign_id,
+                    initial_fluids={"vial_1": {"volume_ul": 1.0}},
+                )
+
+        state_count_after = store._conn.execute(
+            "SELECT COUNT(*) FROM fluid_state_sessions"
+        ).fetchone()[0]
+        assert state_count_after == state_count_before
+        gantry.connect.assert_not_called()
+        store.close()
+
+    def test_run_on_hardware_rejects_conflicting_linked_state_before_connect(self):
+        store = DataStore(":memory:")
+
+        with _TempYamlFiles() as f:
+            _, seed_context = setup_protocol(
+                f.gantry_path,
+                f.deck_path,
+                Protocol([]),
+                gantry=Gantry(offline=True),
+                mock_mode=True,
+            )
+            linked_state_id = store.create_fluid_state(
+                f.deck_path,
+                seed_context.deck,
+            )
+            conflicting_state_id = store.create_fluid_state(
+                f.deck_path,
+                seed_context.deck,
+            )
+            campaign_id = store.create_campaign(
+                "linked state conflict",
+                fluid_state_id=linked_state_id,
+            )
+            gantry = Gantry(offline=True)
+            gantry.connect = MagicMock()
+
+            with pytest.raises(
+                ValueError,
+                match=f"already attached to fluid state {linked_state_id}",
+            ):
+                run_on_hardware(
+                    f.gantry_path,
+                    f.deck_path,
+                    Protocol([]),
+                    gantry=gantry,
+                    mock_mode=True,
+                    data_store=store,
+                    campaign_id=campaign_id,
+                    fluid_state_id=conflicting_state_id,
+                )
+
+        gantry.connect.assert_not_called()
+        store.close()
+
+    def test_run_on_hardware_rejects_resume_and_seed_before_setup(self):
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            run_on_hardware(
+                "missing-gantry.yaml",
+                "missing-deck.yaml",
+                "missing-protocol.yaml",
+                fluid_state_id=1,
+                initial_fluids={"vial_1": {"volume_ul": 1.0}},
+            )
+
     def test_run_on_hardware_disconnects_on_failure(self):
         bad_protocol = """\
 protocol:
@@ -568,6 +853,40 @@ instruments:
         ).fetchone()
         assert status[0] == "failed"
         assert status[1] is not None
+        store.close()
+
+    def test_run_on_hardware_marks_keyboard_interrupt_failed_and_disconnects(self):
+        store = DataStore(":memory:")
+        campaign_id = store.create_campaign(description="interrupted run")
+        protocol = Protocol([])
+
+        def interrupt(_context):
+            raise KeyboardInterrupt
+
+        protocol.execute = interrupt
+        gantry = Gantry(offline=True)
+        original_disconnect = gantry.disconnect
+        gantry.disconnect = MagicMock(wraps=original_disconnect)
+
+        with _TempYamlFiles() as f:
+            with pytest.raises(KeyboardInterrupt):
+                run_on_hardware(
+                    f.gantry_path,
+                    f.deck_path,
+                    protocol,
+                    gantry=gantry,
+                    mock_mode=True,
+                    data_store=store,
+                    campaign_id=campaign_id,
+                )
+
+        status = store._conn.execute(
+            "SELECT status, finished_at FROM campaigns WHERE id = ?",
+            (campaign_id,),
+        ).fetchone()
+        assert status[0] == "failed"
+        assert status[1] is not None
+        gantry.disconnect.assert_called_once_with()
         store.close()
 
     def test_run_on_hardware_full_lifecycle_order(self, monkeypatch):
@@ -740,6 +1059,9 @@ instruments:
         closed = []
 
         class ClosingStore:
+            def get_campaign_fluid_state_id(self, campaign_id):
+                return None
+
             def close(self):
                 closed.append(True)
 
@@ -837,14 +1159,17 @@ instruments:
         )
 
         with _TempYamlFiles() as f:
+            store = DataStore(":memory:")
+            campaign_id = store.create_campaign("mock gantry construction")
             results = run_on_hardware(
                 f.gantry_path,
                 f.deck_path,
                 f.protocol_path,
                 mock_mode=True,
-                data_store=DataStore(":memory:"),
-                campaign_id=1,
+                data_store=store,
+                campaign_id=campaign_id,
             )
 
         assert results == []
         assert constructed == [{"config": None, "offline": True}]
+        store.close()

@@ -1,0 +1,31 @@
+# Offline Cub XL fluid-state simulation gantry.
+#
+# This mirrors the proven pipette-tip simulation envelope. It deliberately
+# keeps the pipette offline and must not be used as a hardware configuration.
+
+serial_port: /dev/null
+gantry_type: cub_xl
+cnc:
+  factory_z_travel_mm: 129.0
+  y_axis_motion: head
+  safe_z: 69.0
+
+working_volume:
+  x_min: 0.0
+  x_max: 307.0
+  y_min: 0.0
+  y_max: 300.0
+  z_min: 0.0
+  z_max: 129.0
+
+instruments:
+  pipette:
+    type: pipette
+    vendor: opentrons
+    pipette_model: p300_single_gen2
+    port: ''
+    baud_rate: 115200
+    offline: true
+    offset_x: 72.0
+    offset_y: -6.0
+    depth: 0.0

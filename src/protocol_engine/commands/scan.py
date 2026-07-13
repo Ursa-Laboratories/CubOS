@@ -14,6 +14,11 @@ from ..measurements import normalize_measurement
 from ..registry import protocol_command
 from ..scan_args import normalize_scan_arguments
 from ._dispatch import inject_runtime_args
+from ._fluid_contents import (
+    contents_for_target,
+    resolve_measurement_target,
+    tracked_fluid_contents,
+)
 from ._movement import _assert_finite_number
 
 if TYPE_CHECKING:
@@ -142,10 +147,22 @@ def scan(
     results: Dict[str, Any] = {}
     sorted_wells = sorted(plate_obj.wells, key=_row_major_key)
 
-    persistence_target = (
-        context.deck.resolve_labware_target(plate)
-        if context.data_store is not None and context.campaign_id is not None
-        else None
+    # Resolve every persisted well through Deck's canonical target registry.
+    # When durable tracking is active, read one authoritative snapshot before
+    # any movement so a missing/corrupt state or target cannot produce a
+    # partially scanned plate with misleading contents.
+    persistence_targets = {}
+    if (
+        context.fluid_state_id is not None
+        or (context.data_store is not None and context.campaign_id is not None)
+    ):
+        persistence_targets = {
+            well_id: resolve_measurement_target(context, f"{plate}.{well_id}")
+            for well_id in sorted_wells
+        }
+    tracked_contents_index = tracked_fluid_contents(
+        context,
+        persistence_targets.values(),
     )
 
     for i, well_id in enumerate(sorted_wells):
@@ -178,7 +195,7 @@ def scan(
         if (
             context.data_store is not None
             and context.campaign_id is not None
-            and persistence_target is not None
+            and well_id in persistence_targets
         ):
             try:
                 measurement = normalize_measurement(
@@ -186,17 +203,24 @@ def scan(
                     method_name=method,
                     raw_result=result,
                 )
-                contents = context.data_store.get_contents(
-                    context.campaign_id,
-                    persistence_target.labware_key,
-                    well_id,
-                )
+                persistence_target = persistence_targets[well_id]
+                if tracked_contents_index is not None:
+                    contents = contents_for_target(
+                        tracked_contents_index,
+                        persistence_target,
+                    )
+                else:
+                    contents = context.data_store.get_contents(
+                        context.campaign_id,
+                        persistence_target.labware_key,
+                        persistence_target.location_id,
+                    )
                 contents_json = json.dumps(contents) if contents else "[]"
                 context.data_store.log_experiment_measurement(
                     campaign_id=context.campaign_id,
                     labware_key=persistence_target.labware_key,
                     labware_name=persistence_target.labware_name,
-                    well_id=well_id,
+                    well_id=persistence_target.location_id,
                     contents_json=contents_json,
                     result=measurement,
                 )

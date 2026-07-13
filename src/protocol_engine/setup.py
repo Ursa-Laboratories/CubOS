@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 import logging
 import os
 from pathlib import Path
@@ -50,6 +51,7 @@ def setup_protocol(
     mock_mode: bool = False,
     data_store: Any | None = None,
     campaign_id: int | None = None,
+    fluid_state_id: int | None = None,
 ) -> Tuple[Protocol, ProtocolContext]:
     """Load all configs, validate bounds, and return a ready-to-run protocol.
 
@@ -71,6 +73,7 @@ def setup_protocol(
         mock_mode: If True, instantiate real driver classes in offline mode.
         data_store: Optional persistence store attached to the runtime context.
         campaign_id: Optional campaign ID used with ``data_store``.
+        fluid_state_id: Optional durable deck-bound fluid-state session ID.
 
     Returns:
         Tuple of (Protocol, ProtocolContext) ready for ``protocol.execute(context)``.
@@ -133,6 +136,7 @@ def setup_protocol(
         gantry_config=gantry_config,
         data_store=data_store,
         campaign_id=campaign_id,
+        fluid_state_id=fluid_state_id,
     )
     return protocol, context
 
@@ -147,6 +151,8 @@ def run_on_hardware(
     campaign_id: int | None = None,
     campaign_description: str | None = None,
     protocol_config: str | None = None,
+    fluid_state_id: int | None = None,
+    initial_fluids: str | os.PathLike[str] | Mapping[str, Any] | None = None,
 ) -> List[Any]:
     """Load configs, validate, and run the protocol as a full hardware session.
 
@@ -157,14 +163,16 @@ def run_on_hardware(
     run and attaches it to the runtime context. The lifecycle is:
 
         1. construct a ``Gantry`` from the gantry YAML (when ``gantry`` is None)
-        2. create a protocol-run campaign if one was not supplied
-        3. ``setup_protocol`` — load/validate configs, build the context
-        4. ``gantry.connect()``
-        5. ``gantry.prepare_for_protocol_run()`` — clear any startup alarm
-        6. ``connect_instruments()``
-        7. ``gantry.is_healthy()`` health check (abort if unhealthy)
-        8. ``protocol.execute(context)`` — run the steps
-        9. disconnect instruments and gantry in ``finally``, even on error
+        2. ``setup_protocol`` — load/validate configs, build the context
+        3. create or verify the optional deck-bound fluid state
+        4. create a protocol-run campaign if one was not supplied, and attach
+           the optional fluid state to it
+        5. ``gantry.connect()``
+        6. ``gantry.prepare_for_protocol_run()`` — clear any startup alarm
+        7. ``connect_instruments()``
+        8. ``gantry.is_healthy()`` health check (abort if unhealthy)
+        9. ``protocol.execute(context)`` — run the steps
+        10. disconnect instruments and gantry in ``finally``, even on error
 
     Args:
         gantry_path: Path to gantry machine YAML config.
@@ -180,6 +188,12 @@ def run_on_hardware(
             campaigns.
         protocol_config: Optional identifier recorded for in-memory protocol
             objects; YAML path inputs use their own path by default.
+        fluid_state_id: Existing deck-bound fluid state to verify and resume.
+            Its saved deck fingerprint must match ``deck_path``, and it must
+            not have an operation awaiting physical reconciliation.
+        initial_fluids: Initial-fluid mapping or seed YAML path used to create
+            a new deck-bound fluid state. Mutually exclusive with
+            ``fluid_state_id``.
 
     Returns:
         List of step results from protocol execution.
@@ -187,6 +201,12 @@ def run_on_hardware(
     Raises:
         GantryHealthCheckError: If the gantry health check fails.
     """
+    if fluid_state_id is not None and initial_fluids is not None:
+        raise ValueError(
+            "fluid_state_id and initial_fluids are mutually exclusive; resume "
+            "an existing state or create a new one, not both."
+        )
+
     if gantry is None:
         if mock_mode:
             gantry = Gantry(offline=True)
@@ -205,11 +225,53 @@ def run_on_hardware(
     context = None
     run_failed = False
     try:
+        if campaign_id is not None:
+            linked_fluid_state_id = data_store.get_campaign_fluid_state_id(
+                campaign_id,
+            )
+            if linked_fluid_state_id is not None:
+                if initial_fluids is not None:
+                    raise ValueError(
+                        f"Campaign {campaign_id} is already attached to fluid "
+                        f"state {linked_fluid_state_id}; initial_fluids cannot "
+                        "be used to replace it. Resume the linked state instead."
+                    )
+                if (
+                    fluid_state_id is not None
+                    and fluid_state_id != linked_fluid_state_id
+                ):
+                    raise ValueError(
+                        f"Campaign {campaign_id} is already attached to fluid "
+                        f"state {linked_fluid_state_id}, not {fluid_state_id}."
+                    )
+                fluid_state_id = linked_fluid_state_id
+
         protocol, context = setup_protocol(
             gantry_path, deck_path, protocol_path,
             gantry=gantry, mock_mode=mock_mode,
             data_store=data_store, campaign_id=campaign_id,
+            fluid_state_id=fluid_state_id,
         )
+        if fluid_state_id is not None:
+            fluid_state_id = data_store.resume_fluid_state(
+                fluid_state_id,
+                deck_path,
+                context.deck,
+            )
+        elif initial_fluids is not None:
+            from data import load_initial_fluids
+
+            seed = (
+                _initial_fluid_mapping(initial_fluids)
+                if isinstance(initial_fluids, Mapping)
+                else load_initial_fluids(initial_fluids)
+            )
+            fluid_state_id = data_store.create_fluid_state(
+                deck_path,
+                context.deck,
+                initial_fluids=seed,
+            )
+
         if campaign_id is None:
             from data import register_deck_labware
 
@@ -222,10 +284,17 @@ def run_on_hardware(
                 deck_config=str(deck_path),
                 gantry_config=str(gantry_path),
                 protocol_config=protocol_file,
+                fluid_state_id=fluid_state_id,
             )
             register_deck_labware(data_store, campaign_id, context.deck)
-            context.data_store = data_store
-            context.campaign_id = campaign_id
+        elif fluid_state_id is not None:
+            data_store.attach_campaign_fluid_state(
+                campaign_id,
+                fluid_state_id,
+            )
+        context.data_store = data_store
+        context.campaign_id = campaign_id
+        context.fluid_state_id = fluid_state_id
         gantry.connect()
         gantry.prepare_for_protocol_run()
         context.gantry.connect_instruments()
@@ -234,7 +303,7 @@ def run_on_hardware(
                 "Gantry health check failed before protocol execution; aborting."
             )
         return protocol.execute(context)
-    except Exception:
+    except BaseException:
         run_failed = True
         logger.exception(
             "Protocol run failed; last commanded pose: %s",
@@ -319,3 +388,22 @@ def _protocol_config_label(
     if source_path is not None:
         return str(source_path)
     return "<in-memory protocol>"
+
+
+def _initial_fluid_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Accept either direct targets or the on-disk ``fluids`` wrapper."""
+    seed = dict(value)
+    if "fluids" not in seed:
+        return seed
+    if set(seed) != {"fluids"}:
+        raise ValueError(
+            "A YAML-shaped initial_fluids mapping must contain exactly one "
+            "top-level `fluids` key. Pass direct target entries without the "
+            "wrapper, or use {'fluids': {...}}."
+        )
+    wrapped = seed["fluids"]
+    if not isinstance(wrapped, Mapping):
+        raise TypeError(
+            "The top-level `fluids` value in initial_fluids must be a mapping."
+        )
+    return dict(wrapped)
