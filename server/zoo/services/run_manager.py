@@ -35,7 +35,7 @@ def _jsonable(value: Any) -> Any:
         return _jsonable(asdict(value))
     if hasattr(value, "model_dump"):
         return _jsonable(value.model_dump())
-    cubos_result_fields = ("status", "steps_executed", "campaign_id")
+    cubos_result_fields = ("status", "steps_executed", "campaign_id", "results")
     if any(hasattr(value, name) for name in cubos_result_fields):
         return {
             name: _jsonable(getattr(value, name))

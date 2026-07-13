@@ -47,7 +47,12 @@ def test_submit_returns_202_and_persists_artifacts(monkeypatch):
         lambda **_kwargs: type(
             "Result",
             (),
-            {"status": "ok", "steps_executed": 1, "campaign_id": 7},
+            {
+                "status": "ok",
+                "steps_executed": 1,
+                "campaign_id": 7,
+                "results": [{"well": "A1", "force": 0.42}],
+            },
         )(),
     )
     app = create_app()
@@ -61,6 +66,7 @@ def test_submit_returns_202_and_persists_artifacts(monkeypatch):
     completed = _wait_for_state(app, "run-001", "succeeded")
     assert completed["result"] == {
         "campaign_id": 7,
+        "results": [{"force": 0.42, "well": "A1"}],
         "status": "ok",
         "steps_executed": 1,
     }
