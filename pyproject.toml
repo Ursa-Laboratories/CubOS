@@ -19,6 +19,9 @@ server = [
     "pydantic-settings>=2.0",
     "httpx>=0.27",
 ]
+client = [
+    "requests>=2.31",
+]
 # Per-vendor SDKs — opt in only when you actually use that driver.
 # The drivers import these lazily and raise a clear error if missing, so the core
 # install (and instruments that don't need them) stays light.

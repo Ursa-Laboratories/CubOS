@@ -89,3 +89,19 @@ jobs:
       - name: Build frontend
         working-directory: web
         run: npm run build
+
+  client:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install client
+        run: pip install -e "clients/python[dev]"
+
+      - name: Test client
+        run: python -m pytest clients/python/tests -q
