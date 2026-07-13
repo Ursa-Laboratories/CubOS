@@ -3,19 +3,23 @@
 from __future__ import annotations
 
 import os
+import tempfile
 from importlib.metadata import PackageNotFoundError, version
+from pathlib import Path
 from typing import Dict, List
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from instruments.registry import get_supported_types, get_supported_vendors
 from pydantic import BaseModel
 from protocol_engine.registry import CommandRegistry
+from zoo.config import get_settings
 
 # Register CubOS protocol commands without connecting to hardware.
 import protocol_engine.commands  # noqa: F401
 
 
 API_VERSION = "v1"
+RUN_SCHEMA_VERSION = "1"
 SERVICE_NAME = "cubos-server"
 
 router = APIRouter(prefix="/api/v1", tags=["cubos-v1"])
@@ -25,6 +29,11 @@ class HealthResponse(BaseModel):
     status: str
     service: str
     api_version: str
+    server_version: str
+    cubos_version: str
+    build_version: str | None = None
+    run_schema_version: str
+    checks: Dict[str, str]
 
 
 class VersionResponse(BaseModel):
@@ -49,10 +58,42 @@ def _distribution_version(distribution: str) -> str:
         return "unknown"
 
 
+def _writable_directory(path: Path) -> str:
+    path.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(prefix=".cub-health-", dir=path):
+        pass
+    return "writable"
+
+
 @router.get("/health", response_model=HealthResponse)
-def health() -> HealthResponse:
-    """Report API readiness without connecting to or probing hardware."""
-    return HealthResponse(status="ok", service=SERVICE_NAME, api_version=API_VERSION)
+def health(response: Response) -> HealthResponse:
+    """Report offline readiness, release identity, and persistent-data health."""
+    settings = get_settings()
+    checks: Dict[str, str] = {"run_schema": "compatible"}
+    paths = {
+        "configs": settings.configs_dir,
+        "runs": settings.run_dir.expanduser().resolve(),
+        "data": settings.data_db_path.expanduser().resolve().parent,
+    }
+    for name, path in paths.items():
+        try:
+            checks[name] = _writable_directory(path)
+        except OSError as exc:
+            checks[name] = f"unwritable: {exc}"
+
+    healthy = all(value in {"writable", "compatible"} for value in checks.values())
+    if not healthy:
+        response.status_code = 503
+    return HealthResponse(
+        status="ok" if healthy else "degraded",
+        service=SERVICE_NAME,
+        api_version=API_VERSION,
+        server_version=_distribution_version("zoo"),
+        cubos_version=_distribution_version("cubos"),
+        build_version=os.environ.get("CUB_BUILD_VERSION"),
+        run_schema_version=RUN_SCHEMA_VERSION,
+        checks=checks,
+    )
 
 
 @router.get("/version", response_model=VersionResponse)

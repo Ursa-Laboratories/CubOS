@@ -8,16 +8,48 @@ from zoo.app import create_app
 from zoo.routers import gantry as gantry_router
 
 
-def test_health_is_hardware_safe():
+def test_health_is_hardware_safe(monkeypatch):
+    from zoo.routers import system
+
     gantry_router.reset_session()
+    versions = {"zoo": "1.2.3", "cubos": "4.5.6"}
+    monkeypatch.setattr(system, "_distribution_version", versions.__getitem__)
+    monkeypatch.setenv("CUB_BUILD_VERSION", "2026.07.13")
     response = api_request(create_app(), "GET", "/api/v1/health")
     assert response.status_code == 200
     assert response.json() == {
         "status": "ok",
         "service": "cubos-server",
         "api_version": "v1",
+        "server_version": "1.2.3",
+        "cubos_version": "4.5.6",
+        "build_version": "2026.07.13",
+        "run_schema_version": "1",
+        "checks": {
+            "configs": "writable",
+            "runs": "writable",
+            "data": "writable",
+            "run_schema": "compatible",
+        },
     }
     assert gantry_router.current_session() is None
+
+
+def test_health_returns_503_for_unwritable_storage(monkeypatch):
+    from zoo.routers import system
+
+    def fail(path):
+        if path == get_settings().run_dir.expanduser().resolve():
+            raise OSError("read only")
+        return "writable"
+
+    from zoo.config import get_settings
+
+    monkeypatch.setattr(system, "_writable_directory", fail)
+    response = api_request(create_app(), "GET", "/api/v1/health")
+    assert response.status_code == 503
+    assert response.json()["status"] == "degraded"
+    assert response.json()["checks"]["runs"].startswith("unwritable:")
 
 
 def test_version_reports_release_identity(monkeypatch):

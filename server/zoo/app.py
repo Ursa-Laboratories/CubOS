@@ -78,7 +78,11 @@ async def _origin_host_middleware(request: Request, call_next):
         # the same-origin check above. Native clients must authenticate when a
         # per-device token is configured, including callers of legacy motion
         # routes as well as the versioned run API.
-        token = get_settings().api_token
+        try:
+            token = get_settings().resolved_api_token()
+        except (OSError, ValueError):
+            logger.exception("Unable to load the configured API token")
+            return JSONResponse({"detail": "API token is unavailable"}, status_code=503)
         if token is not None and not source:
             authorization = request.headers.get("authorization", "")
             scheme, _, supplied = authorization.partition(" ")
