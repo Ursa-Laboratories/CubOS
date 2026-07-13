@@ -74,11 +74,8 @@ PYTHONPATH=src python setup/validate_setup.py \
   `protocol/filmetrics/scan.yaml`, `protocol/sharc_uv/curing_scan.yaml`,
   `protocol/sharc_uv/motion_scan.yaml`.
 
-Offline-only fixtures live under `sim/` so they are not mistaken for measured
-hardware setups. `sim/pipette_tip_transfer/` contains the gantry, deck, and
-protocol triple used by `digital-sim` to replay pipette tip pickup, attached-tip
-height, transfer, blowout, drop-tip, and home behavior without touching
-hardware.
+Offline-only configuration fixtures live under `tests/fixtures/configs/`, not
+in this production config tree.
 
 ## Height Semantics
 

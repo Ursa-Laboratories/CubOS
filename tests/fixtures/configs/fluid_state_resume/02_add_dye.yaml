@@ -1,15 +1,20 @@
-# Run first. The shared fluid-state ID records both withdrawals and dispenses.
+# Test fixture: run second with the state left by 01_load_plate.yaml.
 protocol:
   - home:
 
   - pick_up_tip:
-      position: tip_rack.A1
+      position: tip_rack.B1
   - transfer:
-      source: reagents.buffer
+      source: reagents.dye
       destination: assay_plate.A1
-      volume_ul: 100.0
+      volume_ul: 20.0
       source_height: -5.0
       destination_height: -2.0
+  - mix:
+      position: assay_plate.A1
+      volume_ul: 60.0
+      repetitions: 3
+      height: -3.0
   - blowout:
       position: assay_plate.A1
       height: 4.0
@@ -17,13 +22,18 @@ protocol:
       position: tip_disposal.discard
 
   - pick_up_tip:
-      position: tip_rack.A2
+      position: tip_rack.B2
   - transfer:
-      source: reagents.buffer
+      source: reagents.dye
       destination: assay_plate.A2
-      volume_ul: 80.0
+      volume_ul: 20.0
       source_height: -5.0
       destination_height: -2.0
+  - mix:
+      position: assay_plate.A2
+      volume_ul: 50.0
+      repetitions: 3
+      height: -3.0
   - blowout:
       position: assay_plate.A2
       height: 4.0

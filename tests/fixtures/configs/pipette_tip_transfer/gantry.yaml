@@ -1,7 +1,4 @@
-# Offline Cub XL fluid-state simulation gantry.
-#
-# This mirrors the proven pipette-tip simulation envelope. It deliberately
-# keeps the pipette offline and must not be used as a hardware configuration.
+# Automated-test fixture. Uses /dev/null and must never control hardware.
 
 serial_port: /dev/null
 gantry_type: cub_xl

@@ -1,5 +1,5 @@
-# Offline pipette/tip protocol for digital-sim replay.
-#
+# Offline pipette/tip protocol fixture for digital-sim replay.
+
 # The sequence intentionally exercises attached-tip state:
 #   1. pick up a disposable tip from a TipRack with positive tip_length
 #   2. transfer liquid with distinct source/destination labware-relative heights

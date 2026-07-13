@@ -14,7 +14,7 @@ Validate without hardware:
 
 ```bash
 python setup/validate_setup.py \
-  configs/sim/pipette_tip_transfer/gantry.yaml \
-  configs/sim/pipette_tip_transfer/deck.yaml \
-  configs/sim/pipette_tip_transfer/protocol.yaml
+  tests/fixtures/configs/pipette_tip_transfer/gantry.yaml \
+  tests/fixtures/configs/pipette_tip_transfer/deck.yaml \
+  tests/fixtures/configs/pipette_tip_transfer/protocol.yaml
 ```

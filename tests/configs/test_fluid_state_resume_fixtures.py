@@ -1,4 +1,4 @@
-"""Offline contract tests for the persistent fluid-state example bundle."""
+"""Offline contract tests for the persistent fluid-state fixture bundle."""
 
 from __future__ import annotations
 
@@ -17,10 +17,10 @@ from setup.validate_setup import run_setup_validation
 
 
 ROOT = Path(__file__).resolve().parents[2]
-EXAMPLE = ROOT / "configs/sim/fluid_state_resume"
+FIXTURES = ROOT / "tests/fixtures/configs/fluid_state_resume"
 PROTOCOL_PATHS = (
-    EXAMPLE / "01_load_plate.yaml",
-    EXAMPLE / "02_add_dye.yaml",
+    FIXTURES / "01_load_plate.yaml",
+    FIXTURES / "02_add_dye.yaml",
 )
 
 
@@ -38,10 +38,10 @@ def _commands(document: dict, command_name: str) -> list[dict]:
 
 
 @pytest.mark.parametrize("protocol_path", PROTOCOL_PATHS, ids=lambda path: path.stem)
-def test_fluid_state_resume_protocol_triples_validate_offline(protocol_path: Path):
+def test_fluid_state_resume_fixture_triples_validate_offline(protocol_path: Path):
     result = run_setup_validation(
-        EXAMPLE / "gantry.yaml",
-        EXAMPLE / "deck.yaml",
+        FIXTURES / "gantry.yaml",
+        FIXTURES / "deck.yaml",
         protocol_path,
     )
 
@@ -50,7 +50,7 @@ def test_fluid_state_resume_protocol_triples_validate_offline(protocol_path: Pat
 
 
 def test_initial_fluids_seed_has_the_expected_shape():
-    seed = _load_yaml(EXAMPLE / "initial_fluids.yaml")
+    seed = _load_yaml(FIXTURES / "initial_fluids.yaml")
 
     assert seed == {
         "fluids": {
@@ -71,7 +71,7 @@ def test_initial_fluids_seed_has_the_expected_shape():
 
 
 def test_deck_uses_named_flat_labware_and_canonical_vial_positions():
-    document = _load_yaml(EXAMPLE / "deck.yaml")
+    document = _load_yaml(FIXTURES / "deck.yaml")
     assert document["labware"]["reagents"] == {
         "load_name": "ursa_9_vial_grid",
         "label": "Reagents",
@@ -86,7 +86,7 @@ def test_deck_uses_named_flat_labware_and_canonical_vial_positions():
     )
     assert document["labware"]["assay_plate"]["label"] == "Assay plate"
 
-    deck = load_deck_from_yaml_safe(EXAMPLE / "deck.yaml")
+    deck = load_deck_from_yaml_safe(FIXTURES / "deck.yaml")
     assert deck.canonicalize_target("reagents.buffer") == "reagents.A1"
     assert deck.canonicalize_target("reagents.dye") == "reagents.A2"
     assert deck.resolve_coordinate("reagents.A1").x == pytest.approx(140.0)
@@ -137,7 +137,7 @@ def test_protocols_encode_distinct_tips_and_expected_fluid_math():
         ("assay_plate.A2", 50.0, 3),
     ]
 
-    seed = _load_yaml(EXAMPLE / "initial_fluids.yaml")["fluids"]
+    seed = _load_yaml(FIXTURES / "initial_fluids.yaml")["fluids"]
     state = {
         location: deepcopy(details["composition"])
         for location, details in seed.items()
@@ -182,12 +182,12 @@ def test_two_mock_runs_persist_and_resume_one_fluid_state(tmp_path: Path):
     first_store = DataStore(db_path)
     try:
         first_results = run_on_hardware(
-            EXAMPLE / "gantry.yaml",
-            EXAMPLE / "deck.yaml",
+            FIXTURES / "gantry.yaml",
+            FIXTURES / "deck.yaml",
             PROTOCOL_PATHS[0],
             mock_mode=True,
             data_store=first_store,
-            initial_fluids=EXAMPLE / "initial_fluids.yaml",
+            initial_fluids=FIXTURES / "initial_fluids.yaml",
         )
     finally:
         first_store.close()
@@ -205,8 +205,8 @@ def test_two_mock_runs_persist_and_resume_one_fluid_state(tmp_path: Path):
     resumed_store = DataStore(db_path)
     try:
         second_results = run_on_hardware(
-            EXAMPLE / "gantry.yaml",
-            EXAMPLE / "deck.yaml",
+            FIXTURES / "gantry.yaml",
+            FIXTURES / "deck.yaml",
             PROTOCOL_PATHS[1],
             mock_mode=True,
             data_store=resumed_store,

@@ -1,23 +1,26 @@
-# Offline pipette/tip simulation deck.
-#
-# This deck is calibrated into the Cub XL Sterling pipette reach envelope so
-# digital-sim can replay tip pickup, liquid transfer heights, blowout, and
-# drop-tip behavior without touching hardware.
+# Automated-test fixture with fake coordinates. Not hardware calibration data.
 
 labware:
-  plate:
+  reagents:
+    load_name: ursa_9_vial_grid
+    label: Reagents
+    calibration:
+      a1: { x: 140.0, y: 15.0, z: 30.0 }
+      a2: { x: 140.0, y: 48.0, z: 30.0 }
+    aliases:
+      buffer: A1
+      dye: A2
+
+  assay_plate:
     load_name: sbs_96_wellplate
-    name: pipette_tip_sim_plate
+    label: Assay plate
     calibration:
       a1: { x: 190.0, y: 90.0, z: 30.0 }
       a2: { x: 199.0, y: 90.0, z: 30.0 }
 
   tip_rack:
     load_name: ursa_tip_rack
-    name: pipette_tip_sim_rack
-    # Opentrons OT-2 96 Tip Rack 300 uL labware definition: tipLength 59.3 mm.
-    # pickup_z is the bare-nozzle pickup plane; after pickup the simulated tip
-    # endpoint sits at z ~= 5.4 mm, matching the definition's well/tip bottom.
+    name: fluid_state_tip_rack
     tip_length: 59.3
     pickup_z: 64.7
     drop_z: 34.0
@@ -27,8 +30,8 @@ labware:
 
   tip_disposal:
     type: tip_disposal
-    name: pipette_tip_sim_disposal
-    model_name: pipette_tip_sim_disposal
+    name: fluid_state_tip_disposal
+    model_name: fluid_state_tip_disposal
     length: 54.0
     width: 54.0
     height: 38.0
