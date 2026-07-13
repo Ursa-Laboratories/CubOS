@@ -9,6 +9,7 @@ from .vial_holder import VialHolder
 from .well_plate import WellPlate, generate_wells_from_offsets
 from .well_plate_holder import WellPlateHolder
 from .vial import Vial
+from .vial_grid import VialGrid
 from .wall import Wall
 
 __all__ = [
@@ -24,5 +25,6 @@ __all__ = [
     "WellPlate",
     "WellPlateHolder",
     "Vial",
+    "VialGrid",
     "generate_wells_from_offsets",
 ]

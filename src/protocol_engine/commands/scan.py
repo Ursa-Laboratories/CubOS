@@ -142,6 +142,12 @@ def scan(
     results: Dict[str, Any] = {}
     sorted_wells = sorted(plate_obj.wells, key=_row_major_key)
 
+    persistence_target = (
+        context.deck.resolve_labware_target(plate)
+        if context.data_store is not None and context.campaign_id is not None
+        else None
+    )
+
     for i, well_id in enumerate(sorted_wells):
         if i > 0 and delay_s > 0:
             context.logger.info("Pausing %.1fs between wells", delay_s)
@@ -169,7 +175,11 @@ def scan(
         result = callable_method(**kwargs)
         results[well_id] = result
 
-        if context.data_store is not None and context.campaign_id is not None:
+        if (
+            context.data_store is not None
+            and context.campaign_id is not None
+            and persistence_target is not None
+        ):
             try:
                 measurement = normalize_measurement(
                     instrument_name=instrument,
@@ -177,13 +187,15 @@ def scan(
                     raw_result=result,
                 )
                 contents = context.data_store.get_contents(
-                    context.campaign_id, plate, well_id,
+                    context.campaign_id,
+                    persistence_target.labware_key,
+                    well_id,
                 )
                 contents_json = json.dumps(contents) if contents else "[]"
                 context.data_store.log_experiment_measurement(
                     campaign_id=context.campaign_id,
-                    labware_key=plate,
-                    labware_name=plate_obj.name,
+                    labware_key=persistence_target.labware_key,
+                    labware_name=persistence_target.labware_name,
                     well_id=well_id,
                     contents_json=contents_json,
                     result=measurement,

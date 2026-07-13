@@ -18,6 +18,10 @@ class WellPlate(Labware):
 
     name: str = Field(..., description="Unique well plate name.")
     model_name: str = Field("", description="Well plate model identifier.")
+    label: Optional[str] = Field(
+        None,
+        description="Optional display label; never used for addressing or identity.",
+    )
     # Geometry — optional metadata, not used for well position computation.
     length: Optional[float] = Field(None, description="Overall plate length in millimeters.")
     width: Optional[float] = Field(None, description="Overall plate width in millimeters.")
@@ -58,6 +62,12 @@ class WellPlate(Labware):
     @field_validator("name")
     def _validate_non_empty_text(cls, value: str) -> str:
         return Labware.validate_name(value)
+
+    @field_validator("label")
+    def _validate_optional_label(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
+            raise ValueError("WellPlate label must be a non-empty string when provided.")
+        return value
 
     @field_validator("capacity_ul", "working_volume_ul")
     def _validate_positive_volume(cls, value: Optional[float], info):  # type: ignore[override]

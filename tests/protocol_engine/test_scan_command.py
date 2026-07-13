@@ -451,6 +451,59 @@ class TestScanCommand:
         assert sensor.call_count == 96
         assert board.move_to_labware.call_count == 1
 
+    def test_sharc_nested_plate_persists_under_canonical_labware_key(self):
+        from protocol_engine.commands.scan import scan
+
+        plate = _make_2x2_plate()
+        holder = WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"plate": plate},
+        )
+        deck = Deck(
+            {"plate_holder": holder},
+            volume_labware={"plate_holder__plate": plate},
+            target_aliases={"plate_holder.plate": "plate_holder__plate"},
+        )
+        filmetrics = _FakeFilmetrics(
+            name="filmetrics", offset_x=0.0, offset_y=0.0, depth=0.0,
+        )
+        board = MagicMock()
+        board.instruments = {"filmetrics": filmetrics}
+        store = DataStore(db_path=":memory:")
+        campaign_id = store.create_campaign(description="SHARC nested scan")
+        store.register_labware(
+            campaign_id, "plate_holder__plate", plate,
+        )
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=deck,
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+
+        scan(
+            ctx,
+            plate="plate_holder.plate",
+            instrument="filmetrics",
+            method="measure",
+            measurement_height=MEASUREMENT,
+            interwell_scan_height=SAFE_APPROACH,
+        )
+
+        rows = store._conn.execute(
+            """
+            SELECT labware_key, well_id
+            FROM experiments
+            WHERE campaign_id = ?
+            ORDER BY id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        assert [row[0] for row in rows] == ["plate_holder__plate"] * 4
+        assert [row[1] for row in rows] == ["A1", "A2", "B1", "B2"]
+        store.close()
+
     def test_validates_plate_is_wellplate(self):
         from protocol_engine.commands.scan import scan
 
@@ -499,6 +552,10 @@ class TestScanCommand:
         scan(ctx, **_scan_args())
 
         assert ctx.data_store.log_experiment_measurement.call_count == 4
+        assert [
+            call.args[1]
+            for call in ctx.data_store.get_contents.call_args_list
+        ] == ["plate_1"] * 4
         kwargs = ctx.data_store.log_experiment_measurement.call_args_list[0].kwargs
         measurement = kwargs["result"]
         assert isinstance(measurement, InstrumentMeasurement)

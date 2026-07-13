@@ -20,9 +20,55 @@ def register_deck_labware(
     campaign_id: int,
     deck: Deck,
 ) -> None:
-    """Register top-level and nested deck labware for a campaign."""
+    """Register deck labware using its declared persistence identity model."""
+    if deck.has_explicit_volume_registry:
+        for labware_key, labware in deck.volume_labware.items():
+            _register_labware_item(
+                data_store,
+                campaign_id,
+                labware_key,
+                labware,
+            )
+        return
+
+    # Programmatic Deck callers predate the canonical registry. Preserve their
+    # top-level + contained-labware registration paths unless they explicitly
+    # opt into canonical identities.
     for labware_key, labware in deck.labware.items():
         _register_labware_path(data_store, campaign_id, labware_key, labware)
+
+
+def _register_labware_item(
+    data_store: DataStore,
+    campaign_id: int,
+    labware_key: str,
+    labware: Any,
+) -> None:
+    try:
+        data_store.register_labware(campaign_id, labware_key, labware)
+    except Exception as exc:
+        logger.warning(
+            "Skipping labware registration for %r: %s",
+            labware_key,
+            exc,
+            exc_info=True,
+        )
+
+
+def _register_labware_path(
+    data_store: DataStore,
+    campaign_id: int,
+    labware_key: str,
+    labware: Any,
+) -> None:
+    _register_labware_item(data_store, campaign_id, labware_key, labware)
+    for child_name, child in getattr(labware, "contained_labware", {}).items():
+        _register_labware_path(
+            data_store,
+            campaign_id,
+            f"{labware_key}.{child_name}",
+            child,
+        )
 
 
 def create_campaign_for_protocol_run(
@@ -52,28 +98,3 @@ def create_campaign_for_protocol_run(
     )
     register_deck_labware(data_store, campaign_id, deck)
     return campaign_id
-
-
-def _register_labware_path(
-    data_store: DataStore,
-    campaign_id: int,
-    labware_key: str,
-    labware: Any,
-) -> None:
-    try:
-        data_store.register_labware(campaign_id, labware_key, labware)
-    except Exception as exc:
-        logger.warning(
-            "Skipping labware registration for %r: %s",
-            labware_key,
-            exc,
-            exc_info=True,
-        )
-
-    for child_name, child in getattr(labware, "contained_labware", {}).items():
-        _register_labware_path(
-            data_store,
-            campaign_id,
-            f"{labware_key}.{child_name}",
-            child,
-        )

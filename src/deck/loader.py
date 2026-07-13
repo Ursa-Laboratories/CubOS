@@ -22,6 +22,7 @@ from .labware.tip_disposal import TipDisposal
 from .labware.tip_rack import TipRack
 from .labware.wall import Wall
 from .labware.vial import Vial
+from .labware.vial_grid import VialGrid
 from .labware.vial_holder import VialHolder
 from .labware.well_plate import WellPlate
 from .labware.well_plate_holder import WellPlateHolder
@@ -32,6 +33,7 @@ from .yaml_schema import (
     NestedWellPlateYamlEntry,
     TipDisposalYamlEntry,
     TipRackYamlEntry,
+    VialGridYamlEntry,
     VialHolderYamlEntry,
     WallYamlEntry,
     VialYamlEntry,
@@ -169,19 +171,24 @@ def _resolve_load_names(raw: Dict[str, Any]) -> Dict[str, Any]:
                 f"`src/deck/labware/definitions/`."
             ) from exc
 
-        if base.get("type") == "tip_rack":
+        definition_type = base.get("type")
+        required_instance_fields: tuple[str, ...] = ()
+        if definition_type == "tip_rack":
+            required_instance_fields = ("calibration", "pickup_z")
+        elif definition_type == "vial_grid":
+            required_instance_fields = ("calibration",)
+
+        if required_instance_fields:
             missing = [
-                field
-                for field in ("calibration", "pickup_z")
-                if field not in entry
+                field for field in required_instance_fields if field not in entry
             ]
             if missing:
                 raise DeckLoaderError(
-                    f"❌ Tip rack deck entry '{deck_key}' uses "
+                    f"❌ Calibrated labware deck entry '{deck_key}' uses "
                     f"`load_name: '{load_name}'` but is missing "
                     f"{', '.join(missing)}.\n"
                     "How to fix: the definition provides geometry only; measure "
-                    "and set calibration/pickup_z in your deck YAML."
+                    "and set the missing calibration fields in your deck YAML."
                 )
 
         # Shallow merge: user fields override config fields. Drop load_name.
@@ -422,6 +429,39 @@ def _build_vial(
     return Vial(**kwargs)
 
 
+def _build_vial_grid(
+    entry: VialGridYamlEntry,
+    factory_z_travel_mm: float | None,
+) -> VialGrid:
+    del factory_z_travel_mm
+    resolved_z = _resolve_user_z(
+        entry.a1_point.z,
+        context=f"vial_grid '{entry.name}'",
+    )
+    positions = _derive_wells_from_calibration(entry, resolved_z=resolved_z)
+    vials = {
+        position_id: Vial(
+            name=position_id,
+            model_name=entry.vial_model_name,
+            height=entry.vial_height,
+            diameter=entry.vial_diameter,
+            location=coordinate,
+            capacity_ul=entry.capacity_ul,
+            working_volume_ul=entry.working_volume_ul,
+        )
+        for position_id, coordinate in positions.items()
+    }
+    return VialGrid(
+        name=entry.name,
+        label=entry.label,
+        model_name=entry.model_name,
+        rows=entry.rows,
+        columns=entry.columns,
+        vials=vials,
+        aliases=dict(entry.aliases),
+    )
+
+
 def _build_holder(
     entry: _BaseHolderYamlEntry,
     factory_z_travel_mm: float | None,
@@ -512,11 +552,53 @@ def _build_deck_from_raw(raw: dict[str, Any], *, factory_z_travel_mm: float | No
     raw = _resolve_load_names(raw)
     schema = DeckYamlSchema.model_validate(raw)
     labware: Dict[str, Labware] = {}
+    volume_labware: Dict[str, Labware] = {}
+    target_aliases: Dict[str, str] = {}
+    deck_keys = set(schema.labware)
+
+    def register_volume(
+        canonical_id: str,
+        item: Labware,
+        *,
+        legacy_source: str | None = None,
+    ) -> None:
+        if canonical_id in volume_labware or (
+            legacy_source is not None and canonical_id in deck_keys
+        ):
+            source = f" generated from '{legacy_source}'" if legacy_source else ""
+            raise ValueError(
+                f"Canonical labware ID '{canonical_id}'{source} collides with "
+                "another deck labware ID. Rename the conflicting top-level "
+                "deck key; CubOS will not auto-suffix persistent identities."
+            )
+        volume_labware[canonical_id] = item
+
     for name, entry in schema.labware.items():
         if isinstance(entry, WellPlateYamlEntry):
-            labware[name] = _build_well_plate(entry, factory_z_travel_mm=factory_z_travel_mm)
+            item = _build_well_plate(
+                entry,
+                factory_z_travel_mm=factory_z_travel_mm,
+            )
+            labware[name] = item
+            register_volume(name, item)
+        elif isinstance(entry, VialGridYamlEntry):
+            item = _build_vial_grid(
+                entry,
+                factory_z_travel_mm=factory_z_travel_mm,
+            )
+            labware[name] = item
+            register_volume(name, item)
+            target_aliases.update({
+                f"{name}.{alias}": f"{name}.{position_id}"
+                for alias, position_id in entry.aliases.items()
+            })
         elif isinstance(entry, VialYamlEntry):
-            labware[name] = _build_vial(entry, factory_z_travel_mm=factory_z_travel_mm)
+            item = _build_vial(
+                entry,
+                factory_z_travel_mm=factory_z_travel_mm,
+            )
+            labware[name] = item
+            register_volume(name, item)
         elif isinstance(entry, TipRackYamlEntry):
             labware[name] = _build_tip_rack(entry, factory_z_travel_mm=factory_z_travel_mm)
         elif isinstance(entry, TipDisposalYamlEntry):
@@ -532,20 +614,63 @@ def _build_deck_from_raw(raw: dict[str, Any], *, factory_z_travel_mm: float | No
                 corner_2=Coordinate3D(x=entry.corner_2.x, y=entry.corner_2.y, z=entry.corner_2.z),
             )
         elif isinstance(entry, WellPlateHolderYamlEntry):
-            labware[name] = _build_holder(
+            holder = _build_holder(
                 entry,
                 factory_z_travel_mm=factory_z_travel_mm,
                 model_class=WellPlateHolder,
             )
+            labware[name] = holder
+            nested_plate = holder.contained_labware.get("plate")
+            if nested_plate is not None:
+                canonical_id = f"{name}__plate"
+                register_volume(
+                    canonical_id,
+                    nested_plate,
+                    legacy_source=f"{name}.plate",
+                )
+                target_aliases[f"{name}.plate"] = canonical_id
         elif isinstance(entry, VialHolderYamlEntry):
-            labware[name] = _build_holder(
+            holder = _build_holder(
                 entry,
                 factory_z_travel_mm=factory_z_travel_mm,
                 model_class=VialHolder,
             )
+            labware[name] = holder
+            nested_vials = {
+                vial_id: vial
+                for vial_id, vial in holder.contained_labware.items()
+                if isinstance(vial, Vial)
+            }
+            if nested_vials:
+                canonical_id = f"{name}__vials"
+                grid = VialGrid(
+                    name=canonical_id,
+                    label=holder.name,
+                    model_name=holder.model_name,
+                    vials=nested_vials,
+                )
+                register_volume(
+                    canonical_id,
+                    grid,
+                    legacy_source=name,
+                )
+                reserved_holder_locations = {
+                    "location",
+                    "anchor",
+                    holder.name,
+                }
+                target_aliases.update({
+                    f"{name}.{vial_id}": f"{canonical_id}.{vial_id}"
+                    for vial_id in nested_vials
+                    if vial_id not in reserved_holder_locations
+                })
         else:
             raise TypeError(f"Unsupported deck labware entry type: {type(entry).__name__}")
-    return Deck(labware)
+    return Deck(
+        labware,
+        volume_labware=volume_labware,
+        target_aliases=target_aliases,
+    )
 
 
 def load_deck_from_yaml(

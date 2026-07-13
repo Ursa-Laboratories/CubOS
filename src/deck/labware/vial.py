@@ -14,16 +14,19 @@ class Vial(Labware):
 
     name: str = Field(..., description="Unique vial name.")
     model_name: str = Field("", description="Vial model identifier.")
-    height: float = Field(
-        ...,
+    height: float | None = Field(
+        None,
         description=(
-            "Vial outer height in millimeters (rim → underside). A physical "
-            "dimension used by ``BoundingBoxGeometry`` for collision and "
-            "visualization, not a Z coordinate. The deck-frame Z of the vial "
-            "rim lives on ``location.z``."
+            "Optional vial outer height in millimeters (rim → underside). A "
+            "physical dimension used by ``BoundingBoxGeometry`` for collision "
+            "and visualization, not a Z coordinate. The deck-frame Z of the "
+            "vial rim lives on ``location.z``."
         ),
     )
-    diameter: float = Field(..., description="Vial outer diameter in millimeters.")
+    diameter: float | None = Field(
+        None,
+        description="Optional vial outer diameter in millimeters.",
+    )
     location: Coordinate3D = Field(
         ...,
         description=(
@@ -56,9 +59,13 @@ class Vial(Labware):
         )
         return self
 
-    @field_validator("diameter")
-    def _validate_positive_dimension(cls, value: float, info):  # type: ignore[override]
-        if value <= 0:
+    @field_validator("height", "diameter")
+    def _validate_positive_dimension(
+        cls,
+        value: float | None,
+        info,
+    ):  # type: ignore[override]
+        if value is not None and value <= 0:
             raise ValueError(f"{info.field_name} must be positive.")
         return value
 

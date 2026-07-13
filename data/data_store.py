@@ -676,12 +676,14 @@ class DataStore:
 
         For a WellPlate, one row is created per well.
         For a Vial, a single row is created (well_id = NULL).
+        For a VialGrid, one row is created per canonical vial position.
 
         Raises:
-            TypeError: If *labware* is not a Labware instance (WellPlate or Vial).
+            TypeError: If *labware* is not a supported volume-bearing Labware.
             ValueError: If *labware_key* is already registered for the given campaign.
         """
         from deck.labware.labware import Labware
+        from deck.labware.vial_grid import VialGrid
         from deck.labware.well_plate import WellPlate
         from deck.labware.vial import Vial
 
@@ -717,10 +719,24 @@ class DataStore:
                     (campaign_id, labware_key,
                      labware.capacity_ul, labware.working_volume_ul),
                 )
+            elif isinstance(labware, VialGrid):
+                for position_id, vial in labware.vials.items():
+                    self._conn.execute(
+                        "INSERT INTO labware (campaign_id, labware_key, labware_type, "
+                        "well_id, total_volume_ul, working_volume_ul) "
+                        "VALUES (?, ?, 'vial_grid', ?, ?, ?)",
+                        (
+                            campaign_id,
+                            labware_key,
+                            position_id,
+                            vial.capacity_ul,
+                            vial.working_volume_ul,
+                        ),
+                    )
             else:
                 raise TypeError(
                     f"Unsupported labware type: {type(labware).__name__}. "
-                    f"Expected WellPlate or Vial."
+                    f"Expected WellPlate, Vial, or VialGrid."
                 )
 
     def record_dispense(

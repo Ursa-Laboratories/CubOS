@@ -12,6 +12,8 @@ from deck.deck import Deck
 from deck.labware.labware import Coordinate3D
 from deck.labware.tip_rack import DEFAULT_TIP_LENGTH_MM, TipRack
 from deck.labware.vial import Vial
+from deck.labware.vial_grid import VialGrid
+from deck.labware.vial_holder import VialHolder
 from deck.labware.well_plate import WellPlate
 from deck.labware.well_plate_holder import WellPlateHolder
 from protocol_engine.errors import ProtocolExecutionError
@@ -539,7 +541,7 @@ class TestTransferCommand:
         from protocol_engine.commands.pipette import transfer
 
         source = Vial(
-            name="vial_1",
+            name="A1",
             model_name="standard",
             height=10.0,
             diameter=5.0,
@@ -583,6 +585,125 @@ class TestTransferCommand:
         ).fetchall())
         assert rows["vial_1"] == pytest.approx(75.0)
         assert rows["plate_1.A1"] == pytest.approx(25.0)
+        store.close()
+
+    def test_transfer_persists_vial_grid_aliases_to_canonical_rows(self):
+        from protocol_engine.commands.pipette import transfer
+
+        source = Vial(
+            name="source",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            capacity_ul=1000.0,
+            working_volume_ul=800.0,
+        )
+        destination = Vial(
+            name="destination",
+            location=Coordinate3D(x=10.0, y=0.0, z=0.0),
+            capacity_ul=1000.0,
+            working_volume_ul=800.0,
+        )
+        reagents = VialGrid(
+            name="reagents",
+            rows=1,
+            columns=2,
+            vials={"A1": source, "A2": destination},
+            aliases={"buffer": "A1", "product": "A2"},
+        )
+        board = MagicMock()
+        board.instruments = {"pipette": MagicMock()}
+        store = DataStore(db_path=":memory:")
+        campaign_id = store.create_campaign(description="grid alias transfer")
+        store.register_labware(campaign_id, "reagents", reagents)
+        store._conn.execute(
+            "UPDATE labware SET current_volume_ul = 100.0 "
+            "WHERE labware_key = 'reagents' AND well_id = 'A1'"
+        )
+        store._conn.commit()
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=Deck({"reagents": reagents}),
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+
+        transfer(
+            ctx,
+            source="reagents.buffer",
+            destination="reagents.product",
+            volume_ul=25.0,
+        )
+
+        rows = dict(store._conn.execute(
+            "SELECT well_id, current_volume_ul FROM labware "
+            "WHERE labware_key = 'reagents'"
+        ).fetchall())
+        assert rows["A1"] == pytest.approx(75.0)
+        assert rows["A2"] == pytest.approx(25.0)
+        store.close()
+
+    def test_transfer_persists_legacy_nested_vials_to_canonical_grid_rows(self):
+        from protocol_engine.commands.pipette import transfer
+
+        source = Vial(
+            name="vial_1",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            capacity_ul=1000.0,
+            working_volume_ul=800.0,
+        )
+        destination = Vial(
+            name="A2",
+            location=Coordinate3D(x=10.0, y=0.0, z=0.0),
+            capacity_ul=1000.0,
+            working_volume_ul=800.0,
+        )
+        holder = VialHolder(
+            name="vial_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"A1": source, "A2": destination},
+        )
+        canonical_grid = VialGrid(
+            name="vial_holder__vials",
+            model_name=holder.model_name,
+            vials={"A1": source, "A2": destination},
+        )
+        deck = Deck(
+            {"vial_holder": holder},
+            volume_labware={"vial_holder__vials": canonical_grid},
+            target_aliases={
+                "vial_holder.A1": "vial_holder__vials.A1",
+                "vial_holder.A2": "vial_holder__vials.A2",
+            },
+        )
+        board = MagicMock()
+        board.instruments = {"pipette": MagicMock()}
+        store = DataStore(db_path=":memory:")
+        campaign_id = store.create_campaign(description="legacy vial transfer")
+        store.register_labware(campaign_id, "vial_holder__vials", canonical_grid)
+        store._conn.execute(
+            "UPDATE labware SET current_volume_ul = 100.0 "
+            "WHERE labware_key = 'vial_holder__vials' AND well_id = 'A1'"
+        )
+        store._conn.commit()
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=deck,
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+
+        transfer(
+            ctx,
+            source="vial_holder.A1",
+            destination="vial_holder.A2",
+            volume_ul=25.0,
+        )
+
+        rows = dict(store._conn.execute(
+            "SELECT well_id, current_volume_ul FROM labware "
+            "WHERE labware_key = 'vial_holder__vials'"
+        ).fetchall())
+        assert rows["A1"] == pytest.approx(75.0)
+        assert rows["A2"] == pytest.approx(25.0)
         store.close()
 
 

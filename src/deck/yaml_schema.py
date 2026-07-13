@@ -30,6 +30,7 @@ class WellPlateYamlEntry(BaseModel):
 
     type: Literal["well_plate"] = "well_plate"
     name: str
+    label: Optional[str] = None
     model_name: str = ""
     rows: int = Field(..., gt=0)
     columns: int = Field(..., gt=0)
@@ -84,6 +85,72 @@ class WellPlateYamlEntry(BaseModel):
                 f"({self.height}) — inside floor cannot sit below the plate "
                 f"underside."
             )
+        return self
+
+
+class VialGridYamlEntry(BaseModel):
+    """Strict schema for a calibrated, uniformly defined vial grid."""
+
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+
+    type: Literal["vial_grid"] = "vial_grid"
+    name: str
+    label: Optional[str] = None
+    model_name: str = ""
+    rows: int = Field(..., gt=0, le=26)
+    columns: int = Field(..., gt=0)
+    calibration: _YamlCalibrationPoints
+    x_offset: float = Field(..., gt=0)
+    y_offset: float = Field(..., gt=0)
+    row_direction: Optional[Literal["positive", "negative"]] = None
+    vial_model_name: str = ""
+    vial_height: Optional[float] = Field(default=None, gt=0)
+    vial_diameter: Optional[float] = Field(default=None, gt=0)
+    capacity_ul: float = Field(..., gt=0)
+    working_volume_ul: float = Field(..., gt=0)
+    aliases: Dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def a1_point(self) -> _YamlPoint3D:
+        a1 = self.calibration.a1
+        if a1 is None:
+            raise ValueError("Vial grid calibration must define `a1`.")
+        return a1
+
+    @model_validator(mode="after")
+    def _validate_vial_grid(self) -> "VialGridYamlEntry":
+        a1, a2 = self.a1_point, self.calibration.a2
+        if a1.x == a2.x and a1.y == a2.y:
+            raise ValueError("Calibration points A1 and A2 must not be identical.")
+        same_x = abs(a1.x - a2.x) < 1e-9
+        same_y = abs(a1.y - a2.y) < 1e-9
+        if not same_x and not same_y:
+            raise ValueError(
+                "Calibration A2 must be axis-aligned with A1 (same x or same y); "
+                "diagonal orientation is invalid."
+            )
+        if self.working_volume_ul > self.capacity_ul:
+            raise ValueError("working_volume_ul must be <= capacity_ul.")
+
+        positions = {
+            f"{chr(65 + row_index)}{column_index}"
+            for row_index in range(self.rows)
+            for column_index in range(1, self.columns + 1)
+        }
+        for alias, position_id in self.aliases.items():
+            if not alias.strip() or "." in alias:
+                raise ValueError(
+                    "Vial grid aliases must be non-empty and cannot contain '.'."
+                )
+            if alias in positions:
+                raise ValueError(
+                    f"Vial grid alias {alias!r} shadows a canonical position ID."
+                )
+            if position_id not in positions:
+                raise ValueError(
+                    f"Vial grid alias {alias!r} refers to unknown position "
+                    f"{position_id!r}."
+                )
         return self
 
 
@@ -328,6 +395,7 @@ class VialHolderYamlEntry(_BaseHolderYamlEntry):
 LabwareYamlEntry = Annotated[
     Union[
         WellPlateYamlEntry,
+        VialGridYamlEntry,
         VialYamlEntry,
         TipRackYamlEntry,
         TipDisposalYamlEntry,
@@ -340,6 +408,7 @@ LabwareYamlEntry = Annotated[
 
 LABWARE_YAML_ENTRY_MODELS: Mapping[str, Type[BaseModel]] = MappingProxyType({
     "well_plate": WellPlateYamlEntry,
+    "vial_grid": VialGridYamlEntry,
     "vial": VialYamlEntry,
     "tip_rack": TipRackYamlEntry,
     "tip_disposal": TipDisposalYamlEntry,

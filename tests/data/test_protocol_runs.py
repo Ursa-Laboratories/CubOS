@@ -5,7 +5,8 @@ from __future__ import annotations
 import pytest
 
 from data.data_store import DataStore
-from data.protocol_runs import create_campaign_for_protocol_run
+from data.protocol_runs import create_campaign_for_protocol_run, register_deck_labware
+from deck import Coordinate3D, Deck, Vial, VialHolder
 
 
 GANTRY_YAML = """\
@@ -46,6 +47,26 @@ labware:
 """
 
 
+def _vial(name: str, x: float) -> Vial:
+    return Vial(
+        name=name,
+        model_name="programmatic_vial",
+        height=40.0,
+        diameter=10.0,
+        location=Coordinate3D(x=x, y=20.0, z=30.0),
+        capacity_ul=1000.0,
+        working_volume_ul=900.0,
+    )
+
+
+def _nested_holder() -> VialHolder:
+    return VialHolder(
+        name="programmatic_holder",
+        location=Coordinate3D(x=5.0, y=6.0, z=7.0),
+        contained_labware={"nested": _vial("nested", 10.0)},
+    )
+
+
 def test_create_campaign_for_protocol_run_registers_nested_labware(tmp_path):
     gantry_path = tmp_path / "gantry.yaml"
     deck_path = tmp_path / "deck.yaml"
@@ -80,7 +101,51 @@ def test_create_campaign_for_protocol_run_registers_nested_labware(tmp_path):
     )
     assert campaign[1:] == ("gantry.yaml", "deck.yaml", "protocol.yaml")
     assert [(row[0], row[1], row[2]) for row in rows] == [
-        ("vial_holder.vial_1", "vial", None),
+        ("vial_holder__vials", "vial_grid", "vial_1"),
+    ]
+
+
+def test_programmatic_deck_retains_recursive_nested_registration() -> None:
+    deck = Deck({"holder": _nested_holder()})
+    assert deck.has_explicit_volume_registry is False
+
+    store = DataStore(db_path=":memory:")
+    campaign_id = store.create_campaign("programmatic nested deck")
+    register_deck_labware(store, campaign_id, deck)
+
+    rows = store._conn.execute(
+        "SELECT labware_key, labware_type, well_id FROM labware "
+        "WHERE campaign_id = ? ORDER BY labware_key",
+        (campaign_id,),
+    ).fetchall()
+    store.close()
+
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        ("holder.nested", "vial", None),
+    ]
+
+
+def test_programmatic_mixed_deck_registers_direct_and_nested_labware() -> None:
+    deck = Deck({
+        "direct": _vial("direct", 40.0),
+        "holder": _nested_holder(),
+    })
+    assert deck.has_explicit_volume_registry is False
+
+    store = DataStore(db_path=":memory:")
+    campaign_id = store.create_campaign("programmatic mixed deck")
+    register_deck_labware(store, campaign_id, deck)
+
+    rows = store._conn.execute(
+        "SELECT labware_key, labware_type, well_id FROM labware "
+        "WHERE campaign_id = ? ORDER BY labware_key",
+        (campaign_id,),
+    ).fetchall()
+    store.close()
+
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        ("direct", "vial", None),
+        ("holder.nested", "vial", None),
     ]
 
 

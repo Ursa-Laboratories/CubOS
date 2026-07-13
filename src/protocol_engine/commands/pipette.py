@@ -86,27 +86,27 @@ def _record_dispense_to_store(
 
 def _record_transfer_to_store(
     context: ProtocolContext,
-    source_key: str,
-    source_well: Optional[str],
-    dest_key: str,
-    dest_well: Optional[str],
+    source: str,
+    destination: str,
     volume_ul: float,
 ) -> None:
     """Persist a transfer to the DataStore if one is configured."""
     if context.data_store is not None and context.campaign_id is not None:
         try:
+            source_target = context.deck.resolve_labware_target(source)
+            destination_target = context.deck.resolve_labware_target(destination)
             context.data_store.record_transfer(
                 context.campaign_id,
-                source_key,
-                source_well,
-                dest_key,
-                dest_well,
+                source_target.labware_key,
+                source_target.location_id,
+                destination_target.labware_key,
+                destination_target.location_id,
                 volume_ul,
             )
         except Exception as exc:
             logger.warning(
-                "Failed to record transfer from %s well %s to %s well %s: %s",
-                source_key, source_well, dest_key, dest_well, exc,
+                "Failed to record transfer from %s to %s: %s",
+                source, destination, exc,
                 exc_info=True,
             )
 
@@ -226,11 +226,7 @@ def transfer(
     )
     pipette.dispense(volume_ul, speed)
 
-    source_key, source_well = _parse_position(source)
-    dest_key, dest_well = _parse_position(destination)
-    _record_transfer_to_store(
-        context, source_key, source_well, dest_key, dest_well, volume_ul,
-    )
+    _record_transfer_to_store(context, source, destination, volume_ul)
 
 
 @protocol_command("drop_tip")

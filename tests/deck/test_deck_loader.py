@@ -224,6 +224,7 @@ def test_labware_yaml_entry_models_exposes_public_type_mapping():
         "tip_disposal",
         "tip_rack",
         "vial",
+        "vial_grid",
         "vial_holder",
         "wall",
         "well_plate",
