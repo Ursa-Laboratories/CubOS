@@ -76,9 +76,14 @@ The runtime package is split by responsibility:
 - `src/instruments/` contains instrument drivers, mocks, and registry metadata.
 - `data/` provides SQLite persistence and analysis helpers.
 - `setup/` contains operator-facing validation, calibration, and run scripts.
+- `server/` contains the versioned FastAPI server and backend tests imported
+  with Zoo's history.
+- `web/` contains the Zoo React operator interface.
+- `clients/python/` contains supported automation clients for `/api/v1`.
+- `deploy/docker/` contains the production application image contract.
 
-UI/API wrappers such as Zoo should use `gantry.session.GantrySession` when they
-need a persistent connected gantry. The session owns serial locking, cached
+The CubOS server uses `gantry.session.GantrySession` as the sole persistent
+hardware owner. The session owns serial locking, cached
 position/status, manual movement guards, calibration soft-limit state, protocol
 execution against the connected gantry, campaign creation, and run persistence.
 
@@ -113,6 +118,19 @@ Install developer dependencies and run the test suite:
 ```bash
 pip install -e ".[dev,docs]"
 python -m pytest -q
+```
+
+Install and validate the server and web workspace:
+
+```bash
+pip install -e ".[dev,server]"
+pip install --no-deps -e "server[dev]"
+python -m pytest server/tests -q
+cd web
+npm ci
+npm run lint
+npm run test -- --run
+npm run build
 ```
 
 For hardware-adjacent changes, also run focused setup validation for the

@@ -43,3 +43,49 @@ jobs:
 
       - name: Build docs
         run: mkdocs build --strict
+
+  server:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CubOS and server dependencies
+        run: |
+          pip install -e ".[dev,server]"
+          pip install --no-deps -e "server[dev]"
+
+      - name: Run server and API contract tests
+        run: python -m pytest server/tests -q
+
+  web:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install locked frontend dependencies
+        working-directory: web
+        run: npm ci
+
+      - name: Lint frontend
+        working-directory: web
+        run: npm run lint
+
+      - name: Test frontend
+        working-directory: web
+        run: npm run test -- --run
+
+      - name: Build frontend
+        working-directory: web
+        run: npm run build

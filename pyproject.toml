@@ -12,6 +12,13 @@ dependencies = [
 dev = [
     "pytest",
 ]
+server = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.34",
+    "ruamel.yaml>=0.19.1",
+    "pydantic-settings>=2.0",
+    "httpx>=0.27",
+]
 # Per-vendor SDKs — opt in only when you actually use that driver.
 # The drivers import these lazily and raise a clear error if missing, so the core
 # install (and instruments that don't need them) stays light.
