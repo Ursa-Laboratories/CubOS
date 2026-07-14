@@ -4,16 +4,33 @@ This subsystem drives real hardware, so driver errors and serial commands
 must never be silently discarded. Both helpers:
 
 - attach a file handler under ``path_to_logs`` (defaulting to
-  ``~/.cubos/logs/gantry/``) so ``mill_control.log`` and ``command.log``
-  always exist for post-incident forensics, and
+  ``$CUBOS_GANTRY_LOG_DIR`` if set, otherwise ``~/.cubos/logs/gantry/``) so
+  ``mill_control.log`` and ``command.log`` always exist for post-incident
+  forensics, and
 - attach a console handler at ``ERROR`` (mill logger only) so GRBL
   alarms/errors surface even without anyone tailing the file.
+
+The log directory is resolved when the driver connects. If the resolved
+directory cannot be created (e.g. a read-only ``$HOME`` in a hardened
+container), we fall back to a per-user temp directory and warn, rather
+than crashing the gantry connect — forensic logging degrades but the
+mill still comes online. Set ``$CUBOS_GANTRY_LOG_DIR`` to a writable path
+(the appliance image points it at the persistent ``/var/lib/cub`` volume)
+to keep logs where you want them.
 """
 
 import logging
+import os
+import tempfile
 from pathlib import Path
 
+#: Environment variable overriding where gantry logs are written.
+GANTRY_LOG_DIR_ENV = "CUBOS_GANTRY_LOG_DIR"
+
+#: Fallback default when ``$CUBOS_GANTRY_LOG_DIR`` is unset.
 DEFAULT_LOG_DIR = Path.home() / ".cubos" / "logs" / "gantry"
+
+logger = logging.getLogger(__name__)
 
 _MILL_FORMAT = (
     "%(asctime)s&%(name)s&%(levelname)s&%(module)s&%(funcName)s&%(lineno)d&%(message)s"
@@ -21,10 +38,33 @@ _MILL_FORMAT = (
 _COMMAND_FORMAT = "%(message)s"
 
 
+def default_log_dir() -> Path:
+    """Return the configured gantry log directory (env override wins)."""
+    override = os.environ.get(GANTRY_LOG_DIR_ENV)
+    if override:
+        return Path(override).expanduser()
+    return DEFAULT_LOG_DIR
+
+
 def _resolve_log_dir(path_to_logs: Path | None) -> Path:
-    path = Path(path_to_logs) if path_to_logs is not None else DEFAULT_LOG_DIR
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    candidate = Path(path_to_logs) if path_to_logs is not None else default_log_dir()
+    try:
+        candidate.mkdir(parents=True, exist_ok=True)
+        return candidate
+    except OSError as exc:
+        fallback = Path(tempfile.gettempdir()) / "cubos" / "logs" / "gantry"
+        # If even the temp fallback can't be created, let the OSError propagate:
+        # something is badly wrong and silently discarding logs would be worse.
+        fallback.mkdir(parents=True, exist_ok=True)
+        logger.warning(
+            "Gantry log dir %s is not writable (%s); falling back to %s. "
+            "Set %s to a writable path to control log placement.",
+            candidate,
+            exc,
+            fallback,
+            GANTRY_LOG_DIR_ENV,
+        )
+        return fallback
 
 
 def _has_file_handler_for(logger: logging.Logger, log_file: Path) -> bool:

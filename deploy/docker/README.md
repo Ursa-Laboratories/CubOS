@@ -25,6 +25,13 @@ final Debian image. Customer devices do not run npm, pip, or Git.
 
 - Runs as UID/GID `10001`, never privileged.
 - Persists all mutable state under `/var/lib/cub`.
+- `$HOME` is set to `/var/lib/cub` (a writable, persisted path). Any code that
+  writes under `Path.home()` — notably the gantry driver's forensic logs —
+  must land on the volume, not in the unwritable `/nonexistent` home Debian
+  would otherwise assign the runtime user.
+- Gantry forensic logs are written to `$CUBOS_GANTRY_LOG_DIR`
+  (`/var/lib/cub/logs/gantry`). If that path is ever unwritable the driver
+  falls back to a temp dir and warns rather than failing `/api/v1/gantry/connect`.
 - Reads the API bearer token from `CUBOS_API_TOKEN_FILE`.
 - Accepts only explicitly mapped serial devices.
 - Starts the API/UI but never connects, homes, calibrates, or moves hardware.

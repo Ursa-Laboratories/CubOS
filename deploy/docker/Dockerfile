@@ -33,6 +33,7 @@ LABEL org.opencontainers.image.title="CubOS Appliance" \
 ENV PATH="/opt/venv/bin:${PATH}" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
+    HOME=/var/lib/cub \
     CUBOS_BUILD_VERSION="${BUILD_VERSION}" \
     CUBOS_WEB_DIST=/opt/cubos/web/dist \
     CUBOS_HOST=0.0.0.0 \
@@ -40,14 +41,15 @@ ENV PATH="/opt/venv/bin:${PATH}" \
     CUBOS_OPEN_BROWSER=false \
     CUBOS_CONFIG_DIR=/var/lib/cub/configs \
     CUBOS_RUN_DIR=/var/lib/cub/runs \
-    CUBOS_DATA_DB_PATH=/var/lib/cub/data/cubos.db
+    CUBOS_DATA_DB_PATH=/var/lib/cub/data/cubos.db \
+    CUBOS_GANTRY_LOG_DIR=/var/lib/cub/logs/gantry
 
 RUN apt-get update \
     && apt-get install --yes --no-install-recommends ca-certificates curl libusb-1.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 cub \
-    && useradd --uid 10001 --gid cub --no-create-home --home-dir /nonexistent cub \
-    && mkdir -p /opt/cubos/web /opt/cubos/config-seed /var/lib/cub/configs /var/lib/cub/runs /var/lib/cub/data \
+    && useradd --uid 10001 --gid cub --no-create-home --home-dir /var/lib/cub cub \
+    && mkdir -p /opt/cubos/web /opt/cubos/config-seed /var/lib/cub/configs /var/lib/cub/runs /var/lib/cub/data /var/lib/cub/logs/gantry \
     && chown -R cub:cub /opt/cubos /var/lib/cub
 
 COPY --from=python-build /opt/venv /opt/venv
