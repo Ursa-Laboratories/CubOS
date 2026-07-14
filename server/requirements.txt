@@ -14,8 +14,7 @@ hidapi==0.15.0
 idna==3.11
 iniconfig==2.3.0
 packaging==26.0
-# TODO: repin to a tagged release once CubOS PR #224 merges to main.
-cubos @ git+https://github.com/Ursa-Laboratories/CubOS.git@main
+# CubOS itself is installed from the monorepo root; never fetch a mutable branch.
 pluggy==1.6.0
 pydantic==2.12.5
 pydantic-settings==2.13.0

@@ -8,7 +8,7 @@ Zoo is a web UI (FastAPI + React) for configuring and controlling CubOS. It is *
 - **Never recreate CubOS functionality.** If CubOS already provides it (YAML schema validation, well position calculation, movement, protocol execution, deck resolution, instrument control), use it. Don't duplicate or rewrite it in Zoo.
 - **Zoo routers are thin.** They write YAML from user input, read it back via CubOS loaders/schemas, and return the results. Business logic and validation belong in CubOS, not in Zoo.
 - **Zoo models are API response shapes only.** They describe what the REST API returns (e.g. `GantryPosition`, `DeckResponse`). They must not duplicate CubOS's Pydantic schemas or validation logic.
-- **CubOS is installed from Git and imported as a package.** Zoo must rely on the installed `cubos` package modules (for example `deck`, `gantry`, `protocol_engine`) and must not prepend local source directories onto `sys.path`.
+- **CubOS is installed from the monorepo root and imported as a package.** The server must rely on the installed `cubos` package modules (for example `deck`, `gantry`, `protocol_engine`) and must not fetch a mutable sibling branch or prepend source directories onto `sys.path`.
 - **Zoo stores configs locally.** YAML configs live in the repo-local `configs/` directory by default and can be redirected with the settings UI; the active directory is exposed through the settings API as `config_dir`.
 
 ## How Config Tabs Work

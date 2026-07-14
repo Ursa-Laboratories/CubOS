@@ -130,7 +130,8 @@ npm run build
 
 ## Dependencies On Other Repos Or Services
 
-- Depends on `CubOS` from Git in `pyproject.toml`
+- Installs CubOS from the monorepo root; the server package declares the matching
+  `cubos==0.1.0` release and does not fetch a sibling Git branch
 - Requires Node.js for frontend development and build
 - Deck editing and visualization use CubOS' current deck YAML field names (`length`, `width`, `height`, `x_offset`, `y_offset`, `diameter`).
 - Talks directly to local gantry hardware through CubOS `GantrySession` when operators use motion endpoints
