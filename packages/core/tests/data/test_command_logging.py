@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from cubos.data.data_store import DataStore
+from cubos.deck.deck import Deck
 from cubos.deck.labware.labware import Coordinate3D
 from cubos.deck.labware.vial import Vial
 from cubos.deck.labware.well_plate import WellPlate
@@ -105,6 +106,9 @@ def _mock_context(
     deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
     deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
     deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
+    deck.resolve_labware_target = MagicMock(
+        side_effect=Deck(labware_map).resolve_labware_target,
+    )
 
     return ProtocolContext(
         gantry=board,
@@ -182,9 +186,7 @@ class TestPipetteDbTracking:
         pipette = MagicMock()
         board.instruments = {"pipette": pipette}
 
-        deck = MagicMock()
-        deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
-        deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
+        deck = Deck(labware_map)
 
         ctx = ProtocolContext(
             gantry=board, deck=deck,

@@ -5,6 +5,7 @@ from __future__ import annotations
 import sys
 import csv
 from dataclasses import dataclass
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -33,7 +34,9 @@ def test_run_protocol_exports_result_csvs(tmp_path, monkeypatch, capsys):
         *,
         data_store,
         campaign_id,
+        **run_options,
     ):
+        del run_options
         del gantry_path, deck_path, protocol_path
         experiment_id = data_store.create_experiment(
             campaign_id,
@@ -104,7 +107,9 @@ def test_run_protocol_exports_partial_results_after_failure(tmp_path, monkeypatc
         *,
         data_store,
         campaign_id,
+        **run_options,
     ):
+        del run_options
         del gantry_path, deck_path, protocol_path
         experiment_id = data_store.create_experiment(
             campaign_id,
@@ -183,6 +188,94 @@ def test_run_protocol_validation_failure_exits_before_hardware(monkeypatch, caps
 
     assert exc_info.value.code == 1
     assert "Aborting" in capsys.readouterr().out
+
+
+def test_run_protocol_delegates_mock_fluid_options_and_reports_state(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    import cubos.tools.run_protocol as run_protocol
+
+    database = tmp_path / "tracked.db"
+    initial_fluids = tmp_path / "initial.yaml"
+    initial_fluids.write_text("fluids: {}\n", encoding="utf-8")
+    captured = {}
+
+    monkeypatch.setattr(
+        run_protocol,
+        "run_setup_validation",
+        lambda *args: _ValidationResult(passed=True, output="PASS"),
+    )
+    monkeypatch.setattr(
+        run_protocol,
+        "create_campaign_for_protocol_run",
+        lambda data_store, **kwargs: data_store.create_campaign("mock run"),
+    )
+    monkeypatch.setattr(run_protocol, "project_root", tmp_path)
+
+    def fake_run(*args, **kwargs):
+        del args
+        captured.update(kwargs)
+        store = kwargs["data_store"]
+        with store._conn:
+            cursor = store._conn.execute(
+                "INSERT INTO fluid_state_sessions "
+                "(deck_path, deck_fingerprint, deck_snapshot_json, layout_json) "
+                "VALUES (?, ?, ?, ?)",
+                ("deck.yaml", "fingerprint", "{}", "{}"),
+            )
+        store.attach_campaign_fluid_state(
+            kwargs["campaign_id"],
+            int(cursor.lastrowid),
+        )
+        return ["offline"]
+
+    monkeypatch.setattr(run_protocol, "run_on_hardware", fake_run)
+
+    run_protocol.main([
+        "gantry.yaml",
+        "deck.yaml",
+        "protocol.yaml",
+        "--mock",
+        "--database",
+        str(database),
+        "--initial-fluids",
+        str(initial_fluids),
+    ])
+
+    assert captured["mock_mode"] is True
+    assert captured["fluid_state_id"] is None
+    assert captured["initial_fluids"] == initial_fluids
+    assert database.exists()
+    out = capsys.readouterr().out
+    assert "explicit offline mock mode" in out
+    assert "Linked fluid state ID: 1" in out
+
+
+def test_run_protocol_rejects_both_fluid_options_before_validation(
+    monkeypatch,
+    capsys,
+):
+    import cubos.tools.run_protocol as run_protocol
+
+    validation = MagicMock()
+    monkeypatch.setattr(run_protocol, "run_setup_validation", validation)
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_protocol.main([
+            "g.yaml",
+            "d.yaml",
+            "p.yaml",
+            "--fluid-state-id",
+            "1",
+            "--initial-fluids",
+            "initial.yaml",
+        ])
+
+    assert exc_info.value.code == 1
+    assert "not allowed with argument" in capsys.readouterr().out
+    validation.assert_not_called()
 
 
 def test_run_protocol_export_failure_sets_exit_1(tmp_path, monkeypatch, capsys):

@@ -17,6 +17,11 @@ labware:
     class_name: VialHolder
     config: ursa_vial_holder/9VialHolder.yaml
 
+  ursa_9_vial_grid:
+    module: deck.labware.vial_grid
+    class_name: VialGrid
+    config: ursa_9_vial_grid/9VialGrid.yaml
+
   ursa_tip_rack:
     module: cubos.deck.labware.tip_rack
     class_name: TipRack

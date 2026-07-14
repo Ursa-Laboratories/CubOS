@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterator
+from typing import Dict, Iterator, Mapping
 
 from .labware.labware import Coordinate3D, Labware
 
@@ -35,12 +35,109 @@ class Deck:
       the owning labware path plus optional location/well id.
     """
 
-    def __init__(self, labware: Dict[str, Labware]) -> None:
+    def __init__(
+        self,
+        labware: Dict[str, Labware],
+        *,
+        volume_labware: Mapping[str, Labware] | None = None,
+        target_aliases: Mapping[str, str] | None = None,
+    ) -> None:
         self._labware = dict(labware)
+        self._has_explicit_volume_registry = volume_labware is not None
+        self._volume_labware = (
+            dict(volume_labware)
+            if volume_labware is not None
+            else {
+                key: item
+                for key, item in labware.items()
+                if hasattr(item, "capacity_ul") or hasattr(item, "vials")
+            }
+        )
+        self._target_aliases = dict(target_aliases or {})
 
     @property
     def labware(self) -> Dict[str, Labware]:
         return self._labware
+
+    @property
+    def volume_labware(self) -> Dict[str, Labware]:
+        """Return volume-bearing labware by canonical flat instance ID.
+
+        Existing holder objects remain in :attr:`labware` for compatibility,
+        while this mapping is the persistence-facing source of truth. Legacy
+        aliases are intentionally excluded.
+        """
+        return self._volume_labware
+
+    @property
+    def has_explicit_volume_registry(self) -> bool:
+        """Whether ``volume_labware`` was supplied by a canonical loader.
+
+        Plain programmatic ``Deck({...})`` callers retain legacy recursive
+        persistence registration even though direct volume labware is inferred
+        for target resolution.
+        """
+        return self._has_explicit_volume_registry
+
+    @property
+    def target_aliases(self) -> Dict[str, str]:
+        """Return legacy/display target aliases mapped to canonical targets."""
+        return self._target_aliases
+
+    def canonicalize_target(self, target: str) -> str:
+        """Return the stable flat identity for an addressable deck target.
+
+        Exact aliases cover legacy vial paths and user-defined position
+        labels. Prefix aliases cover a legacy nested plate path followed by a
+        well ID, for example ``holder.plate.A1``.
+        """
+        if not isinstance(target, str) or not target:
+            raise ValueError("Deck target must be a non-empty string.")
+
+        exact = self._target_aliases.get(target)
+        if exact is not None:
+            return exact
+
+        for alias in sorted(self._target_aliases, key=len, reverse=True):
+            prefix = f"{alias}."
+            if target.startswith(prefix):
+                canonical_prefix = self._target_aliases[alias]
+                return f"{canonical_prefix}.{target[len(prefix):]}"
+
+        if "." in target:
+            labware_key, location_id = target.split(".", 1)
+            labware = self._volume_labware.get(labware_key)
+            canonicalize = getattr(labware, "canonicalize_location_id", None)
+            if callable(canonicalize):
+                canonical_location_id = canonicalize(location_id)
+                return f"{labware_key}.{canonical_location_id}"
+
+        return target
+
+    def _resolve_canonical_target(
+        self,
+        target: str,
+    ) -> DeckLabwareTarget | None:
+        canonical = self.canonicalize_target(target)
+        labware = self._volume_labware.get(canonical)
+        if labware is not None:
+            return DeckLabwareTarget(
+                labware_key=canonical,
+                labware=labware,
+                location_id=None,
+            )
+
+        if "." not in canonical:
+            return None
+        labware_key, location_id = canonical.split(".", 1)
+        labware = self._volume_labware.get(labware_key)
+        if labware is None:
+            return None
+        return DeckLabwareTarget(
+            labware_key=labware_key,
+            labware=labware,
+            location_id=location_id,
+        )
 
     def resolve_coordinate(self, target: str) -> Coordinate3D:
         """
@@ -51,6 +148,12 @@ class Deck:
             'vial_1'      -> vial center (initial position)
             'plate_1'     -> plate initial position (A1)
         """
+        canonical = self._resolve_canonical_target(target)
+        if canonical is not None:
+            if canonical.location_id is None:
+                return canonical.labware.get_initial_position()
+            return canonical.labware.get_location(canonical.location_id)
+
         if "." in target:
             labware_key, location_id = target.split(".", 1)
             return self._get_labware(labware_key).get_location(location_id)
@@ -64,7 +167,14 @@ class Deck:
             'plate_holder.plate' -> contained plate object
         """
         parts = target.split(".")
-        labware = self._get_labware(parts[0])
+        try:
+            labware = self._get_labware(parts[0])
+        except KeyError:
+            canonical = self.canonicalize_target(target)
+            try:
+                return self._volume_labware[canonical]
+            except KeyError:
+                raise KeyError(f"No labware '{target}' on deck.") from None
 
         for child_name in parts[1:]:
             children = getattr(labware, "contained_labware", {})
@@ -85,6 +195,10 @@ class Deck:
             'plate_holder.plate.A1'  -> labware_key='plate_holder.plate',
                                        location_id='A1'
         """
+        canonical = self._resolve_canonical_target(target)
+        if canonical is not None:
+            return canonical
+
         try:
             labware = self.resolve_labware(target)
         except KeyError:

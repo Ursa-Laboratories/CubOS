@@ -1,8 +1,4 @@
-# Offline pipette/tip simulation deck.
-#
-# This deck is calibrated into the Cub XL Sterling pipette reach envelope so
-# digital-sim can replay tip pickup, liquid transfer heights, blowout, and
-# drop-tip behavior without touching hardware.
+# Automated-test pipette/tip fixture with fake coordinates.
 
 labware:
   plate:

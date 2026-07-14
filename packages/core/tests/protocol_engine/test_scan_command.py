@@ -13,6 +13,7 @@ The scan command's per-well motion under the labware-relative model is:
 
 from __future__ import annotations
 
+import json
 import logging
 from unittest.mock import MagicMock
 
@@ -23,6 +24,7 @@ from cubos.deck.deck import Deck
 from cubos.deck.labware.labware import Coordinate3D
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.deck.labware.well_plate_holder import WellPlateHolder
+from cubos.deck.loader import load_deck_from_yaml_safe
 from cubos.instruments.base_instrument import BaseInstrument
 from cubos.instruments.filmetrics.models import MeasurementResult
 from cubos.instruments.uv_curing.models import CureResult
@@ -37,6 +39,38 @@ SAFE_APPROACH = 10.0
 MEASUREMENT = 1.0
 APPROACH_ABS = HEIGHT_MM + SAFE_APPROACH
 ACTION_ABS = HEIGHT_MM + MEASUREMENT
+
+
+TRACKED_SCAN_DECK_YAML = """\
+labware:
+  source:
+    type: vial
+    name: source
+    model_name: source_vial
+    height: 50.0
+    diameter: 20.0
+    location: {x: 5.0, y: 5.0, z: 20.0}
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+
+  plate:
+    type: well_plate
+    name: plate_1
+    model_name: test_2x2
+    length: 30.0
+    width: 20.0
+    height: 14.1
+    well_depth: 10.0
+    rows: 2
+    columns: 2
+    calibration:
+      a1: {x: 20.0, y: 20.0, z: 14.1}
+      a2: {x: 30.0, y: 20.0, z: 14.1}
+    x_offset: 10.0
+    y_offset: 8.0
+    capacity_ul: 200.0
+    working_volume_ul: 150.0
+"""
 
 
 def _make_2x2_plate() -> WellPlate:
@@ -451,6 +485,59 @@ class TestScanCommand:
         assert sensor.call_count == 96
         assert board.move_to_labware.call_count == 1
 
+    def test_sharc_nested_plate_persists_under_canonical_labware_key(self):
+        from cubos.protocol_engine.commands.scan import scan
+
+        plate = _make_2x2_plate()
+        holder = WellPlateHolder(
+            name="plate_holder",
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            contained_labware={"plate": plate},
+        )
+        deck = Deck(
+            {"plate_holder": holder},
+            volume_labware={"plate_holder__plate": plate},
+            target_aliases={"plate_holder.plate": "plate_holder__plate"},
+        )
+        filmetrics = _FakeFilmetrics(
+            name="filmetrics", offset_x=0.0, offset_y=0.0, depth=0.0,
+        )
+        board = MagicMock()
+        board.instruments = {"filmetrics": filmetrics}
+        store = DataStore(db_path=":memory:")
+        campaign_id = store.create_campaign(description="SHARC nested scan")
+        store.register_labware(
+            campaign_id, "plate_holder__plate", plate,
+        )
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=deck,
+            data_store=store,
+            campaign_id=campaign_id,
+        )
+
+        scan(
+            ctx,
+            plate="plate_holder.plate",
+            instrument="filmetrics",
+            method="measure",
+            measurement_height=MEASUREMENT,
+            interwell_scan_height=SAFE_APPROACH,
+        )
+
+        rows = store._conn.execute(
+            """
+            SELECT labware_key, well_id
+            FROM experiments
+            WHERE campaign_id = ?
+            ORDER BY id
+            """,
+            (campaign_id,),
+        ).fetchall()
+        assert [row[0] for row in rows] == ["plate_holder__plate"] * 4
+        assert [row[1] for row in rows] == ["A1", "A2", "B1", "B2"]
+        store.close()
+
     def test_validates_plate_is_wellplate(self):
         from cubos.protocol_engine.commands.scan import scan
 
@@ -499,10 +586,108 @@ class TestScanCommand:
         scan(ctx, **_scan_args())
 
         assert ctx.data_store.log_experiment_measurement.call_count == 4
+        assert [
+            call.args[1]
+            for call in ctx.data_store.get_contents.call_args_list
+        ] == ["plate_1"] * 4
         kwargs = ctx.data_store.log_experiment_measurement.call_args_list[0].kwargs
         measurement = kwargs["result"]
         assert isinstance(measurement, InstrumentMeasurement)
         assert kwargs["labware_key"] == "plate_1"
+        ctx.data_store.get_fluid_snapshot.assert_not_called()
+
+    def test_tracked_transfer_scan_uses_current_fluid_composition(self, tmp_path):
+        from cubos.protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.scan import scan
+
+        deck_path = tmp_path / "deck.yaml"
+        deck_path.write_text(TRACKED_SCAN_DECK_YAML, encoding="utf-8")
+        deck = load_deck_from_yaml_safe(deck_path)
+        store = DataStore(db_path=":memory:")
+        state_id = store.create_fluid_state(
+            deck_path,
+            deck,
+            initial_fluids={
+                "source": {
+                    "volume_ul": 100.0,
+                    "composition": {"water": 60.0, "ethanol": 40.0},
+                },
+            },
+        )
+        campaign_id = store.create_campaign(
+            description="tracked scan",
+            fluid_state_id=state_id,
+        )
+        board = MagicMock()
+        board.instruments = {
+            "pipette": MagicMock(),
+            "filmetrics": _FakeFilmetrics(
+                name="filmetrics", offset_x=0.0, offset_y=0.0, depth=0.0,
+            ),
+        }
+        ctx = ProtocolContext(
+            gantry=board,
+            deck=deck,
+            data_store=store,
+            campaign_id=campaign_id,
+            fluid_state_id=state_id,
+        )
+
+        transfer(
+            ctx,
+            source="source",
+            destination="plate.A1",
+            volume_ul=50.0,
+        )
+        store.get_contents = MagicMock(
+            side_effect=AssertionError("tracked scan used legacy contents"),
+        )
+        scan(
+            ctx,
+            plate="plate",
+            instrument="filmetrics",
+            method="measure",
+            measurement_height=MEASUREMENT,
+            interwell_scan_height=SAFE_APPROACH,
+        )
+
+        rows = store._conn.execute(
+            "SELECT well_id, contents FROM experiments ORDER BY id"
+        ).fetchall()
+        assert [row[0] for row in rows] == ["A1", "A2", "B1", "B2"]
+        assert json.loads(rows[0][1]) == [
+            {"source": "ethanol", "volume_ul": 20.0},
+            {"source": "water", "volume_ul": 30.0},
+        ]
+        assert all(json.loads(row[1]) == [] for row in rows[1:])
+        store.get_contents.assert_not_called()
+        store.close()
+
+    def test_tracked_scan_missing_container_fails_before_first_move(self):
+        from cubos.protocol_engine.commands.scan import scan
+
+        ctx = _mock_context()
+        ctx.data_store = MagicMock()
+        ctx.data_store.get_campaign_fluid_state_id.return_value = 9
+        ctx.data_store.get_fluid_snapshot.return_value = {
+            "containers": [
+                {
+                    "labware_key": "plate_1",
+                    "location_id": "A1",
+                    "current_volume_ul": 0.0,
+                    "composition": {},
+                }
+            ]
+        }
+        ctx.campaign_id = 13
+        ctx.fluid_state_id = 9
+
+        with pytest.raises(ProtocolExecutionError, match="has no container"):
+            scan(ctx, **_scan_args())
+
+        ctx.gantry.move_to_labware.assert_not_called()
+        ctx.gantry.move.assert_not_called()
+        assert ctx.gantry.instruments["uvvis"].call_count == 0
 
     def test_persists_filmetrics_measurements(self):
         from cubos.protocol_engine.commands.scan import scan

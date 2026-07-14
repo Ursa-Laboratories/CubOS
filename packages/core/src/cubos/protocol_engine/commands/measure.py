@@ -11,6 +11,11 @@ from ..measurements import normalize_measurement
 from ..registry import protocol_command
 from ..scan_args import normalize_scan_arguments
 from ._dispatch import inject_runtime_args
+from ._fluid_contents import (
+    contents_for_target,
+    resolve_measurement_target,
+    tracked_fluid_contents,
+)
 from ._movement import _assert_finite_number, engage_at_labware
 
 if TYPE_CHECKING:
@@ -85,6 +90,19 @@ def measure(
             "in +Z-up."
         )
 
+    # Durable state is authoritative for a tracked run. Resolve and snapshot
+    # it before any movement or instrument call so corrupt, missing, or
+    # campaign-mismatched state fails closed instead of producing an
+    # unpersisted physical measurement.
+    persistence_target = None
+    tracked_contents_index = None
+    if context.fluid_state_id is not None:
+        persistence_target = resolve_measurement_target(context, position)
+        tracked_contents_index = tracked_fluid_contents(
+            context,
+            [persistence_target],
+        )
+
     callable_method = getattr(instr, method)
     try:
         kwargs_probe = inject_runtime_args(
@@ -131,10 +149,16 @@ def measure(
                 method_name=method,
                 raw_result=result,
             )
-            target = context.deck.resolve_labware_target(position)
-            contents = context.data_store.get_contents(
-                context.campaign_id, target.labware_key, target.location_id,
+            target = persistence_target or resolve_measurement_target(
+                context,
+                position,
             )
+            if tracked_contents_index is not None:
+                contents = contents_for_target(tracked_contents_index, target)
+            else:
+                contents = context.data_store.get_contents(
+                    context.campaign_id, target.labware_key, target.location_id,
+                )
             contents_json = json.dumps(contents) if contents else "[]"
             context.data_store.log_experiment_measurement(
                 campaign_id=context.campaign_id,

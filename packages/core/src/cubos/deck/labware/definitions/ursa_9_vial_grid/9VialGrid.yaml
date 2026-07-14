@@ -1,0 +1,17 @@
+# Ursa 9-position tight-fit 20 mL vial grid.
+#
+# The definition owns the repeatable layout and vial metadata. Deck YAML owns
+# measured A1/A2 coordinates, including the vial-rim deck-frame Z.
+
+type: vial_grid
+name: ursa_9_vial_grid
+model_name: 9VialHolder20mL_TightFit
+rows: 1
+columns: 9
+x_offset: 33.0
+y_offset: 33.0
+vial_model_name: 20ml_vial
+vial_height: 57.0
+vial_diameter: 28.0
+capacity_ul: 20000.0
+working_volume_ul: 20000.0

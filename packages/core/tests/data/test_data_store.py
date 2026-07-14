@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -24,6 +26,46 @@ from cubos.protocol_engine.measurements import InstrumentMeasurement, Measuremen
 def _make_store() -> DataStore:
     """Create an in-memory DataStore for testing."""
     return DataStore(db_path=":memory:")
+
+
+def _create_legacy_fluid_operations_table(
+    connection: sqlite3.Connection,
+) -> None:
+    connection.executescript(
+        """
+        CREATE TABLE fluid_operations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fluid_state_id INTEGER NOT NULL,
+            operation_key TEXT NOT NULL UNIQUE,
+            operation_type TEXT NOT NULL CHECK (operation_type = 'transfer'),
+            source_labware_key TEXT NOT NULL,
+            source_location_id TEXT NOT NULL DEFAULT '',
+            destination_labware_key TEXT NOT NULL,
+            destination_location_id TEXT NOT NULL DEFAULT '',
+            volume_ul REAL NOT NULL CHECK (volume_ul > 0),
+            composition_json TEXT NOT NULL,
+            source_version INTEGER NOT NULL,
+            destination_version INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK (
+                status IN ('started', 'applied', 'reconciliation_required')
+            ),
+            campaign_id INTEGER,
+            detail TEXT,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+            applied_at TEXT
+        );
+        INSERT INTO fluid_operations (
+            fluid_state_id, operation_key, operation_type,
+            source_labware_key, destination_labware_key, volume_ul,
+            composition_json, source_version, destination_version, status
+        ) VALUES (
+            1, 'legacy-transfer', 'transfer',
+            'source', 'plate', 10.0, '{"water":10.0}', 1, 1, 'applied'
+        );
+        """
+    )
+    connection.commit()
 
 
 def _make_uvvis_spectrum(n: int = 10) -> UVVisSpectrum:
@@ -117,11 +159,55 @@ class TestSchemaCreation:
             )
         store.close()
 
+    def test_fluid_operation_rebuild_rolls_back_every_step_on_failure(self):
+        connection = sqlite3.connect(":memory:")
+        _create_legacy_fluid_operations_table(connection)
+        store = object.__new__(DataStore)
+        store.db_path = ":memory:"
+        store._conn = connection
+
+        def deny_final_rename(action, _arg1, _arg2, _database, _source):
+            if action == sqlite3.SQLITE_ALTER_TABLE:
+                return sqlite3.SQLITE_DENY
+            return sqlite3.SQLITE_OK
+
+        connection.set_authorizer(deny_final_rename)
+        with pytest.raises(sqlite3.DatabaseError, match="not authorized"):
+            store._migrate_fluid_operations_schema()
+        connection.set_authorizer(None)
+
+        assert connection.in_transaction is False
+        columns = {
+            row[1] for row in connection.execute(
+                "PRAGMA table_info(fluid_operations)"
+            )
+        }
+        assert "parameters_json" not in columns
+        assert connection.execute(
+            "SELECT operation_key, status FROM fluid_operations"
+        ).fetchall() == [("legacy-transfer", "applied")]
+        assert connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'fluid_operations_new'"
+        ).fetchone() is None
+        store.close()
+
 
 # ─── Campaign CRUD ────────────────────────────────────────────────────────────
 
 
 class TestCampaignCRUD:
+
+    @staticmethod
+    def _fluid_state_id(store: DataStore) -> int:
+        with store._conn:
+            cursor = store._conn.execute(
+                "INSERT INTO fluid_state_sessions "
+                "(deck_path, deck_fingerprint, deck_snapshot_json, layout_json) "
+                "VALUES (?, ?, ?, ?)",
+                ("deck.yaml", "fingerprint", "{}", "{}"),
+            )
+        return int(cursor.lastrowid)
 
     def test_create_returns_id(self):
         store = _make_store()
@@ -177,6 +263,92 @@ class TestCampaignCRUD:
         ).fetchone()
         assert row == ("completed", "2026-07-07 12:00:00")
         store.close()
+
+    def test_attach_campaign_fluid_state_is_queryable_and_idempotent(self):
+        store = _make_store()
+        state_id = self._fluid_state_id(store)
+        campaign_id = store.create_campaign(description="tracked")
+
+        store.attach_campaign_fluid_state(campaign_id, state_id)
+        store.attach_campaign_fluid_state(campaign_id, state_id)
+
+        assert store.get_campaign_fluid_state_id(campaign_id) == state_id
+        store.close()
+
+    def test_attach_campaign_fluid_state_refuses_replacement(self):
+        store = _make_store()
+        first_state = self._fluid_state_id(store)
+        second_state = self._fluid_state_id(store)
+        campaign_id = store.create_campaign(
+            description="tracked",
+            fluid_state_id=first_state,
+        )
+
+        with pytest.raises(ValueError, match="already attached"):
+            store.attach_campaign_fluid_state(campaign_id, second_state)
+
+        assert store.get_campaign_fluid_state_id(campaign_id) == first_state
+        store.close()
+
+    def test_attach_campaign_fluid_state_validates_both_ids(self):
+        store = _make_store()
+        state_id = self._fluid_state_id(store)
+        campaign_id = store.create_campaign(description="tracked")
+
+        with pytest.raises(ValueError, match="Campaign 999 not found"):
+            store.attach_campaign_fluid_state(999, state_id)
+        with pytest.raises(ValueError, match="Fluid state 999 not found"):
+            store.attach_campaign_fluid_state(campaign_id, 999)
+        with pytest.raises(ValueError, match="Campaign 999 not found"):
+            store.get_campaign_fluid_state_id(999)
+        store.close()
+
+    def test_two_connections_cannot_attach_different_states(self, tmp_path):
+        db_path = tmp_path / "campaign-attachment.db"
+        setup = DataStore(db_path)
+        first_state = self._fluid_state_id(setup)
+        second_state = self._fluid_state_id(setup)
+        campaign_id = setup.create_campaign(description="concurrent attach")
+        setup.close()
+
+        barrier = threading.Barrier(2)
+        results: list[tuple[int, str]] = []
+
+        def attach(fluid_state_id: int) -> None:
+            store = None
+            try:
+                store = DataStore(db_path)
+                barrier.wait(timeout=5)
+                store.attach_campaign_fluid_state(campaign_id, fluid_state_id)
+                results.append((fluid_state_id, "attached"))
+            except BaseException as exc:
+                results.append(
+                    (fluid_state_id, f"{type(exc).__name__}: {exc}")
+                )
+            finally:
+                if store is not None:
+                    store.close()
+
+        threads = [
+            threading.Thread(target=attach, args=(first_state,)),
+            threading.Thread(target=attach, args=(second_state,)),
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=10)
+
+        assert all(not thread.is_alive() for thread in threads)
+        assert [result for _, result in results].count("attached") == 1
+        failures = [result for _, result in results if result != "attached"]
+        assert len(failures) == 1
+        assert "ValueError: Campaign" in failures[0]
+        assert "already attached" in failures[0]
+
+        winner = next(state for state, result in results if result == "attached")
+        reopened = DataStore(db_path)
+        assert reopened.get_campaign_fluid_state_id(campaign_id) == winner
+        reopened.close()
 
 
 # ─── Experiment CRUD ──────────────────────────────────────────────────────────

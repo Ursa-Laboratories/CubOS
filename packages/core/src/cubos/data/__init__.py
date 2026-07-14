@@ -15,6 +15,23 @@ from .exports import (
     export_campaign_results_csvs,
     list_campaign_summaries,
 )
+from .fluid_state import (
+    FLUID_STATE_API_VERSION,
+    FluidContainerSnapshot,
+    FluidOperationSnapshot,
+    FluidReplacementEndpoint,
+    FluidReplacementState,
+    FluidStateConflictError,
+    FluidStateDeckMismatchError,
+    FluidStateError,
+    FluidStateNotFoundError,
+    FluidStateReconciliationRequiredError,
+    FluidStateSnapshot,
+    FluidStateSummary,
+    load_initial_fluids,
+    load_replacement_state,
+)
+from .fluid_state_reader import FluidStateReader
 from .protocol_runs import create_campaign_for_protocol_run, register_deck_labware
 
 __all__ = [
@@ -33,6 +50,21 @@ __all__ = [
     "export_campaign_measurements_zip",
     "export_campaign_results_csvs",
     "list_campaign_summaries",
+    "FLUID_STATE_API_VERSION",
+    "FluidContainerSnapshot",
+    "FluidOperationSnapshot",
+    "FluidReplacementEndpoint",
+    "FluidReplacementState",
+    "FluidStateConflictError",
+    "FluidStateDeckMismatchError",
+    "FluidStateError",
+    "FluidStateNotFoundError",
+    "FluidStateReconciliationRequiredError",
+    "FluidStateSnapshot",
+    "FluidStateSummary",
+    "FluidStateReader",
+    "load_initial_fluids",
+    "load_replacement_state",
     "create_campaign_for_protocol_run",
     "register_deck_labware",
 ]
