@@ -1,6 +1,6 @@
 # Calibration
 
-Use `setup/calibrate_gantry.py` for gantry calibration. It reads one gantry
+Use `packages/core/src/cubos/tools/calibrate_gantry.py` for gantry calibration. It reads one gantry
 YAML file, detects the mounted instruments, selects the single- or
 multi-instrument flow, and writes calibrated values back to YAML.
 
@@ -77,28 +77,28 @@ To calibrate in place, run:
 
 - **macOS / Linux / Windows (Git Bash):**
   ```bash
-  PYTHONPATH=src python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
+  python -m cubos.tools.calibrate_gantry packages/core/configs/gantry/cub_xl_asmi.yaml
   ```
 - **Windows (PowerShell):**
   ```powershell
   $env:PYTHONPATH = "src"
-  python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
+  python -m cubos.tools.calibrate_gantry packages/core/configs/gantry/cub_xl_asmi.yaml
   ```
 
 The script asks before overwriting the input file. To write a calibrated copy:
 
 - **macOS / Linux / Windows (Git Bash):**
   ```bash
-  PYTHONPATH=src python setup/calibrate_gantry.py \
-    configs/gantry/cub_xl_sterling_3_instrument.yaml \
-    --output-gantry configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
+  python -m cubos.tools.calibrate_gantry \
+    packages/core/configs/gantry/cub_xl_sterling_3_instrument.yaml \
+    --output-gantry packages/core/configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
   ```
 - **Windows (PowerShell):**
   ```powershell
   $env:PYTHONPATH = "src"
-  python setup/calibrate_gantry.py `
-    configs/gantry/cub_xl_sterling_3_instrument.yaml `
-    --output-gantry configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
+  python -m cubos.tools.calibrate_gantry `
+    packages/core/configs/gantry/cub_xl_sterling_3_instrument.yaml `
+    --output-gantry packages/core/configs/gantry/cub_xl_sterling_3_instrument_calibrated.yaml
   ```
 
 The preflight shows the input file, output file, detected instruments, and the
@@ -130,7 +130,7 @@ if recovery fails.
 
 Use this flow when the gantry YAML has one mounted instrument.
 
-1. Start `setup/calibrate_gantry.py`.
+1. Start `packages/core/src/cubos/tools/calibrate_gantry.py`.
 2. Confirm the single-instrument flow in the preflight.
 3. Place your calibration reference at the front-left origin point — the
    calibration block, or a deck feature such as a plate's corner-most well
@@ -160,7 +160,7 @@ connection and has no `--port` flag.
 
 ![Board placement markers used during calibration](images/calibration-marks.webp){ width="520" }
 
-1. Start `setup/calibrate_gantry.py`.
+1. Start `packages/core/src/cubos/tools/calibrate_gantry.py`.
 2. Confirm the multi-instrument flow in the preflight.
 3. Select the leftmost/reference instrument when prompted.
 4. Enter the calibration block height when prompted.
@@ -196,8 +196,8 @@ connection and has no `--port` flag.
 After calibration, run the interactive deck-frame jog check:
 
 ```bash
-PYTHONPATH=src python setup/hello_world.py \
-  --gantry configs/gantry/cub_xl_asmi.yaml
+python -m cubos.tools.hello_world \
+  --gantry packages/core/configs/gantry/cub_xl_asmi.yaml
 ```
 
 Expected directions:

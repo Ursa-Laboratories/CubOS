@@ -1,0 +1,100 @@
+"""Persistence helpers for CubOS protocol runs."""
+
+from __future__ import annotations
+
+import logging
+from pathlib import Path
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+from cubos.deck.deck import Deck
+from cubos.deck.loader import load_deck_from_yaml_safe
+from cubos.gantry.loader import load_gantry_from_yaml_safe
+
+from .data_store import DataStore
+
+
+def register_deck_labware(
+    data_store: DataStore,
+    campaign_id: int,
+    deck: Deck,
+) -> None:
+    """Register deck labware using its declared persistence identity model."""
+    if deck.has_explicit_volume_registry:
+        for labware_key, labware in deck.volume_labware.items():
+            _register_labware_item(
+                data_store,
+                campaign_id,
+                labware_key,
+                labware,
+            )
+        return
+
+    # Programmatic Deck callers predate the canonical registry. Preserve their
+    # top-level + contained-labware registration paths unless they explicitly
+    # opt into canonical identities.
+    for labware_key, labware in deck.labware.items():
+        _register_labware_path(data_store, campaign_id, labware_key, labware)
+
+
+def _register_labware_item(
+    data_store: DataStore,
+    campaign_id: int,
+    labware_key: str,
+    labware: Any,
+) -> None:
+    try:
+        data_store.register_labware(campaign_id, labware_key, labware)
+    except Exception as exc:
+        logger.warning(
+            "Skipping labware registration for %r: %s",
+            labware_key,
+            exc,
+            exc_info=True,
+        )
+
+
+def _register_labware_path(
+    data_store: DataStore,
+    campaign_id: int,
+    labware_key: str,
+    labware: Any,
+) -> None:
+    _register_labware_item(data_store, campaign_id, labware_key, labware)
+    for child_name, child in getattr(labware, "contained_labware", {}).items():
+        _register_labware_path(
+            data_store,
+            campaign_id,
+            f"{labware_key}.{child_name}",
+            child,
+        )
+
+
+def create_campaign_for_protocol_run(
+    data_store: DataStore,
+    *,
+    gantry_path: str | Path,
+    deck_path: str | Path,
+    gantry_file: str,
+    deck_file: str,
+    protocol_file: str,
+    description: str | None = None,
+) -> int:
+    """Create a campaign and register deck labware for a protocol run."""
+    gantry_config = load_gantry_from_yaml_safe(gantry_path)
+    deck = load_deck_from_yaml_safe(
+        deck_path,
+        factory_z_travel_mm=gantry_config.factory_z_travel_mm,
+    )
+    campaign_id = data_store.create_campaign(
+        description=description or (
+            f"CubOS protocol run: gantry={gantry_file}, deck={deck_file}, "
+            f"protocol={protocol_file}"
+        ),
+        deck_config=deck_file,
+        gantry_config=gantry_file,
+        protocol_config=protocol_file,
+    )
+    register_deck_labware(data_store, campaign_id, deck)
+    return campaign_id

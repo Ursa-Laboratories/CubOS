@@ -1,0 +1,24 @@
+labware:
+  plate:
+    load_name: sbs_96_wellplate
+    name: asmi_96_well_deck_origin
+    model_name: asmi_96_well_deck_origin
+    calibration:
+      a1:
+        x: 335.0
+        y: 14.5
+        z: 18.5
+      a2:
+        x: 326.0
+        y: 14.5
+        z: 18.5
+    x_offset: 9
+    y_offset: 9
+    type: well_plate
+    rows: 8
+    columns: 12
+    capacity_ul: 200
+    working_volume_ul: 150
+    length: 127.76
+    width: 85.47
+    height: 14.35

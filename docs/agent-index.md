@@ -5,14 +5,14 @@ Use this map after reading `AGENTS.md`. Read the smallest relevant set of files 
 ## Gantry / motion / coordinates / homing
 
 Read before changing motion, coordinates, bounds, homing, session ownership, or scan/protocol movement.
-- `src/gantry/session.py` - persistent connected gantry session, serial operation lock, cached position/status, calibration policy, interrupt handling, and Zoo-owned HTTP runtime delegation.
-- `src/gantry/gantry.py`, `gantry_config.py`, `origin.py` - frame, working volume, deck-origin calibration.
-- `src/gantry/machine_geometry.py` - built-in machine geometry per gantry family. Not user-authored YAML; consumed by setup validation.
-- `src/gantry/coordinate_translator.py`, `instrument_mount.py`, `instrument_loader.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `calibration_utils.py`, `offline.py` - gantry boundary, mounted instrument offsets, GRBL calibration utilities, and labware movement.
-- `src/validation/bounds.py`, `src/validation/protocol_semantics.py` - offline safety checks.
-- Tests: `tests/protocol_engine/test_deck_origin_configs.py`.
+- `packages/core/src/cubos/gantry/session.py` - persistent connected gantry session, serial operation lock, cached position/status, calibration policy, interrupt handling, and CubOS-owned HTTP runtime delegation.
+- `packages/core/src/cubos/gantry/gantry.py`, `gantry_config.py`, `origin.py` - frame, working volume, deck-origin calibration.
+- `packages/core/src/cubos/gantry/machine_geometry.py` - built-in machine geometry per gantry family. Not user-authored YAML; consumed by setup validation.
+- `packages/core/src/cubos/gantry/coordinate_translator.py`, `instrument_mount.py`, `instrument_loader.py`, `loader.py`, `yaml_schema.py`, `grbl_settings.py`, `calibration_utils.py`, `offline.py` - gantry boundary, mounted instrument offsets, GRBL calibration utilities, and labware movement.
+- `packages/core/src/cubos/validation/bounds.py`, `packages/core/src/cubos/validation/protocol_semantics.py` - offline safety checks.
+- Tests: `packages/core/tests/protocol_engine/test_deck_origin_configs.py`.
 
-Setup and calibration flows should route through public `Gantry` APIs. Long-lived UI/API runtimes such as Zoo should route through `GantrySession`. Do not import `Mill` or `gantry_driver` internals from user-facing scripts.
+Setup and calibration flows should route through public `Gantry` APIs. Long-lived UI/API runtimes such as CubOS should route through `GantrySession`. Do not import `Mill` or `gantry_driver` internals from user-facing scripts.
 
 Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`).
 
@@ -20,56 +20,56 @@ Setup bounds validation checks the concrete motion targets implied by the loaded
 
 ## Deck YAML / labware / calibration
 
-- `src/deck/yaml_schema.py` - strict Pydantic schema.
-- `src/deck/loader.py` - load-name expansion, calibration, derived wells, nested labware.
+- `packages/core/src/cubos/deck/yaml_schema.py` - strict Pydantic schema.
+- `packages/core/src/cubos/deck/loader.py` - load-name expansion, calibration, derived wells, nested labware.
 - Public API for UI/config consumers: `deck.resolve_load_names`,
   `deck.derive_wells_preview`, and
   `deck.yaml_schema.LABWARE_YAML_ENTRY_MODELS`.
-- `src/deck/labware/`, `src/deck/labware/definitions/`.
-- `configs/deck/`.
-- Tests: `tests/deck/test_deck_loader.py`,
-  `tests/deck/test_holder_labware.py`, `tests/deck/test_panda_deck_yaml.py`.
+- `packages/core/src/cubos/deck/labware/`, `packages/core/src/cubos/deck/labware/definitions/`.
+- `packages/core/configs/deck/`.
+- Tests: `packages/core/tests/deck/test_deck_loader.py`,
+  `packages/core/tests/deck/test_holder_labware.py`, `packages/core/tests/deck/test_panda_deck_yaml.py`.
 
-After schema/config changes: focused tests, then `setup/validate_setup.py` for affected real triples.
+After schema/config changes: focused tests, then `packages/core/src/cubos/tools/validate_setup.py` for affected real triples.
 
 ## Protocol engine / setup validation
 
-- `src/protocol_engine/yaml_schema.py`, `loader.py`, `runtime.py`, `setup.py`,
+- `packages/core/src/cubos/protocol_engine/yaml_schema.py`, `loader.py`, `runtime.py`, `setup.py`,
   `setup_validator.py`.
-- `src/protocol_engine/commands/` - command behavior.
-- `setup/validate_setup.py` - end-to-end offline validation.
-- `configs/protocol/<instrument-or-workflow>/`.
-- Tests: `tests/protocol_engine/`.
+- `packages/core/src/cubos/protocol_engine/commands/` - command behavior.
+- `packages/core/src/cubos/tools/validate_setup.py` - end-to-end offline validation.
+- `packages/core/configs/protocol/<instrument-or-workflow>/`.
+- Tests: `packages/core/tests/protocol_engine/`.
 
 ## Instruments
 
-- `src/instruments/<type>/interface.py`, `vendors/<vendor>.py`, `models.py`, `exceptions.py`.
-- `src/instruments/registry.yaml`, `src/instruments/registry.py`, `src/instruments/yaml_schema.py`.
+- `packages/core/src/cubos/instruments/<type>/interface.py`, `vendors/<vendor>.py`, `models.py`, `exceptions.py`.
+- `packages/core/src/cubos/instruments/registry.yaml`, `packages/core/src/cubos/instruments/registry.py`, `packages/core/src/cubos/instruments/yaml_schema.py`.
 - Public API for UI/config consumers: `instruments.registry.config_fields`,
   `instruments.registry.list_measurement_methods`, and
   `protocol_engine.is_measurement_result`.
 - Gantry YAML keeps `type` + `vendor`; `registry.py` resolves the concrete class, merges installed `cubos.instrument_registries` entry points, and then merges `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlays.
-- `src/protocol_engine/measurements.py`, `data/data_store.py` - persisted measurements.
-- `data/protocol_runs.py`, `data/exports.py` - campaign creation for CubOS-owned protocol sessions and Zoo-compatible result summaries/ZIP exports.
-- Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
+- `packages/core/src/cubos/protocol_engine/measurements.py`, `packages/core/src/cubos/data/data_store.py` - persisted measurements.
+- `packages/core/src/cubos/data/protocol_runs.py`, `packages/core/src/cubos/data/exports.py` - campaign creation for CubOS-owned protocol sessions and CubOS-compatible result summaries/ZIP exports.
+- Tests: `packages/core/tests/instruments/`, `packages/core/tests/protocol_engine/`, `packages/core/tests/data/`.
 
 ## Calibration scripts
 
-- `setup/calibrate_gantry.py` - only supported user-facing calibration entrypoint. Loads input gantry YAML, dispatches single- or multi-instrument flow by instrument count. Without `--output-gantry`, prompts before overwriting input; with it, writes the explicit path without extra prompt.
-- `setup/calibration/single_instrument_calibration.py` - internal one-instrument flow.
-- `setup/calibration/multi_instrument_calibration.py` - internal multi-instrument flow.
+- `packages/core/src/cubos/tools/calibrate_gantry.py` - only supported user-facing calibration entrypoint. Loads input gantry YAML, dispatches single- or multi-instrument flow by instrument count. Without `--output-gantry`, prompts before overwriting input; with it, writes the explicit path without extra prompt.
+- `packages/core/src/cubos/tools/calibration/single_instrument_calibration.py` - internal one-instrument flow.
+- `packages/core/src/cubos/tools/calibration/multi_instrument_calibration.py` - internal multi-instrument flow.
 - Detailed operator steps and offset math live in `docs/calibration.md`.
 
 ## Setup scripts
 
-- `setup/validate_setup.py` - offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
-- `setup/run_protocol.py` - load, validate, connect hardware, run protocol end-to-end. Delegates the hardware lifecycle to `protocol_engine.setup.run_on_hardware`, which connects the gantry after clearing the expected GRBL alarm and restoring state, connects instruments before the first step, and disconnects both in `finally`. Python-authored protocols built with `ProtocolBuilder.with_setup(...)` reach the same path via `protocol.run()` (and `protocol.validate()` for offline checks).
-- `setup/hello_world.py` - interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y +/-1mm), Z (down 1mm), X (up 1mm), Q (quit).
-- `setup/keyboard_input.py` - single-keypress reader using Unix `tty`/`termios`.
+- `packages/core/src/cubos/tools/validate_setup.py` - offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
+- `packages/core/src/cubos/tools/run_protocol.py` - load, validate, connect hardware, run protocol end-to-end. Delegates the hardware lifecycle to `protocol_engine.setup.run_on_hardware`, which connects the gantry after clearing the expected GRBL alarm and restoring state, connects instruments before the first step, and disconnects both in `finally`. Python-authored protocols built with `ProtocolBuilder.with_setup(...)` reach the same path via `protocol.run()` (and `protocol.validate()` for offline checks).
+- `packages/core/src/cubos/tools/hello_world.py` - interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y +/-1mm), Z (down 1mm), X (up 1mm), Q (quit).
+- `packages/core/src/cubos/tools/keyboard_input.py` - single-keypress reader using Unix `tty`/`termios`.
 
 ## Exception handling patterns
 
-These rules apply everywhere in `src/` and `setup/`:
+These rules apply throughout `packages/core/src/cubos/`:
 
 - `except Exception` in user-facing pipelines: include the exception type name in the error message so developers can diagnose without a full traceback, for example `f"{type(exc).__name__}: {exc}"`. Add `logging.getLogger(__name__).debug(..., exc_info=True)` for config-load failures; use `logging.exception` for unexpected failures in validators.
 - Unguarded validation calls: wrap calls to validators, bounds checkers, or semantics checkers that can raise so callers get a structured result or a clear re-raised message instead of raw operator tracebacks.
