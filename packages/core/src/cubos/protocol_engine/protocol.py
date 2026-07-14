@@ -118,6 +118,8 @@ class Protocol:
         campaign: str | None = None,
         data_store: Any | None = None,
         protocol_config: str | None = None,
+        fluid_state_id: int | None = None,
+        initial_fluids: str | Path | Dict[str, Any] | None = None,
     ) -> List[Any]:
         """Run the protocol on hardware as a full session.
 
@@ -135,6 +137,10 @@ class Protocol:
                 omitted, a default store is created and closed automatically.
             protocol_config: Optional identifier recorded on the campaign for
                 the source that built this protocol (e.g. a module path).
+            fluid_state_id: Existing deck-bound fluid state to resume. The
+                stored deck fingerprint must match this protocol's deck.
+            initial_fluids: Seed YAML path or mapping used only when creating a
+                new fluid state for this run.
 
         Raises:
             ValueError: If the protocol has no setup metadata.
@@ -156,6 +162,8 @@ class Protocol:
             data_store=data_store,
             campaign_description=campaign,
             protocol_config=protocol_config,
+            fluid_state_id=fluid_state_id,
+            initial_fluids=initial_fluids,
         )
 
     def __repr__(self) -> str:

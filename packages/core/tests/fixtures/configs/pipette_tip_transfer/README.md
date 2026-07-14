@@ -14,7 +14,7 @@ Validate without hardware:
 
 ```bash
 python -m cubos.tools.validate_setup \
-  packages/core/configs/sim/pipette_tip_transfer/gantry.yaml \
-  packages/core/configs/sim/pipette_tip_transfer/deck.yaml \
-  packages/core/configs/sim/pipette_tip_transfer/protocol.yaml
+  packages/core/tests/fixtures/configs/pipette_tip_transfer/gantry.yaml \
+  packages/core/tests/fixtures/configs/pipette_tip_transfer/deck.yaml \
+  packages/core/tests/fixtures/configs/pipette_tip_transfer/protocol.yaml
 ```

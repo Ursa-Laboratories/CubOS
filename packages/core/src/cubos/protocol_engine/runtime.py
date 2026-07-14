@@ -29,6 +29,33 @@ class ProtocolContext:
     )
     data_store: Any = None
     campaign_id: int | None = None
+    fluid_state_id: int | None = None
+    active_step_index: int | None = None
+    active_step_command: str | None = None
+    active_substep: str | None = None
+    _manual_operation_sequence: int = 0
+
+    def fluid_operation_key(self, action: str) -> str:
+        """Return a stable key for one persisted fluid operation.
+
+        Protocol-driven keys are deterministic within a campaign so an
+        already-applied transfer can be recognized instead of replayed.
+        Direct command calls outside ``Protocol.execute`` receive a monotonic
+        manual suffix scoped to this context.
+        """
+        if self.campaign_id is None:
+            raise ValueError("Fluid operations require a campaign_id")
+
+        if self.active_step_index is None:
+            self._manual_operation_sequence += 1
+            scope = f"manual:{self._manual_operation_sequence}"
+        else:
+            command = self.active_step_command or "command"
+            scope = f"step:{self.active_step_index}:{command}"
+
+        if self.active_substep is not None:
+            scope = f"{scope}:substep:{self.active_substep}"
+        return f"campaign:{self.campaign_id}:{scope}:{action}"
 
 
 @dataclass
@@ -48,4 +75,15 @@ class ProtocolStep:
             self.command_name,
             ", ".join(f"{k}={v!r}" for k, v in self.args.items()),
         )
-        return self.handler(context, **self.args)
+        previous_index = context.active_step_index
+        previous_command = context.active_step_command
+        previous_substep = context.active_substep
+        context.active_step_index = self.index
+        context.active_step_command = self.command_name
+        context.active_substep = None
+        try:
+            return self.handler(context, **self.args)
+        finally:
+            context.active_step_index = previous_index
+            context.active_step_command = previous_command
+            context.active_substep = previous_substep

@@ -1,7 +1,7 @@
 """Load, validate, and run a protocol end-to-end.
 
 Usage:
-    python -m cubos.tools.run_protocol <gantry.yaml> <deck.yaml> <protocol.yaml>
+    python -m cubos.tools.run_protocol [options] <gantry.yaml> <deck.yaml> <protocol.yaml>
 
 Example:
     python -m cubos.tools.run_protocol \\
@@ -19,6 +19,7 @@ Steps:
     7. Disconnect
 """
 
+import argparse
 import sys
 import traceback
 from pathlib import Path
@@ -39,18 +40,57 @@ from cubos.protocol_engine.setup_validator import run_setup_validation
 SEPARATOR = "-" * 60
 
 
-def main() -> None:
-    if len(sys.argv) != 4:
-        print("Usage: python -m cubos.tools.run_protocol <gantry.yaml> <deck.yaml> <protocol.yaml>")
-        print()
-        print("Example:")
-        print("  python -m cubos.tools.run_protocol \\")
-        print("    ../BU-Configs/configs/gantry/cub_xl_asmi.yaml \\")
-        print("    ../BU-Configs/configs/deck/asmi_deck.yaml \\")
-        print("    ../BU-Configs/configs/protocol/asmi/move_a1.yaml")
-        sys.exit(1)
+class _RunProtocolParser(argparse.ArgumentParser):
+    """Keep the historical CLI's exit code and stdout usage surface."""
 
-    gantry_path, deck_path, protocol_path = sys.argv[1:4]
+    def error(self, message: str) -> None:
+        print(
+            "Usage: python -m cubos.tools.run_protocol [options] "
+            "<gantry.yaml> <deck.yaml> <protocol.yaml>"
+        )
+        print(f"error: {message}")
+        self.exit(1)
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = _RunProtocolParser(
+        description=(
+            "Validate and run one CubOS protocol. Hardware is used by default; "
+            "pass --mock for an explicit offline run."
+        ),
+    )
+    parser.add_argument("gantry_path", help="Gantry YAML path")
+    parser.add_argument("deck_path", help="Deck YAML path")
+    parser.add_argument("protocol_path", help="Protocol YAML path")
+    fluid_group = parser.add_mutually_exclusive_group()
+    fluid_group.add_argument(
+        "--fluid-state-id",
+        type=int,
+        help="Resume this existing deck-bound fluid-state ID",
+    )
+    fluid_group.add_argument(
+        "--initial-fluids",
+        type=Path,
+        help="Create and seed a new fluid state from this YAML file",
+    )
+    parser.add_argument(
+        "--mock",
+        action="store_true",
+        help="Run gantry and instruments offline; never connect to hardware",
+    )
+    parser.add_argument(
+        "--database",
+        type=Path,
+        help="SQLite database path (default: CubOS data directory or env override)",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = _build_parser().parse_args(argv)
+    gantry_path = args.gantry_path
+    deck_path = args.deck_path
+    protocol_path = args.protocol_path
 
     # Phase 1: Validate (offline, before touching hardware)
     result = run_setup_validation(gantry_path, deck_path, protocol_path)
@@ -65,13 +105,17 @@ def main() -> None:
     # execute, and disconnect in finally.
     print()
     print(SEPARATOR)
-    print("Running protocol on hardware...")
+    if args.mock:
+        print("Running protocol in explicit offline mock mode...")
+    else:
+        print("Running protocol on hardware...")
     print(SEPARATOR)
     print()
 
-    db_path = default_database_path()
+    db_path = args.database or default_database_path()
     data_store = DataStore(db_path)
     campaign_id = None
+    linked_fluid_state_id = None
     results = []
     exit_code = 0
     try:
@@ -93,6 +137,9 @@ def main() -> None:
             protocol_path,
             data_store=data_store,
             campaign_id=campaign_id,
+            mock_mode=args.mock,
+            fluid_state_id=args.fluid_state_id,
+            initial_fluids=args.initial_fluids,
         )
     except KeyboardInterrupt:
         print("\nAborted by user.")
@@ -102,6 +149,13 @@ def main() -> None:
         traceback.print_exc()
         exit_code = 1
     finally:
+        if campaign_id is not None:
+            try:
+                linked_fluid_state_id = data_store.get_campaign_fluid_state_id(
+                    campaign_id
+                )
+            except Exception as exc:
+                print(f"\nWARNING: could not read linked fluid-state ID: {exc}")
         data_store.close()
 
     result_files = []
@@ -125,6 +179,8 @@ def main() -> None:
     else:
         print(f"Protocol did not complete — {len(results)} steps executed before exit.")
     print(f"Measurement data store: {db_path}")
+    if linked_fluid_state_id is not None:
+        print(f"Linked fluid state ID: {linked_fluid_state_id}")
     if campaign_id is not None:
         print("Result CSV files:")
         for path in result_files:

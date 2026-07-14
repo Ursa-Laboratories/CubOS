@@ -7,6 +7,7 @@ import logging
 from unittest.mock import MagicMock
 
 from cubos.data.data_store import DataStore
+from cubos.deck.deck import Deck
 from cubos.deck.labware.labware import Coordinate3D
 from cubos.deck.labware.vial import Vial
 from cubos.deck.labware.well_plate import WellPlate
@@ -89,9 +90,13 @@ class TestFullProtocolWithDataStore:
         board.instruments = {"uvvis": sensor, "pipette": pipette}
 
         deck = MagicMock()
+        resolver_deck = Deck(labware_map)
         deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
         deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
         deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
+        deck.resolve_labware_target = MagicMock(
+            side_effect=resolver_deck.resolve_labware_target,
+        )
 
         store = DataStore(db_path=":memory:")
         cid = store.create_campaign(
@@ -176,9 +181,13 @@ class TestFullProtocolWithoutDataStore:
         board.instruments = {"uvvis": sensor, "pipette": pipette}
 
         deck = MagicMock()
+        resolver_deck = Deck(labware_map)
         deck.__getitem__ = MagicMock(side_effect=lambda k: labware_map[k])
         deck.resolve_coordinate = MagicMock(return_value=(0.0, 0.0, 0.0))
         deck.resolve_labware = MagicMock(side_effect=lambda k: labware_map[k])
+        deck.resolve_labware_target = MagicMock(
+            side_effect=resolver_deck.resolve_labware_target,
+        )
 
         ctx = ProtocolContext(
             gantry=board,

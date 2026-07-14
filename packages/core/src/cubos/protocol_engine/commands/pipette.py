@@ -55,33 +55,111 @@ def _engage(
         raise ProtocolExecutionError(str(exc)) from exc
 
 
+def _tracked_fluid_state(context: ProtocolContext) -> bool:
+    """Return whether durable tracking is active, rejecting partial context.
+
+    A normal campaign may have a data store without a fluid state. Once a
+    ``fluid_state_id`` is present, however, both the store and campaign link
+    are required before any motion or liquid actuation.
+    """
+    if context.fluid_state_id is None:
+        return False
+    missing = []
+    if context.data_store is None:
+        missing.append("data_store")
+    if context.campaign_id is None:
+        missing.append("campaign_id")
+    if missing:
+        raise ProtocolExecutionError(
+            "Durable fluid tracking context is incomplete: fluid_state_id is "
+            f"set but {', '.join(missing)} is missing. No motion was attempted."
+        )
+    return True
+
+
 def _parse_position(position: str) -> tuple[str, Optional[str]]:
-    """Split ``"plate_1.A1"`` into ``("plate_1", "A1")`` or ``"vial_1"`` into ``("vial_1", None)``."""
-    parts = position.split(".", 1)
-    if len(parts) == 2:
-        return (parts[0], parts[1])
-    return (parts[0], None)
+    """Compatibility helper that preserves nested labware paths.
+
+    Runtime tracking resolves targets through :class:`deck.deck.Deck`; this
+    helper remains for callers that only need the string split.
+    """
+    if "." not in position:
+        return position, None
+    labware_key, location_id = position.rsplit(".", 1)
+    return labware_key, location_id
 
 
-def _record_dispense_to_store(
+def _resolve_fluid_target(context: ProtocolContext, position: str):
+    try:
+        return context.deck.resolve_labware_target(position)
+    except (KeyError, ValueError) as exc:
+        raise ProtocolExecutionError(
+            f"Cannot resolve tracked fluid target {position!r}: {exc}"
+        ) from exc
+
+
+def _begin_tracked_transfer(
     context: ProtocolContext,
-    labware_key: str,
-    well_id: Optional[str],
-    source_name: str,
+    *,
+    source: str,
+    destination: str,
     volume_ul: float,
-) -> None:
-    """Persist a dispense to the DataStore if one is configured."""
-    if context.data_store is not None and context.campaign_id is not None:
-        try:
-            context.data_store.record_dispense(
-                context.campaign_id, labware_key, well_id, source_name, volume_ul,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Failed to record dispense for %s well %s: %s",
-                labware_key, well_id, exc,
-                exc_info=True,
-            )
+) -> tuple[str, bool]:
+    """Preflight and journal a tracked transfer before liquid actuation.
+
+    Returns the operation key and whether hardware should execute. ``False``
+    means this exact campaign step was already applied and must not be replayed.
+    """
+    source_target = _resolve_fluid_target(context, source)
+    destination_target = _resolve_fluid_target(context, destination)
+    try:
+        operation_key = context.fluid_operation_key("transfer")
+        should_execute = context.data_store.begin_fluid_transfer(
+            context.fluid_state_id,
+            operation_key,
+            source_target.labware_key,
+            source_target.location_id,
+            destination_target.labware_key,
+            destination_target.location_id,
+            volume_ul,
+            campaign_id=context.campaign_id,
+        )
+    except Exception as exc:
+        raise ProtocolExecutionError(
+            f"Fluid-state preflight failed for {source!r} -> "
+            f"{destination!r}: {type(exc).__name__}: {exc}"
+        ) from exc
+    return operation_key, should_execute
+
+
+def _begin_tracked_mix(
+    context: ProtocolContext,
+    *,
+    position: str,
+    volume_ul: float,
+    repetitions: int,
+    speed: float,
+    height: float,
+) -> tuple[str, bool]:
+    target = _resolve_fluid_target(context, position)
+    try:
+        operation_key = context.fluid_operation_key("mix")
+        should_execute = context.data_store.begin_fluid_mix(
+            context.fluid_state_id,
+            operation_key,
+            target,
+            volume_ul,
+            repetitions,
+            speed,
+            height,
+            campaign_id=context.campaign_id,
+        )
+    except Exception as exc:
+        raise ProtocolExecutionError(
+            f"Fluid-state mix preflight failed for {position!r}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+    return operation_key, should_execute
 
 
 def _record_transfer_to_store(
@@ -90,7 +168,7 @@ def _record_transfer_to_store(
     destination: str,
     volume_ul: float,
 ) -> None:
-    """Persist a transfer to the DataStore if one is configured."""
+    """Persist an ordinary campaign transfer using canonical deck identity."""
     if context.data_store is not None and context.campaign_id is not None:
         try:
             source_target = context.deck.resolve_labware_target(source)
@@ -111,6 +189,24 @@ def _record_transfer_to_store(
             )
 
 
+def _mark_transfer_uncertain(
+    context: ProtocolContext,
+    operation_key: str,
+    exc: BaseException,
+) -> None:
+    """Best-effort marker for physical actions whose outcome needs review."""
+    try:
+        context.data_store.mark_fluid_reconciliation_required(
+            operation_key,
+            f"{type(exc).__name__}: {exc}",
+        )
+    except Exception:
+        logger.exception(
+            "Failed to mark fluid operation %s reconciliation-required",
+            operation_key,
+        )
+
+
 @protocol_command("aspirate")
 def aspirate(
     context: ProtocolContext,
@@ -120,6 +216,12 @@ def aspirate(
     height: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then aspirate."""
+    if _tracked_fluid_state(context):
+        raise ProtocolExecutionError(
+            "Standalone aspirate is disabled while durable fluid tracking is "
+            "active because it cannot conserve well/vial state without a "
+            "known destination. Use transfer or serial_transfer."
+        )
     pipette = _get_pipette(context)
     _engage(context, position, command_label="aspirate", height=height)
     return pipette.aspirate(volume_ul, speed)
@@ -137,6 +239,11 @@ def dispense(
     Not exposed as a YAML protocol command — use ``transfer`` instead,
     which correctly tracks source labware for DB logging.
     """
+    if _tracked_fluid_state(context):
+        raise ProtocolExecutionError(
+            "Standalone dispense is disabled while durable fluid tracking is "
+            "active because its source is unknown. Use transfer or serial_transfer."
+        )
     pipette = _get_pipette(context)
     _engage(context, position, command_label="dispense", height=height)
     return pipette.dispense(volume_ul, speed)
@@ -165,9 +272,41 @@ def mix(
     height: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then mix."""
+    tracked = _tracked_fluid_state(context)
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="mix", height=height)
-    return pipette.mix(volume_ul, repetitions, speed)
+    operation_key = None
+    if tracked:
+        operation_key, should_execute = _begin_tracked_mix(
+            context,
+            position=position,
+            volume_ul=volume_ul,
+            repetitions=repetitions,
+            speed=speed,
+            height=height,
+        )
+        if not should_execute:
+            context.logger.info(
+                "Skipping already-applied fluid operation %s", operation_key,
+            )
+            return None
+    try:
+        _engage(context, position, command_label="mix", height=height)
+        result = pipette.mix(volume_ul, repetitions, speed)
+    except BaseException as exc:
+        if operation_key is not None:
+            _mark_transfer_uncertain(context, operation_key, exc)
+        raise
+    if operation_key is not None:
+        try:
+            context.data_store.complete_fluid_mix(operation_key)
+        except Exception as exc:
+            _mark_transfer_uncertain(context, operation_key, exc)
+            raise ProtocolExecutionError(
+                "Physical mix completed, but its fluid-state commit failed for "
+                f"operation {operation_key!r}: {type(exc).__name__}: {exc}. "
+                "Reconciliation is required."
+            ) from exc
+    return result
 
 
 @protocol_command("pick_up_tip")
@@ -214,19 +353,50 @@ def transfer(
     destination_height: float = 0.0,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*."""
+    tracked = _tracked_fluid_state(context)
     pipette = _get_pipette(context)
-    _engage(
-        context, source, command_label="transfer.aspirate",
-        height=source_height,
-    )
-    pipette.aspirate(volume_ul, speed)
-    _engage(
-        context, destination, command_label="transfer.dispense",
-        height=destination_height,
-    )
-    pipette.dispense(volume_ul, speed)
+    operation_key = None
+    if tracked:
+        operation_key, should_execute = _begin_tracked_transfer(
+            context,
+            source=source,
+            destination=destination,
+            volume_ul=volume_ul,
+        )
+        if not should_execute:
+            context.logger.info(
+                "Skipping already-applied fluid operation %s", operation_key,
+            )
+            return
 
-    _record_transfer_to_store(context, source, destination, volume_ul)
+    try:
+        _engage(
+            context, source, command_label="transfer.aspirate",
+            height=source_height,
+        )
+        pipette.aspirate(volume_ul, speed)
+        _engage(
+            context, destination, command_label="transfer.dispense",
+            height=destination_height,
+        )
+        pipette.dispense(volume_ul, speed)
+    except BaseException as exc:
+        if operation_key is not None:
+            _mark_transfer_uncertain(context, operation_key, exc)
+        raise
+
+    if operation_key is not None:
+        try:
+            context.data_store.complete_fluid_transfer(operation_key)
+        except Exception as exc:
+            _mark_transfer_uncertain(context, operation_key, exc)
+            raise ProtocolExecutionError(
+                "Physical transfer completed, but its fluid-state commit "
+                f"failed for operation {operation_key!r}: "
+                f"{type(exc).__name__}: {exc}. Reconciliation is required."
+            ) from exc
+    else:
+        _record_transfer_to_store(context, source, destination, volume_ul)
 
 
 @protocol_command("drop_tip")
@@ -317,8 +487,13 @@ def serial_transfer(
             f"well count ({len(well_ids)})."
         )
 
-    for well_id, vol in zip(well_ids, volumes):
-        destination = f"{plate}.{well_id}"
-        transfer(context, source=source, destination=destination,
-                 volume_ul=vol, speed=speed, source_height=source_height,
-                 destination_height=destination_height)
+    previous_substep = context.active_substep
+    try:
+        for index, (well_id, vol) in enumerate(zip(well_ids, volumes)):
+            destination = f"{plate}.{well_id}"
+            context.active_substep = f"{index}:{destination}"
+            transfer(context, source=source, destination=destination,
+                     volume_ul=vol, speed=speed, source_height=source_height,
+                     destination_height=destination_height)
+    finally:
+        context.active_substep = previous_substep
