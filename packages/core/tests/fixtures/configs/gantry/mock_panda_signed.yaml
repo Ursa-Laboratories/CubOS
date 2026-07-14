@@ -1,0 +1,38 @@
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+origin_policy: home_origin
+cnc:
+  factory_z_travel_mm: 100.0
+  y_axis_motion: head
+  safe_z: -5.0
+working_volume:
+  x_min: -400.0
+  x_max: 0.0
+  y_min: -300.0
+  y_max: 0.0
+  z_min: -100.0
+  z_max: 0.0
+instruments:
+  potentiostat:
+    type: potentiostat
+    vendor: admiral
+    port: ""
+    channel: 0
+    offline: true
+    offset_x: -55.0
+    offset_y: 0.0
+    depth: 58.0
+  camera:
+    type: camera
+    vendor: mount_only
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 32.0
+  vial_capper_decapper:
+    type: mounted_tool
+    vendor: mount_only
+    offline: true
+    offset_x: 58.0
+    offset_y: 0.0
+    depth: 48.0

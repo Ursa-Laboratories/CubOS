@@ -28,10 +28,12 @@ duplicates CubOS schemas.
 
 ## Coordinate rule
 
-Display and submit CubOS deck coordinates directly: front-left-bottom origin,
-+X right, +Y back, +Z up. Do not add client-side axis sign changes. Changes to
-motion or calibration behavior belong in the core runtime and require separate
-physical validation.
+Display and submit CubOS coordinates directly, in the frame the gantry YAML's
+`origin_policy` selects: `deck_origin` (default, front-left-bottom origin) or
+`home_origin` (back-right-top origin, negative workspace). Both keep +X
+right, +Y back, +Z up. Do not add client-side axis sign changes or convert
+between policies. Changes to motion or calibration behavior belong in the
+core runtime and require separate physical validation.
 
 ## Verification
 

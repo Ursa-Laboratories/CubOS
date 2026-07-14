@@ -288,6 +288,75 @@ describe("buildCalibratedConfig", () => {
     expect(calibrated.grbl_settings?.max_travel_z).toBe(101);
   });
 
+  it("defaults origin_policy to deck_origin when the seed config omits it", () => {
+    const calibrated = buildCalibratedConfig({
+      config: gantryConfig(),
+      measuredVolume: { x: 398.5, y: 299.25, z: 96.75 },
+      zMin: 0,
+      zMax: 110,
+      maxTravel: { x: 398.5, y: 299.25, z: 110 },
+      isMulti: false,
+      instruments: ["asmi"],
+      instrumentPositions: {},
+      referenceInstrument: "asmi",
+      lowestInstrument: "asmi",
+    });
+
+    expect(calibrated.origin_policy).toBe("deck_origin");
+  });
+
+  it("emits a negative working volume and clamps safe_z to the ceiling for home_origin configs", () => {
+    const config = gantryConfig();
+    config.origin_policy = "home_origin";
+
+    const calibrated = buildCalibratedConfig({
+      config,
+      measuredVolume: { x: 398.5, y: 299.25, z: 96.75 },
+      zMin: 0,
+      zMax: 110,
+      maxTravel: { x: 398.5, y: 299.25, z: 110 },
+      isMulti: false,
+      instruments: ["asmi"],
+      instrumentPositions: {},
+      referenceInstrument: "asmi",
+      lowestInstrument: "asmi",
+    });
+
+    expect(calibrated.origin_policy).toBe("home_origin");
+    expect(calibrated.working_volume).toEqual({
+      x_min: -398.5,
+      x_max: 0,
+      y_min: -299.25,
+      y_max: 0,
+      z_min: -110,
+      z_max: 0,
+    });
+    // safe_z (120 in the seed config) is above the home_origin ceiling
+    // (z_max=0), so it clamps down to the ceiling.
+    expect(calibrated.cnc.safe_z).toBe(0);
+  });
+
+  it("keeps a home_origin safe_z that already sits within [z_min, z_max]", () => {
+    const config = gantryConfig();
+    config.origin_policy = "home_origin";
+    config.cnc.safe_z = -20;
+
+    const calibrated = buildCalibratedConfig({
+      config,
+      measuredVolume: { x: 398.5, y: 299.25, z: 96.75 },
+      zMin: 0,
+      zMax: 110,
+      maxTravel: { x: 398.5, y: 299.25, z: 110 },
+      isMulti: false,
+      instruments: ["asmi"],
+      instrumentPositions: {},
+      referenceInstrument: "asmi",
+      lowestInstrument: "asmi",
+    });
+
+    expect(calibrated.cnc.safe_z).toBe(-20);
+  });
+
   it("calibrates a camera from centered block position and measured block distance", () => {
     const config = gantryConfig();
     config.instruments.camera = {

@@ -203,6 +203,8 @@ export interface GrblSettingsConfig {
   max_travel_z?: number | null;
 }
 
+export type OriginPolicy = "deck_origin" | "home_origin";
+
 export interface GantryConfig {
   serial_port: string;
   gantry_type: "cub" | "cub_xl";
@@ -210,6 +212,11 @@ export interface GantryConfig {
   working_volume: WorkingVolume;
   grbl_settings?: GrblSettingsConfig | null;
   instruments: Record<string, InstrumentConfig>;
+  // Selects which physical corner WPos zero is calibrated to. Absent means
+  // "deck_origin" (existing behavior: WPos zero at the front-left-bottom,
+  // workspace nonnegative). See calibrationMath.buildCalibratedConfig for
+  // how this changes the emitted working_volume sign convention.
+  origin_policy?: OriginPolicy;
 }
 
 export interface GantryResponse {

@@ -1421,6 +1421,45 @@ class TestTipRackDimensionForwarding:
             Path(path).unlink(missing_ok=True)
 
 
+TIPRACK_WITH_SIGNED_PICKUP_Z = """
+labware:
+  rack:
+    type: tip_rack
+    name: test_rack
+    rows: 1
+    columns: 1
+    pickup_z: -20.0
+    drop_z: -15.0
+    tip_length: 59.3
+    calibration:
+      a1:
+        x: -110.0
+        y: -50.0
+      a2:
+        x: -10.0
+        y: -50.0
+    x_offset: 100.0
+    y_offset: 1.0
+"""
+
+
+class TestTipRackSignedPickupZ:
+
+    def test_signed_pickup_and_drop_z_accepted_by_schema(self):
+        """home_origin decks need negative pickup_z/drop_z; gt=0 was removed."""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(TIPRACK_WITH_SIGNED_PICKUP_Z)
+            path = f.name
+        try:
+            deck = load_deck_from_yaml(path)
+            rack = deck["rack"]
+            assert isinstance(rack, TipRack)
+            assert rack.pickup_z == pytest.approx(-20.0)
+            assert rack.tips["A1"].z == pytest.approx(-20.0)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+
 # ----- Wall labware -----
 
 VALID_WALL = """

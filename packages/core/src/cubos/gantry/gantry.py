@@ -34,9 +34,13 @@ logger = logging.getLogger(__name__)
 class Gantry:
     """High-level gantry wrapper around the low-level Mill driver.
 
-    CubOS coordinates use the deck-origin frame at this boundary:
-    front-left-bottom origin, +X operator-right, +Y back, +Z up.
-    Controller GRBL settings are expected to make WPos match that frame.
+    CubOS coordinates use a signed frame at this boundary, selected per
+    gantry config by ``origin_policy`` (see ``cubos.gantry.origin``):
+    ``deck_origin`` (default) puts WPos zero at the front-left-bottom deck
+    corner with a non-negative working volume; ``home_origin`` puts WPos
+    zero at the homed back-right-top corner with a non-positive working
+    volume. Both use +X operator-right, +Y back, +Z up. Controller GRBL
+    settings are expected to make WPos match the configured frame.
     """
 
     def __init__(

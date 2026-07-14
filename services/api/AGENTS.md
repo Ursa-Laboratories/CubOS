@@ -43,11 +43,17 @@ python -m cubos_api
 
 ## Coordinate and calibration semantics
 
-CubOS uses a front-left-bottom deck origin: +X right, +Y back, +Z up. Clients
-must not negate X or Y. `working_volume` is the usable deck/WPos range; GRBL
-`max_travel_*` includes the configured homing pull-off reserve. Calibration UI
-and API code may sequence operator actions, but controller behavior remains in
-the CubOS runtime.
+Gantry YAML selects the coordinate frame with `origin_policy`: `deck_origin`
+(default) zeroes at the front-left-bottom deck corner, with non-negative
+`working_volume` minima; `home_origin` zeroes at the homed back-right-top
+corner, with the entire reachable workspace expressed as non-positive
+coordinates (`working_volume` maxima at 0). Both policies keep +X right, +Y
+back, +Z up. Clients must use coordinates in the machine's configured frame
+verbatim — never negate, sign-flip, or convert between policies.
+`working_volume` is the usable deck/WPos range for the configured policy;
+GRBL `max_travel_*` includes the configured homing pull-off reserve.
+Calibration UI and API code may sequence operator actions, but controller
+behavior remains in the CubOS runtime.
 
 ## Local state
 

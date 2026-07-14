@@ -94,7 +94,7 @@ def _run_hello_world(monkeypatch, tmp_path, gantry_cls, keys: list[str]) -> str:
     monkeypatch.setattr(sys, "argv", ["hello_world.py", "--gantry", str(gantry_path)])
     monkeypatch.setattr(hello_world, "Gantry", gantry_cls)
     monkeypatch.setattr(hello_world, "load_gantry_from_yaml_safe", lambda _path: {})
-    monkeypatch.setattr(hello_world, "validate_deck_origin_minima", lambda _config: None)
+    monkeypatch.setattr(hello_world, "validate_working_volume_origin", lambda _config: None)
     monkeypatch.setattr(hello_world, "read_keypress", lambda: next(key_iter))
     monkeypatch.setattr(hello_world, "flush_stdin", lambda: None)
     monkeypatch.setattr(builtins, "input", lambda _prompt: "")
@@ -144,7 +144,7 @@ def test_hello_world_unhealthy_non_alarm_disconnects_and_exits(monkeypatch, tmp_
     monkeypatch.setattr(sys, "argv", ["hello_world.py", "--gantry", str(gantry_path)])
     monkeypatch.setattr(hello_world, "Gantry", _UnhealthyGantry)
     monkeypatch.setattr(hello_world, "load_gantry_from_yaml_safe", lambda _path: {})
-    monkeypatch.setattr(hello_world, "validate_deck_origin_minima", lambda _config: None)
+    monkeypatch.setattr(hello_world, "validate_working_volume_origin", lambda _config: None)
 
     with pytest.raises(SystemExit) as exc_info:
         hello_world.main()
@@ -159,7 +159,7 @@ def test_hello_world_keyboard_interrupt_stops_and_disconnects(monkeypatch, tmp_p
     monkeypatch.setattr(sys, "argv", ["hello_world.py", "--gantry", str(gantry_path)])
     monkeypatch.setattr(hello_world, "Gantry", _BaseHelloGantry)
     monkeypatch.setattr(hello_world, "load_gantry_from_yaml_safe", lambda _path: {})
-    monkeypatch.setattr(hello_world, "validate_deck_origin_minima", lambda _config: None)
+    monkeypatch.setattr(hello_world, "validate_working_volume_origin", lambda _config: None)
     monkeypatch.setattr(hello_world, "read_keypress", lambda: (_ for _ in ()).throw(KeyboardInterrupt))
     monkeypatch.setattr(hello_world, "flush_stdin", lambda: None)
     monkeypatch.setattr(builtins, "input", lambda _prompt: "")

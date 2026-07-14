@@ -57,7 +57,7 @@ def test_home_gantry_config_run_homing_disconnects_after_home(monkeypatch, tmp_p
     path = tmp_path / "gantry.yaml"
     path.write_text("serial_port: /dev/fake\n", encoding="utf-8")
     monkeypatch.setattr(home_gantry_config, "load_gantry_from_yaml_safe", lambda p: {"path": p})
-    monkeypatch.setattr(home_gantry_config, "validate_deck_origin_minima", lambda _config: None)
+    monkeypatch.setattr(home_gantry_config, "validate_working_volume_origin", lambda _config: None)
     monkeypatch.setattr(home_gantry_config, "Gantry", _FakeHomingGantry)
 
     home_gantry_config.run_homing(path)
@@ -70,7 +70,7 @@ def test_home_gantry_config_run_homing_disconnects_after_failure(monkeypatch, tm
     path = tmp_path / "gantry.yaml"
     path.write_text("serial_port: /dev/fake\n", encoding="utf-8")
     monkeypatch.setattr(home_gantry_config, "load_gantry_from_yaml_safe", lambda _path: {})
-    monkeypatch.setattr(home_gantry_config, "validate_deck_origin_minima", lambda _config: None)
+    monkeypatch.setattr(home_gantry_config, "validate_working_volume_origin", lambda _config: None)
     monkeypatch.setattr(home_gantry_config, "Gantry", _FailingHomeGantry)
 
     with pytest.raises(RuntimeError, match="limit switch"):

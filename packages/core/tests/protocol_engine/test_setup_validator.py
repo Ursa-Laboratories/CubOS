@@ -36,6 +36,29 @@ DECK_YAML = """\
 labware: {}
 """
 
+GANTRY_YAML_HOME_ORIGIN = """\
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+origin_policy: home_origin
+cnc:
+  factory_z_travel_mm: 90.0
+  safe_z: -5.0
+working_volume:
+  x_min: -300.0
+  x_max: 0.0
+  y_min: -200.0
+  y_max: 0.0
+  z_min: -80.0
+  z_max: 0.0
+instruments:
+  pipette:
+    type: pipette
+    vendor: opentrons
+    offset_x: 5.0
+    offset_y: 0.0
+    depth: 0.0
+"""
+
 
 @pytest.fixture(autouse=True)
 def _ensure_commands_registered():
@@ -116,6 +139,30 @@ def test_run_setup_validation_reports_named_position_bounds_errors(tmp_path):
     assert result.stage == "validation"
     assert any("park.location.target" in error for error in result.errors)
     assert "RESULT: FAIL" in result.output
+
+
+def test_run_setup_validation_passes_for_home_origin_negative_fixture(tmp_path):
+    """A home_origin gantry config must validate end-to-end like deck_origin."""
+    gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML_HOME_ORIGIN)
+    deck = _write(tmp_path / "deck.yaml", DECK_YAML)
+    protocol = _write(
+        tmp_path / "protocol.yaml",
+        """\
+        positions:
+          park: [-150.0, -50.0, -30.0]
+        protocol:
+          - move:
+              instrument: pipette
+              position: park
+              travel_z: -5.0
+        """,
+    )
+
+    result = run_setup_validation(gantry, deck, protocol)
+
+    assert result.passed is True
+    assert result.errors == ()
+    assert "RESULT: PASS" in result.output
 
 
 @pytest.mark.parametrize("command_yaml", [

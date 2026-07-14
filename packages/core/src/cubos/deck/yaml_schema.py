@@ -307,8 +307,8 @@ class TipRackYamlEntry(_BaseHolderYamlEntry):
     model_name: str = "tip_rack"
     rows: int = Field(..., gt=0, le=26)
     columns: int = Field(..., gt=0)
-    pickup_z: float = Field(..., gt=0)
-    drop_z: Optional[float] = Field(default=None, gt=0)
+    pickup_z: float
+    drop_z: Optional[float] = None
     tip_length: float = Field(..., gt=0)
     calibration: _YamlCalibrationPoints
     x_offset: float = Field(..., gt=0)

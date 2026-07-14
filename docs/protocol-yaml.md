@@ -134,8 +134,9 @@ Commands available in YAML:
 
 ### `home`
 
-Home the gantry without rewriting the calibrated deck-origin work-coordinate
-system. No arguments.
+Home the gantry without rewriting the calibrated work-coordinate system —
+whichever `origin_policy` the gantry YAML selects (see [Gantry: Origin
+Policy](gantry.md#origin-policy)). No arguments.
 
 ### `move`
 

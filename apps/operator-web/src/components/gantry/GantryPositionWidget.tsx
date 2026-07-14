@@ -327,10 +327,6 @@ export default function GantryPositionWidget({
       setMoveError("Enter valid X, Y, and Z coordinates.");
       return;
     }
-    if (x < 0 || y < 0 || z < 0) {
-      setMoveError("Coordinates must be 0 or greater.");
-      return;
-    }
     if (workingVolume) {
       const axisChecks: Array<[string, number, number, number]> = [
         ["X", x, workingVolume.x_min, workingVolume.x_max],

@@ -13,6 +13,7 @@ from .errors import GantryLoaderError
 from .gantry_config import (
     GantryConfig,
     GantryType,
+    OriginPolicy,
     WorkingVolume,
     YAxisMotion,
 )
@@ -35,8 +36,8 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
         elif "extra_forbidden" in error_type or "Extra inputs are not permitted" in detail:
             guidance = (
                 "Remove unknown YAML fields; only 'serial_port', 'cnc', "
-                "'gantry_type', 'working_volume', 'grbl_settings', and "
-                "'instruments' are allowed at root."
+                "'gantry_type', 'working_volume', 'origin_policy', "
+                "'grbl_settings', and 'instruments' are allowed at root."
             )
         else:
             guidance = "Review the YAML values against the gantry schema."
@@ -98,6 +99,7 @@ def load_gantry_from_yaml(path: str | Path) -> GantryConfig:
             z_max=schema.working_volume.z_max,
         ),
         y_axis_motion=YAxisMotion(schema.cnc.y_axis_motion),
+        origin_policy=OriginPolicy(schema.origin_policy),
         expected_grbl_settings=expected_grbl,
         instruments=instruments,
     )

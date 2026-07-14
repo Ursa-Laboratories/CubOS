@@ -21,6 +21,20 @@ class GantryType(str, Enum):
     CUB_XL = "cub_xl"
 
 
+class OriginPolicy(str, Enum):
+    """Which physical corner WPos zero is calibrated to.
+
+    ``DECK_ORIGIN`` (default): WPos zero at the front-left-bottom deck
+    corner; the entire reachable working volume is non-negative.
+    ``HOME_ORIGIN``: WPos zero at the homed back-right-top corner; the
+    entire reachable working volume is non-positive (mirror-symmetric with
+    ``DECK_ORIGIN``).
+    """
+
+    DECK_ORIGIN = "deck_origin"
+    HOME_ORIGIN = "home_origin"
+
+
 @dataclass(frozen=True)
 class WorkingVolume:
     """Gantry working volume bounds in millimeters.
@@ -63,6 +77,7 @@ class GantryConfig:
     factory_z_travel_mm: float
     working_volume: WorkingVolume
     y_axis_motion: YAxisMotion = YAxisMotion.HEAD
+    origin_policy: OriginPolicy = OriginPolicy.DECK_ORIGIN
     calibration_block_height_mm: Optional[float] = None
     safe_z: Optional[float] = None
     expected_grbl_settings: Optional[Dict[str, float]] = field(default=None)
@@ -74,6 +89,14 @@ class GantryConfig:
         except ValueError as exc:
             raise ValueError(
                 f"Unsupported gantry_type {self.gantry_type!r}."
+            ) from exc
+        try:
+            object.__setattr__(
+                self, "origin_policy", OriginPolicy(self.origin_policy),
+            )
+        except ValueError as exc:
+            raise ValueError(
+                f"Unsupported origin_policy {self.origin_policy!r}."
             ) from exc
         if self.factory_z_travel_mm <= 0:
             raise ValueError(

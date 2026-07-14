@@ -40,6 +40,34 @@ class TestGantryYamlSchema:
         assert schema.working_volume.z_min == 0.0
         assert schema.working_volume.z_max == 80.0
 
+    def test_origin_policy_defaults_to_deck_origin(self):
+        schema = GantryYamlSchema.model_validate(_valid_gantry_dict())
+
+        assert schema.origin_policy == "deck_origin"
+
+    def test_origin_policy_accepts_home_origin(self):
+        data = _valid_gantry_dict()
+        data["origin_policy"] = "home_origin"
+        data["working_volume"] = {
+            "x_min": -300.0,
+            "x_max": 0.0,
+            "y_min": -200.0,
+            "y_max": 0.0,
+            "z_min": -80.0,
+            "z_max": 0.0,
+        }
+
+        schema = GantryYamlSchema.model_validate(data)
+
+        assert schema.origin_policy == "home_origin"
+
+    def test_origin_policy_rejects_unknown_value(self):
+        data = _valid_gantry_dict()
+        data["origin_policy"] = "bogus"
+
+        with pytest.raises(ValidationError, match="origin_policy"):
+            GantryYamlSchema.model_validate(data)
+
     def test_homing_strategy_is_rejected(self):
         data = _valid_gantry_dict()
         data["cnc"]["homing_strategy"] = "standard"

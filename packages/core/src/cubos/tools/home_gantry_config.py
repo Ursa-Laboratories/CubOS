@@ -23,7 +23,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
 from cubos.gantry import Gantry, load_gantry_from_yaml_safe  # noqa: E402
-from cubos.gantry.origin import validate_deck_origin_minima  # noqa: E402
+from cubos.gantry.origin import validate_working_volume_origin  # noqa: E402
 
 
 def run_homing(gantry_path: Path) -> None:
@@ -33,7 +33,7 @@ def run_homing(gantry_path: Path) -> None:
         gantry_path: Path to a validated gantry YAML file.
     """
     config = load_gantry_from_yaml_safe(gantry_path)
-    validate_deck_origin_minima(config)
+    validate_working_volume_origin(config)
 
     gantry = Gantry(config=config)
     try:

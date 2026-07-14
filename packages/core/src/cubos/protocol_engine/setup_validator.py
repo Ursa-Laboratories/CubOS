@@ -16,7 +16,7 @@ from cubos.deck.loader import load_deck_from_yaml
 from cubos.gantry.gantry import Gantry
 from cubos.gantry.instrument_loader import load_instrumented_gantry_from_config
 from cubos.gantry.loader import load_gantry_from_yaml
-from cubos.gantry.origin import validate_deck_origin_minima
+from cubos.gantry.origin import validate_working_volume_origin
 from cubos.protocol_engine.loader import load_protocol_from_yaml
 from cubos.validation.bounds import (
     collect_protocol_motion_targets,
@@ -110,7 +110,7 @@ def run_setup_validation(
     out("[1/4] Loading gantry config...")
     try:
         gantry_config = load_gantry_from_yaml(gantry_path)
-        validate_deck_origin_minima(gantry_config)
+        validate_working_volume_origin(gantry_config)
     except Exception as exc:
         _log.error("Failed to load gantry config from %s", gantry_path, exc_info=True)
         return _error_result(
