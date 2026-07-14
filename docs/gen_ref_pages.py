@@ -8,12 +8,12 @@ from pathlib import Path
 import mkdocs_gen_files
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-# Each root defines import paths separately from docs paths. Modules under
-# src/ import as `deck`, `gantry`, etc., but keep the existing reference/src/
-# URL layout for stable documentation links.
 SOURCE_ROOTS = [
-    (REPO_ROOT / "src", (), ("src",)),
-    (REPO_ROOT / "data", ("data",), ("data",)),
+    (
+        REPO_ROOT / "packages" / "core" / "src" / "cubos",
+        ("cubos",),
+        ("cubos",),
+    ),
 ]
 EXCLUDED_PARTS: set[str] = set()
 
@@ -135,16 +135,16 @@ index_lines = [
     "",
     "Common entrypoints:",
     "",
-    "- `deck.load_deck_from_yaml_safe(path)`",
-    "- `gantry.load_gantry_from_yaml_safe(path)`",
-    "- `protocol_engine.load_protocol_from_yaml_safe(path)`",
-    "- `protocol_engine.ProtocolBuilder.with_setup(gantry_path=..., deck_path=...)`",
+    "- `cubos.deck.load_deck_from_yaml_safe(path)`",
+    "- `cubos.gantry.load_gantry_from_yaml_safe(path)`",
+    "- `cubos.protocol_engine.load_protocol_from_yaml_safe(path)`",
+    "- `cubos.protocol_engine.ProtocolBuilder.with_setup(gantry_path=..., deck_path=...)`",
     "- `protocol.validate()` — offline gantry/deck/bounds/semantics validation",
     "- `protocol.run(campaign=\"...\")` — run on hardware, optionally saving a campaign",
-    "- `protocol_engine.setup.setup_protocol(gantry_path, deck_path, protocol, ...)` where `protocol` is a YAML path or `Protocol`",
-    "- `protocol_engine.setup_validator.run_setup_validation(gantry_path, deck_path, protocol_path)`",
-    "- `data.DataStore(db_path=None)`",
-    "- `data.DataReader(db_path=..., connection=...)`",
+    "- `cubos.protocol_engine.setup.setup_protocol(gantry_path, deck_path, protocol, ...)` where `protocol` is a YAML path or `Protocol`",
+    "- `cubos.protocol_engine.setup_validator.run_setup_validation(gantry_path, deck_path, protocol_path)`",
+    "- `cubos.data.DataStore(db_path=None)`",
+    "- `cubos.data.DataReader(db_path=..., connection=...)`",
     "",
 ]
 

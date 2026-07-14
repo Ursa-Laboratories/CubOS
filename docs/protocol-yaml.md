@@ -26,8 +26,8 @@ The YAML path has three user-facing steps:
 
 1. **Write** a protocol YAML file.
 2. **Validate** the gantry, deck, and protocol together with
-   `setup/validate_setup.py`.
-3. **Run** the same three files with `setup/run_protocol.py`.
+   `packages/core/src/cubos/tools/validate_setup.py`.
+3. **Run** the same three files with `packages/core/src/cubos/tools/run_protocol.py`.
 
 The sections below cover that workflow first. Detailed command arguments come
 later in [Protocol command reference](#protocol-command-reference).
@@ -55,14 +55,14 @@ strict — an unknown key under a command is rejected.
 
 ## Validate offline
 
-Run `setup/validate_setup.py` before connecting hardware, using the exact
+Run `packages/core/src/cubos/tools/validate_setup.py` before connecting hardware, using the exact
 gantry, deck, and protocol files intended for the run:
 
 ```bash
-python setup/validate_setup.py \
-  configs/gantry/cub_xl_asmi.yaml \
-  configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi/move_a1.yaml
+python -m cubos.tools.validate_setup \
+  packages/core/configs/gantry/cub_xl_asmi.yaml \
+  packages/core/configs/deck/asmi_deck.yaml \
+  packages/core/configs/protocol/asmi/move_a1.yaml
 ```
 
 Treat this as a required preflight after calibration changes, deck edits, gantry
@@ -76,13 +76,13 @@ fixture, cable, tool, and sample clearance before running.
 After calibration, jog checks, and offline validation:
 
 ```bash
-python setup/run_protocol.py \
-  configs/gantry/cub_xl_asmi.yaml \
-  configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi/move_a1.yaml
+python -m cubos.tools.run_protocol \
+  packages/core/configs/gantry/cub_xl_asmi.yaml \
+  packages/core/configs/deck/asmi_deck.yaml \
+  packages/core/configs/protocol/asmi/move_a1.yaml
 ```
 
-`setup/run_protocol.py` re-runs offline validation first, then connects to
+`packages/core/src/cubos/tools/run_protocol.py` re-runs offline validation first, then connects to
 the gantry and instruments, health-checks them, runs the protocol steps, and
 disconnects when done. Measurement results are saved automatically.
 

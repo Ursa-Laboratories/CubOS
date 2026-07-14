@@ -21,7 +21,7 @@ Use this guide when labware is moved, recalibrated, or replaced.
 
 4. **Jog to the labware calibration points.**
 
-    Use Zoo, UGS, or another G-code controller to jog the instrument to the
+    Use CubOS, UGS, or another G-code controller to jog the instrument to the
     physical points that define the labware position.
 
     For a 96-well plate, jog to A1 and record the displayed position. Then jog
@@ -148,10 +148,10 @@ dimensions:
 7. **Validate before running hardware.**
 
     ```bash
-    PYTHONPATH=src python setup/validate_setup.py \
-      configs/gantry/cub_xl_asmi.yaml \
-      configs/deck/asmi_deck.yaml \
-      configs/protocol/asmi/indentation.yaml
+    python -m cubos.tools.validate_setup \
+      packages/core/configs/gantry/cub_xl_asmi.yaml \
+      packages/core/configs/deck/asmi_deck.yaml \
+      packages/core/configs/protocol/asmi/indentation.yaml
     ```
 
     Replace the example paths with the gantry, deck, and protocol YAML files

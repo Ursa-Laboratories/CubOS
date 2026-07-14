@@ -5,7 +5,7 @@ instruments are mounted. Create it **before calibrating** — calibration reads
 the mounted instruments from this file and writes its measurements back into
 it.
 
-Don't write one from scratch. Copy the seed config from `configs/gantry/`
+Don't write one from scratch. Copy the seed config from `packages/core/configs/gantry/`
 that matches your machine and instrument, rename the copy for your setup,
 and adjust the instruments if needed.
 
@@ -56,7 +56,7 @@ Supported types: `asmi`, `filmetrics`, `pipette`, `potentiostat`,
 
 Every instrument entry accepts these shared fields:
 
-- `type` *(str, required)* — a type from `src/instruments/registry.yaml`.
+- `type` *(str, required)* — a type from `packages/core/src/cubos/instruments/registry.yaml`.
 - `vendor` *(str, required)* — a vendor registered for that type. The
   `type`/`vendor` pair tells CubOS which Python driver class to load.
 - `offset_x`, `offset_y`, `depth` *(float, default `0.0`)* — physical mounting
