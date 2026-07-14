@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cubos-client"
+version = "0.1.0"
+description = "Supported Python client for the CubOS appliance API"
+requires-python = ">=3.11"
+dependencies = ["requests>=2.31"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+cubos-send = "cubos_client.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cubos_client"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

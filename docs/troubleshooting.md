@@ -83,7 +83,7 @@ Calibration doesn't write to a separate data store — it writes calibrated
 values (working volume, offsets, GRBL travel settings) directly back into
 the gantry YAML you point it at, either overwriting the input file or, with
 `--output-gantry`, into an explicit copy. Calibrated gantry configs live
-wherever you keep your gantry YAML, typically `configs/gantry/`.
+wherever you keep your gantry YAML, typically `packages/core/configs/gantry/`.
 
 To start clean:
 
@@ -92,6 +92,6 @@ To start clean:
 - If you calibrated in place and want to discard the result, restore the
   file from version control:
   ```bash
-  git checkout -- configs/gantry/<your-gantry-file>.yaml
+  git checkout -- packages/core/configs/gantry/<your-gantry-file>.yaml
   ```
 - Then re-run [Calibration](calibration.md) from the top.

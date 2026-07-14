@@ -3,7 +3,7 @@
 CubOS runs from three YAML inputs:
 
 ```text
-configs/
+packages/core/configs/
   gantry/      # machine envelope, GRBL expectations, mounted instruments
   deck/        # labware placement and calibration anchors
   protocol/    # ordered experiment steps
