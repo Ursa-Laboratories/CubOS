@@ -1,0 +1,70 @@
+# Supported instrument types, vendor implementations, and calibration metadata.
+# Gantry YAML selects a generic `type` plus a concrete `vendor`.
+
+instruments:
+  asmi:
+    interface: cubos.instruments.asmi.interface.ASMIInstrument
+    calibration_mode: contact
+    vendors:
+      vernier:
+        module: cubos.instruments.asmi.vendors.vernier
+        class_name: VernierASMI
+
+  filmetrics:
+    interface: cubos.instruments.filmetrics.interface.FilmetricsInstrument
+    calibration_mode: contact
+    vendors:
+      kla:
+        module: cubos.instruments.filmetrics.vendors.kla
+        class_name: KLAFilmetrics
+
+  pipette:
+    interface: cubos.instruments.pipette.interface.PipetteInstrument
+    calibration_mode: contact
+    vendors:
+      opentrons:
+        module: cubos.instruments.pipette.vendors.opentrons
+        class_name: OpentronsPipette
+
+  potentiostat:
+    interface: cubos.instruments.potentiostat.interface.PotentiostatInstrument
+    calibration_mode: contact
+    vendors:
+      admiral:
+        module: cubos.instruments.potentiostat.vendors.admiral
+        class_name: AdmiralPotentiostat
+
+  uv_curing:
+    interface: cubos.instruments.uv_curing.interface.UVCuringInstrument
+    calibration_mode: contact
+    vendors:
+      excelitas:
+        module: cubos.instruments.uv_curing.vendors.excelitas
+        class_name: ExcelitasUVCuring
+
+  uvvis_ccs:
+    interface: cubos.instruments.uvvis_ccs.interface.UVVisCCSInstrument
+    calibration_mode: contact
+    vendors:
+      thorlabs:
+        module: cubos.instruments.uvvis_ccs.vendors.thorlabs
+        class_name: ThorlabsUVVisCCS
+
+  camera:
+    interface: cubos.instruments.camera.interface.CameraInstrument
+    calibration_mode: non_contact
+    vendors:
+      mount_only:
+        module: cubos.instruments.camera.vendors.mount_only
+        class_name: MountOnlyCamera
+      raspberry_pi:
+        module: cubos.instruments.camera.vendors.raspberry_pi
+        class_name: RaspberryPiCamera
+
+  mounted_tool:
+    interface: cubos.instruments.mounted_tool.interface.MountedToolInstrument
+    calibration_mode: contact
+    vendors:
+      mount_only:
+        module: cubos.instruments.mounted_tool.vendors.mount_only
+        class_name: MountOnlyTool

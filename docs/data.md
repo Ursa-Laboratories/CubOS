@@ -71,4 +71,4 @@ python -m data.export_helpers \
 If `--csv` is omitted, the helper prints the table to stdout.
 
 For programmatic access — Python read/write APIs and ZIP exports — see the
-[data API reference](reference/data/index.md).
+[data API reference](reference/cubos/data/index.md).

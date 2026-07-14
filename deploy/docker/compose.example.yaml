@@ -7,9 +7,9 @@ services:
     ports:
       - "8742:8742"
     environment:
-      CUB_IMAGE_DIGEST: sha256:REPLACE_WITH_DIGEST
-      ZOO_API_TOKEN_FILE: /run/secrets/cub_api_token
-      ZOO_TRUSTED_HOSTS: '["cub.local","cub.local:8742"]'
+      CUBOS_IMAGE_DIGEST: sha256:REPLACE_WITH_DIGEST
+      CUBOS_API_TOKEN_FILE: /run/secrets/cub_api_token
+      CUBOS_TRUSTED_HOSTS: '["cub.local","cub.local:8742"]'
     volumes:
       - /var/lib/cub:/var/lib/cub
     devices:

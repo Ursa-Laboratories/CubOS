@@ -1,0 +1,306 @@
+/* CubOS foundation styles.
+   Runtime theme values live as CSS custom properties here. src/theme.ts
+   exposes those variables to the inline-style component system. */
+
+:root, :root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --z-canvas: #070b16;
+  --z-surface: #0e1526;
+  --z-surface-muted: #141d33;
+  --z-surface-sunken: #0a101f;
+  --z-ink: #f1f5f9;
+  --z-text: #e2e8f0;
+  --z-text-secondary: #b0bdd4;
+  --z-text-muted: #94a3b8;
+  --z-text-faint: #5d6b85;
+  --z-border: #1e2a44;
+  --z-border-strong: #31405f;
+
+  --z-accent: #22d3ee;
+  --z-accent-hover: #67e8f9;
+  --z-accent-tint: rgba(34, 211, 238, 0.10);
+  --z-accent-tint-border: rgba(34, 211, 238, 0.35);
+  --z-accent-text: #7dedff;
+  --z-accent-soft: rgba(34, 211, 238, 0.18);
+
+  --z-danger-bg: rgba(239, 68, 68, 0.10);
+  --z-danger-border: rgba(239, 68, 68, 0.40);
+  --z-danger-text: #fca5a5;
+  --z-warning: #f59e0b;
+  --z-warning-bg: rgba(245, 158, 11, 0.10);
+  --z-warning-border: rgba(245, 158, 11, 0.38);
+  --z-warning-text: #fcd34d;
+  --z-success: #34d399;
+  --z-success-bg: rgba(52, 211, 153, 0.10);
+  --z-success-border: rgba(52, 211, 153, 0.38);
+  --z-success-text: #6ee7b7;
+
+  --z-shadow-card: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 10px 30px rgba(2, 6, 17, 0.45);
+  --z-shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 14px 40px rgba(2, 6, 17, 0.6);
+  --z-shadow-overlay: 0 24px 70px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(148, 163, 184, 0.08);
+  --z-shadow-glow: 0 0 20px rgba(34, 211, 238, 0.28), 0 4px 14px rgba(2, 6, 17, 0.5);
+
+  --z-btn-primary-bg: linear-gradient(135deg, #06b6d4 0%, #6366f1 100%);
+  --z-btn-primary-border: rgba(103, 232, 249, 0.35);
+  --z-btn-primary-shadow: var(--z-shadow-glow);
+  --z-btn-primary-text-shadow: 0 1px 2px rgba(2, 6, 17, 0.35);
+  --z-btn-hover-filter: brightness(1.15);
+  --z-btn-active-filter: brightness(0.85);
+
+  --z-body-bg: radial-gradient(1100px 700px at 75% -10%, rgba(56, 189, 248, 0.10), transparent 60%), radial-gradient(900px 600px at -8% 110%, rgba(99, 102, 241, 0.08), transparent 60%), #070b16;
+  --z-header-bg: rgba(10, 16, 31, 0.85);
+  --z-header-hairline: 0 1px 0 rgba(34, 211, 238, 0.06);
+  --z-brand-glow: 0 0 14px rgba(34, 211, 238, 0.25);
+  --z-segment-active-bg: #141d33;
+  --z-segment-active-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.35), 0 0 10px rgba(34, 211, 238, 0.15);
+  --z-telemetry-glow: 0 0 12px rgba(34, 211, 238, 0.35);
+  --z-backdrop: rgba(2, 6, 17, 0.72);
+  --z-jog-active-bg: #1c2946;
+  --z-scrollbar-thumb: #31405f;
+  --z-scrollbar-thumb-hover: #47598a;
+
+  --z-cat-emerald: #34d399;
+  --z-cat-amber: #fbbf24;
+  --z-cat-violet: #a78bfa;
+  --z-cat-blue: #60a5fa;
+  --z-cat-slate: #94a3b8;
+
+  --z-viz-canvas: #0a101f;
+  --z-viz-frame: #1e2a44;
+  --z-viz-grid: rgba(148, 163, 184, 0.10);
+  --z-viz-tick: #5d6b85;
+  --z-viz-caption: #94a3b8;
+  --z-viz-halo: #0a101f;
+  --z-viz-plate-fill: #141d33;
+  --z-viz-plate-stroke: #31405f;
+  --z-viz-well-fill: #0a101f;
+  --z-viz-well-stroke: #22d3ee;
+  --z-viz-label: #b0bdd4;
+  --z-viz-tiprack-fill: rgba(52, 211, 153, 0.08);
+  --z-viz-tiprack-stroke: #31405f;
+  --z-viz-tip: #34d399;
+  --z-viz-holder-fill: rgba(20, 29, 51, 0.5);
+  --z-viz-holder-stroke: #31405f;
+  --z-viz-holder-label: #94a3b8;
+  --z-viz-vial-fill: rgba(245, 158, 11, 0.12);
+  --z-viz-vial-stroke: #f59e0b;
+  --z-viz-vial-label: #fcd34d;
+  --z-viz-marker: #22d3ee;
+  --z-viz-marker-halo: rgba(34, 211, 238, 0.15);
+  --z-viz-marker-label: #7dedff;
+  --z-viz-marker-ring: #0a101f;
+
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+  line-height: 1.45;
+  font-weight: 400;
+  color: var(--z-ink);
+  background-color: var(--z-canvas);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  font-variant-numeric: tabular-nums;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --z-canvas: #f1f5f9;
+  --z-surface: #ffffff;
+  --z-surface-muted: #f8fafc;
+  --z-surface-sunken: #f1f5f9;
+  --z-ink: #0f172a;
+  --z-text: #1e293b;
+  --z-text-secondary: #475569;
+  --z-text-muted: #64748b;
+  --z-text-faint: #94a3b8;
+  --z-border: #e2e8f0;
+  --z-border-strong: #cbd5e1;
+
+  --z-accent: #4f46e5;
+  --z-accent-hover: #4338ca;
+  --z-accent-tint: #eef2ff;
+  --z-accent-tint-border: #c7d2fe;
+  --z-accent-text: #3730a3;
+  --z-accent-soft: rgba(79, 70, 229, 0.16);
+
+  --z-danger-bg: #fef2f2;
+  --z-danger-border: #fecaca;
+  --z-danger-text: #991b1b;
+  --z-warning: #d97706;
+  --z-warning-bg: #fffbeb;
+  --z-warning-border: #fde68a;
+  --z-warning-text: #92400e;
+  --z-success: #059669;
+  --z-success-bg: #ecfdf5;
+  --z-success-border: #a7f3d0;
+  --z-success-text: #065f46;
+
+  --z-shadow-card: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.06);
+  --z-shadow-raised: 0 4px 12px rgba(15, 23, 42, 0.08), 0 2px 4px rgba(15, 23, 42, 0.05);
+  --z-shadow-overlay: 0 20px 50px rgba(15, 23, 42, 0.22), 0 8px 16px rgba(15, 23, 42, 0.1);
+  --z-shadow-glow: var(--z-shadow-card);
+
+  --z-btn-primary-bg: #4f46e5;
+  --z-btn-primary-border: #4f46e5;
+  --z-btn-primary-shadow: none;
+  --z-btn-primary-text-shadow: none;
+  --z-btn-hover-filter: brightness(0.96);
+  --z-btn-active-filter: brightness(0.9);
+
+  --z-body-bg: #f1f5f9;
+  --z-header-bg: #ffffff;
+  --z-header-hairline: none;
+  --z-brand-glow: none;
+  --z-segment-active-bg: #ffffff;
+  --z-segment-active-shadow: var(--z-shadow-card);
+  --z-telemetry-glow: none;
+  --z-backdrop: rgba(15, 23, 42, 0.45);
+  --z-jog-active-bg: #e2e8f0;
+  --z-scrollbar-thumb: #cbd5e1;
+  --z-scrollbar-thumb-hover: #94a3b8;
+
+  --z-cat-emerald: #059669;
+  --z-cat-amber: #d97706;
+  --z-cat-violet: #7c3aed;
+  --z-cat-blue: #2563eb;
+  --z-cat-slate: #64748b;
+
+  --z-viz-canvas: #f8fafc;
+  --z-viz-frame: #e2e8f0;
+  --z-viz-grid: #e2e8f0;
+  --z-viz-tick: #94a3b8;
+  --z-viz-caption: #64748b;
+  --z-viz-halo: #ffffff;
+  --z-viz-plate-fill: #f1f5f9;
+  --z-viz-plate-stroke: #94a3b8;
+  --z-viz-well-fill: #ffffff;
+  --z-viz-well-stroke: #4f46e5;
+  --z-viz-label: #475569;
+  --z-viz-tiprack-fill: #ecfdf5;
+  --z-viz-tiprack-stroke: #94a3b8;
+  --z-viz-tip: #059669;
+  --z-viz-holder-fill: #f8fafc;
+  --z-viz-holder-stroke: #cbd5e1;
+  --z-viz-holder-label: #475569;
+  --z-viz-vial-fill: #fffbeb;
+  --z-viz-vial-stroke: #d97706;
+  --z-viz-vial-label: #92400e;
+  --z-viz-marker: #4f46e5;
+  --z-viz-marker-halo: rgba(79, 70, 229, 0.15);
+  --z-viz-marker-label: #4338ca;
+  --z-viz-marker-ring: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow: hidden;
+  color: var(--z-ink);
+  background: var(--z-body-bg);
+}
+
+::selection {
+  background: var(--z-accent-soft);
+}
+
+input, select, button, textarea {
+  font-family: inherit;
+}
+
+/* Quiet, uniform interaction feedback. Component-specific looks stay
+   inline; these rules only add the states inline styles can't. */
+button {
+  transition: filter 0.12s ease, box-shadow 0.12s ease, opacity 0.12s ease,
+    background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+button:not(:disabled):hover {
+  filter: var(--z-btn-hover-filter);
+}
+
+button:not(:disabled):active {
+  filter: var(--z-btn-active-filter);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input, select, textarea {
+  transition: border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+input:focus, select:focus, textarea:focus {
+  outline: none;
+  border-color: var(--z-accent);
+  box-shadow: 0 0 0 3px var(--z-accent-soft);
+}
+
+*:focus-visible {
+  outline: 2px solid var(--z-accent);
+  outline-offset: 2px;
+}
+
+input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: none;
+}
+
+/* Jog button press feedback */
+.jog-btn:active:not(:disabled) {
+  background: var(--z-jog-active-bg);
+  transform: scale(0.93);
+}
+
+@keyframes cubos-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(245, 158, 11, 0);
+  }
+}
+
+.cubos-pulse {
+  animation: cubos-pulse 2s ease-in-out infinite;
+}
+
+/* Slim slate scrollbars so dense config panels stay tidy. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--z-scrollbar-thumb);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--z-scrollbar-thumb-hover);
+  background-clip: content-box;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}

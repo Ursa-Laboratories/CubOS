@@ -29,32 +29,33 @@ installation steps — this README doesn't duplicate them.
 Validate an example setup without moving hardware:
 
 ```bash
-PYTHONPATH=src python setup/validate_setup.py \
-  configs/gantry/cub_xl_asmi.yaml \
-  configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi/move_a1.yaml
+pip install -e packages/core
+python -m cubos.tools.validate_setup \
+  packages/core/configs/gantry/cub_xl_asmi.yaml \
+  packages/core/configs/deck/asmi_deck.yaml \
+  packages/core/configs/protocol/asmi/move_a1.yaml
 ```
 
 For real hardware, calibrate the gantry YAML before running protocols:
 
 ```bash
-PYTHONPATH=src python setup/calibrate_gantry.py configs/gantry/cub_xl_asmi.yaml
+python -m cubos.tools.calibrate_gantry packages/core/configs/gantry/cub_xl_asmi.yaml
 ```
 
 After calibration, confirm physical jog direction with the interactive test:
 
 ```bash
-PYTHONPATH=src python setup/hello_world.py \
-  --gantry configs/gantry/cub_xl_asmi.yaml
+python -m cubos.tools.hello_world \
+  --gantry packages/core/configs/gantry/cub_xl_asmi.yaml
 ```
 
 Then run a minimal protocol:
 
 ```bash
-PYTHONPATH=src python setup/run_protocol.py \
-  configs/gantry/cub_xl_asmi.yaml \
-  configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi/move_a1.yaml
+python -m cubos.tools.run_protocol \
+  packages/core/configs/gantry/cub_xl_asmi.yaml \
+  packages/core/configs/deck/asmi_deck.yaml \
+  packages/core/configs/protocol/asmi/move_a1.yaml
 ```
 
 ## How CubOS Is Organized
@@ -62,7 +63,7 @@ PYTHONPATH=src python setup/run_protocol.py \
 A runnable experiment is defined by three YAML files:
 
 ```text
-configs/
+packages/core/configs/
   gantry/     # machine envelope, serial port, homing, instruments
   deck/       # labware placement, holder nesting, calibration anchors
   protocol/   # ordered experiment steps
@@ -70,19 +71,20 @@ configs/
 
 The runtime package is split by responsibility:
 
-- `src/gantry/` handles GRBL communication, coordinates, and machine geometry.
-- `src/deck/` loads labware definitions and resolves deck positions.
-- `src/protocol_engine/` validates and executes protocol commands.
-- `src/instruments/` contains instrument drivers, mocks, and registry metadata.
-- `data/` provides SQLite persistence and analysis helpers.
-- `setup/` contains operator-facing validation, calibration, and run scripts.
-- `server/` contains the versioned FastAPI server and backend tests imported
-  with Zoo's history.
-- `web/` contains the Zoo React operator interface.
-- `clients/python/` contains supported automation clients for `/api/v1`.
+- `packages/core/src/cubos/gantry/` handles GRBL communication, coordinates, and machine geometry.
+- `packages/core/src/cubos/deck/` loads labware definitions and resolves deck positions.
+- `packages/core/src/cubos/protocol_engine/` validates and executes protocol commands.
+- `packages/core/src/cubos/instruments/` contains instrument drivers, mocks, and registry metadata.
+- `packages/core/src/cubos/data/` provides SQLite persistence and analysis helpers.
+- `packages/core/src/cubos/tools/` contains operator-facing validation, calibration, and run tools.
+- `services/api/` contains the sole FastAPI backend (`cubos_api`).
+- `apps/operator-web/` contains the browser client for that API.
+- `sdk/python/` contains the Python client and `cubos-send` CLI for `/api/v1`.
 - `deploy/docker/` contains the production application image contract.
+- `deploy/windows/` contains the Windows operator installer.
 
-The CubOS server uses `gantry.session.GantrySession` as the sole persistent
+Both the operator web app and Python SDK call the same `/api/v1` FastAPI
+surface. The API uses `cubos.gantry.session.GantrySession` as the sole persistent
 hardware owner. The session owns serial locking, cached
 position/status, manual movement guards, calibration soft-limit state, protocol
 execution against the connected gantry, campaign creation, and run persistence.
@@ -107,7 +109,7 @@ full documentation instead of treating this README as the source of truth.
 Build and serve the documentation locally:
 
 ```bash
-pip install -e ".[docs]"
+pip install -e "packages/core[docs]"
 mkdocs serve
 ```
 
@@ -116,17 +118,18 @@ mkdocs serve
 Install developer dependencies and run the test suite:
 
 ```bash
-pip install -e ".[dev,docs]"
-python -m pytest -q
+pip install -e "packages/core[dev,docs]"
+python -m pytest packages/core/tests -q
 ```
 
 Install and validate the server and web workspace:
 
 ```bash
-pip install -e ".[dev,server]"
-pip install --no-deps -e "server[dev]"
-python -m pytest server/tests -q
-cd web
+pip install -e packages/core
+pip install -e "services/api[dev]"
+python -m pytest services/api/tests -q
+python -m pytest sdk/python/tests -q
+cd apps/operator-web
 npm ci
 npm run lint
 npm run test -- --run
@@ -137,10 +140,10 @@ For hardware-adjacent changes, also run focused setup validation for the
 affected gantry, deck, and protocol combination:
 
 ```bash
-PYTHONPATH=src python setup/validate_setup.py \
-  configs/gantry/cub_xl_asmi.yaml \
-  configs/deck/asmi_deck.yaml \
-  configs/protocol/asmi/indentation.yaml
+python -m cubos.tools.validate_setup \
+  packages/core/configs/gantry/cub_xl_asmi.yaml \
+  packages/core/configs/deck/asmi_deck.yaml \
+  packages/core/configs/protocol/asmi/indentation.yaml
 ```
 
 Run `mkdocs build --strict` before publishing documentation changes.

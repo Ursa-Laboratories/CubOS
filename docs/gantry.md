@@ -200,7 +200,7 @@ That admin procedure covers:
 
 | Config | System | Current status |
 |--------|--------|----------------|
-| `configs/gantry/cub_xl_asmi.yaml` | CubOS-XL + ASMI | Measured deck-origin ASMI config from 2026-04-24; still requires staged hardware checks before broad reuse |
-| `configs/gantry/cub_xl_sterling.yaml` | Sterling ASMI | Sterling ASMI setup; validate on hardware before real protocols |
-| `configs/gantry/cub_filmetrics.yaml` | Cub + Filmetrics | Converted deck-origin starting point; recalibrate and hardware-validate before real Filmetrics runs |
-| `configs/gantry/cub_xl_panda.yaml` | CubOS-XL + PANDA-style mounted instruments | Estimated layout/config surface; camera/capper use registered `mount_only` vendors until real PANDA-specific drivers are supplied |
+| `packages/core/configs/gantry/cub_xl_asmi.yaml` | CubOS-XL + ASMI | Measured deck-origin ASMI config from 2026-04-24; still requires staged hardware checks before broad reuse |
+| `packages/core/configs/gantry/cub_xl_sterling.yaml` | Sterling ASMI | Sterling ASMI setup; validate on hardware before real protocols |
+| `packages/core/configs/gantry/cub_filmetrics.yaml` | Cub + Filmetrics | Converted deck-origin starting point; recalibrate and hardware-validate before real Filmetrics runs |
+| `packages/core/configs/gantry/cub_xl_panda.yaml` | CubOS-XL + PANDA-style mounted instruments | Estimated layout/config surface; camera/capper use registered `mount_only` vendors until real PANDA-specific drivers are supplied |

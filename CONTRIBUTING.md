@@ -65,9 +65,9 @@ offline setup validation:
 
 ```bash
 PYTHONPATH=src python setup/validate_setup.py \
-  configs/gantry/<gantry>.yaml \
-  configs/deck/<deck>.yaml \
-  configs/protocol/<protocol>.yaml
+  packages/core/configs/gantry/<gantry>.yaml \
+  packages/core/configs/deck/<deck>.yaml \
+  packages/core/configs/protocol/<protocol>.yaml
 ```
 
 For documentation changes, run:
@@ -81,7 +81,7 @@ mkdocs build --strict
 Follow the existing instrument layout:
 
 ```text
-src/instruments/<type>/
+packages/core/src/cubos/instruments/<type>/
   interface.py
   models.py
   exceptions.py
@@ -103,7 +103,7 @@ Keep the boundary clear:
   required core dependencies.
 - Drivers should support `offline=True` when a meaningful dry-run behavior is
   possible.
-- Register new built-in vendors in `src/instruments/registry.yaml`.
+- Register new built-in vendors in `packages/core/src/cubos/instruments/registry.yaml`.
 - External or proprietary drivers should use the instrument registry entry
   point or `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlay mechanism instead of
   merging private code into CubOS.

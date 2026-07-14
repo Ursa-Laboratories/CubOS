@@ -23,10 +23,10 @@ jobs:
           python-version: ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e "packages/core[dev]"
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest packages/core/tests -q
 
   docs:
     runs-on: ubuntu-latest
@@ -39,12 +39,12 @@ jobs:
           python-version: "3.12"
 
       - name: Install docs dependencies
-        run: pip install -e ".[docs]"
+        run: pip install -e "packages/core[docs]"
 
       - name: Build docs
         run: mkdocs build --strict
 
-  server:
+  api:
     runs-on: ubuntu-latest
 
     steps:
@@ -54,13 +54,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install CubOS and server dependencies
+      - name: Install CubOS and API dependencies
         run: |
-          pip install -e ".[dev,server]"
-          pip install --no-deps -e "server[dev]"
+          pip install -e packages/core
+          pip install -e "services/api[dev]"
 
-      - name: Run server and API contract tests
-        run: python -m pytest server/tests -q
+      - name: Run API tests
+        run: python -m pytest services/api/tests -q
 
   web:
     runs-on: ubuntu-latest
@@ -72,22 +72,22 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: apps/operator-web/package-lock.json
 
       - name: Install locked frontend dependencies
-        working-directory: web
+        working-directory: apps/operator-web
         run: npm ci
 
       - name: Lint frontend
-        working-directory: web
+        working-directory: apps/operator-web
         run: npm run lint
 
       - name: Test frontend
-        working-directory: web
+        working-directory: apps/operator-web
         run: npm run test -- --run
 
       - name: Build frontend
-        working-directory: web
+        working-directory: apps/operator-web
         run: npm run build
 
   client:
@@ -101,7 +101,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install client
-        run: pip install -e "clients/python[dev]"
+        run: pip install -e "sdk/python[dev]"
 
       - name: Test client
-        run: python -m pytest clients/python/tests -q
+        run: python -m pytest sdk/python/tests -q

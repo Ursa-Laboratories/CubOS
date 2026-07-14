@@ -1,7 +1,7 @@
 # CubOS Application Image
 
 This directory builds the application image consumed by `PiCub-Appliance`.
-The image contains CubOS, the FastAPI server, and precompiled Zoo web assets.
+The image contains CubOS, the FastAPI server, and precompiled CubOS web assets.
 It does not configure host networking, Docker, systemd, mDNS, or OS updates.
 
 ## Build ARM64
@@ -17,15 +17,15 @@ docker buildx build \
   .
 ```
 
-The multi-stage build compiles `web/` with Node, installs CubOS and the server
-into a Python virtual environment, and copies only runtime artifacts into the
+The multi-stage build compiles `apps/operator-web/` with Node, installs the
+CubOS runtime and `cubos_api` into a Python virtual environment, and copies only runtime artifacts into the
 final Debian image. Customer devices do not run npm, pip, or Git.
 
 ## Runtime contract
 
 - Runs as UID/GID `10001`, never privileged.
 - Persists all mutable state under `/var/lib/cub`.
-- Reads the API bearer token from `ZOO_API_TOKEN_FILE`.
+- Reads the API bearer token from `CUBOS_API_TOKEN_FILE`.
 - Accepts only explicitly mapped serial devices.
 - Starts the API/UI but never connects, homes, calibrates, or moves hardware.
 - Health checks `/api/v1/health`, which verifies package/build/schema identity
@@ -39,7 +39,7 @@ docker run --rm \
   --name cubos-smoke \
   --publish 8742:8742 \
   --volume /tmp/cubos-smoke:/var/lib/cub \
-  --env 'ZOO_TRUSTED_HOSTS=["localhost","localhost:8742"]' \
+  --env 'CUBOS_TRUSTED_HOSTS=["localhost","localhost:8742"]' \
   cubos-appliance:dev
 ```
 

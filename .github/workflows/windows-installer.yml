@@ -1,0 +1,82 @@
+name: Windows Installer
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/windows-installer.yml"
+      - "deploy/windows/**"
+      - "apps/operator-web/**"
+      - "packages/core/**"
+      - "services/api/**"
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-installer:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: choco install innosetup --no-progress -y
+
+      - name: Set release version
+        shell: powershell
+        run: |
+          $version = "0.1.$env:GITHUB_RUN_NUMBER"
+          "APP_VERSION=$version" >> $env:GITHUB_ENV
+          "RELEASE_TAG=v$version" >> $env:GITHUB_ENV
+          "RELEASE_NAME=CubOS Windows $version" >> $env:GITHUB_ENV
+
+      - name: Build installer
+        shell: powershell
+        run: .\deploy\windows\build-installer.ps1 -CubOSSourceDir "$env:GITHUB_WORKSPACE" -AppVersion "$env:APP_VERSION"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: cubos-windows-installer
+          path: deploy/windows/build/dist/*.exe
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $asset = Get-ChildItem -Path "deploy/windows/build/dist/*.exe" | Select-Object -First 1
+          if (-not $asset) {
+            throw "No installer exe found under deploy/windows/build/dist"
+          }
+
+          $body = @"
+          Automated CubOS Windows installer build.
+
+          CubOS commit: $env:GITHUB_SHA
+          Version: $env:APP_VERSION
+
+          Download the installer from the Assets section below.
+          "@
+
+          gh release create $env:RELEASE_TAG $asset.FullName --target $env:GITHUB_SHA --title $env:RELEASE_NAME --notes $body --latest
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to create release $env:RELEASE_TAG"
+          }

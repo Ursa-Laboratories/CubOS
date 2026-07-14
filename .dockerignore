@@ -11,10 +11,10 @@
 **/__pycache__
 **/.pytest_cache
 **/node_modules
-web/dist
+apps/operator-web/dist
 site
 htmlcov
 *.db
 *.log
-server/installer
-server/progress
+deploy/windows
+services/api/progress
