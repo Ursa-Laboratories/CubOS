@@ -452,7 +452,7 @@ class TestScanCommand:
         assert board.move_to_labware.call_count == 1
 
     def test_sharc_nested_plate_persists_under_canonical_labware_key(self):
-        from protocol_engine.commands.scan import scan
+        from cubos.protocol_engine.commands.scan import scan
 
         plate = _make_2x2_plate()
         holder = WellPlateHolder(

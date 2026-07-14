@@ -588,7 +588,7 @@ class TestTransferCommand:
         store.close()
 
     def test_transfer_persists_vial_grid_aliases_to_canonical_rows(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         source = Vial(
             name="source",
@@ -642,7 +642,7 @@ class TestTransferCommand:
         store.close()
 
     def test_transfer_persists_legacy_nested_vials_to_canonical_grid_rows(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         source = Vial(
             name="vial_1",

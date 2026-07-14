@@ -8,9 +8,9 @@ from textwrap import dedent
 import pytest
 from pydantic import ValidationError
 
-from data.data_store import DataStore
-from data.protocol_runs import register_deck_labware
-from deck import (
+from cubos.data.data_store import DataStore
+from cubos.data.protocol_runs import register_deck_labware
+from cubos.deck import (
     BoundingBoxGeometry,
     Coordinate3D,
     VialGrid,
@@ -19,7 +19,7 @@ from deck import (
     WellPlate,
     WellPlateHolder,
 )
-from deck.loader import load_deck_from_yaml, resolve_load_names
+from cubos.deck.loader import load_deck_from_yaml, resolve_load_names
 
 
 def _write_deck(tmp_path: Path, name: str, contents: str) -> Path:
