@@ -195,7 +195,7 @@ def test_run_protocol_delegates_mock_fluid_options_and_reports_state(
     monkeypatch,
     capsys,
 ):
-    import setup.run_protocol as run_protocol
+    import cubos.tools.run_protocol as run_protocol
 
     database = tmp_path / "tracked.db"
     initial_fluids = tmp_path / "initial.yaml"
@@ -257,7 +257,7 @@ def test_run_protocol_rejects_both_fluid_options_before_validation(
     monkeypatch,
     capsys,
 ):
-    import setup.run_protocol as run_protocol
+    import cubos.tools.run_protocol as run_protocol
 
     validation = MagicMock()
     monkeypatch.setattr(run_protocol, "run_setup_validation", validation)

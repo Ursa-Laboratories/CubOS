@@ -486,7 +486,7 @@ class TestScanCommand:
         assert board.move_to_labware.call_count == 1
 
     def test_sharc_nested_plate_persists_under_canonical_labware_key(self):
-        from protocol_engine.commands.scan import scan
+        from cubos.protocol_engine.commands.scan import scan
 
         plate = _make_2x2_plate()
         holder = WellPlateHolder(
@@ -597,8 +597,8 @@ class TestScanCommand:
         ctx.data_store.get_fluid_snapshot.assert_not_called()
 
     def test_tracked_transfer_scan_uses_current_fluid_composition(self, tmp_path):
-        from protocol_engine.commands.pipette import transfer
-        from protocol_engine.commands.scan import scan
+        from cubos.protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.scan import scan
 
         deck_path = tmp_path / "deck.yaml"
         deck_path.write_text(TRACKED_SCAN_DECK_YAML, encoding="utf-8")
@@ -664,7 +664,7 @@ class TestScanCommand:
         store.close()
 
     def test_tracked_scan_missing_container_fails_before_first_move(self):
-        from protocol_engine.commands.scan import scan
+        from cubos.protocol_engine.commands.scan import scan
 
         ctx = _mock_context()
         ctx.data_store = MagicMock()

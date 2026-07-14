@@ -170,7 +170,7 @@ class TestAspirateCommand:
             aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
 
     def test_rejects_standalone_aspirate_when_fluid_tracking_is_active(self):
-        from protocol_engine.commands.pipette import aspirate
+        from cubos.protocol_engine.commands.pipette import aspirate
 
         ctx = _mock_context()
         ctx.data_store = MagicMock()
@@ -319,7 +319,7 @@ class TestMixCommand:
             mix(ctx, position="plate_1.A1", volume_ul=50.0)
 
     def test_tracked_mix_journals_before_motion_and_applies_after_success(self):
-        from protocol_engine.commands.pipette import mix
+        from cubos.protocol_engine.commands.pipette import mix
 
         ctx = _mock_context()
         ctx.campaign_id = 7
@@ -359,7 +359,7 @@ class TestMixCommand:
         assert store.begin_fluid_mix.call_args.kwargs == {"campaign_id": 7}
 
     def test_tracked_mix_skips_exact_already_applied_replay_without_motion(self):
-        from protocol_engine.commands.pipette import mix
+        from cubos.protocol_engine.commands.pipette import mix
 
         ctx = _mock_context()
         ctx.campaign_id = 7
@@ -376,7 +376,7 @@ class TestMixCommand:
         ctx.data_store.complete_fluid_mix.assert_not_called()
 
     def test_tracked_mix_failure_requires_reconciliation(self):
-        from protocol_engine.commands.pipette import mix
+        from cubos.protocol_engine.commands.pipette import mix
 
         ctx = _mock_context()
         ctx.campaign_id = 7
@@ -622,7 +622,7 @@ class TestTransferCommand:
         pip.dispense.assert_called_once_with(100.0, 50.0)
 
     def test_tracked_transfer_journals_before_liquid_and_commits_after_dispense(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
         ctx.campaign_id = 7
@@ -670,7 +670,7 @@ class TestTransferCommand:
         store.record_transfer.assert_not_called()
 
     def test_tracked_transfer_skips_already_applied_operation(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
         ctx.campaign_id = 7
@@ -690,7 +690,7 @@ class TestTransferCommand:
         ctx.data_store.complete_fluid_transfer.assert_not_called()
 
     def test_tracked_transfer_preflight_failure_stops_before_aspirate(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
         ctx.campaign_id = 7
@@ -714,7 +714,7 @@ class TestTransferCommand:
 
     @pytest.mark.parametrize("missing", ["data_store", "campaign_id"])
     def test_incomplete_tracked_context_fails_before_motion(self, missing):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
         ctx.fluid_state_id = 11
@@ -728,7 +728,7 @@ class TestTransferCommand:
         _get_pipette(ctx).aspirate.assert_not_called()
 
     def test_tracked_transfer_failure_marks_reconciliation_required(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
         ctx.campaign_id = 7
@@ -751,7 +751,7 @@ class TestTransferCommand:
         ctx.data_store.complete_fluid_transfer.assert_not_called()
 
     def test_tracked_transfer_commit_failure_is_not_silently_ignored(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
         ctx.campaign_id = 7
@@ -831,7 +831,7 @@ class TestTransferCommand:
         store.close()
 
     def test_transfer_persists_vial_grid_aliases_to_canonical_rows(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         source = Vial(
             name="source",
@@ -885,7 +885,7 @@ class TestTransferCommand:
         store.close()
 
     def test_transfer_persists_legacy_nested_vials_to_canonical_grid_rows(self):
-        from protocol_engine.commands.pipette import transfer
+        from cubos.protocol_engine.commands.pipette import transfer
 
         source = Vial(
             name="vial_1",

@@ -259,7 +259,7 @@ def run_on_hardware(
                 context.deck,
             )
         elif initial_fluids is not None:
-            from data import load_initial_fluids
+            from cubos.data import load_initial_fluids
 
             seed = (
                 _initial_fluid_mapping(initial_fluids)

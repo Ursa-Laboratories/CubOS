@@ -610,7 +610,7 @@ class TestRunOnHardwareLifecycle:
             protocol = Protocol([])
 
             def transfer_and_capture(context):
-                from protocol_engine.commands.pipette import transfer
+                from cubos.protocol_engine.commands.pipette import transfer
 
                 observed["fluid_state_id"] = context.fluid_state_id
                 transfer(
