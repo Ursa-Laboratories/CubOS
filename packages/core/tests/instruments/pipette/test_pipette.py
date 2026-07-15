@@ -216,6 +216,7 @@ class TestPipetteLifecycle:
         """Create a mock serial.Serial that returns canned responses."""
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.in_waiting = 0
         if responses is None:
             responses = ["OK:{homed:1,pos:0.0,max_vol:200}\n"]
         mock_ser.readline.side_effect = [r.encode() for r in responses]
@@ -233,7 +234,7 @@ class TestPipetteLifecycle:
         mock_serial_cls.assert_called_once_with(
             port="/dev/ttyUSB0", baudrate=115200, timeout=30.0,
         )
-        mock_sleep.assert_called_once()
+        assert mock_sleep.called
 
     @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
     @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
@@ -279,6 +280,8 @@ class TestPipetteLifecycle:
     @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
     def test_connect_discards_boot_banner(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial()
+        # Banner bytes pending on the first check, quiet on the second.
+        type(mock_ser).in_waiting = PropertyMock(side_effect=[1, 0])
         mock_serial_cls.return_value = mock_ser
 
         pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
@@ -291,6 +294,7 @@ class TestPipetteLifecycle:
     def test_connect_raises_when_homing_fails(self, mock_sleep, mock_serial_cls):
         responses = [
             'OK:{"homed":0,"pos":0.00,"max_vol":300.00}\n',
+            'ERR:{"error":"Failed to home pipette"}\n',
             'ERR:{"error":"Failed to home pipette"}\n',
         ]
         mock_ser = self._make_mock_serial(responses)
@@ -316,6 +320,7 @@ class TestPipetteLifecycle:
     def test_connect_raises_on_no_response(self, mock_sleep, mock_serial_cls):
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.in_waiting = 0
         mock_ser.readline.return_value = b""
         mock_serial_cls.return_value = mock_ser
 
@@ -371,6 +376,7 @@ class TestPipetteCommands:
         all_responses = ["OK:{homed:1,pos:0.0,max_vol:200}\n"] + responses
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.in_waiting = 0
         mock_ser.readline.side_effect = [r.encode() for r in all_responses]
         mock_serial_cls.return_value = mock_ser
 
@@ -477,12 +483,62 @@ class TestPipetteCommands:
     @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
     @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
     def test_command_error_on_err_response(self, mock_sleep, mock_serial_cls):
+        # home() retries once, so it takes two ERR responses to fail.
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
-            ["ERR:motor stall detected\n"],
+            ["ERR:motor stall detected\n", "ERR:motor stall detected\n"],
         )
         with pytest.raises(PipetteCommandError, match="motor stall"):
             pip.home()
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_home_retries_once_when_first_attempt_falls_short(
+        self, mock_sleep, mock_serial_cls
+    ):
+        # Firmware caps upward travel per homing attempt below full plunger
+        # travel, so a plunger parked low fails once and succeeds on retry.
+        pip, mock_ser = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            [
+                'ERR:{"error":"Failed to home pipette"}\n',
+                'OK:{"msg":"Pipette homed"}\n',
+            ],
+        )
+        pip.home()
+        written = [c[0][0].decode().strip() for c in mock_ser.write.call_args_list]
+        assert [w.split(",")[0] for w in written].count("10") == 2
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_status_skips_stray_ok_lines(self, mock_sleep, mock_serial_cls):
+        # A late boot banner must not be taken as the status response.
+        pip, _ = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            ["OK:Ready\n", 'OK:{"homed":1,"pos":36.00,"max_vol":300.00}\n'],
+        )
+        status = pip.get_status()
+        assert status.is_homed is True
+        assert status.position_mm == pytest.approx(36.0)
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_plunger_moves_use_firmware_default_speed(
+        self, mock_sleep, mock_serial_cls
+    ):
+        # Firmware reads the speed arg as steps/second; 0 selects its own
+        # calibrated default instead of a floor-clamped crawl.
+        pip, mock_ser = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            ["OK:{pos:36.0}\n", "OK:{pos:0.0}\n", "OK:{pos:60.0}\n"],
+        )
+        pip.prime()
+        pip.pick_up_tip()
+        pip.drop_tip()
+        written = [c[0][0].decode().strip() for c in mock_ser.write.call_args_list]
+        moves = [w for w in written if w.startswith("11,")]
+        assert len(moves) == 3
+        assert all(w.split(",")[2] == "0.0" for w in moves)
 
     @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
     @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")

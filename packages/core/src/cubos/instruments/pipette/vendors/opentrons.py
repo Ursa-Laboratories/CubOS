@@ -35,6 +35,13 @@ _ARDUINO_SETTLE_TIME = 2.0
 # before it gives up, so the serial wait must outlast that.
 _HOME_TIMEOUT = 90.0
 
+# Firmware interprets the optional speed argument as stepper steps/second
+# (its stepDelay floor makes small values ~16x slower than intended, slow
+# enough to blow the serial timeout on a full-travel move). Passing 0 tells
+# the firmware to use its own calibrated default velocity.
+# TODO(iter): map CubOS speed semantics onto steps/second explicitly.
+_FIRMWARE_DEFAULT_SPEED = 0.0
+
 
 class OpentronsPipette(PipetteInstrument):
     """Driver for Opentrons pipettes via Arduino serial (Pawduino firmware).
@@ -132,9 +139,10 @@ class OpentronsPipette(PipetteInstrument):
             ) from exc
 
         time.sleep(_ARDUINO_SETTLE_TIME)
-        # Opening the port resets the Arduino; discard any boot banner so it
-        # is not mistaken for the first command's response.
-        self._serial.reset_input_buffer()
+        # Opening the port resets the Arduino; discard the boot banner so it
+        # is not mistaken for the first command's response. The banner can
+        # trail the settle sleep, so drain until the line goes quiet.
+        self._drain_input()
 
         try:
             status = self.get_status()
@@ -191,7 +199,14 @@ class OpentronsPipette(PipetteInstrument):
             self._position_mm = self._config.zero_position
             self._is_homed = True
             return
-        self._send_command(_CMD_HOME, timeout=_HOME_TIMEOUT)
+        try:
+            self._send_command(_CMD_HOME, timeout=_HOME_TIMEOUT)
+        except PipetteCommandError:
+            # Firmware gives up after ~31 mm of upward travel per attempt,
+            # but full plunger travel is 55 mm: a plunger parked low needs a
+            # second leg to reach the limit switch.
+            self.logger.info("Homing fell short of the limit switch; retrying")
+            self._send_command(_CMD_HOME, timeout=_HOME_TIMEOUT)
         self._position_mm = self._config.zero_position
         self._is_homed = True
 
@@ -200,7 +215,9 @@ class OpentronsPipette(PipetteInstrument):
             self._position_mm = self._config.prime_position
             self._is_primed = True
             return
-        self._send_command(_CMD_MOVE_TO, self._config.prime_position, speed)
+        self._send_command(
+            _CMD_MOVE_TO, self._config.prime_position, _FIRMWARE_DEFAULT_SPEED
+        )
         self._position_mm = self._config.prime_position
         self._is_primed = True
 
@@ -236,7 +253,9 @@ class OpentronsPipette(PipetteInstrument):
         if self._offline:
             self._position_mm = self._config.blowout_position
             return
-        self._send_command(_CMD_MOVE_TO, self._config.blowout_position, speed)
+        self._send_command(
+            _CMD_MOVE_TO, self._config.blowout_position, _FIRMWARE_DEFAULT_SPEED
+        )
 
     def mix(
         self, volume_ul: float, repetitions: int = 3, speed: float = 50.0
@@ -251,12 +270,18 @@ class OpentronsPipette(PipetteInstrument):
 
     def pick_up_tip(self, speed: float = 50.0) -> None:
         if not self._offline:
-            self._send_command(_CMD_MOVE_TO, self._config.zero_position, speed)
+            self._send_command(
+                _CMD_MOVE_TO, self._config.zero_position, _FIRMWARE_DEFAULT_SPEED
+            )
         self._has_tip = True
 
     def drop_tip(self, speed: float = 50.0) -> None:
         if not self._offline:
-            self._send_command(_CMD_MOVE_TO, self._config.drop_tip_position, speed)
+            self._send_command(
+                _CMD_MOVE_TO,
+                self._config.drop_tip_position,
+                _FIRMWARE_DEFAULT_SPEED,
+            )
         self._has_tip = False
         self.clear_attached_tip_extension()
         self._position_mm = self._config.drop_tip_position
@@ -270,7 +295,9 @@ class OpentronsPipette(PipetteInstrument):
                 has_tip=self._has_tip,
                 is_primed=self._is_primed,
             )
-        response = self._send_command(_CMD_STATUS)
+        # A status body always carries max_vol; requiring it keeps stray OK
+        # lines (e.g. a late boot banner) from being taken as the response.
+        response = self._send_command(_CMD_STATUS, expect="max_vol")
         parsed = self._parse_key_value(response)
         return PipetteStatus(
             is_homed=parsed.get("homed", 0) == 1,
@@ -289,8 +316,24 @@ class OpentronsPipette(PipetteInstrument):
 
     # ── Private helpers ───────────────────────────────────────────────────
 
+    def _drain_input(self, quiet_s: float = 0.6, max_s: float = 5.0) -> None:
+        """Discard pending input until the port stays quiet for *quiet_s*."""
+        if self._serial is None:
+            return
+        deadline = time.monotonic() + max_s
+        while time.monotonic() < deadline:
+            if self._serial.in_waiting:
+                self._serial.reset_input_buffer()
+            time.sleep(quiet_s)
+            if not self._serial.in_waiting:
+                return
+
     def _send_command(
-        self, code: int, *args: float, timeout: Optional[float] = None
+        self,
+        code: int,
+        *args: float,
+        timeout: Optional[float] = None,
+        expect: Optional[str] = None,
     ) -> str:
         if self._serial is None or not self._serial.is_open:
             raise PipetteCommandError("Not connected to Arduino")
@@ -320,6 +363,12 @@ class OpentronsPipette(PipetteInstrument):
                 if not line:
                     continue
                 if line.startswith("OK:"):
+                    if expect is not None and expect not in line:
+                        self.logger.debug(
+                            "Ignoring unexpected response %r to command %d",
+                            line, code,
+                        )
+                        continue
                     return line
                 if line.startswith("ERR:"):
                     raise PipetteCommandError(
