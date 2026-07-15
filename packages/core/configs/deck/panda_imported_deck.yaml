@@ -1,0 +1,185 @@
+# GENERATED FILE -- do not hand-edit. Regenerate with:
+#   python -m cubos.tools.import_panda_bear <db_path> [--resolutions ...] [--out-dir ...]
+#
+# Imported from a PANDA-BEAR production SQLite snapshot (read-only; see
+# panda_import_report.json next to this file for the source DB path/hash
+# and the full conflict report).
+#
+# Coordinates are CubOS home-origin GANTRY-frame values, not instrument-
+# frame: gantry = panda_bear_tool_point + panda_bear_tool_offset (pipette
+# frame for wells/tips/stock/waste vials, electrode frame for e1). See
+# cubos.tools.panda_bear_import.conversion for the exact formula and
+# protocol/panda/position_tour.yaml's header for why the tour hovers with
+# a zero-offset instrument.
+#
+# Vial location.z / well-plate calibration.a1.z are the converted mouth
+# (DB 'top' generated column), matching CubOS's vial/well-plate Z
+# semantics (calibration anchor = labware-surface reference).
+#
+# Positions are NOT guaranteed physically exact -- labware will be moved
+# and positions re-derived after the hardware gate; out-of-envelope
+# coordinates are written as-is with a WARNING in the conflict report,
+# never clamped or blocked.
+
+labware:
+  e1:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -361.0
+      y: -275.8
+      z: -13.0
+    name: e1
+    type: vial
+    working_volume_ul: 20000.0
+  ito_pama_plate:
+    calibration:
+      a1:
+        x: -356.5
+        y: -188.1
+        z: -81.8
+      a2:
+        x: -356.5
+        y: -203.1
+    capacity_ul: 700.0
+    columns: 4
+    name: ito_pama_plate
+    rows: 3
+    type: well_plate
+    working_volume_ul: 700.0
+    x_offset: 15.0
+    y_offset: 15.0
+  s1:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -7.0
+      z: -15.0
+    name: s1
+    type: vial
+    working_volume_ul: 20000.0
+  s2:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -40.0
+      z: -15.0
+    name: s2
+    type: vial
+    working_volume_ul: 20000.0
+  s3:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -73.0
+      z: -15.0
+    name: s3
+    type: vial
+    working_volume_ul: 20000.0
+  s4:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -106.0
+      z: -15.0
+    name: s4
+    type: vial
+    working_volume_ul: 20000.0
+  s5:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -139.0
+      z: -15.0
+    name: s5
+    type: vial
+    working_volume_ul: 20000.0
+  s6:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -172.0
+      z: -15.0
+    name: s6
+    type: vial
+    working_volume_ul: 20000.0
+  tip_disposal:
+    location:
+      x: -188.0
+      y: -183.4
+      z: -69.0
+    name: tip_disposal
+    slots:
+      discard:
+        description: Tiprack drop_coordinates, converted to gantry frame.
+        location:
+          x: -188.0
+          y: -183.4
+          z: -69.0
+        supported_labware_types:
+        - pipette_tip
+    type: tip_disposal
+  tip_rack:
+    calibration:
+      a1:
+        x: -229.0
+        y: -12.4
+        z: -88.8
+      a2:
+        x: -229.0
+        y: -21.4
+    columns: 12
+    drop_z: -69.0
+    name: tip_rack
+    pickup_z: -88.8
+    rows: 2
+    tip_length: 59.3
+    type: tip_rack
+    x_offset: 9.0
+    y_offset: 9.0
+  w1:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -205.0
+      z: -15.0
+    name: w1
+    type: vial
+    working_volume_ul: 20000.0
+  w2:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -238.0
+      z: -15.0
+    name: w2
+    type: vial
+    working_volume_ul: 20000.0
+  w3:
+    capacity_ul: 20000.0
+    diameter: 28.0
+    height: 57.0
+    location:
+      x: -133.0
+      y: -271.0
+      z: -15.0
+    name: w3
+    type: vial
+    working_volume_ul: 20000.0
