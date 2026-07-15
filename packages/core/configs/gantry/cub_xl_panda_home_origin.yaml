@@ -5,27 +5,30 @@
 # directions match deck_origin; only the zero corner differs. After a
 # successful home, WPos must read (0, 0, 0).
 #
-# Estimated work volume from the Cub XL / Genmitsu PROVerXL 4030 V2 setup.
-# This setup still needs staged hardware validation. Confirm live $130/$131/
-# $132, the serial device path, homing corner, and jog directions before
-# trusting physical motion.
+# Working volume verified against the PANDA production database snapshot
+# (panda_prod_db.db, read-only): occupied positions span X[-417.7, -17.1],
+# Y[-297.9, -0.9], Z[-197.8, -169.0], so the machine has roughly 418/298/198
+# of usable travel (Z extension installed). Bounds below are the observed
+# production envelope plus margin. Confirm live $130/$131/$132, the serial
+# device path, homing corner, and jog directions before trusting physical
+# motion.
 
 serial_port: /dev/ttyUSB0
 gantry_type: cub_xl
 origin_policy: home_origin
 
 cnc:
-  factory_z_travel_mm: 100.0
+  factory_z_travel_mm: 200.0
   y_axis_motion: head
   # Absolute Z ceiling for inter-labware travel, 5 mm below the homed top.
   safe_z: -5.0
 
 working_volume:
-  x_min: -400.0
+  x_min: -418.0
   x_max: 0.0
-  y_min: -300.0
+  y_min: -298.0
   y_max: 0.0
-  z_min: -100.0
+  z_min: -198.0
   z_max: 0.0
 
 grbl_settings:
@@ -38,9 +41,9 @@ grbl_settings:
   steps_per_mm_x: 400.0
   steps_per_mm_y: 400.0
   steps_per_mm_z: 400.0
-  max_travel_x: 400.0
-  max_travel_y: 300.0
-  max_travel_z: 100.0
+  max_travel_x: 418.0
+  max_travel_y: 298.0
+  max_travel_z: 198.0
 
 instruments:
   # Left red probe; approximate offset from center camera mount.
