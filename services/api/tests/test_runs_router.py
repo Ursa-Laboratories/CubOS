@@ -314,6 +314,37 @@ def test_run_submission_creates_new_fluid_state_and_persists_link(monkeypatch):
     assert snapshot.json()["label"] == "run-seeded"
 
 
+def test_run_execution_receives_fluid_state_id(monkeypatch):
+    """The linked fluid state must reach the execution context, not just the
+    run record — otherwise runs silently execute untracked (no volume
+    journaling, no state-derived liquid heights)."""
+    from cubos_api.routers import gantry as gantry_router
+
+    seen_kwargs = {}
+
+    def capture(**kwargs):
+        seen_kwargs.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(gantry_router, "run_protocol_on_session", capture)
+    app = create_app()
+    payload = _stateful_payload(
+        "state-exec",
+        state={
+            "initial_state": {
+                "label": "exec-linked",
+                "fluids": {"source": {"volume_ul": 50.0, "composition": {"water": 50.0}}},
+            }
+        },
+    )
+    response = api_request(app, "POST", "/api/v1/runs", json=payload)
+    assert response.status_code == 202
+    fluid_state_id = response.json()["fluid_state_id"]
+
+    _wait_for_state(app, "state-exec", "succeeded")
+    assert seen_kwargs["fluid_state_id"] == fluid_state_id
+
+
 def test_run_submission_resumes_existing_fluid_state(monkeypatch):
     from cubos_api.routers import gantry as gantry_router
 

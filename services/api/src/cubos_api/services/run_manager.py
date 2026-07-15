@@ -307,6 +307,7 @@ class RunManager:
                     deck_file="deck.yaml",
                     protocol_file="protocol.yaml",
                     db_path=self.settings.data_db_path,
+                    fluid_state_id=record.fluid_state_id,
                 )
             result = _jsonable(raw_result)
             record = self.store.read(run_id) or record

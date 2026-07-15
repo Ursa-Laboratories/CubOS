@@ -590,6 +590,7 @@ class GantrySession:
         deck_file: str,
         protocol_file: str,
         db_path: str | Path | None = None,
+        fluid_state_id: int | None = None,
     ) -> ProtocolRunResult:
         context = None
         data_store = None
@@ -619,6 +620,7 @@ class GantrySession:
                     gantry=gantry,
                     data_store=data_store,
                     campaign_id=campaign_id,
+                    fluid_state_id=fluid_state_id,
                 )
                 gantry.prepare_for_protocol_run()
                 context.gantry.connect_instruments()
