@@ -13,6 +13,7 @@ from cubos.gantry.coordinates import Coordinates
 from cubos.gantry.gantry_driver.driver import Mill, wpos_pattern, mpos_pattern
 from cubos.gantry.gantry_driver.exceptions import (
     CommandExecutionError,
+    LocationNotFound,
     MillConnectionError,
     StatusReturnError,
 )
@@ -347,10 +348,44 @@ class TestCNCDriverLogic(unittest.TestCase):
         mill.config = {"$10": "0"}
         self.assertEqual(mill.current_coordinates(), Coordinates(1.0, 2.0, 3.0))
 
+        # Parsing is mode-agnostic: an unexpected $10 value must not matter
+        # as long as the frame carries a position field.
         mill.ser_mill = FakeGrblSerial(status="<Idle|WPos:1,2,3|FS:0,0>")
         mill.config = {"$10": "9"}
-        with self.assertRaises(ValueError):
+        self.assertEqual(mill.current_coordinates(), Coordinates(1.0, 2.0, 3.0))
+
+    @patch('cubos.gantry.gantry_driver.driver.time.sleep')
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_current_coordinates_parses_mpos_even_in_wpos_mode(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        # Controller reporting MPos despite $10=0 (e.g. settings drift)
+        # still yields a position via the cached WCO.
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial(
+            status="<Idle|MPos:11.000,22.000,33.000|WCO:1.000,2.000,3.000>"
+        )
+        mill.config = {"$10": "0"}
+        self.assertEqual(mill.current_coordinates(), Coordinates(10.0, 20.0, 30.0))
+
+    @patch('cubos.gantry.gantry_driver.driver.time.sleep')
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_current_coordinates_raises_location_not_found_with_context(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial(status="<Idle|FS:0,0>")
+        mill.config = {"$10": "0"}
+        mill._wco = None
+        # seed_wco polls the same positionless frames; keep it cheap.
+        mill.seed_wco = MagicMock()
+        with self.assertRaises(LocationNotFound) as ctx:
             mill.current_coordinates()
+        self.assertIn("No parsable position", str(ctx.exception))
 
     def test_mill_motion_api_has_no_driver_level_instrument_offsets(self):
         """InstrumentedGantry owns instrument offsets; Mill only receives machine coordinates."""
@@ -471,6 +506,34 @@ class TestCNCDriverLogic(unittest.TestCase):
             "G01 X-110.0 F2000",   # X alone
             "G01 Y-60.0 F2000",    # Y alone
             "G01 Z-90.0 F2000",    # descend
+        ])
+
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_move_to_survives_position_read_failure(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        """A transient LocationNotFound must not kill an absolute move:
+        the full unpruned sequence is emitted instead (lift first)."""
+        mill = Mill()
+        mill.ser_mill = MagicMock()
+        mill.current_coordinates = MagicMock(side_effect=LocationNotFound("boom"))
+        mill.execute_command = MagicMock()
+
+        mill.move_to(
+            x_coordinate=-110.0,
+            y_coordinate=-60.0,
+            z_coordinate=-90.0,
+            travel_z=-5.0,
+        )
+
+        commands = [c[0][0] for c in mill.execute_command.call_args_list]
+        self.assertEqual(commands, [
+            "G01 Z-5.0 F2000",     # lift first, unconditionally
+            "G01 X-110.0 F2000",
+            "G01 Y-60.0 F2000",
+            "G01 Z-90.0 F2000",
         ])
 
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
