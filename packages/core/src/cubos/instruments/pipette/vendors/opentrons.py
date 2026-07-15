@@ -12,6 +12,7 @@ from cubos.instruments.pipette.exceptions import (
     PipetteConnectionError,
     PipetteTimeoutError,
 )
+from cubos.instruments.pipette.liquid_class import build_liquid_classes
 from cubos.instruments.pipette.models import (
     AspirateResult,
     MixResult,
@@ -52,6 +53,7 @@ class OpentronsPipette(PipetteInstrument):
         offset_y: float = 0.0,
         depth: float = 0.0,
         offline: bool = False,
+        liquid_classes: Optional[dict] = None,
         **kwargs,
     ):
         super().__init__(
@@ -65,6 +67,10 @@ class OpentronsPipette(PipetteInstrument):
                 f"Available: {', '.join(sorted(PIPETTE_MODELS.keys()))}"
             )
         self._config: PipetteConfig = PIPETTE_MODELS[pipette_model]
+        # Per-liquid-class stroke-volume correction (multiplier + offset_ul),
+        # keyed by an operator-chosen name; empty/disabled unless configured.
+        # See cubos.instruments.pipette.liquid_class for the parametric form.
+        self._liquid_classes = build_liquid_classes(liquid_classes)
         self._port = port
         self._baud_rate = baud_rate
         self._command_timeout = command_timeout

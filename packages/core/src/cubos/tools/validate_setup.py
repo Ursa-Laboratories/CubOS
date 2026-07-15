@@ -1,7 +1,12 @@
 """Validate a protocol setup by loading all configs and checking bounds.
 
 Usage:
-    python -m cubos.tools.validate_setup <gantry.yaml> <deck.yaml> <protocol.yaml>
+    python -m cubos.tools.validate_setup <gantry.yaml> <deck.yaml> <protocol.yaml> [initial_fluids.yaml]
+
+The optional fourth argument is a fluid seed YAML (same ``fluids:`` shape as
+``run_protocol --initial-fluids``); when given, protocol liquid handling is
+also simulated offline (pipette-model volume bounds, vial dead-volume floors,
+destination working-volume overflow).
 
 Example:
     python -m cubos.tools.validate_setup \
@@ -26,8 +31,11 @@ from cubos.protocol_engine.setup_validator import (  # noqa: E402
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
-        print("Usage: python -m cubos.tools.validate_setup <gantry.yaml> <deck.yaml> <protocol.yaml>")
+    if len(sys.argv) not in (4, 5):
+        print(
+            "Usage: python -m cubos.tools.validate_setup "
+            "<gantry.yaml> <deck.yaml> <protocol.yaml> [initial_fluids.yaml]"
+        )
         print()
         print("Example:")
         print("  python -m cubos.tools.validate_setup \\")
@@ -37,7 +45,10 @@ def main() -> None:
         sys.exit(1)
 
     gantry_path, deck_path, protocol_path = sys.argv[1:4]
-    result = run_setup_validation(gantry_path, deck_path, protocol_path)
+    initial_fluids_path = sys.argv[4] if len(sys.argv) == 5 else None
+    result = run_setup_validation(
+        gantry_path, deck_path, protocol_path, initial_fluids_path,
+    )
     print(result.output)
     if not result.passed:
         sys.exit(1)

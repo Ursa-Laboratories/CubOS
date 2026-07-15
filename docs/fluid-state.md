@@ -60,8 +60,16 @@ files before running them:
 python setup/validate_setup.py \
   /path/to/gantry.yaml \
   /path/to/deck.yaml \
-  /path/to/first-protocol.yaml
+  /path/to/first-protocol.yaml \
+  /path/to/initial-fluids.yaml   # optional
 ```
+
+When the optional initial-fluids YAML is supplied, validation also simulates
+every `transfer`/`serial_transfer`/`mix` step against those starting volumes:
+pipette-model volume bounds, vial `dead_volume_ul` floors, and destination
+`working_volume_ul` overflow are all checked offline, so a protocol that
+would fail its liquid-safety preflight mid-run fails here instead. Containers
+not named in the file are treated as starting empty.
 
 ## Resume a state
 

@@ -243,13 +243,34 @@ Move to a position and mix in place (repeated aspirate/dispense).
 Aspirate from a source and dispense into a destination (records the dispense with
 its source labware).
 
+Safety preflight runs before any motion: the request is rejected when the
+volume is non-positive, below the configured pipette model's `min_volume`,
+would draw a source vial below its `dead_volume_ul` floor, or would push the
+destination above its `working_volume_ul` (dead-volume/overflow checks apply
+when durable fluid tracking is active). Volumes above the model's
+`max_volume` split automatically into capacity-bounded strokes; each stroke
+is journaled durably, so a failure mid-transfer records exactly which strokes
+applied and a rerun never re-applies committed liquid.
+
 - `source` *(str, required)* — deck target to aspirate from.
 - `destination` *(str, required)* — deck target to dispense into.
-- `volume_ul` *(float, required)* — transfer volume (µL).
+- `volume_ul` *(float, required)* — transfer volume (µL). May exceed the
+  pipette model capacity (split into strokes).
 - `speed` *(float, default `50.0`)* — aspirate/dispense speed.
-- `source_height` *(float, default `0.0`)* — engage offset at the source.
-- `destination_height` *(float, default `0.0`)* — engage offset at the
-  destination.
+- `source_height` *(float, default unset)* — engage offset at the source.
+  When omitted and durable fluid tracking is active on a vial source with
+  known `height`/`diameter`, the aspiration height is derived from the
+  tracked liquid level (the tip follows the liquid down, floored at the
+  dead-volume/bottom-clearance level). Pass an explicit value (including
+  `0.0`) to bypass derivation; without tracking the legacy default `0.0`
+  applies.
+- `destination_height` *(float, default unset)* — engage offset at the
+  destination; same explicit/derived rules as `source_height`.
+- `liquid_class` *(str, default `null`)* — name of a volume-correction
+  entry from the pipette instrument's `liquid_classes` gantry-YAML config
+  (`{multiplier, offset_ul}` per class). The correction adjusts only the
+  driver-commanded stroke volume; tracked fluid state always moves the
+  requested volume. Disabled (identity) when omitted.
 
 #### `serial_transfer`
 

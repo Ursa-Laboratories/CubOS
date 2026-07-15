@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, List, Optional
 
 from cubos.deck.labware.tip_rack import (
@@ -10,9 +11,19 @@ from cubos.deck.labware.tip_rack import (
     resolve_tip_rack_slot,
 )
 from cubos.deck.labware.well_plate import WellPlate
+from cubos.instruments.pipette.liquid_class import IDENTITY_CORRECTION
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
+from ._liquid_transfer import (
+    LiquidTransferPreflightError,
+    derive_liquid_relative_height,
+    pipette_capacity,
+    plan_strokes,
+    validate_dead_volume,
+    validate_destination_overflow,
+    vial_for_target,
+)
 from ._movement import engage_at_labware
 
 logger = logging.getLogger(__name__)
@@ -103,15 +114,21 @@ def _begin_tracked_transfer(
     *,
     source: str,
     destination: str,
+    source_target: Any,
+    destination_target: Any,
     volume_ul: float,
 ) -> tuple[str, bool]:
     """Preflight and journal a tracked transfer before liquid actuation.
 
+    *source_target*/*destination_target* are already-resolved
+    ``DeckLabwareTarget``s (resolved once per ``transfer()`` call and reused
+    across every stroke) rather than re-resolved from the raw strings here,
+    so a multi-stroke transfer only ever hits ``context.deck.resolve_labware_
+    target`` twice regardless of stroke count.
+
     Returns the operation key and whether hardware should execute. ``False``
     means this exact campaign step was already applied and must not be replayed.
     """
-    source_target = _resolve_fluid_target(context, source)
-    destination_target = _resolve_fluid_target(context, destination)
     try:
         operation_key = context.fluid_operation_key("transfer")
         should_execute = context.data_store.begin_fluid_transfer(
@@ -205,6 +222,31 @@ def _mark_transfer_uncertain(
             "Failed to mark fluid operation %s reconciliation-required",
             operation_key,
         )
+
+
+def _mark_transfer_stroke_uncertain(
+    context: ProtocolContext,
+    operation_key: str,
+    *,
+    stroke_index: int,
+    stroke_count: int,
+    exc: BaseException,
+) -> None:
+    """Best-effort marker carrying which stroke of a split transfer failed."""
+    try:
+        context.data_store.mark_fluid_reconciliation_required(
+            operation_key,
+            f"stroke {stroke_index + 1}/{stroke_count}: "
+            f"{type(exc).__name__}: {exc}",
+        )
+    except Exception:
+        logger.exception(
+            "Failed to mark fluid operation %s reconciliation-required "
+            "(stroke %d/%d)",
+            operation_key, stroke_index + 1, stroke_count,
+        )
+
+
 
 
 def _tip_rack_key(position: str) -> str:
@@ -436,54 +478,275 @@ def transfer(
     destination: str,
     volume_ul: float,
     speed: float = 50.0,
-    source_height: float = 0.0,
-    destination_height: float = 0.0,
+    source_height: Optional[float] = None,
+    destination_height: Optional[float] = None,
+    liquid_class: Optional[str] = None,
 ) -> None:
-    """Aspirate from *source* and dispense into *destination*."""
+    """Aspirate from *source* and dispense into *destination*.
+
+    Safety preflight runs entirely before any motion or durable journaling:
+    rejects ``volume_ul <= 0``, volume below the configured pipette model's
+    ``min_volume``, source draws that would cross its ``dead_volume_ul``
+    floor, and destination fills that would exceed ``working_volume_ul``.
+    Preflight and splitting only engage when *pipette* exposes a real
+    ``PipetteConfig`` (see ``_liquid_transfer.pipette_capacity``); bare test
+    doubles fall back to the single-stroke, unvalidated pre-Feature-04
+    behavior.
+
+    Volumes above the model's ``max_volume`` split deterministically into
+    capacity-bounded strokes (``_liquid_transfer.plan_strokes``). Each
+    stroke is its own durable fluid operation reusing the existing
+    begin/complete journal (one ``operation_key`` per stroke, scoped via
+    ``context.active_substep``): this makes a multi-stroke transfer a
+    logically-one action whose per-stroke sub-state is independently
+    recoverable -- a crash after stroke *N* leaves strokes ``< N`` applied
+    and terminal, stroke *N* itself ``reconciliation_required`` (with a
+    stroke-numbered detail message), and strokes ``> N`` never started; a
+    rerun skips every already-applied stroke via the existing idempotent
+    ``begin_fluid_transfer`` check and only executes what's left. No new
+    schema/journal was needed for this -- it composes entirely from the
+    tip_state/fluid_state two-phase begin/complete primitives.
+
+    ``source_height``/``destination_height`` keep the existing
+    labware-relative sign convention (0 = labware reference Z, negative =
+    below). Leave them unset (``None``, the default) to opt into
+    state-derived aspiration height: when durable fluid tracking is active
+    and the target resolves to a ``Vial`` with known geometry, the engage Z
+    tracks the current liquid surface (floored at the dead-volume/bottom
+    clearance -- see ``_liquid_transfer.derive_liquid_relative_height``).
+    Otherwise (untracked, non-vial, or missing geometry) falls back to the
+    legacy default of ``0.0``, identical to pre-Feature-04 behavior. Passing
+    an explicit numeric value (including ``0.0``) always wins.
+
+    ``liquid_class`` selects a per-pipette-instrument volume correction
+    (``cubos.instruments.pipette.liquid_class``; disabled/identity by
+    default), applied to the *driver-commanded* stroke volume only --
+    durable fluid-state updates always move the *requested* (uncorrected)
+    volume, so tracked container state reflects what was asked for while
+    hardware receives whatever correction is calibrated to actually deliver
+    it.
+    """
     tracked = _tracked_fluid_state(context)
     pipette = _get_pipette(context)
+    capacity = pipette_capacity(pipette)
+
+    # Only resolve through the pipette's own correction_for() when it's a
+    # real driver (capacity is not None, see pipette_capacity() gating) --
+    # bare test doubles don't implement PipetteInstrument and would
+    # otherwise hand back an unconfigured Mock instead of a correction.
+    if capacity is not None:
+        try:
+            correction = pipette.correction_for(liquid_class)
+        except Exception as exc:
+            raise ProtocolExecutionError(
+                f"transfer liquid_class resolution failed: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+    elif liquid_class is not None:
+        raise ProtocolExecutionError(
+            "transfer liquid_class was requested but the pipette instrument "
+            "does not expose model/correction metadata (no PipetteConfig)."
+        )
+    else:
+        correction = IDENTITY_CORRECTION
+
+    # Correction participates in planning: the driver is commanded the
+    # corrected stroke volume, so strokes are sized such that even the
+    # corrected volume never exceeds the model max (see plan_strokes).
+    try:
+        stroke_volumes = plan_strokes(volume_ul, capacity, correction)
+    except LiquidTransferPreflightError as exc:
+        raise ProtocolExecutionError(f"transfer preflight failed: {exc}") from exc
+
+    resolved_source_height = source_height
+    resolved_destination_height = destination_height
+    source_target = None
+    destination_target = None
+
+    if tracked:
+        # Resolve exactly once and reuse across every stroke below -- a
+        # multi-stroke transfer must not multiply deck-target resolution
+        # calls per stroke.
+        source_target = _resolve_fluid_target(context, source)
+        destination_target = _resolve_fluid_target(context, destination)
+        try:
+            source_container = context.data_store.get_fluid_container(
+                context.fluid_state_id,
+                source_target.labware_key,
+                source_target.location_id or "",
+            )
+            destination_container = context.data_store.get_fluid_container(
+                context.fluid_state_id,
+                destination_target.labware_key,
+                destination_target.location_id or "",
+            )
+        except Exception as exc:
+            raise ProtocolExecutionError(
+                f"Fluid-state preflight failed reading container state for "
+                f"{source!r} -> {destination!r}: {type(exc).__name__}: {exc}"
+            ) from exc
+
+        # A real DataStore always returns a plain dict snapshot; test
+        # doubles that don't configure get_fluid_container() return an
+        # unconfigured Mock. Mirror pipette_capacity()'s gating: dead-volume/
+        # overflow preflight and state-derived height only activate against
+        # a genuine snapshot, so unit tests exercising other behavior with
+        # bare mocks are unaffected.
+        if isinstance(source_container, Mapping) and isinstance(
+            destination_container, Mapping,
+        ):
+            source_vial = vial_for_target(source_target)
+            dead_volume_ul = (
+                float(getattr(source_vial, "dead_volume_ul", 0.0) or 0.0)
+                if source_vial is not None else 0.0
+            )
+            try:
+                validate_dead_volume(
+                    source_current_volume_ul=source_container["current_volume_ul"],
+                    dead_volume_ul=dead_volume_ul,
+                    requested_volume_ul=volume_ul,
+                    source_label=source,
+                )
+                validate_destination_overflow(
+                    destination_current_volume_ul=destination_container["current_volume_ul"],
+                    working_volume_ul=destination_container["working_volume_ul"],
+                    requested_volume_ul=volume_ul,
+                    destination_label=destination,
+                )
+            except LiquidTransferPreflightError as exc:
+                raise ProtocolExecutionError(
+                    f"transfer preflight failed: {exc}"
+                ) from exc
+
+            if resolved_source_height is None and source_vial is not None:
+                derived = derive_liquid_relative_height(
+                    source_vial, source_container["current_volume_ul"],
+                )
+                if derived is not None:
+                    resolved_source_height = derived
+
+            if resolved_destination_height is None:
+                destination_vial = vial_for_target(destination_target)
+                if destination_vial is not None:
+                    derived = derive_liquid_relative_height(
+                        destination_vial,
+                        destination_container["current_volume_ul"],
+                    )
+                    if derived is not None:
+                        resolved_destination_height = derived
+
+    if resolved_source_height is None:
+        resolved_source_height = 0.0
+    if resolved_destination_height is None:
+        resolved_destination_height = 0.0
+
+    stroke_count = len(stroke_volumes)
+    multi_stroke = stroke_count > 1
+    previous_substep = context.active_substep
+    try:
+        for stroke_index, stroke_volume in enumerate(stroke_volumes):
+            if multi_stroke:
+                suffix = f"stroke{stroke_index}"
+                context.active_substep = (
+                    f"{previous_substep}:{suffix}" if previous_substep else suffix
+                )
+            _execute_transfer_stroke(
+                context,
+                pipette,
+                source=source,
+                destination=destination,
+                source_target=source_target,
+                destination_target=destination_target,
+                stroke_volume_ul=stroke_volume,
+                speed=speed,
+                source_height=resolved_source_height,
+                destination_height=resolved_destination_height,
+                correction=correction,
+                tracked=tracked,
+                stroke_index=stroke_index,
+                stroke_count=stroke_count,
+            )
+    finally:
+        context.active_substep = previous_substep
+
+
+def _execute_transfer_stroke(
+    context: ProtocolContext,
+    pipette: Any,
+    *,
+    source: str,
+    destination: str,
+    source_target: Any,
+    destination_target: Any,
+    stroke_volume_ul: float,
+    speed: float,
+    source_height: float,
+    destination_height: float,
+    correction: Any,
+    tracked: bool,
+    stroke_index: int,
+    stroke_count: int,
+) -> None:
+    """Journal, actuate, and commit exactly one transfer stroke.
+
+    One durable fluid operation per stroke (see ``transfer``'s docstring for
+    the resumability rationale). ``correction`` is applied only to the
+    volume handed to the pipette driver; the durable state update always
+    uses ``stroke_volume_ul`` (the requested, uncorrected amount).
+    """
     operation_key = None
     if tracked:
         operation_key, should_execute = _begin_tracked_transfer(
             context,
             source=source,
             destination=destination,
-            volume_ul=volume_ul,
+            source_target=source_target,
+            destination_target=destination_target,
+            volume_ul=stroke_volume_ul,
         )
         if not should_execute:
             context.logger.info(
-                "Skipping already-applied fluid operation %s", operation_key,
+                "Skipping already-applied fluid operation %s (stroke %d/%d)",
+                operation_key, stroke_index + 1, stroke_count,
             )
             return
 
+    commanded_volume_ul = correction.apply(stroke_volume_ul)
     try:
         _engage(
             context, source, command_label="transfer.aspirate",
             height=source_height,
         )
-        pipette.aspirate(volume_ul, speed)
+        pipette.aspirate(commanded_volume_ul, speed)
         _engage(
             context, destination, command_label="transfer.dispense",
             height=destination_height,
         )
-        pipette.dispense(volume_ul, speed)
+        pipette.dispense(commanded_volume_ul, speed)
     except BaseException as exc:
         if operation_key is not None:
-            _mark_transfer_uncertain(context, operation_key, exc)
+            _mark_transfer_stroke_uncertain(
+                context, operation_key,
+                stroke_index=stroke_index, stroke_count=stroke_count, exc=exc,
+            )
         raise
 
     if operation_key is not None:
         try:
             context.data_store.complete_fluid_transfer(operation_key)
         except Exception as exc:
-            _mark_transfer_uncertain(context, operation_key, exc)
+            _mark_transfer_stroke_uncertain(
+                context, operation_key,
+                stroke_index=stroke_index, stroke_count=stroke_count, exc=exc,
+            )
             raise ProtocolExecutionError(
                 "Physical transfer completed, but its fluid-state commit "
-                f"failed for operation {operation_key!r}: "
+                f"failed for operation {operation_key!r} (stroke "
+                f"{stroke_index + 1}/{stroke_count}): "
                 f"{type(exc).__name__}: {exc}. Reconciliation is required."
             ) from exc
     else:
-        _record_transfer_to_store(context, source, destination, volume_ul)
+        _record_transfer_to_store(context, source, destination, stroke_volume_ul)
 
 
 @protocol_command("drop_tip")

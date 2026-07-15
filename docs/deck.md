@@ -110,6 +110,13 @@ override `vial_model_name`, `vial_height`, `vial_diameter`, `capacity_ul`, or
 `working_volume_ul`. Calibration remains deck-specific even when every other
 value comes from the definition.
 
+Vial-like labware may also declare an unreachable residual volume:
+`dead_volume_ul` on a `vial` (and nested holder vials), or
+`vial_dead_volume_ul` on a `vial_grid` (applied to every vial in the grid).
+It is optional and defaults to `0`. Tracked `transfer` steps refuse to draw a
+source below this floor before any motion, and state-derived aspiration
+heights never descend beneath the level at which this volume remains.
+
 ## Existing Nested Deck Files
 
 Existing deck YAML files do not need to be rewritten. CubOS continues to load

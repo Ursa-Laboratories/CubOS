@@ -108,6 +108,7 @@ class VialGridYamlEntry(BaseModel):
     vial_diameter: Optional[float] = Field(default=None, gt=0)
     capacity_ul: float = Field(..., gt=0)
     working_volume_ul: float = Field(..., gt=0)
+    vial_dead_volume_ul: float = Field(default=0.0, ge=0)
     aliases: Dict[str, str] = Field(default_factory=dict)
 
     @property
@@ -131,6 +132,8 @@ class VialGridYamlEntry(BaseModel):
             )
         if self.working_volume_ul > self.capacity_ul:
             raise ValueError("working_volume_ul must be <= capacity_ul.")
+        if self.vial_dead_volume_ul > self.working_volume_ul:
+            raise ValueError("vial_dead_volume_ul must be <= working_volume_ul.")
 
         positions = {
             f"{chr(65 + row_index)}{column_index}"
@@ -167,6 +170,7 @@ class VialYamlEntry(BaseModel):
     location: _YamlPoint3D
     capacity_ul: float
     working_volume_ul: float
+    dead_volume_ul: float = Field(default=0.0, ge=0)
 
     @model_validator(mode="after")
     def _validate_vial_volumes(self) -> "VialYamlEntry":
@@ -174,6 +178,8 @@ class VialYamlEntry(BaseModel):
             raise ValueError("working_volume_ul must be <= capacity_ul.")
         if self.capacity_ul <= 0 or self.working_volume_ul <= 0:
             raise ValueError("capacity_ul and working_volume_ul must be positive.")
+        if self.dead_volume_ul > self.working_volume_ul:
+            raise ValueError("dead_volume_ul must be <= working_volume_ul.")
         return self
 
 
@@ -189,6 +195,7 @@ class NestedVialYamlEntry(BaseModel):
     location: _YamlPoint3D
     capacity_ul: float
     working_volume_ul: float
+    dead_volume_ul: float = Field(default=0.0, ge=0)
 
     @model_validator(mode="after")
     def _validate_nested_vial(self) -> "NestedVialYamlEntry":
@@ -198,6 +205,8 @@ class NestedVialYamlEntry(BaseModel):
             raise ValueError("capacity_ul and working_volume_ul must be positive.")
         if self.working_volume_ul > self.capacity_ul:
             raise ValueError("working_volume_ul must be <= capacity_ul.")
+        if self.dead_volume_ul > self.working_volume_ul:
+            raise ValueError("dead_volume_ul must be <= working_volume_ul.")
         return self
 
 

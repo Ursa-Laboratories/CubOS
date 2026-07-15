@@ -248,6 +248,92 @@ def test_loaded_vial_has_location_and_volume():
         Path(path).unlink(missing_ok=True)
 
 
+def test_vial_dead_volume_defaults_to_zero_and_loads_when_specified():
+    yaml = """
+labware:
+  vial_default:
+    type: vial
+    name: vial_default
+    height: 66.75
+    diameter: 28.0
+    location: {x: 30.0, y: 40.0, z: 30.0}
+    capacity_ul: 1500.0
+    working_volume_ul: 1200.0
+  vial_dead:
+    type: vial
+    name: vial_dead
+    height: 66.75
+    diameter: 28.0
+    location: {x: 60.0, y: 40.0, z: 30.0}
+    capacity_ul: 1500.0
+    working_volume_ul: 1200.0
+    dead_volume_ul: 75.0
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml)
+        path = f.name
+    try:
+        result = load_deck_from_yaml(path)
+        assert result["vial_default"].dead_volume_ul == pytest.approx(0.0)
+        assert result["vial_dead"].dead_volume_ul == pytest.approx(75.0)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_vial_dead_volume_above_working_volume_rejected():
+    yaml = """
+labware:
+  vial_1:
+    type: vial
+    name: vial_1
+    height: 66.75
+    diameter: 28.0
+    location: {x: 30.0, y: 40.0, z: 30.0}
+    capacity_ul: 1500.0
+    working_volume_ul: 1200.0
+    dead_volume_ul: 1300.0
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml)
+        path = f.name
+    try:
+        with pytest.raises(Exception, match="dead_volume_ul"):
+            load_deck_from_yaml(path)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_vial_grid_dead_volume_propagates_to_every_vial():
+    yaml = """
+labware:
+  reagents:
+    type: vial_grid
+    name: reagents
+    rows: 1
+    columns: 2
+    calibration:
+      a1: {x: 10.0, y: 20.0, z: 30.0}
+      a2: {x: 20.0, y: 20.0, z: 30.0}
+    x_offset: 10.0
+    y_offset: 10.0
+    vial_height: 40.0
+    vial_diameter: 12.0
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+    vial_dead_volume_ul: 25.0
+"""
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(yaml)
+        path = f.name
+    try:
+        result = load_deck_from_yaml(path)
+        grid = result["reagents"]
+        for vial in grid.vials.values():
+            assert vial.dead_volume_ul == pytest.approx(25.0)
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
 def test_vial_location_z_is_direct_deck_frame_z() -> None:
     yaml = """
 labware:

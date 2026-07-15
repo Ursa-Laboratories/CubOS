@@ -448,6 +448,7 @@ def _build_vial_grid(
             location=coordinate,
             capacity_ul=entry.capacity_ul,
             working_volume_ul=entry.working_volume_ul,
+            dead_volume_ul=entry.vial_dead_volume_ul,
         )
         for position_id, coordinate in positions.items()
     }
@@ -524,6 +525,7 @@ def _build_nested_vial(
         ),
         capacity_ul=entry.capacity_ul,
         working_volume_ul=entry.working_volume_ul,
+        dead_volume_ul=entry.dead_volume_ul,
     )
 
 

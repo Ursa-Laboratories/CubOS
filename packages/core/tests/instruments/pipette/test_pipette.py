@@ -541,3 +541,51 @@ class TestOfflinePipette:
         pip = OpentronsPipette(pipette_model="flex_1channel_1000", offline=True)
         assert pip.config.family == PipetteFamily.FLEX
         assert pip.config.max_volume == 1000.0
+
+
+# --- Liquid-class correction tests --------------------------------------------
+
+
+class TestLiquidClassCorrection:
+
+    def test_identity_by_default(self):
+        pip = OpentronsPipette(offline=True)
+        assert pip.liquid_classes == {}
+        assert pip.correction_for(None).apply(123.0) == pytest.approx(123.0)
+
+    def test_configured_multiplier_and_offset_applied(self):
+        pip = OpentronsPipette(
+            offline=True,
+            liquid_classes={"viscous": {"multiplier": 1.1, "offset_ul": 5.0}},
+        )
+        correction = pip.correction_for("viscous")
+        assert correction.apply(100.0) == pytest.approx(115.0)
+
+    def test_unknown_liquid_class_raises(self):
+        from cubos.instruments.pipette.liquid_class import LiquidClassConfigError
+
+        pip = OpentronsPipette(offline=True)
+        with pytest.raises(LiquidClassConfigError, match="Unknown liquid class"):
+            pip.correction_for("does_not_exist")
+
+    def test_disabled_when_liquid_classes_omitted(self):
+        pip = OpentronsPipette(offline=True)
+        assert pip.correction_for(None).apply(50.0) == pytest.approx(50.0)
+
+    def test_multiplier_must_be_positive(self):
+        from cubos.instruments.pipette.liquid_class import LiquidClassConfigError
+
+        with pytest.raises(LiquidClassConfigError):
+            OpentronsPipette(
+                offline=True,
+                liquid_classes={"bad": {"multiplier": 0.0}},
+            )
+
+    def test_rejects_unknown_config_fields(self):
+        from cubos.instruments.pipette.liquid_class import LiquidClassConfigError
+
+        with pytest.raises(LiquidClassConfigError, match="unknown fields"):
+            OpentronsPipette(
+                offline=True,
+                liquid_classes={"bad": {"scale": 2.0}},
+            )

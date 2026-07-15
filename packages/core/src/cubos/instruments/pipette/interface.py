@@ -3,11 +3,38 @@
 from abc import abstractmethod
 
 from cubos.instruments.base_instrument import BaseInstrument
+from cubos.instruments.pipette.liquid_class import (
+    IDENTITY_CORRECTION,
+    LiquidClassConfigError,
+    LiquidClassCorrection,
+)
 from cubos.instruments.pipette.models import AspirateResult, MixResult, PipetteStatus
 
 
 class PipetteInstrument(BaseInstrument):
     """Base class for pipette implementations."""
+
+    @property
+    def liquid_classes(self) -> dict[str, LiquidClassCorrection]:
+        """Return this instrument's configured liquid-class corrections.
+
+        Empty by default (no vendor wiring required to opt out). Vendors
+        that support per-liquid correction store parsed corrections on
+        ``self._liquid_classes``.
+        """
+        return getattr(self, "_liquid_classes", {})
+
+    def correction_for(self, liquid_class: str | None) -> LiquidClassCorrection:
+        """Return the correction for *liquid_class*, or identity when unset."""
+        if liquid_class is None:
+            return IDENTITY_CORRECTION
+        try:
+            return self.liquid_classes[liquid_class]
+        except KeyError:
+            raise LiquidClassConfigError(
+                f"Unknown liquid class {liquid_class!r}. Configured: "
+                f"{sorted(self.liquid_classes)}."
+            ) from None
 
     @property
     @abstractmethod

@@ -813,6 +813,48 @@ def get_fluid_snapshot(
     }
 
 
+def get_fluid_container(
+    connection: sqlite3.Connection,
+    fluid_state_id: int,
+    labware_key: str,
+    location_id: str,
+) -> FluidContainerSnapshot:
+    """Return a single container's current durable state.
+
+    Lightweight sibling of :func:`get_fluid_snapshot` for callers (transfer
+    preflight) that need one container's volume/composition without paying
+    for the whole session snapshot.
+    """
+    with _read_transaction(connection):
+        _require_state(connection, fluid_state_id)
+        row = connection.execute(
+            "SELECT labware_key, location_id, labware_type, capacity_ul, "
+            "working_volume_ul, current_volume_ul, composition_json, version, "
+            "updated_at FROM fluid_containers WHERE fluid_state_id = ? AND "
+            "labware_key = ? AND location_id = ?",
+            (fluid_state_id, labware_key, location_id),
+        ).fetchone()
+    if row is None:
+        raise FluidStateError(
+            f"Fluid target {_format_target(labware_key, location_id)!r} is not "
+            f"registered in state {fluid_state_id}."
+        )
+    volume = float(row[5])
+    return {
+        "labware_key": row[0],
+        "location_id": row[1],
+        "labware_type": row[2],
+        "capacity_ul": float(row[3]),
+        "working_volume_ul": float(row[4]),
+        "current_volume_ul": volume,
+        "composition": _decode_composition(
+            row[6], volume, target=_format_target(row[0], row[1]),
+        ),
+        "version": int(row[7]),
+        "updated_at": row[8],
+    }
+
+
 def _resolved_deck_provenance(deck_path: str | Path) -> tuple[str, str]:
     """Return the resolved source YAML as provenance, not compatibility state."""
     path = Path(deck_path).expanduser().resolve()
@@ -1948,6 +1990,7 @@ __all__ = [
     "complete_fluid_mix",
     "complete_fluid_transfer",
     "create_fluid_state",
+    "get_fluid_container",
     "get_fluid_snapshot",
     "load_initial_fluids",
     "load_replacement_state",

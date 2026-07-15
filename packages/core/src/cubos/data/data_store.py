@@ -15,7 +15,7 @@ from cubos.instruments.uvvis_ccs.models import UVVisSpectrum
 from cubos.protocol_engine.measurements import InstrumentMeasurement, MeasurementType
 
 if TYPE_CHECKING:
-    from .fluid_state import FluidStateSnapshot, FluidStateSummary
+    from .fluid_state import FluidContainerSnapshot, FluidStateSnapshot, FluidStateSummary
 
 DATA_DB_PATH_ENV = "CUBOS_DATA_DB_PATH"
 SQLITE_MEMORY_DATABASE = ":memory:"
@@ -1036,6 +1036,19 @@ class DataStore:
         from .fluid_state import list_fluid_states
 
         return list_fluid_states(self._conn)
+
+    def get_fluid_container(
+        self,
+        fluid_state_id: int,
+        labware_key: str,
+        location_id: str,
+    ) -> FluidContainerSnapshot:
+        """Return one container's current durable volume/composition."""
+        from .fluid_state import get_fluid_container
+
+        return get_fluid_container(
+            self._conn, fluid_state_id, labware_key, location_id,
+        )
 
     def seed_fluid(
         self,
