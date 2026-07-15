@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.responses import FileResponse
+from cubos.data import CapStateError, FluidStateError, TipStateError
 from cubos.gantry.session import (
     GantryNotConnectedError,
     InterruptFeedHoldTimeoutError,
@@ -20,6 +21,7 @@ from cubos_api.services.run_manager import (
     RunPolicyError,
     get_run_manager,
 )
+from cubos_api.services.state_errors import map_state_exception
 
 
 router = APIRouter(prefix="/api/v1/runs", tags=["cubos-runs-v1"])
@@ -31,6 +33,8 @@ def submit_run(body: RunSubmission, response: Response) -> RunRecord:
         record = get_run_manager().submit(body)
     except RunConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
+    except (FluidStateError, TipStateError, CapStateError) as exc:
+        raise map_state_exception(exc) from exc
     except (RunPolicyError, ValueError, OSError) as exc:
         raise HTTPException(400, str(exc)) from exc
     response.headers["Location"] = f"/api/v1/runs/{record.run_id}"

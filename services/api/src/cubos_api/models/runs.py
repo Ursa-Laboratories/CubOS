@@ -7,6 +7,8 @@ from typing import Any, Dict, List, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
+from cubos_api.models.state import RunStateSelection
+
 
 RunState = Literal[
     "queued",
@@ -30,6 +32,7 @@ class RunSubmission(BaseModel):
     protocol_yaml: str | None = None
     mock_mode: bool = False
     metadata: Dict[str, Any] = Field(default_factory=dict)
+    state: RunStateSelection | None = None
 
     @model_validator(mode="after")
     def validate_source(self) -> "RunSubmission":
@@ -70,6 +73,7 @@ class RunRecord(BaseModel):
     result: Any = None
     error: str | None = None
     artifacts: List[str] = Field(default_factory=list)
+    fluid_state_id: int | None = None
 
 
 class RunEventsResponse(BaseModel):

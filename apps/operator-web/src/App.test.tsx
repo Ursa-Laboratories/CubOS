@@ -6,6 +6,7 @@ import App from "./App";
 import type {
   DeckConfig,
   DeckResponse,
+  FluidStateSummary,
   GantryConfig,
   GantryPosition,
   GantryResponse,
@@ -28,6 +29,8 @@ type FetchMockOptions = {
   runStatus?: () => ProtocolRunStatus;
   validateSetup?: () => Response | Promise<Response>;
   calibrationWarning?: string | null;
+  fluidStates?: FluidStateSummary[];
+  runsSubmit?: (body: Record<string, unknown> | null) => Response | Promise<Response>;
 };
 
 function createState(): ApiState {
@@ -157,6 +160,8 @@ function toProtocolResponse(filename: string, body: ProtocolConfig): ProtocolRes
 
 function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
   let gantryConnected = false;
+  let lastSubmittedRunId: string | null = null;
+  let lastSubmittedFluidStateId: number | null = null;
   const gantryPosition = (x = 0, y = 0, z = 0): GantryPosition => ({
     x,
     y,
@@ -322,6 +327,46 @@ function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
     }
     if (path === "/api/v1/deck/preview-wells" && method === "POST") {
       return jsonResponse(previewWells(body as WellPlateConfig));
+    }
+    if (path === "/api/v1/fluid-states" && method === "GET") {
+      return jsonResponse(options.fluidStates ?? []);
+    }
+    if (path === "/api/v1/runs" && method === "POST") {
+      if (options.runsSubmit) return options.runsSubmit(body);
+      lastSubmittedRunId = (body?.run_id as string) ?? null;
+      lastSubmittedFluidStateId = (body?.state as { fluid_state_id?: number } | undefined)?.fluid_state_id
+        ?? null;
+      return jsonResponse({
+        run_id: lastSubmittedRunId,
+        state: "queued",
+        created_at: 0,
+        started_at: null,
+        finished_at: null,
+        mock_mode: false,
+        metadata: {},
+        digests: {},
+        result: null,
+        error: null,
+        artifacts: [],
+        fluid_state_id: lastSubmittedFluidStateId,
+      });
+    }
+    if (path.startsWith("/api/v1/runs/") && method === "GET") {
+      const runId = path.slice("/api/v1/runs/".length);
+      return jsonResponse({
+        run_id: runId,
+        state: "succeeded",
+        created_at: 0,
+        started_at: 0,
+        finished_at: 1,
+        mock_mode: false,
+        metadata: {},
+        digests: {},
+        result: { status: "ok", steps_executed: 1, campaign_id: 456 },
+        error: null,
+        artifacts: [],
+        fluid_state_id: lastSubmittedRunId === runId ? lastSubmittedFluidStateId : null,
+      });
     }
 
     const [, api, version, kind, filename] = path.split("/");
@@ -1316,5 +1361,118 @@ describe("CubOS editor interactions", () => {
     const afterSaveEvent = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(afterSaveEvent);
     expect(afterSaveEvent.defaultPrevented).toBe(false);
+  });
+
+  // ── Feature 07: create-new/resume-existing fluid-state run submission ──
+
+  it("keeps Run Protocol disabled while Resume is chosen without a state selected", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      fluidStates: [{
+        id: 5,
+        label: "seed",
+        deck_path: "/deck.yaml",
+        deck_fingerprint: "abc",
+        created_at: "now",
+        updated_at: "now",
+        container_count: 1,
+        operation_count: 0,
+      }],
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+
+    await user.click(screen.getByRole("radio", { name: "Resume existing state" }));
+    expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run Protocol" })).toBeEnabled());
+  });
+
+  it("submits a stateful run through the versioned runs resource when resuming a state", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(createState(), {
+      fluidStates: [{
+        id: 5,
+        label: "seed",
+        deck_path: "/deck.yaml",
+        deck_fingerprint: "abc",
+        created_at: "now",
+        updated_at: "now",
+        container_count: 1,
+        operation_count: 0,
+      }],
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "Resume existing state" }));
+    await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
+
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await user.click(runButton);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    const [, submitInit] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/runs")!;
+    expect(JSON.parse(String(submitInit?.body))).toMatchObject({
+      gantry_file: "cubos.yaml",
+      deck_file: "panda-deck.yaml",
+      protocol_file: "move.yaml",
+      state: { fluid_state_id: 5 },
+    });
+
+    expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
+    // The legacy synchronous endpoint must never be used for a stateful run.
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything());
+  });
+
+  it("surfaces a deck-fingerprint mismatch error clearly when resuming", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      fluidStates: [{
+        id: 5,
+        label: "seed",
+        deck_path: "/deck.yaml",
+        deck_fingerprint: "abc",
+        created_at: "now",
+        updated_at: "now",
+        container_count: 1,
+        operation_count: 0,
+      }],
+      runsSubmit: async () => new Response(
+        JSON.stringify({
+          detail: "Fluid state 5 belongs to deck fingerprint abc123, but the "
+            + "supplied deck resolves to def456.",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "Resume existing state" }));
+    await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
+    await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
+
+    expect(await screen.findByText(/deck fingerprint/i)).toBeInTheDocument();
   });
 });

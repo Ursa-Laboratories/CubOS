@@ -2,6 +2,8 @@ import { useState } from "react";
 import type {
   CommandInfo,
   DeckResponse,
+  FluidStateChoice,
+  FluidStateSummary,
   GantryResponse,
   LabwareResponse,
   ProtocolStep,
@@ -49,6 +51,12 @@ interface Props {
   isCancelingRun: boolean;
   runResult: ProtocolRunResponse | null;
   runError: string | null;
+  /** Explicit create-new-state vs resume-existing-state choice (Feature 07).
+   * Defaults to `{ mode: "none" }` when the caller doesn't opt in, which
+   * keeps every pre-Feature-07 run submission byte-identical. */
+  fluidStateChoice?: FluidStateChoice;
+  onFluidStateChoiceChange?: (choice: FluidStateChoice) => void;
+  availableFluidStates?: FluidStateSummary[];
 }
 
 // Categorical accents for step kinds: movement = indigo accent, liquid
@@ -132,6 +140,9 @@ export default function ProtocolEditor({
   isCancelingRun,
   runResult,
   runError,
+  fluidStateChoice = { mode: "none", newLabel: "", resumeId: null },
+  onFluidStateChoiceChange,
+  availableFluidStates = [],
 }: Props) {
   const [steps, setSteps] = useState<ProtocolStep[]>(() => (
     loadedSteps ? structuredClone(loadedSteps) : []
@@ -294,8 +305,16 @@ export default function ProtocolEditor({
   // those configs from here.
   const otherDirty = unsavedConfigs.filter((name) => name !== "Protocol");
   const canSave = hasSteps && (!!saveAs.trim() || !!selectedFile) && !saving && !hasPositionErrors;
-  const runDisabled = isRunning || !hasSteps || !canRun || hasUnsaved;
-  const runButtonTitle = hasUnsaved ? "Save your changes before running" : runDisabledReason ?? undefined;
+  // "new"/"resume" both need an explicit, complete choice before Run is
+  // enabled — resume specifically needs a picked state id. "none" (the
+  // default) never blocks Run, so every pre-Feature-07 flow is unaffected.
+  const stateChoiceIncomplete = fluidStateChoice.mode === "resume" && fluidStateChoice.resumeId === null;
+  const runDisabled = isRunning || !hasSteps || !canRun || hasUnsaved || stateChoiceIncomplete;
+  const runButtonTitle = hasUnsaved
+    ? "Save your changes before running"
+    : stateChoiceIncomplete
+      ? "Select a fluid state to resume before running"
+      : runDisabledReason ?? undefined;
   const runButtonLabel = isCancelingRun
     ? "Cancelling — waiting for protocol to stop"
     : isRunning
@@ -492,6 +511,66 @@ export default function ProtocolEditor({
       </div>
 
       <div style={{ marginTop: 12 }}>
+        {onFluidStateChoiceChange && (
+          <div style={stateChoicePanelStyle}>
+            <div style={theme.sectionLabel}>Fluid state tracking</div>
+            <div style={stateChoiceOptionsStyle}>
+              <label style={stateChoiceOptionStyle}>
+                <input
+                  type="radio"
+                  name="fluid-state-choice"
+                  checked={fluidStateChoice.mode === "none"}
+                  onChange={() => onFluidStateChoiceChange({ ...fluidStateChoice, mode: "none" })}
+                />
+                No state tracking
+              </label>
+              <label style={stateChoiceOptionStyle}>
+                <input
+                  type="radio"
+                  name="fluid-state-choice"
+                  checked={fluidStateChoice.mode === "new"}
+                  onChange={() => onFluidStateChoiceChange({ ...fluidStateChoice, mode: "new" })}
+                />
+                New fluid state
+              </label>
+              <label style={stateChoiceOptionStyle}>
+                <input
+                  type="radio"
+                  name="fluid-state-choice"
+                  checked={fluidStateChoice.mode === "resume"}
+                  onChange={() => onFluidStateChoiceChange({ ...fluidStateChoice, mode: "resume" })}
+                />
+                Resume existing state
+              </label>
+            </div>
+            {fluidStateChoice.mode === "new" && (
+              <input
+                value={fluidStateChoice.newLabel}
+                onChange={(e) => onFluidStateChoiceChange({ ...fluidStateChoice, newLabel: e.target.value })}
+                placeholder="Label for the new fluid state (optional)"
+                style={{ ...theme.input, marginTop: 8, width: "100%", maxWidth: 360 }}
+              />
+            )}
+            {fluidStateChoice.mode === "resume" && (
+              <select
+                aria-label="Fluid state to resume"
+                value={fluidStateChoice.resumeId ?? ""}
+                onChange={(e) => onFluidStateChoiceChange({
+                  ...fluidStateChoice,
+                  resumeId: e.target.value ? Number(e.target.value) : null,
+                })}
+                style={{ ...theme.input, marginTop: 8, width: "100%", maxWidth: 360 }}
+              >
+                <option value="">Select a fluid state…</option>
+                {availableFluidStates.map((state) => (
+                  <option key={state.id} value={state.id}>
+                    #{state.id} {state.label ? `— ${state.label}` : ""}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
         {hasUnsaved && (
           <UnsavedNotice>
             <strong>Unsaved changes.</strong>{" "}
@@ -1072,6 +1151,28 @@ const protocolActionBarStyle: React.CSSProperties = {
   gap: 8,
   alignItems: "center",
   flexWrap: "wrap",
+};
+
+const stateChoicePanelStyle: React.CSSProperties = {
+  ...theme.card,
+  padding: 10,
+  marginBottom: 10,
+};
+
+const stateChoiceOptionsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 16,
+  flexWrap: "wrap",
+  marginTop: 6,
+};
+
+const stateChoiceOptionStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  fontSize: 13,
+  color: theme.color.text,
+  cursor: "pointer",
 };
 
 const protocolButtonGroupStyle: React.CSSProperties = {

@@ -12,7 +12,17 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from cubos_api.config import get_settings
-from cubos_api.routers import data, deck, gantry, protocol, raw, runs, settings, system
+from cubos_api.routers import (
+    data,
+    deck,
+    fluid_states,
+    gantry,
+    protocol,
+    raw,
+    runs,
+    settings,
+    system,
+)
 
 FRONTEND_DIST = Path(
     os.environ.get(
@@ -118,6 +128,7 @@ def create_app() -> FastAPI:
     app.include_router(settings.router)
     app.include_router(system.router)
     app.include_router(runs.router)
+    app.include_router(fluid_states.router)
 
     if FRONTEND_DIST.is_dir():
         app.mount("/", StaticFiles(directory=FRONTEND_DIST, html=True), name="frontend")
