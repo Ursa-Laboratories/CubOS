@@ -16,10 +16,16 @@ declaration of what liquid exists at protocol start.
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Callable, Mapping, Optional
 
 from cubos.deck.deck import Deck
 from cubos.instruments.pipette.models import PipetteConfig
+from cubos.protocol_engine.commands._liquid_selection import (
+    LiquidSelectionError,
+    select_stock_container,
+    select_waste_container,
+    target_position,
+)
 from cubos.protocol_engine.commands._liquid_transfer import (
     LiquidTransferPreflightError,
     plan_strokes,
@@ -157,6 +163,280 @@ def _check_transfer(
     return violations
 
 
+def _static_volume_lookup(
+    volumes: dict[_ContainerKey, float],
+) -> Callable[[Any], float]:
+    """Simulated-volume lookup for ``_liquid_selection``: unseeded == 0 uL.
+
+    Matches this module's own convention (see module docstring): a
+    container absent from ``volumes`` starts at 0 uL, never "unknown" (that
+    distinction only matters for the ``None``-tolerant runtime lookup in
+    ``cubos.protocol_engine.commands.pipette._current_volume_lookup``).
+    """
+    def _lookup(target: Any) -> float:
+        return volumes.get(_container_key(target), 0.0)
+    return _lookup
+
+
+def _resolve_stock_position(
+    *,
+    step_index: int,
+    command_name: str,
+    label: str,
+    deck: Deck,
+    volumes: dict[_ContainerKey, float],
+    source: Any,
+    solution: Any,
+    volume_ul: float,
+) -> tuple[Optional[str], list[ProtocolSemanticViolation]]:
+    """Resolve a compound command's stock source, statically, for simulation.
+
+    Mirrors ``cubos.protocol_engine.commands.pipette._resolve_stock_source``:
+    exactly one of *source*/*solution* is expected (the semantic validator
+    reports the shape error otherwise, so this silently no-ops here rather
+    than duplicating that message).
+    """
+    if source is not None:
+        return source, []
+    if not isinstance(solution, str) or not solution.strip():
+        return None, []
+    try:
+        target = select_stock_container(
+            deck, solution, volume_ul, _static_volume_lookup(volumes),
+        )
+    except LiquidSelectionError as exc:
+        return None, [_violation(step_index, command_name, f"{label}: {exc}")]
+    return target_position(target), []
+
+
+def _resolve_waste_position(
+    *,
+    step_index: int,
+    command_name: str,
+    label: str,
+    deck: Deck,
+    volumes: dict[_ContainerKey, float],
+    waste: Any,
+    solution: Any,
+    volume_ul: float,
+) -> tuple[Optional[str], list[ProtocolSemanticViolation]]:
+    """Resolve a compound command's waste target, statically, for simulation."""
+    if waste is not None:
+        return waste, []
+    try:
+        target = select_waste_container(
+            deck, volume_ul, _static_volume_lookup(volumes),
+            solution=solution if isinstance(solution, str) else None,
+        )
+    except LiquidSelectionError as exc:
+        return None, [_violation(step_index, command_name, f"{label}: {exc}")]
+    return target_position(target), []
+
+
+def _is_number(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
+def _check_rinse_well(
+    *,
+    step_index: int,
+    args: Mapping[str, Any],
+    deck: Deck,
+    volumes: dict[_ContainerKey, float],
+    pipette_config: PipetteConfig | None,
+) -> list[ProtocolSemanticViolation]:
+    violations: list[ProtocolSemanticViolation] = []
+    well = args.get("well")
+    volume = args.get("volume_ul")
+    cycles = args.get("cycles", 3)
+    if not _is_number(volume) or not isinstance(cycles, int) or isinstance(cycles, bool) or cycles <= 0:
+        return violations
+    volume = float(volume)
+    mix_repetitions = args.get("mix_repetitions", 0)
+    mix_volume = args.get("mix_volume_ul")
+    source = args.get("source")
+    solution = args.get("solution")
+    waste = args.get("waste")
+
+    for cycle in range(cycles):
+        source_position, source_violations = _resolve_stock_position(
+            step_index=step_index, command_name="rinse_well",
+            label=f"rinse_well cycle {cycle} fill", deck=deck, volumes=volumes,
+            source=source, solution=solution, volume_ul=volume,
+        )
+        violations.extend(source_violations)
+        if source_position is None:
+            # Selection failure aborts the whole command at runtime (see
+            # `pipette._resolve_stock_source`) -- later cycles never run,
+            # so simulating a "remove" against a well that was never
+            # filled would only produce a misleading follow-on violation.
+            break
+        violations.extend(_check_transfer(
+            step_index=step_index, command_name="rinse_well", deck=deck,
+            volumes=volumes, source=source_position, destination=well,
+            volume_ul=volume, pipette_config=pipette_config,
+            label=f"rinse_well cycle {cycle} fill {source_position!r} -> {well!r}",
+        ))
+
+        if isinstance(mix_repetitions, int) and not isinstance(mix_repetitions, bool) and mix_repetitions > 0:
+            try:
+                well_target = _resolve(deck, well)
+            except (KeyError, ValueError):
+                well_target = None
+            if well_target is not None:
+                available = volumes.get(_container_key(well_target), 0.0)
+                needed = float(mix_volume) if _is_number(mix_volume) else volume
+                if needed > available + 1e-6:
+                    violations.append(_violation(
+                        step_index, "rinse_well",
+                        f"rinse_well cycle {cycle} mix {well!r} needs "
+                        f"{needed:g} uL but only {available:g} uL will be "
+                        "present at this point.",
+                    ))
+
+        waste_position, waste_violations = _resolve_waste_position(
+            step_index=step_index, command_name="rinse_well",
+            label=f"rinse_well cycle {cycle} remove", deck=deck, volumes=volumes,
+            waste=waste, solution=solution, volume_ul=volume,
+        )
+        violations.extend(waste_violations)
+        if waste_position is None:
+            break
+        violations.extend(_check_transfer(
+            step_index=step_index, command_name="rinse_well", deck=deck,
+            volumes=volumes, source=well, destination=waste_position,
+            volume_ul=volume, pipette_config=pipette_config,
+            label=f"rinse_well cycle {cycle} remove {well!r} -> {waste_position!r}",
+        ))
+    return violations
+
+
+def _check_flush_pipette(
+    *,
+    step_index: int,
+    args: Mapping[str, Any],
+    deck: Deck,
+    volumes: dict[_ContainerKey, float],
+    pipette_config: PipetteConfig | None,
+) -> list[ProtocolSemanticViolation]:
+    violations: list[ProtocolSemanticViolation] = []
+    volume = args.get("volume_ul")
+    cycles = args.get("cycles", 1)
+    if not _is_number(volume) or not isinstance(cycles, int) or isinstance(cycles, bool) or cycles <= 0:
+        return violations
+    volume = float(volume)
+    source = args.get("source")
+    solution = args.get("solution")
+    waste = args.get("waste")
+
+    for cycle in range(cycles):
+        source_position, source_violations = _resolve_stock_position(
+            step_index=step_index, command_name="flush_pipette",
+            label=f"flush_pipette cycle {cycle}", deck=deck, volumes=volumes,
+            source=source, solution=solution, volume_ul=volume,
+        )
+        violations.extend(source_violations)
+        waste_position, waste_violations = _resolve_waste_position(
+            step_index=step_index, command_name="flush_pipette",
+            label=f"flush_pipette cycle {cycle}", deck=deck, volumes=volumes,
+            waste=waste, solution=solution, volume_ul=volume,
+        )
+        violations.extend(waste_violations)
+        if source_position is None or waste_position is None:
+            # Matches `pipette._resolve_stock_source`/`_resolve_waste_target`:
+            # a selection failure aborts the whole command, so later cycles
+            # never run and would only duplicate this violation.
+            break
+        if source_position is not None and waste_position is not None:
+            violations.extend(_check_transfer(
+                step_index=step_index, command_name="flush_pipette", deck=deck,
+                volumes=volumes, source=source_position, destination=waste_position,
+                volume_ul=volume, pipette_config=pipette_config,
+                label=f"flush_pipette cycle {cycle} {source_position!r} -> "
+                      f"{waste_position!r}",
+            ))
+    return violations
+
+
+def _check_purge_pipette(
+    *,
+    step_index: int,
+    args: Mapping[str, Any],
+    deck: Deck,
+    volumes: dict[_ContainerKey, float],
+    pipette_config: PipetteConfig | None,
+) -> list[ProtocolSemanticViolation]:
+    violations: list[ProtocolSemanticViolation] = []
+    volume = args.get("volume_ul")
+    if not _is_number(volume):
+        return violations
+    volume = float(volume)
+    source_position, source_violations = _resolve_stock_position(
+        step_index=step_index, command_name="purge_pipette",
+        label="purge_pipette", deck=deck, volumes=volumes,
+        source=args.get("source"), solution=args.get("solution"), volume_ul=volume,
+    )
+    violations.extend(source_violations)
+    waste_position, waste_violations = _resolve_waste_position(
+        step_index=step_index, command_name="purge_pipette",
+        label="purge_pipette", deck=deck, volumes=volumes,
+        waste=args.get("waste"), solution=args.get("solution"), volume_ul=volume,
+    )
+    violations.extend(waste_violations)
+    if source_position is not None and waste_position is not None:
+        violations.extend(_check_transfer(
+            step_index=step_index, command_name="purge_pipette", deck=deck,
+            volumes=volumes, source=source_position, destination=waste_position,
+            volume_ul=volume, pipette_config=pipette_config,
+            label=f"purge_pipette {source_position!r} -> {waste_position!r}",
+        ))
+    return violations
+
+
+def _check_clear_well(
+    *,
+    step_index: int,
+    args: Mapping[str, Any],
+    deck: Deck,
+    volumes: dict[_ContainerKey, float],
+    pipette_config: PipetteConfig | None,
+) -> list[ProtocolSemanticViolation]:
+    violations: list[ProtocolSemanticViolation] = []
+    well = args.get("well")
+    explicit_volume = args.get("volume_ul")
+    if explicit_volume is not None:
+        if not _is_number(explicit_volume):
+            return violations
+        removal_volume = float(explicit_volume)
+    else:
+        try:
+            well_target = _resolve(deck, well)
+        except (KeyError, ValueError):
+            return violations
+        target_volume = args.get("target_volume_ul", 0.0)
+        target_volume = float(target_volume) if _is_number(target_volume) else 0.0
+        removal_volume = volumes.get(_container_key(well_target), 0.0) - target_volume
+
+    if removal_volume <= 1e-9:
+        return violations
+
+    waste_position, waste_violations = _resolve_waste_position(
+        step_index=step_index, command_name="clear_well",
+        label="clear_well", deck=deck, volumes=volumes,
+        waste=args.get("waste"), solution=args.get("solution"),
+        volume_ul=removal_volume,
+    )
+    violations.extend(waste_violations)
+    if waste_position is not None:
+        violations.extend(_check_transfer(
+            step_index=step_index, command_name="clear_well", deck=deck,
+            volumes=volumes, source=well, destination=waste_position,
+            volume_ul=removal_volume, pipette_config=pipette_config,
+            label=f"clear_well {well!r} -> {waste_position!r}",
+        ))
+    return violations
+
+
 def validate_protocol_fluid_volumes(
     protocol: Protocol,
     deck: Deck,
@@ -230,6 +510,26 @@ def validate_protocol_fluid_volumes(
                     f"mix {position!r} needs {float(volume):g} uL but only "
                     f"{available:g} uL will be present at this step.",
                 ))
+        elif step.command_name == "rinse_well":
+            violations.extend(_check_rinse_well(
+                step_index=step.index, args=args, deck=deck, volumes=volumes,
+                pipette_config=pipette_config,
+            ))
+        elif step.command_name == "flush_pipette":
+            violations.extend(_check_flush_pipette(
+                step_index=step.index, args=args, deck=deck, volumes=volumes,
+                pipette_config=pipette_config,
+            ))
+        elif step.command_name == "purge_pipette":
+            violations.extend(_check_purge_pipette(
+                step_index=step.index, args=args, deck=deck, volumes=volumes,
+                pipette_config=pipette_config,
+            ))
+        elif step.command_name == "clear_well":
+            violations.extend(_check_clear_well(
+                step_index=step.index, args=args, deck=deck, volumes=volumes,
+                pipette_config=pipette_config,
+            ))
     return violations
 
 

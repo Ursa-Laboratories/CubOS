@@ -15,6 +15,9 @@ from __future__ import annotations
 
 from typing import Mapping, NamedTuple
 
+from cubos.deck.labware.container_role import PROCESS as _CONTAINER_ROLE_PROCESS
+from cubos.deck.labware.container_role import STOCK as _CONTAINER_ROLE_STOCK
+from cubos.deck.labware.container_role import WASTE as _CONTAINER_ROLE_WASTE
 from cubos.deck.labware.tip_rack import DEFAULT_TIP_LENGTH_MM as _DEFAULT_TIP_LENGTH_MM
 
 
@@ -56,6 +59,16 @@ VIAL_DIAMETER_MM = 28.0
 VIAL_CATEGORY_STOCK = 0
 VIAL_CATEGORY_WASTE = 1
 VIAL_CATEGORY_ELECTRODE = 2
+
+# Feature 05: category -> generic CubOS container role (see
+# cubos.deck.labware.container_role). The electrode/bath category maps to
+# the generic "process" role -- it is neither a solution reservoir (stock)
+# nor a disposal sink (waste), just a container liquid is processed in.
+VIAL_CATEGORY_ROLES: Mapping[int, str] = {
+    VIAL_CATEGORY_STOCK: _CONTAINER_ROLE_STOCK,
+    VIAL_CATEGORY_WASTE: _CONTAINER_ROLE_WASTE,
+    VIAL_CATEGORY_ELECTRODE: _CONTAINER_ROLE_PROCESS,
+}
 
 ROUND_NDIGITS = 3  # 0.001mm determinism, matches cubos.deck.loader rounding.
 

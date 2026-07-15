@@ -440,6 +440,92 @@ def test_generated_fluids_load_via_load_initial_fluids(tmp_path):
     assert fluids["e1"] == {"volume_ul": 2000.0, "composition": {"ebath": 2000.0}}
 
 
+# ---------------------------------------------------------------------------
+# Feature 05: role/solution emission from category + name
+# ---------------------------------------------------------------------------
+
+
+def test_vial_role_emitted_from_category(tmp_path):
+    snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
+    result = build_import(snapshot, empty_resolutions(), ZERO_OFFSETS, REAL_WORKING_VOLUME, MIN_GANTRY_RAW)
+
+    labware = result.deck["labware"]
+    assert labware["s1"]["role"] == "stock"  # category 0
+    assert labware["w1"]["role"] == "waste"  # category 1
+    assert labware["e1"]["role"] == "process"  # category 2 (electrode/bath)
+
+
+def test_vial_solution_emitted_from_name(tmp_path):
+    snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
+    result = build_import(snapshot, empty_resolutions(), ZERO_OFFSETS, REAL_WORKING_VOLUME, MIN_GANTRY_RAW)
+
+    labware = result.deck["labware"]
+    assert labware["s1"]["solution"] == "water"
+    assert labware["w1"]["solution"] == "waste"
+    assert labware["e1"]["solution"] == "ebath"
+
+
+def test_vial_solution_omitted_when_name_is_blank(tmp_path):
+    vials = [
+        vial_row(id=1, position="s1", category=0, x=-50.0, y=-10.0, z=-70.0, name="  "),
+    ]
+    snapshot = read_snapshot(make_db(tmp_path, vials=vials))
+    result = build_import(snapshot, empty_resolutions(), ZERO_OFFSETS, WIDE_OPEN_VOLUME, MIN_GANTRY_RAW)
+
+    labware = result.deck["labware"]["s1"]
+    assert labware["role"] == "stock"
+    assert "solution" not in labware
+
+
+def test_vial_role_omitted_for_unrecognized_category(tmp_path):
+    vials = [
+        vial_row(id=1, position="s1", category=99, x=-50.0, y=-10.0, z=-70.0, name="mystery"),
+    ]
+    snapshot = read_snapshot(make_db(tmp_path, vials=vials))
+    result = build_import(snapshot, empty_resolutions(), ZERO_OFFSETS, WIDE_OPEN_VOLUME, MIN_GANTRY_RAW)
+
+    labware = result.deck["labware"]["s1"]
+    assert "role" not in labware
+    assert labware["solution"] == "mystery"
+
+
+def test_generated_deck_role_and_solution_load_through_real_deck_loader(tmp_path):
+    snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
+    result = build_import(snapshot, empty_resolutions(), ZERO_OFFSETS, REAL_WORKING_VOLUME, MIN_GANTRY_RAW)
+
+    deck_path = tmp_path / "deck.yaml"
+    write_yaml_with_header(deck_path, ["test fixture"], result.deck)
+    deck = load_deck_from_yaml(deck_path)
+
+    assert deck["s1"].role == "stock"
+    assert deck["s1"].solution == "water"
+    assert deck["w1"].role == "waste"
+    assert deck["e1"].role == "process"
+
+
+def test_generated_deck_determinism_covers_role_and_solution_fields(tmp_path):
+    """Regression guard: role/solution participate in the byte-identical
+    determinism ``test_deterministic_double_run`` already checks at the
+    file level -- this pins the actual values so a determinism regression
+    that only shuffled these two new fields would still be caught."""
+    db_path = build_happy_path_db(tmp_path / "panda.db")
+    gantry_path = write_min_gantry_yaml(tmp_path)
+
+    out1 = tmp_path / "out1"
+    out2 = tmp_path / "out2"
+    for out_dir in (out1, out2):
+        rc = main([
+            str(db_path), "--no-resolutions", "--out-dir", str(out_dir),
+            "--gantry-source", str(gantry_path),
+        ])
+        assert rc == 0
+
+    for out_dir in (out1, out2):
+        deck = load_deck_from_yaml(out_dir / "deck" / "panda_imported_deck.yaml")
+        assert deck["s1"].role == "stock"
+        assert deck["s1"].solution == "water"
+
+
 def test_generated_configs_pass_run_setup_validation_end_to_end(tmp_path):
     snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
     result = build_import(snapshot, empty_resolutions(), ZERO_OFFSETS, REAL_WORKING_VOLUME, MIN_GANTRY_RAW)

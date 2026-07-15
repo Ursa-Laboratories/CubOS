@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from typing import List, Optional
+
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
+from .container_role import KNOWN_CONTAINER_ROLES
 from .labware import BoundingBoxGeometry, Coordinate3D, Labware
 
 
@@ -50,10 +53,63 @@ class Vial(Labware):
             "this floor."
         ),
     )
+    role: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional generic container role for automatic liquid-handling "
+            "selection (see cubos.deck.labware.container_role); one of "
+            "KNOWN_CONTAINER_ROLES (stock, waste, process, rinse). No "
+            "machine-name branches ever key off this -- it is purely "
+            "role-based selection metadata."
+        ),
+    )
+    solution: Optional[str] = Field(
+        default=None,
+        description=(
+            "Optional canonical solution identity (e.g. 'water'), distinct "
+            "from any display alias. Stock selection matches a requested "
+            "solution name against this field."
+        ),
+    )
+    allowed_solutions: Optional[List[str]] = Field(
+        default=None,
+        description=(
+            "Optional compatibility policy for waste containers: solutions "
+            "this container may receive. Omitted/None means accept-all "
+            "(the default). Only meaningful when role='waste'."
+        ),
+    )
 
     @field_validator("name")
     def _validate_non_empty_text(cls, value: str) -> str:
         return Labware.validate_name(value)
+
+    @field_validator("role")
+    def _validate_role(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and value not in KNOWN_CONTAINER_ROLES:
+            raise ValueError(
+                f"role must be one of {sorted(KNOWN_CONTAINER_ROLES)}, got {value!r}."
+            )
+        return value
+
+    @field_validator("solution")
+    def _validate_solution(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
+            raise ValueError("solution must be a non-empty string when provided.")
+        return value
+
+    @field_validator("allowed_solutions")
+    def _validate_allowed_solutions(
+        cls, value: Optional[List[str]],
+    ) -> Optional[List[str]]:
+        if value is None:
+            return value
+        if not value:
+            raise ValueError("allowed_solutions, when provided, must be non-empty.")
+        for item in value:
+            if not isinstance(item, str) or not item.strip():
+                raise ValueError("allowed_solutions entries must be non-empty strings.")
+        return value
 
     @field_validator("capacity_ul", "working_volume_ul")
     def _validate_positive_volume(cls, value: float, info):  # type: ignore[override]

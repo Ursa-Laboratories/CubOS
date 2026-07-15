@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, List, Optional
+from contextlib import contextmanager
+from typing import TYPE_CHECKING, Any, Iterator, List, Optional
 
 from cubos.deck.labware.tip_rack import (
     TipRackResolutionError,
@@ -15,6 +16,12 @@ from cubos.instruments.pipette.liquid_class import IDENTITY_CORRECTION
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
+from ._liquid_selection import (
+    LiquidSelectionError,
+    select_stock_container,
+    select_waste_container,
+    target_position,
+)
 from ._liquid_transfer import (
     LiquidTransferPreflightError,
     derive_liquid_relative_height,
@@ -891,3 +898,413 @@ def serial_transfer(
                      destination_height=destination_height)
     finally:
         context.active_substep = previous_substep
+
+
+# -- Automatic selection + compound commands --------------------------------
+#
+# Everything below composes `transfer`/`mix` (never duplicates their
+# preflight, splitting, or durable begin/complete journaling). Each compound
+# command extends the `fluid_operation_key` substep scheme with a stable,
+# documented suffix (see each command's docstring) so a crash mid-workflow
+# resumes by skipping every already-applied substep -- exactly like
+# `transfer`'s per-stroke substeps and `serial_transfer`'s per-well
+# substeps, which this composes underneath.
+
+
+@contextmanager
+def _substep_scope(context: ProtocolContext, suffix: str) -> Iterator[None]:
+    """Nest *suffix* under the current ``active_substep``, then restore it.
+
+    Mirrors the manual save/restore ``transfer``/``serial_transfer`` already
+    do around ``context.active_substep``, as a reusable context manager for
+    the compound commands below.
+    """
+    previous = context.active_substep
+    context.active_substep = f"{previous}:{suffix}" if previous else suffix
+    try:
+        yield
+    finally:
+        context.active_substep = previous
+
+
+def _leg_already_applied(context: ProtocolContext) -> bool:
+    """Return True when the single-stroke transfer for the current substep
+    scope is already durably applied.
+
+    ``transfer``'s own idempotent skip (``begin_fluid_transfer``) already
+    makes replaying an applied operation a no-op -- but only *after*
+    re-validating dead-volume/destination-overflow preflight against LIVE
+    current container state (see ``transfer``'s docstring: "Safety
+    preflight runs entirely before any motion or durable journaling"). A
+    compound-command leg that intentionally drains a transient container
+    back toward empty (``rinse_well``'s ``remove``) legitimately has less
+    current volume on a full-workflow replay than a *fresh* call's
+    preflight would require -- even though that specific operation was
+    always going to be skipped. Checking applied status first, via the
+    same durable journal ``transfer`` itself reads
+    (``DataStore.get_fluid_snapshot``, a public read), lets a compound
+    command skip the call -- and its preflight -- entirely for an
+    already-committed leg.
+
+    Only covers the common single-stroke case (the operation key with no
+    ``:strokeN`` suffix). A multi-stroke leg (volume above the pipette
+    model's max) replays through ``transfer``'s own internal per-stroke
+    skip as before -- see this module's documented scope note on
+    ``purge_pipette``/`rinse_well` for the residual gap this leaves for a
+    multi-stroke leg on a self-draining transient container.
+    """
+    if context.data_store is None or context.fluid_state_id is None:
+        return False
+    key = context.fluid_operation_key("transfer")
+    try:
+        operations = context.data_store.get_fluid_snapshot(
+            context.fluid_state_id,
+        )["operations"]
+    except Exception:
+        return False
+    return any(
+        operation["operation_key"] == key and operation["status"] == "applied"
+        for operation in operations
+    )
+
+
+def _transfer_or_skip(context: ProtocolContext, **kwargs: Any) -> None:
+    """Call `transfer`, unless this exact leg is already durably applied.
+
+    See `_leg_already_applied` for why compound commands need this
+    pre-check rather than relying solely on `transfer`'s own idempotent
+    skip.
+    """
+    if _leg_already_applied(context):
+        context.logger.info(
+            "Skipping already-applied fluid operation %s",
+            context.fluid_operation_key("transfer"),
+        )
+        return
+    transfer(context, **kwargs)
+
+
+def _current_volume_lookup(context: ProtocolContext):
+    """Return a ``CurrentVolumeLookup`` backed by this context's DataStore."""
+    def _lookup(target: Any) -> Optional[float]:
+        try:
+            snapshot = context.data_store.get_fluid_container(
+                context.fluid_state_id,
+                target.labware_key,
+                target.location_id or "",
+            )
+        except Exception:
+            return None
+        return float(snapshot["current_volume_ul"])
+    return _lookup
+
+
+def _resolve_stock_source(
+    context: ProtocolContext,
+    *,
+    source: Optional[str],
+    solution: Optional[str],
+    volume_ul: float,
+    command_label: str,
+) -> str:
+    """Return a deck-target position naming the stock source to draw from.
+
+    Exactly one of *source* (an explicit deck target) or *solution* (a
+    canonical solution identity resolved via automatic
+    ``role=stock`` selection, see ``_liquid_selection``) must be given.
+    Automatic selection requires durable fluid tracking, since it needs a
+    known current volume for every candidate.
+    """
+    if (source is None) == (solution is None):
+        raise ProtocolExecutionError(
+            f"{command_label} requires exactly one of `source` (explicit "
+            "deck target) or `solution` (automatic stock selection)."
+        )
+    if source is not None:
+        return source
+    if not _tracked_fluid_state(context):
+        raise ProtocolExecutionError(
+            f"{command_label} automatic stock selection (`solution=`) "
+            "requires durable fluid tracking (context.fluid_state_id)."
+        )
+    try:
+        target = select_stock_container(
+            context.deck, solution, volume_ul, _current_volume_lookup(context),
+        )
+    except LiquidSelectionError as exc:
+        raise ProtocolExecutionError(
+            f"{command_label} stock selection failed: {exc}"
+        ) from exc
+    position = target_position(target)
+    # Recorded run artifact for the automatic choice: the resolved position
+    # is logged here for operator-readable narration, and durably lands in
+    # the fluid_operations journal row `transfer` (below) begins -- that
+    # row's source_labware_key/source_location_id name exactly this
+    # container, so the choice is part of the permanent operation record.
+    context.logger.info(
+        "%s automatic stock selection: solution=%r -> %s",
+        command_label, solution, position,
+    )
+    return position
+
+
+def _resolve_waste_target(
+    context: ProtocolContext,
+    *,
+    waste: Optional[str],
+    solution: Optional[str],
+    volume_ul: float,
+    command_label: str,
+) -> str:
+    """Return a deck-target position naming the waste container to fill.
+
+    *waste* (explicit deck target) wins when given. Otherwise automatic
+    ``role=waste`` selection runs, using *solution* only as an optional
+    compatibility filter (``allowed_solutions``; accept-all when a
+    candidate declares none). Automatic selection requires durable fluid
+    tracking.
+    """
+    if waste is not None:
+        return waste
+    if not _tracked_fluid_state(context):
+        raise ProtocolExecutionError(
+            f"{command_label} automatic waste selection requires durable "
+            "fluid tracking (context.fluid_state_id); pass `waste=` explicitly "
+            "otherwise."
+        )
+    try:
+        target = select_waste_container(
+            context.deck, volume_ul, _current_volume_lookup(context),
+            solution=solution,
+        )
+    except LiquidSelectionError as exc:
+        raise ProtocolExecutionError(
+            f"{command_label} waste selection failed: {exc}"
+        ) from exc
+    position = target_position(target)
+    context.logger.info(
+        "%s automatic waste selection: solution=%r -> %s",
+        command_label, solution, position,
+    )
+    return position
+
+
+@protocol_command("rinse_well")
+def rinse_well(
+    context: ProtocolContext,
+    well: str,
+    volume_ul: float,
+    cycles: int = 3,
+    source: Optional[str] = None,
+    solution: Optional[str] = None,
+    waste: Optional[str] = None,
+    mix_repetitions: int = 0,
+    mix_volume_ul: Optional[float] = None,
+    speed: float = 50.0,
+    source_height: Optional[float] = None,
+    well_height: Optional[float] = None,
+    waste_height: Optional[float] = None,
+) -> None:
+    """Rinse *well* with a stock solution, ``cycles`` times.
+
+    Each cycle: fill *well* from the stock source with *volume_ul*,
+    optionally mix in place, then remove the same *volume_ul* to waste.
+    Composes entirely from `transfer`/`mix` -- see this module's docstring
+    for why that means every cycle inherits their preflight and durable
+    recovery for free.
+
+    The stock source is either *source* (explicit deck target) or
+    *solution* (automatic ``role=stock`` selection) -- exactly one must be
+    given. *waste* is optional; when omitted, automatic ``role=waste``
+    selection runs (using *solution* as its compatibility filter).
+
+    Substep keys (extends `fluid_operation_key`, 0-indexed cycles):
+    ``rinse:cycle{N}:fill``, ``rinse:cycle{N}:mix`` (only when
+    ``mix_repetitions > 0``), ``rinse:cycle{N}:remove``. A crash mid-rinse
+    resumes by skipping every already-applied substep and cycle.
+    """
+    if not isinstance(cycles, int) or isinstance(cycles, bool) or cycles <= 0:
+        raise ProtocolExecutionError(
+            f"rinse_well cycles must be a positive integer, got {cycles!r}."
+        )
+    for cycle in range(cycles):
+        cycle_scope = f"rinse:cycle{cycle}"
+        resolved_source = _resolve_stock_source(
+            context, source=source, solution=solution, volume_ul=volume_ul,
+            command_label="rinse_well",
+        )
+        with _substep_scope(context, f"{cycle_scope}:fill"):
+            _transfer_or_skip(
+                context, source=resolved_source, destination=well,
+                volume_ul=volume_ul, speed=speed,
+                source_height=source_height, destination_height=well_height,
+            )
+        if mix_repetitions > 0:
+            with _substep_scope(context, f"{cycle_scope}:mix"):
+                mix(
+                    context, well, mix_volume_ul or volume_ul,
+                    repetitions=mix_repetitions, speed=speed,
+                    height=well_height or 0.0,
+                )
+        resolved_waste = _resolve_waste_target(
+            context, waste=waste, solution=solution, volume_ul=volume_ul,
+            command_label="rinse_well",
+        )
+        with _substep_scope(context, f"{cycle_scope}:remove"):
+            _transfer_or_skip(
+                context, source=well, destination=resolved_waste,
+                volume_ul=volume_ul, speed=speed,
+                source_height=well_height, destination_height=waste_height,
+            )
+
+
+@protocol_command("flush_pipette")
+def flush_pipette(
+    context: ProtocolContext,
+    volume_ul: float,
+    cycles: int = 1,
+    source: Optional[str] = None,
+    solution: Optional[str] = None,
+    waste: Optional[str] = None,
+    speed: float = 50.0,
+    source_height: Optional[float] = None,
+    waste_height: Optional[float] = None,
+) -> None:
+    """Flush the pipette by drawing from stock and dispensing to waste, xN.
+
+    Each cycle is exactly one `transfer` from the resolved stock source to
+    the resolved waste container. Container resolution follows
+    `rinse_well`'s rules: exactly one of *source*/*solution* for the stock
+    side, *waste* optional (else automatic ``role=waste`` selection).
+
+    Substep keys: ``flush:cycle{N}`` (0-indexed).
+    """
+    if not isinstance(cycles, int) or isinstance(cycles, bool) or cycles <= 0:
+        raise ProtocolExecutionError(
+            f"flush_pipette cycles must be a positive integer, got {cycles!r}."
+        )
+    for cycle in range(cycles):
+        resolved_source = _resolve_stock_source(
+            context, source=source, solution=solution, volume_ul=volume_ul,
+            command_label="flush_pipette",
+        )
+        resolved_waste = _resolve_waste_target(
+            context, waste=waste, solution=solution, volume_ul=volume_ul,
+            command_label="flush_pipette",
+        )
+        with _substep_scope(context, f"flush:cycle{cycle}"):
+            _transfer_or_skip(
+                context, source=resolved_source, destination=resolved_waste,
+                volume_ul=volume_ul, speed=speed,
+                source_height=source_height, destination_height=waste_height,
+            )
+
+
+@protocol_command("purge_pipette")
+def purge_pipette(
+    context: ProtocolContext,
+    volume_ul: float,
+    source: Optional[str] = None,
+    solution: Optional[str] = None,
+    waste: Optional[str] = None,
+    speed: float = 50.0,
+    source_height: Optional[float] = None,
+    waste_height: Optional[float] = None,
+) -> None:
+    """Empty the pipette's currently-loaded volume into waste.
+
+    CubOS's durable fluid model has no volume tracked independently "inside
+    the tip": `transfer` moves liquid atomically from a known source
+    container to a known destination in one journaled operation (see
+    `_liquid_transfer`/`fluid_state.begin_fluid_transfer`), so there is
+    nothing held outside of an in-flight transfer to query. `purge_pipette`
+    is accordingly a single ``source -> waste`` transfer -- *source* must
+    name (explicitly, or via *solution*'s automatic stock selection) the
+    container the currently-loaded liquid is attributed to. This is a
+    deliberate, documented scope decision (see docs/protocol-yaml.md and
+    this module's docstring), not an oversight: it is the same primitive
+    `flush_pipette` uses per cycle, kept as a distinct single-action command
+    for protocol-readability ("empty what's in the tip right now" vs.
+    "clean the tip with N cycles of fresh solvent").
+
+    Substep key: ``purge``.
+    """
+    resolved_source = _resolve_stock_source(
+        context, source=source, solution=solution, volume_ul=volume_ul,
+        command_label="purge_pipette",
+    )
+    resolved_waste = _resolve_waste_target(
+        context, waste=waste, solution=solution, volume_ul=volume_ul,
+        command_label="purge_pipette",
+    )
+    with _substep_scope(context, "purge"):
+        _transfer_or_skip(
+            context, source=resolved_source, destination=resolved_waste,
+            volume_ul=volume_ul, speed=speed,
+            source_height=source_height, destination_height=waste_height,
+        )
+
+
+@protocol_command("clear_well")
+def clear_well(
+    context: ProtocolContext,
+    well: str,
+    target_volume_ul: float = 0.0,
+    volume_ul: Optional[float] = None,
+    waste: Optional[str] = None,
+    solution: Optional[str] = None,
+    speed: float = 50.0,
+    well_height: Optional[float] = None,
+    waste_height: Optional[float] = None,
+) -> None:
+    """Remove *well*'s contents to waste until empty (or *target_volume_ul*).
+
+    *volume_ul* overrides the amount removed explicitly (matching
+    `serial_transfer`'s explicit-override convention). Otherwise the amount
+    removed is ``current_volume_ul - target_volume_ul`` read from durable
+    fluid state, which requires tracking to be active (there is no other
+    source of "current volume" to drain down from). *waste* is optional;
+    when omitted, automatic ``role=waste`` selection runs (*solution*, if
+    given, filters by compatibility).
+
+    A no-op (no substep, no motion) when the computed removal volume is at
+    or below zero. Substep key: ``clear``.
+    """
+    resolved_volume_ul = volume_ul
+    if resolved_volume_ul is None:
+        if not _tracked_fluid_state(context):
+            raise ProtocolExecutionError(
+                "clear_well requires an explicit `volume_ul` when durable "
+                "fluid tracking is inactive (no current volume to drain from)."
+            )
+        well_target = _resolve_fluid_target(context, well)
+        try:
+            current = context.data_store.get_fluid_container(
+                context.fluid_state_id,
+                well_target.labware_key,
+                well_target.location_id or "",
+            )["current_volume_ul"]
+        except Exception as exc:
+            raise ProtocolExecutionError(
+                f"clear_well failed to read current volume for {well!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        resolved_volume_ul = float(current) - float(target_volume_ul)
+
+    if resolved_volume_ul <= 1e-9:
+        context.logger.info(
+            "clear_well %s: already at or below target_volume_ul=%g; skipping.",
+            well, target_volume_ul,
+        )
+        return
+
+    resolved_waste = _resolve_waste_target(
+        context, waste=waste, solution=solution, volume_ul=resolved_volume_ul,
+        command_label="clear_well",
+    )
+    with _substep_scope(context, "clear"):
+        _transfer_or_skip(
+            context, source=well, destination=resolved_waste,
+            volume_ul=resolved_volume_ul, speed=speed,
+            source_height=well_height, destination_height=waste_height,
+        )

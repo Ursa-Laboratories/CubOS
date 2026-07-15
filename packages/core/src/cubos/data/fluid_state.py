@@ -943,6 +943,17 @@ def _container_descriptor_rows(
             },
             "capacity_ul": float(labware.capacity_ul),
             "working_volume_ul": float(labware.working_volume_ul),
+            # Role/solution identity participates in the resume boundary:
+            # automatic stock/waste selection (Feature 05) depends on it, so
+            # a deck edit that reassigns a container's role/solution must
+            # invalidate an old fluid-state session exactly like a moved
+            # coordinate or changed volume limit does.
+            "role": labware.role,
+            "solution": labware.solution,
+            "allowed_solutions": (
+                sorted(labware.allowed_solutions)
+                if labware.allowed_solutions is not None else None
+            ),
         }]
     if isinstance(labware, VialGrid):
         return [
@@ -957,6 +968,12 @@ def _container_descriptor_rows(
                 },
                 "capacity_ul": float(vial.capacity_ul),
                 "working_volume_ul": float(vial.working_volume_ul),
+                "role": vial.role,
+                "solution": vial.solution,
+                "allowed_solutions": (
+                    sorted(vial.allowed_solutions)
+                    if vial.allowed_solutions is not None else None
+                ),
             }
             for location_id, vial in sorted(
                 labware.vials.items(), key=lambda item: _location_sort_key(item[0])

@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Annotated, Dict, Literal, Mapping, Optional, Type, Union
+from typing import Annotated, Dict, List, Literal, Mapping, Optional, Type, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .labware.container_role import KNOWN_CONTAINER_ROLES
+
+
+def _validate_optional_role(value: Optional[str]) -> Optional[str]:
+    if value is not None and value not in KNOWN_CONTAINER_ROLES:
+        raise ValueError(
+            f"role must be one of {sorted(KNOWN_CONTAINER_ROLES)}, got {value!r}."
+        )
+    return value
 
 
 
@@ -110,6 +120,11 @@ class VialGridYamlEntry(BaseModel):
     working_volume_ul: float = Field(..., gt=0)
     vial_dead_volume_ul: float = Field(default=0.0, ge=0)
     aliases: Dict[str, str] = Field(default_factory=dict)
+    # Uniformly applied to every vial in the grid -- a vial grid has one
+    # physical role/solution identity (see cubos.deck.labware.container_role).
+    vial_role: Optional[str] = None
+    vial_solution: Optional[str] = None
+    vial_allowed_solutions: Optional[List[str]] = None
 
     @property
     def a1_point(self) -> _YamlPoint3D:
@@ -117,6 +132,10 @@ class VialGridYamlEntry(BaseModel):
         if a1 is None:
             raise ValueError("Vial grid calibration must define `a1`.")
         return a1
+
+    @field_validator("vial_role")
+    def _validate_vial_role(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_optional_role(value)
 
     @model_validator(mode="after")
     def _validate_vial_grid(self) -> "VialGridYamlEntry":
@@ -171,6 +190,13 @@ class VialYamlEntry(BaseModel):
     capacity_ul: float
     working_volume_ul: float
     dead_volume_ul: float = Field(default=0.0, ge=0)
+    role: Optional[str] = None
+    solution: Optional[str] = None
+    allowed_solutions: Optional[List[str]] = None
+
+    @field_validator("role")
+    def _validate_role_field(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_optional_role(value)
 
     @model_validator(mode="after")
     def _validate_vial_volumes(self) -> "VialYamlEntry":
@@ -196,6 +222,13 @@ class NestedVialYamlEntry(BaseModel):
     capacity_ul: float
     working_volume_ul: float
     dead_volume_ul: float = Field(default=0.0, ge=0)
+    role: Optional[str] = None
+    solution: Optional[str] = None
+    allowed_solutions: Optional[List[str]] = None
+
+    @field_validator("role")
+    def _validate_role_field(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_optional_role(value)
 
     @model_validator(mode="after")
     def _validate_nested_vial(self) -> "NestedVialYamlEntry":

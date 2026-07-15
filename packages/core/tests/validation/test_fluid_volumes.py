@@ -200,6 +200,137 @@ class TestValidateProtocolFluidVolumes:
         assert "dead-volume" in violations[0].message
 
 
+# ─── Feature 05: compound commands, including automatic selection ─────────
+
+
+def _role_deck() -> Deck:
+    stock = Vial(
+        name="stock", role="stock", solution="water",
+        height=100.0, diameter=20.0,
+        location=Coordinate3D(x=5.0, y=5.0, z=50.0),
+        capacity_ul=5000.0, working_volume_ul=4500.0, dead_volume_ul=100.0,
+    )
+    waste = Vial(
+        name="waste", role="waste",
+        height=80.0, diameter=25.0,
+        location=Coordinate3D(x=40.0, y=5.0, z=45.0),
+        capacity_ul=5000.0, working_volume_ul=4500.0,
+    )
+    plate = WellPlate(
+        name="plate", model_name="test", rows=1, columns=1,
+        wells={"A1": Coordinate3D(x=70.0, y=20.0, z=15.0)},
+        capacity_ul=200.0, working_volume_ul=150.0,
+    )
+    return Deck({"stock": stock, "waste": waste, "plate": plate})
+
+
+ROLE_SEED = {"stock": {"volume_ul": 4000.0, "composition": {"water": 4000.0}}}
+
+
+class TestCompoundCommandsFluidVolumes:
+
+    def test_rinse_well_automatic_selection_no_violations(self):
+        protocol = _protocol(
+            ("rinse_well", {"well": "plate.A1", "volume_ul": 50.0, "cycles": 3,
+                             "solution": "water"}),
+        )
+        assert validate_protocol_fluid_volumes(
+            protocol, _role_deck(), ROLE_SEED, pipette_config=P300,
+        ) == []
+
+    def test_rinse_well_unknown_solution_reported(self):
+        protocol = _protocol(
+            ("rinse_well", {"well": "plate.A1", "volume_ul": 50.0, "cycles": 1,
+                             "solution": "acetone"}),
+        )
+        violations = validate_protocol_fluid_volumes(
+            protocol, _role_deck(), ROLE_SEED, pipette_config=P300,
+        )
+        assert len(violations) == 1
+        assert "role='stock'" in violations[0].message
+
+    def test_rinse_well_dead_volume_reserve_reported(self):
+        seed = {"stock": {"volume_ul": 150.0, "composition": {"water": 150.0}}}
+        protocol = _protocol(
+            ("rinse_well", {"well": "plate.A1", "volume_ul": 60.0, "cycles": 1,
+                             "solution": "water"}),
+        )
+        violations = validate_protocol_fluid_volumes(
+            protocol, _role_deck(), seed, pipette_config=P300,
+        )
+        assert len(violations) == 1
+        assert "dead-volume" in violations[0].message
+
+    def test_rinse_well_no_waste_role_on_deck_reported(self):
+        deck = _role_deck()
+        del deck.volume_labware["waste"]
+        protocol = _protocol(
+            ("rinse_well", {"well": "plate.A1", "volume_ul": 50.0, "cycles": 1,
+                             "solution": "water"}),
+        )
+        violations = validate_protocol_fluid_volumes(
+            protocol, deck, ROLE_SEED, pipette_config=P300,
+        )
+        assert len(violations) == 1
+        assert "role='waste'" in violations[0].message
+
+    def test_rinse_well_explicit_containers_skip_selection_entirely(self):
+        deck = _role_deck()
+        del deck.volume_labware["waste"]  # no role=waste candidate at all
+        protocol = _protocol(
+            ("rinse_well", {"well": "plate.A1", "volume_ul": 50.0, "cycles": 1,
+                             "source": "stock", "waste": "stock"}),
+        )
+        # Both endpoints explicit -- automatic selection never runs, so the
+        # missing waste role doesn't matter (transfer's own preflight would
+        # reject source==destination at runtime; that's out of static scope
+        # here, this only proves selection is bypassed for explicit args).
+        violations = validate_protocol_fluid_volumes(
+            protocol, deck, ROLE_SEED, pipette_config=P300,
+        )
+        assert violations == []
+
+    def test_flush_pipette_automatic_selection_simulates_each_cycle(self):
+        protocol = _protocol(
+            ("flush_pipette", {"volume_ul": 100.0, "cycles": 3, "solution": "water"}),
+        )
+        assert validate_protocol_fluid_volumes(
+            protocol, _role_deck(), ROLE_SEED, pipette_config=P300,
+        ) == []
+
+    def test_purge_pipette_automatic_selection_no_violations(self):
+        protocol = _protocol(
+            ("purge_pipette", {"volume_ul": 75.0, "solution": "water"}),
+        )
+        assert validate_protocol_fluid_volumes(
+            protocol, _role_deck(), ROLE_SEED, pipette_config=P300,
+        ) == []
+
+    def test_clear_well_uses_seeded_volume_when_volume_ul_omitted(self):
+        seed = dict(ROLE_SEED)
+        seed["plate.A1"] = {"volume_ul": 60.0, "composition": {"water": 60.0}}
+        protocol = _protocol(
+            ("clear_well", {"well": "plate.A1", "waste": "waste"}),
+        )
+        assert validate_protocol_fluid_volumes(
+            protocol, _role_deck(), seed, pipette_config=P300,
+        ) == []
+
+    def test_clear_well_overflow_reported_when_waste_lacks_headroom(self):
+        deck = _role_deck()
+        deck.volume_labware["waste"].working_volume_ul = 10.0
+        seed = dict(ROLE_SEED)
+        seed["plate.A1"] = {"volume_ul": 60.0, "composition": {"water": 60.0}}
+        protocol = _protocol(
+            ("clear_well", {"well": "plate.A1", "waste": "waste"}),
+        )
+        violations = validate_protocol_fluid_volumes(
+            protocol, deck, seed, pipette_config=P300,
+        )
+        assert len(violations) == 1
+        assert "working volume" in violations[0].message
+
+
 # ─── run_setup_validation integration ────────────────────────────────────────
 
 

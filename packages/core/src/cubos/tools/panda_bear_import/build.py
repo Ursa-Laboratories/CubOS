@@ -23,6 +23,7 @@ from .constants import (
     PIPETTE_FRAME_TOOL,
     PITCH_RESIDUAL_TOLERANCE_MM,
     VIAL_CATEGORY_ELECTRODE,
+    VIAL_CATEGORY_ROLES,
     VIAL_DIAMETER_MM,
     VIAL_HEIGHT_MM,
 )
@@ -154,6 +155,7 @@ def _build_vials(
             "location": {"x": top_point.x, "y": top_point.y, "z": top_point.z},
             "capacity_ul": round_mm(row.capacity),
             "working_volume_ul": round_mm(row.capacity),
+            **_vial_role_and_solution(row),
         }
 
         volume_ul, composition, mismatch = _vial_composition(row)
@@ -206,6 +208,30 @@ def _select_vials(
         if resolved:
             included.append(remaining[0])
     return included, conflicts
+
+
+def _vial_role_and_solution(row: VialRow) -> dict:
+    """Return the Feature-05 ``role``/``solution`` fields for one vial row.
+
+    ``role`` comes straight from ``panda_vials.category`` via
+    ``VIAL_CATEGORY_ROLES`` (0=stock, 1=waste, 2=process/bath); unrecognized
+    category values are left unlabeled (``None``) rather than guessed.
+
+    ``solution`` is ``panda_vials.name`` -- PANDA-BEAR's own automatic stock
+    selection (``panda_lib.actions.vessel_handling.solution_selector``)
+    matches a requested solution name against exactly this field
+    (``solution.name.lower() == solution_name.lower()``), so it is the
+    proven canonical solution identity, not a display label. Omitted when
+    blank.
+    """
+    fields: dict = {}
+    role = VIAL_CATEGORY_ROLES.get(row.category)
+    if role is not None:
+        fields["role"] = role
+    solution = row.name.strip()
+    if solution:
+        fields["solution"] = solution
+    return fields
 
 
 def _vial_composition(row: VialRow) -> tuple[float, dict[str, float], bool]:

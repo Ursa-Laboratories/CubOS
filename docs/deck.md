@@ -117,6 +117,58 @@ It is optional and defaults to `0`. Tracked `transfer` steps refuse to draw a
 source below this floor before any motion, and state-derived aspiration
 heights never descend beneath the level at which this volume remains.
 
+## Container Role And Solution Identity
+
+Vial-like labware may declare generic, machine-agnostic metadata that the
+compound liquid-handling commands (`rinse_well`, `flush_pipette`,
+`purge_pipette`, `clear_well` -- see [Protocol YAML: Compound liquid
+commands](protocol-yaml.md#compound-liquid-commands)) use for automatic
+container selection instead of naming a specific vial ID:
+
+- `role` -- one of `stock`, `waste`, `process`, `rinse` (see
+  `cubos.deck.labware.container_role.KNOWN_CONTAINER_ROLES`). `stock`
+  containers are automatic-selection sources; `waste` containers are
+  automatic-selection sinks. `process`/`rinse` are not yet consumed by any
+  automatic-selection command but are recognized, reserved roles.
+- `solution` -- the canonical solution identity (e.g. `water`), distinct
+  from any display `label`/alias. Automatic stock selection matches a
+  requested `solution=` against this field.
+- `allowed_solutions` -- optional, waste containers only: a list of solution
+  identities this container may receive. Omitted (the default) means
+  accept-all.
+
+```yaml
+labware:
+  water_stock:
+    type: vial
+    name: water_stock
+    role: stock
+    solution: water
+    height: 57.0
+    diameter: 28.0
+    location: {x: -50.0, y: -10.0, z: -70.0}
+    capacity_ul: 5000.0
+    working_volume_ul: 4500.0
+    dead_volume_ul: 200.0
+
+  aqueous_waste:
+    type: vial
+    name: aqueous_waste
+    role: waste
+    allowed_solutions: [water, buffer]
+    height: 57.0
+    diameter: 28.0
+    location: {x: -50.0, y: -40.0, z: -70.0}
+    capacity_ul: 5000.0
+    working_volume_ul: 4500.0
+```
+
+`vial_grid` uses grid-uniform `vial_role`/`vial_solution`/
+`vial_allowed_solutions` fields (applied to every position, mirroring
+`vial_dead_volume_ul`). All three fields are optional and default to
+unset/accept-all; a vial with no `role` is simply never a candidate for
+automatic selection.
+
 ## Existing Nested Deck Files
 
 Existing deck YAML files do not need to be rewritten. CubOS continues to load

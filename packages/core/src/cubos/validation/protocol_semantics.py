@@ -21,10 +21,13 @@ from typing import Any
 
 from cubos.gantry.instrument_mount import InstrumentedGantry
 from cubos.deck.deck import Deck
+from cubos.deck.labware.container_role import STOCK, WASTE
 from cubos.deck.labware.tip_rack import (
     TipRackResolutionError,
     resolve_tip_rack_slot,
 )
+from cubos.deck.labware.vial import Vial
+from cubos.deck.labware.vial_grid import VialGrid
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.gantry.gantry_config import GantryConfig
 from cubos.gantry.machine_geometry import FixedStructureBox, fixed_structures_for_gantry
@@ -1147,13 +1150,150 @@ def _require_attached_tip(
 _PIPETTE_COMMANDS = frozenset({
     "aspirate",
     "blowout",
+    "clear_well",
     "drop_tip",
+    "flush_pipette",
     "mix",
     "pick_up_tip",
+    "purge_pipette",
+    "rinse_well",
     "transfer",
     "serial_transfer",
 })
 _NO_MOTION_COMMANDS = frozenset({"pause", "breakpoint"})
+
+
+# -- Feature 05: compound-command container resolution (structural only) --
+#
+# Automatic selection (`solution=`/role-based, see
+# `cubos.protocol_engine.commands._liquid_selection`) picks its concrete
+# container from *tracked volumes*, which this static pass has no access to.
+# What IS checkable here, with only the deck definition (no initial-fluids
+# seed required): whether the requested role/solution combination is even
+# defined on the deck at all -- catching a typo'd solution name or a deck
+# with no waste container long before a hardware run. Full volume-adequate
+# selection (dead-volume reserve, waste headroom) is separately simulated
+# offline when an initial-fluids seed is supplied -- see
+# `cubos.validation.fluid_volumes`. Neither pass feeds the resolved
+# automatic-selection container back into this module's XY/Z/structure
+# bounds checks below (`_validate_pipette_engage`); only explicit
+# source/waste/well positions get full motion-bounds coverage. This is a
+# deliberate, documented scope gap (see docs/protocol-yaml.md).
+
+
+def _iter_role_vials(deck: Deck, role: str):
+    for labware in deck.volume_labware.values():
+        if isinstance(labware, Vial):
+            if labware.role == role:
+                yield labware
+        elif isinstance(labware, VialGrid):
+            for vial in labware.vials.values():
+                if vial.role == role:
+                    yield vial
+
+
+def _static_stock_candidate_exists(deck: Deck, solution: str) -> bool:
+    return any(
+        vial.solution == solution for vial in _iter_role_vials(deck, STOCK)
+    )
+
+
+def _static_waste_candidate_exists(deck: Deck, solution: Any) -> bool:
+    for vial in _iter_role_vials(deck, WASTE):
+        if vial.allowed_solutions is None:
+            return True
+        if solution is not None and solution in vial.allowed_solutions:
+            return True
+    return False
+
+
+def _validate_stock_or_solution(
+    *,
+    step_index: int,
+    command_name: str,
+    label: str,
+    deck: Deck,
+    source: Any,
+    solution: Any,
+) -> list[ProtocolSemanticViolation]:
+    if (source is None) == (solution is None):
+        return [_violation(
+            step_index,
+            command_name,
+            f"{label}: provide exactly one of an explicit source or "
+            "`solution=` for automatic stock selection.",
+        )]
+    if (
+        solution is not None
+        and isinstance(solution, str)
+        and not _static_stock_candidate_exists(deck, solution)
+    ):
+        return [_violation(
+            step_index,
+            command_name,
+            f"{label}: no role={STOCK!r} container with solution={solution!r} "
+            "is defined on the deck.",
+        )]
+    return []
+
+
+def _validate_waste_or_solution(
+    *,
+    step_index: int,
+    command_name: str,
+    label: str,
+    deck: Deck,
+    waste: Any,
+    solution: Any,
+) -> list[ProtocolSemanticViolation]:
+    if waste is not None:
+        return []
+    if not _static_waste_candidate_exists(deck, solution):
+        detail = f" accepting solution={solution!r}" if solution else ""
+        return [_violation(
+            step_index,
+            command_name,
+            f"{label}: no role={WASTE!r} container{detail} is defined on "
+            "the deck.",
+        )]
+    return []
+
+
+def _validate_optional_engage(
+    *,
+    step_index: int,
+    command_name: str,
+    label: str,
+    position: Any,
+    args: dict[str, Any],
+    height_field_name: str,
+    tip_extension: float,
+    instrumented_gantry: InstrumentedGantry,
+    deck: Deck,
+    gantry: GantryConfig,
+    current_poses: dict[str, Point3D],
+) -> list[ProtocolSemanticViolation]:
+    """Engage-validate *position* only when it is an explicit deck target.
+
+    Automatic-selection args (``position is None``) have no single resolved
+    position to bounds-check statically -- see the scope note above.
+    """
+    if position is None:
+        return []
+    violations, _ = _validate_pipette_engage(
+        step_index=step_index,
+        command_name=command_name,
+        label=label,
+        position=position,
+        height=_height_value(args, height_field_name),
+        height_field_name=height_field_name,
+        tip_extension=tip_extension,
+        instrumented_gantry=instrumented_gantry,
+        deck=deck,
+        gantry=gantry,
+        current_poses=current_poses,
+    )
+    return violations
 
 
 def _known_command_names() -> frozenset[str]:
@@ -1355,6 +1495,145 @@ def _validate_pipette_command(
                 current_poses=current_poses,
             )
             violations.extend(engage_violations)
+        return violations, tip_state
+
+    if command_name == "rinse_well":
+        violations.extend(_require_attached_tip(
+            step_index=step_index, command_name=command_name, tip_state=tip_state,
+        ))
+        well = args.get("well")
+        violations.extend(_validate_optional_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"rinse_well well {well!r}", position=well, args=args,
+            height_field_name="well_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        ))
+        source = args.get("source")
+        solution = args.get("solution")
+        violations.extend(_validate_stock_or_solution(
+            step_index=step_index, command_name=command_name,
+            label="rinse_well source", deck=deck, source=source, solution=solution,
+        ))
+        violations.extend(_validate_optional_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"rinse_well source {source!r}", position=source, args=args,
+            height_field_name="source_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        ))
+        waste = args.get("waste")
+        violations.extend(_validate_waste_or_solution(
+            step_index=step_index, command_name=command_name,
+            label="rinse_well waste", deck=deck, waste=waste, solution=solution,
+        ))
+        violations.extend(_validate_optional_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"rinse_well waste {waste!r}", position=waste, args=args,
+            height_field_name="waste_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        ))
+        return violations, tip_state
+
+    if command_name == "flush_pipette":
+        violations.extend(_require_attached_tip(
+            step_index=step_index, command_name=command_name, tip_state=tip_state,
+        ))
+        source = args.get("source")
+        solution = args.get("solution")
+        violations.extend(_validate_stock_or_solution(
+            step_index=step_index, command_name=command_name,
+            label="flush_pipette source", deck=deck, source=source, solution=solution,
+        ))
+        violations.extend(_validate_optional_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"flush_pipette source {source!r}", position=source, args=args,
+            height_field_name="source_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        ))
+        waste = args.get("waste")
+        violations.extend(_validate_waste_or_solution(
+            step_index=step_index, command_name=command_name,
+            label="flush_pipette waste", deck=deck, waste=waste, solution=solution,
+        ))
+        violations.extend(_validate_optional_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"flush_pipette waste {waste!r}", position=waste, args=args,
+            height_field_name="waste_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        ))
+        return violations, tip_state
+
+    if command_name == "purge_pipette":
+        violations.extend(_require_attached_tip(
+            step_index=step_index, command_name=command_name, tip_state=tip_state,
+        ))
+        source = args.get("source")
+        solution = args.get("solution")
+        violations.extend(_validate_stock_or_solution(
+            step_index=step_index, command_name=command_name,
+            label="purge_pipette source", deck=deck, source=source, solution=solution,
+        ))
+        violations.extend(_validate_optional_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"purge_pipette source {source!r}", position=source, args=args,
+            height_field_name="source_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        ))
+        waste = args.get("waste")
+        violations.extend(_validate_waste_or_solution(
+            step_index=step_index, command_name=command_name,
+            label="purge_pipette waste", deck=deck, waste=waste, solution=solution,
+        ))
+        violations.extend(_validate_optional_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"purge_pipette waste {waste!r}", position=waste, args=args,
+            height_field_name="waste_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        ))
+        return violations, tip_state
+
+    if command_name == "clear_well":
+        violations.extend(_require_attached_tip(
+            step_index=step_index, command_name=command_name, tip_state=tip_state,
+        ))
+        well = args.get("well")
+        engage_violations, _ = _validate_pipette_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"clear_well well {well!r}", position=well,
+            height=_height_value(args, "well_height"),
+            height_field_name="well_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        )
+        violations.extend(engage_violations)
+        waste = args.get("waste")
+        solution = args.get("solution")
+        violations.extend(_validate_waste_or_solution(
+            step_index=step_index, command_name=command_name,
+            label="clear_well waste", deck=deck, waste=waste, solution=solution,
+        ))
+        violations.extend(_validate_optional_engage(
+            step_index=step_index, command_name=command_name,
+            label=f"clear_well waste {waste!r}", position=waste, args=args,
+            height_field_name="waste_height",
+            tip_extension=tip_state.tip_extension,
+            instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+            current_poses=current_poses,
+        ))
         return violations, tip_state
 
     return violations, tip_state
