@@ -31,9 +31,10 @@ _CMD_DRIP_STOP = 28
 
 _ARDUINO_SETTLE_TIME = 2.0
 
-# Homing runs open-loop until a limit switch; firmware allows up to 60 s
-# before it gives up, so the serial wait must outlast that.
-_HOME_TIMEOUT = 90.0
+# The firmware replies only after a motion completes, and plunger motion is
+# slow: full 55 mm travel at the default velocity takes ~35 s, and a failed
+# homing attempt takes up to 60 s. Match PANDA-BEAR's 120 s command deadline.
+_MOTION_TIMEOUT = 120.0
 
 # Firmware interprets the optional speed argument as stepper steps/second
 # (its stepDelay floor makes small values ~16x slower than intended, slow
@@ -200,13 +201,13 @@ class OpentronsPipette(PipetteInstrument):
             self._is_homed = True
             return
         try:
-            self._send_command(_CMD_HOME, timeout=_HOME_TIMEOUT)
+            self._send_command(_CMD_HOME, timeout=_MOTION_TIMEOUT)
         except PipetteCommandError:
             # Firmware gives up after ~31 mm of upward travel per attempt,
             # but full plunger travel is 55 mm: a plunger parked low needs a
             # second leg to reach the limit switch.
             self.logger.info("Homing fell short of the limit switch; retrying")
-            self._send_command(_CMD_HOME, timeout=_HOME_TIMEOUT)
+            self._send_command(_CMD_HOME, timeout=_MOTION_TIMEOUT)
         self._position_mm = self._config.zero_position
         self._is_homed = True
 
@@ -216,7 +217,8 @@ class OpentronsPipette(PipetteInstrument):
             self._is_primed = True
             return
         self._send_command(
-            _CMD_MOVE_TO, self._config.prime_position, _FIRMWARE_DEFAULT_SPEED
+            _CMD_MOVE_TO, self._config.prime_position, _FIRMWARE_DEFAULT_SPEED,
+            timeout=_MOTION_TIMEOUT,
         )
         self._position_mm = self._config.prime_position
         self._is_primed = True
@@ -229,7 +231,9 @@ class OpentronsPipette(PipetteInstrument):
             return AspirateResult(
                 success=True, volume_ul=volume_ul, position_mm=self._position_mm
             )
-        response = self._send_command(_CMD_ASPIRATE, mm_travel, speed)
+        response = self._send_command(
+            _CMD_ASPIRATE, mm_travel, speed, timeout=_MOTION_TIMEOUT
+        )
         position = self._parse_position(response)
         return AspirateResult(
             success=True, volume_ul=volume_ul, position_mm=position
@@ -243,7 +247,9 @@ class OpentronsPipette(PipetteInstrument):
             return AspirateResult(
                 success=True, volume_ul=volume_ul, position_mm=self._position_mm
             )
-        response = self._send_command(_CMD_DISPENSE, mm_travel, speed)
+        response = self._send_command(
+            _CMD_DISPENSE, mm_travel, speed, timeout=_MOTION_TIMEOUT
+        )
         position = self._parse_position(response)
         return AspirateResult(
             success=True, volume_ul=volume_ul, position_mm=position
@@ -254,7 +260,8 @@ class OpentronsPipette(PipetteInstrument):
             self._position_mm = self._config.blowout_position
             return
         self._send_command(
-            _CMD_MOVE_TO, self._config.blowout_position, _FIRMWARE_DEFAULT_SPEED
+            _CMD_MOVE_TO, self._config.blowout_position, _FIRMWARE_DEFAULT_SPEED,
+            timeout=_MOTION_TIMEOUT,
         )
 
     def mix(
@@ -263,7 +270,9 @@ class OpentronsPipette(PipetteInstrument):
         self._validate_volume(volume_ul)
         if not self._offline:
             mm_travel = volume_ul * self._config.mm_to_ul
-            self._send_command(_CMD_MIX, mm_travel, repetitions, speed)
+            self._send_command(
+                _CMD_MIX, mm_travel, repetitions, speed, timeout=_MOTION_TIMEOUT
+            )
         return MixResult(
             success=True, volume_ul=volume_ul, repetitions=repetitions
         )
@@ -271,7 +280,8 @@ class OpentronsPipette(PipetteInstrument):
     def pick_up_tip(self, speed: float = 50.0) -> None:
         if not self._offline:
             self._send_command(
-                _CMD_MOVE_TO, self._config.zero_position, _FIRMWARE_DEFAULT_SPEED
+                _CMD_MOVE_TO, self._config.zero_position, _FIRMWARE_DEFAULT_SPEED,
+                timeout=_MOTION_TIMEOUT,
             )
         self._has_tip = True
 
@@ -281,6 +291,7 @@ class OpentronsPipette(PipetteInstrument):
                 _CMD_MOVE_TO,
                 self._config.drop_tip_position,
                 _FIRMWARE_DEFAULT_SPEED,
+                timeout=_MOTION_TIMEOUT,
             )
         self._has_tip = False
         self.clear_attached_tip_extension()
@@ -312,7 +323,7 @@ class OpentronsPipette(PipetteInstrument):
         if self._offline:
             return
         mm_travel = volume_ul * self._config.mm_to_ul
-        self._send_command(_CMD_DRIP_STOP, mm_travel, speed)
+        self._send_command(_CMD_DRIP_STOP, mm_travel, speed, timeout=_MOTION_TIMEOUT)
 
     # ── Private helpers ───────────────────────────────────────────────────
 
