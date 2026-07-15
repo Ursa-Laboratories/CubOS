@@ -286,16 +286,39 @@ class OpentronsPipette(PipetteInstrument):
         self._has_tip = True
 
     def drop_tip(self, speed: float = 50.0) -> None:
-        if not self._offline:
-            self._send_command(
-                _CMD_MOVE_TO,
-                self._config.drop_tip_position,
-                _FIRMWARE_DEFAULT_SPEED,
-                timeout=_MOTION_TIMEOUT,
-            )
+        if self._offline:
+            self._has_tip = False
+            self.clear_attached_tip_extension()
+            self._position_mm = self._config.prime_position
+            self._is_primed = True
+            return
+        self._send_command(
+            _CMD_MOVE_TO,
+            self._config.drop_tip_position,
+            _FIRMWARE_DEFAULT_SPEED,
+            timeout=_MOTION_TIMEOUT,
+        )
         self._has_tip = False
         self.clear_attached_tip_extension()
         self._position_mm = self._config.drop_tip_position
+        # The tip is already off; a failure returning to prime must not look
+        # like a failed drop. Leave the plunger parked low — connect() will
+        # re-home it next time.
+        try:
+            self._send_command(
+                _CMD_MOVE_TO,
+                self._config.prime_position,
+                _FIRMWARE_DEFAULT_SPEED,
+                timeout=_MOTION_TIMEOUT,
+            )
+        except (PipetteCommandError, PipetteTimeoutError) as exc:
+            self.logger.warning(
+                "Return to prime after tip drop failed (%s); plunger parked "
+                "low, will re-home on next connect", exc,
+            )
+            return
+        self._position_mm = self._config.prime_position
+        self._is_primed = True
 
     def get_status(self) -> PipetteStatus:
         if self._offline:

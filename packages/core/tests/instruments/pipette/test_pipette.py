@@ -473,10 +473,52 @@ class TestPipetteCommands:
     def test_drop_tip_clears_flag(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
-            ["OK:{pos:0.0}\n", "OK:{pos:60.0}\n", "OK:{homed:1,pos:60.0,max_vol:200}\n"],
+            [
+                "OK:{pos:0.0}\n",   # pick_up_tip
+                "OK:{pos:60.0}\n",  # drop move
+                "OK:{pos:36.0}\n",  # return to prime
+                "OK:{homed:1,pos:36.0,max_vol:200}\n",
+            ],
         )
         pip.pick_up_tip()
         pip.drop_tip()
+        status = pip.get_status()
+        assert status.has_tip is False
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_drop_tip_returns_plunger_to_prime(self, mock_sleep, mock_serial_cls):
+        # The ejector stroke parks the plunger at the bottom of travel; the
+        # driver must move it back to prime so the next cycle starts ready.
+        pip, mock_ser = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            ["OK:{pos:60.0}\n", "OK:{pos:36.0}\n"],
+        )
+        pip.drop_tip()
+        written = [c[0][0].decode().strip() for c in mock_ser.write.call_args_list]
+        moves = [w for w in written if w.startswith("11,")]
+        assert moves[0].startswith("11,60.0")  # drop
+        assert moves[1].startswith("11,36.0")  # return to prime
+        assert pip._position_mm == pytest.approx(36.0)
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_drop_tip_failed_return_to_prime_does_not_raise(
+        self, mock_sleep, mock_serial_cls
+    ):
+        # The tip is off once the drop move succeeds; a failure returning to
+        # prime must not surface as a failed drop.
+        pip, _ = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            [
+                "OK:{pos:0.0}\n",           # pick_up_tip
+                "OK:{pos:60.0}\n",          # drop move
+                "ERR:motor stall detected\n",  # return to prime fails
+                "OK:{homed:1,pos:60.0,max_vol:200}\n",
+            ],
+        )
+        pip.pick_up_tip()
+        pip.drop_tip()  # must not raise
         status = pip.get_status()
         assert status.has_tip is False
 
@@ -530,14 +572,19 @@ class TestPipetteCommands:
         # calibrated default instead of a floor-clamped crawl.
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
-            ["OK:{pos:36.0}\n", "OK:{pos:0.0}\n", "OK:{pos:60.0}\n"],
+            [
+                "OK:{pos:36.0}\n",  # prime
+                "OK:{pos:0.0}\n",   # pick_up_tip
+                "OK:{pos:60.0}\n",  # drop move
+                "OK:{pos:36.0}\n",  # return to prime
+            ],
         )
         pip.prime()
         pip.pick_up_tip()
         pip.drop_tip()
         written = [c[0][0].decode().strip() for c in mock_ser.write.call_args_list]
         moves = [w for w in written if w.startswith("11,")]
-        assert len(moves) == 3
+        assert len(moves) == 4
         assert all(w.split(",")[2] == "0.0" for w in moves)
 
     @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
