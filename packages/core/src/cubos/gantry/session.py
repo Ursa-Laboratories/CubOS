@@ -595,13 +595,10 @@ class GantrySession:
         data_store = None
         with self._lock:
             gantry = self._require_connected()
-            if self._calibration_warning:
-                raise CalibrationBlockedError(
-                    "Gantry calibration warning is active. Calibration and jog "
-                    "recovery remain available, but protocol runs are blocked "
-                    "until the selected gantry YAML matches the controller. "
-                    f"{self._calibration_warning}"
-                )
+            # A GRBL-settings mismatch (self._calibration_warning) is advisory,
+            # not blocking: commissioning machines legitimately differ from the
+            # selected gantry YAML, and the operator owns that decision. The
+            # warning is still computed and surfaced; it no longer blocks runs.
             if not gantry.is_healthy():
                 raise GantrySessionHealthCheckError("Gantry is not connected")
 

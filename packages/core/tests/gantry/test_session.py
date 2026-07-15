@@ -646,12 +646,15 @@ def test_run_protocol_uses_existing_gantry_and_preserves_connection(monkeypatch,
     ]
 
 
-def test_run_protocol_blocks_when_calibration_warning_active(tmp_path):
+def test_run_protocol_does_not_block_on_calibration_warning(tmp_path):
     session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
     session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
     session._calibration_warning = "settings differ"
 
-    with pytest.raises(CalibrationBlockedError):
+    # A GRBL-settings mismatch is advisory, not blocking: run_protocol must get
+    # past the calibration gate. It still fails here on the missing deck/protocol
+    # fixtures, but never with CalibrationBlockedError.
+    with pytest.raises(Exception) as excinfo:
         session.run_protocol(
             gantry_path=tmp_path / "gantry.yaml",
             deck_path=tmp_path / "deck.yaml",
@@ -660,6 +663,7 @@ def test_run_protocol_blocks_when_calibration_warning_active(tmp_path):
             deck_file="deck.yaml",
             protocol_file="protocol.yaml",
         )
+    assert not isinstance(excinfo.value, CalibrationBlockedError)
 
 
 def test_run_protocol_blocks_initial_unhealthy_gantry(tmp_path):
