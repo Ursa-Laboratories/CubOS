@@ -536,8 +536,31 @@ export interface CreateFluidStateRequest {
 // resource instead of the legacy synchronous endpoint.
 export type FluidStateChoiceMode = "none" | "new" | "resume";
 
+// One component of a seed row's composition, kept as raw input strings so
+// the controlled inputs can hold partial/empty values while editing. Parsed
+// and validated only when the run payload is assembled (see utils/fluidSeeds).
+export interface CompositionSeedRow {
+  id: string;
+  component: string;
+  volume: string;
+}
+
+// One "New fluid state" seed row: a container target plus its starting
+// volume and optional composition breakdown. Volumes stay as strings for
+// the same controlled-input reason as CompositionSeedRow.
+export interface FluidSeedRow {
+  id: string;
+  container: string;
+  volume: string;
+  composition: CompositionSeedRow[];
+}
+
 export interface FluidStateChoice {
   mode: FluidStateChoiceMode;
   newLabel: string;
   resumeId: number | null;
+  // Per-container starting volumes for a "new" fluid state. Empty (the
+  // default) sends `fluids: {}`, preserving the pre-Feature-07b empty-state
+  // behavior. Only consulted when `mode === "new"`.
+  seeds: FluidSeedRow[];
 }

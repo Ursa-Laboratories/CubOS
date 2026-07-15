@@ -433,6 +433,90 @@ describe("ProtocolEditor", () => {
 
     confirmSpy.mockRestore();
   });
+
+  // ── Feature 07b: per-container starting-volume seed rows ──
+
+  it("shows the starting-volumes editor only for the New fluid state choice", () => {
+    const onFluidStateChoiceChange = vi.fn();
+    const { rerender } = render(
+      <ProtocolEditor
+        {...baseProps()}
+        onFluidStateChoiceChange={onFluidStateChoiceChange}
+        fluidStateChoice={{ mode: "none", newLabel: "", resumeId: null, seeds: [] }}
+      />,
+    );
+    expect(screen.queryByText("Starting volumes")).not.toBeInTheDocument();
+
+    rerender(
+      <ProtocolEditor
+        {...baseProps()}
+        onFluidStateChoiceChange={onFluidStateChoiceChange}
+        fluidStateChoice={{ mode: "new", newLabel: "", resumeId: null, seeds: [] }}
+      />,
+    );
+    expect(screen.getByText("Starting volumes")).toBeInTheDocument();
+    expect(screen.getByText(/every container starts empty/i)).toBeInTheDocument();
+  });
+
+  it("adds a seed row through the choice callback", async () => {
+    const user = userEvent.setup();
+    const onFluidStateChoiceChange = vi.fn();
+    render(
+      <ProtocolEditor
+        {...baseProps()}
+        onFluidStateChoiceChange={onFluidStateChoiceChange}
+        fluidStateChoice={{ mode: "new", newLabel: "", resumeId: null, seeds: [] }}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add container" }));
+    expect(onFluidStateChoiceChange).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mode: "new",
+        seeds: [expect.objectContaining({ container: "", volume: "", composition: [] })],
+      }),
+    );
+  });
+
+  it("blocks Run and shows an inline error when a composition does not sum to the volume", () => {
+    render(
+      <ProtocolEditor
+        {...baseProps()}
+        onFluidStateChoiceChange={vi.fn()}
+        fluidStateChoice={{
+          mode: "new",
+          newLabel: "",
+          resumeId: null,
+          seeds: [
+            {
+              id: "seed-a",
+              container: "s1",
+              volume: "100",
+              composition: [{ id: "comp-a", component: "water", volume: "40" }],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByRole("alert")).toHaveTextContent(/composition sums to 40/i);
+    expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled();
+  });
+
+  it("enables Run when seed rows are valid", () => {
+    render(
+      <ProtocolEditor
+        {...baseProps()}
+        onFluidStateChoiceChange={vi.fn()}
+        fluidStateChoice={{
+          mode: "new",
+          newLabel: "seeded",
+          resumeId: null,
+          seeds: [{ id: "seed-a", container: "s1", volume: "6500", composition: [] }],
+        }}
+      />,
+    );
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run Protocol" })).toBeEnabled();
+  });
 });
 
 function baseProps(): React.ComponentProps<typeof ProtocolEditor> {

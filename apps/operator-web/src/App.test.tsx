@@ -1475,4 +1475,96 @@ describe("CubOS editor interactions", () => {
 
     expect(await screen.findByText(/deck fingerprint/i)).toBeInTheDocument();
   });
+
+  it("seeds per-container starting volumes into a new-state run submission", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(createState());
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "New fluid state" }));
+
+    await user.click(screen.getByRole("button", { name: "Add container" }));
+    await user.type(screen.getByLabelText("Seed container 1"), "plate_1.A1");
+    await user.type(screen.getByLabelText("Seed volume 1"), "150");
+    // A composition breakdown that sums to the volume.
+    await user.click(screen.getByRole("button", { name: "Add component to container 1" }));
+    await user.type(screen.getByLabelText("Seed 1 component 1 name"), "water");
+    await user.type(screen.getByLabelText("Seed 1 component 1 volume"), "150");
+
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await user.click(runButton);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    const [, submitInit] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/runs")!;
+    expect(JSON.parse(String(submitInit?.body))).toMatchObject({
+      deck_file: "panda-deck.yaml",
+      protocol_file: "move.yaml",
+      state: {
+        initial_state: {
+          fluids: { "plate_1.A1": { volume_ul: 150, composition: { water: 150 } } },
+        },
+      },
+    });
+  });
+
+  it("keeps the new-state submission empty when no seed rows are added", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(createState());
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "New fluid state" }));
+    await user.type(screen.getByLabelText("Label for the new fluid state"), "empty seed");
+
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await user.click(runButton);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    const [, submitInit] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/runs")!;
+    expect(JSON.parse(String(submitInit?.body))).toMatchObject({
+      state: { initial_state: { label: "empty seed", fluids: {} } },
+    });
+  });
+
+  it("blocks a new-state run when a seed composition does not sum to its volume", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(createState());
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "New fluid state" }));
+
+    await user.click(screen.getByRole("button", { name: "Add container" }));
+    await user.type(screen.getByLabelText("Seed container 1"), "plate_1.A1");
+    await user.type(screen.getByLabelText("Seed volume 1"), "150");
+    await user.click(screen.getByRole("button", { name: "Add component to container 1" }));
+    await user.type(screen.getByLabelText("Seed 1 component 1 name"), "water");
+    await user.type(screen.getByLabelText("Seed 1 component 1 volume"), "40");
+
+    // Run is blocked client-side and never reaches the runs resource.
+    expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(/composition sums to 40/i);
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/runs", expect.anything());
+  });
 });
