@@ -1,0 +1,26 @@
+# Minimal PANDA signed-frame bring-up protocol.
+#
+# Super-conservative first motion for the home_origin frame: home, then a
+# 20 mm XY excursion from the homed corner with the gantry Z held at the
+# -5 mm safe ceiling, then home again. Uses the offset-free camera mount so
+# the gantry XY equals the target XY exactly.
+#
+# Z targets are instrument-point positions: gantry Z = target Z + depth.
+# Camera depth is 32.0, so target/travel Z of -37.0 keeps the gantry at -5.0.
+#
+# Run only after the cub_xl_panda_home_origin.yaml preflight passes: E-stop
+# in reach, machine clear, tool retracted, homing verified, WPos (0,0,0)
+# confirmed at the homed corner.
+
+positions:
+  near_home_park: [-20.0, -20.0, -37.0]
+
+protocol:
+  - home:
+
+  - move:
+      instrument: camera
+      position: near_home_park
+      travel_z: -37.0
+
+  - home:

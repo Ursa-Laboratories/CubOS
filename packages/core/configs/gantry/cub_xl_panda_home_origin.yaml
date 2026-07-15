@@ -1,0 +1,73 @@
+# PANDA gantry configuration for the CubOS home-origin (signed) frame.
+#
+# home_origin policy: WPos zero is the homed back-right-top corner and the
+# entire reachable workspace is negative. +X right, +Y back, +Z up — the axis
+# directions match deck_origin; only the zero corner differs. After a
+# successful home, WPos must read (0, 0, 0).
+#
+# Estimated work volume from the Cub XL / Genmitsu PROVerXL 4030 V2 setup.
+# This setup still needs staged hardware validation. Confirm live $130/$131/
+# $132, the serial device path, homing corner, and jog directions before
+# trusting physical motion.
+
+serial_port: /dev/ttyUSB0
+gantry_type: cub_xl
+origin_policy: home_origin
+
+cnc:
+  factory_z_travel_mm: 100.0
+  y_axis_motion: head
+  # Absolute Z ceiling for inter-labware travel, 5 mm below the homed top.
+  safe_z: -5.0
+
+working_volume:
+  x_min: -400.0
+  x_max: 0.0
+  y_min: -300.0
+  y_max: 0.0
+  z_min: -100.0
+  z_max: 0.0
+
+grbl_settings:
+  # Starting point copied from the deck-origin PANDA config (cub_xl_panda.yaml).
+  # Re-verify on the actual PANDA controller before trusting physical motion.
+  dir_invert_mask: 1
+  status_report: 0
+  homing_enable: true
+  homing_dir_mask: 0
+  steps_per_mm_x: 400.0
+  steps_per_mm_y: 400.0
+  steps_per_mm_z: 400.0
+  max_travel_x: 400.0
+  max_travel_y: 300.0
+  max_travel_z: 100.0
+
+instruments:
+  # Left red probe; approximate offset from center camera mount.
+  potentiostat:
+    type: potentiostat
+    vendor: admiral
+    port: ""
+    channel: 0
+    offline: true
+    offset_x: -55.0
+    offset_y: 0.0
+    depth: 58.0
+
+  # Center mount; estimated imaging standoff above deck targets.
+  camera:
+    type: camera
+    vendor: mount_only
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 32.0
+
+  # Right white tool; approximate capper/decapper centerline.
+  vial_capper_decapper:
+    type: mounted_tool
+    vendor: mount_only
+    offline: true
+    offset_x: 58.0
+    offset_y: 0.0
+    depth: 48.0
