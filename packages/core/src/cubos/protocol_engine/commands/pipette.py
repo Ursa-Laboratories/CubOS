@@ -207,6 +207,33 @@ def _mark_transfer_uncertain(
         )
 
 
+def _tip_rack_key(position: str) -> str:
+    """Return the deck path used to resolve *position*'s owning TipRack.
+
+    Mirrors ``resolve_tip_rack_slot``'s own rsplit so the durable tip-state
+    rack identity always matches what was used to resolve the rack.
+    """
+    return position.rsplit(".", 1)[0] if "." in position else position
+
+
+def _mark_tip_uncertain(
+    context: ProtocolContext,
+    operation_key: str,
+    exc: BaseException,
+) -> None:
+    """Best-effort marker for physical tip actions whose outcome needs review."""
+    try:
+        context.data_store.mark_tip_reconciliation_required(
+            operation_key,
+            f"{type(exc).__name__}: {exc}",
+        )
+    except Exception:
+        logger.exception(
+            "Failed to mark tip operation %s reconciliation-required",
+            operation_key,
+        )
+
+
 @protocol_command("aspirate")
 def aspirate(
     context: ProtocolContext,
@@ -317,29 +344,89 @@ def pick_up_tip(
 ) -> None:
     """Move pipette to *position*, then pick up a tip.
 
-    Tip-rack consumption is currently in-memory only. Re-running a protocol
-    cannot know which physical slots were emptied by an earlier run; operators
-    must refresh/replace racks or update the deck definition before reruns.
+    *position* may name a specific slot (``"tips.A1"``) or a whole rack
+    (``"tips"``) for next-available selection using the rack's tip order.
+
+    When durable fluid/tip tracking is active (``context.fluid_state_id``),
+    the pickup is journaled with the same two-phase begin/complete pattern as
+    fluid transfers: the slot is reserved *before* motion, committed to
+    ``attached`` only after ``pipette.pick_up_tip`` succeeds, and marked
+    ``reconciliation_required`` (blocking further liquid handling) if the
+    physical outcome is uncertain. Re-running an already-applied step is a
+    no-op that restores the pipette's tip extension without picking a second
+    tip. Without tracking, tip-rack consumption is in-memory only: re-running
+    a protocol cannot know which physical slots were emptied by an earlier
+    run, so operators must refresh/replace racks or update the deck
+    definition before reruns.
     """
     pipette = _get_pipette(context)
     try:
         rack, tip_id = resolve_tip_rack_slot(context.deck, position)
     except TipRackResolutionError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
-    if tip_id is None:
-        raise ProtocolExecutionError(
-            f"pick_up_tip position {position!r} must include an explicit "
-            "tip slot such as `tips.A1`."
-        )
-    if not rack.is_tip_present(tip_id):
-        raise ProtocolExecutionError(
-            f"pick_up_tip target {position!r} is not available "
-            "(slot is unknown or already consumed)."
-        )
-    _engage(context, position, command_label="pick_up_tip")
-    pipette.pick_up_tip(speed)
+    rack_key = _tip_rack_key(position)
+
+    tracked = _tracked_fluid_state(context)
+    operation_key = None
+    if tracked:
+        operation_key = context.fluid_operation_key("pick_up_tip")
+        try:
+            should_execute, resolved_tip_id, extension_mm = (
+                context.data_store.begin_pick_up_tip(
+                    context.fluid_state_id,
+                    operation_key,
+                    rack_key,
+                    tip_id,
+                    rack.tip_length,
+                    campaign_id=context.campaign_id,
+                )
+            )
+        except Exception as exc:
+            raise ProtocolExecutionError(
+                f"Tip-state preflight failed for pick_up_tip at {position!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if not should_execute:
+            pipette.set_attached_tip_extension(extension_mm)
+            context.logger.info(
+                "Skipping already-applied tip operation %s", operation_key,
+            )
+            return
+        tip_id = resolved_tip_id
+        position = f"{rack_key}.{tip_id}"
+    else:
+        if tip_id is None:
+            tip_id = rack.next_available_tip()
+            if tip_id is None:
+                raise ProtocolExecutionError(
+                    f"pick_up_tip rack {rack_key!r} has no available tips."
+                )
+            position = f"{rack_key}.{tip_id}"
+        if not rack.is_tip_present(tip_id):
+            raise ProtocolExecutionError(
+                f"pick_up_tip target {position!r} is not available "
+                "(slot is unknown or already consumed)."
+            )
+
+    try:
+        _engage(context, position, command_label="pick_up_tip")
+        pipette.pick_up_tip(speed)
+    except BaseException as exc:
+        if operation_key is not None:
+            _mark_tip_uncertain(context, operation_key, exc)
+        raise
     pipette.set_attached_tip_extension(rack.tip_length)
     rack.mark_tip_used(tip_id)
+    if operation_key is not None:
+        try:
+            context.data_store.complete_pick_up_tip(operation_key)
+        except Exception as exc:
+            _mark_tip_uncertain(context, operation_key, exc)
+            raise ProtocolExecutionError(
+                "Physical tip pickup completed, but its tip-state commit "
+                f"failed for operation {operation_key!r}: "
+                f"{type(exc).__name__}: {exc}. Reconciliation is required."
+            ) from exc
 
 
 @protocol_command("transfer")
@@ -405,11 +492,55 @@ def drop_tip(
     position: str,
     speed: float = 50.0,
 ) -> None:
-    """Move pipette to *position*, then drop the tip."""
+    """Move pipette to *position*, then drop the tip.
+
+    When durable fluid/tip tracking is active, the drop is journaled the
+    same way as pick_up_tip: reserved before motion, committed to
+    ``consumed`` only after ``pipette.drop_tip`` succeeds, and marked
+    ``reconciliation_required`` (blocking further liquid handling) if the
+    physical outcome is uncertain.
+    """
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="drop_tip")
-    pipette.drop_tip(speed)
+    tracked = _tracked_fluid_state(context)
+    operation_key = None
+    if tracked:
+        operation_key = context.fluid_operation_key("drop_tip")
+        try:
+            should_execute, _rack_key, _slot_id = context.data_store.begin_drop_tip(
+                context.fluid_state_id,
+                operation_key,
+                campaign_id=context.campaign_id,
+            )
+        except Exception as exc:
+            raise ProtocolExecutionError(
+                f"Tip-state preflight failed for drop_tip at {position!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if not should_execute:
+            pipette.clear_attached_tip_extension()
+            context.logger.info(
+                "Skipping already-applied tip operation %s", operation_key,
+            )
+            return
+
+    try:
+        _engage(context, position, command_label="drop_tip")
+        pipette.drop_tip(speed)
+    except BaseException as exc:
+        if operation_key is not None:
+            _mark_tip_uncertain(context, operation_key, exc)
+        raise
     pipette.clear_attached_tip_extension()
+    if operation_key is not None:
+        try:
+            context.data_store.complete_drop_tip(operation_key)
+        except Exception as exc:
+            _mark_tip_uncertain(context, operation_key, exc)
+            raise ProtocolExecutionError(
+                "Physical tip drop completed, but its tip-state commit "
+                f"failed for operation {operation_key!r}: "
+                f"{type(exc).__name__}: {exc}. Reconciliation is required."
+            ) from exc
 
 
 # -- Compound helpers ----------------------------------------------------------

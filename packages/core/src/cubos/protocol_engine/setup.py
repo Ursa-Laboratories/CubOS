@@ -258,6 +258,13 @@ def run_on_hardware(
                 deck_path,
                 context.deck,
             )
+            pipette = context.gantry.instruments.get("pipette")
+            if pipette is not None:
+                # Restores the attached-tip extension onto the pipette
+                # instrument, or raises if attachment is uncertain -- resume
+                # already refuses when a tip operation needs reconciliation,
+                # so this is primarily a same-session consistency guarantee.
+                data_store.restore_pipette_attachment(fluid_state_id, pipette)
         elif initial_fluids is not None:
             from cubos.data import load_initial_fluids
 

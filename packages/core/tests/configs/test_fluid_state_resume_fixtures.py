@@ -273,3 +273,106 @@ def test_two_mock_runs_persist_and_resume_one_fluid_state(tmp_path: Path):
             "SELECT fluid_state_id, status FROM campaigns ORDER BY id"
         ).fetchall()
     assert campaign_rows == [(state_id, "completed"), (state_id, "completed")]
+
+
+def test_two_mock_runs_persist_tip_state_and_never_repick_a_consumed_tip(
+    tmp_path: Path,
+):
+    """Durable per-slot tip state, seeded from this same fixture bundle.
+
+    01_load_plate.yaml picks tip_rack.A1 then tip_rack.A2 (dropping each
+    before the next pickup); 02_add_dye.yaml picks B1 then B2. A third,
+    ad-hoc run against the same DB that tries to re-pick tip_rack.A1 must be
+    refused by durable state even though a freshly loaded deck still reports
+    every tip as present in memory.
+    """
+    db_path = tmp_path / "fluid-state-tip-repick.db"
+    from cubos.protocol_engine.errors import ProtocolExecutionError
+
+    first_store = DataStore(db_path)
+    try:
+        run_on_hardware(
+            FIXTURES / "gantry.yaml",
+            FIXTURES / "deck.yaml",
+            PROTOCOL_PATHS[0],
+            mock_mode=True,
+            data_store=first_store,
+            initial_fluids=FIXTURES / "initial_fluids.yaml",
+        )
+    finally:
+        first_store.close()
+
+    with sqlite3.connect(db_path) as connection:
+        state_id = connection.execute(
+            "SELECT id FROM fluid_state_sessions ORDER BY id"
+        ).fetchone()[0]
+        tip_status = dict(
+            connection.execute(
+                "SELECT slot_id, status FROM tip_containers "
+                "WHERE fluid_state_id = ? AND rack_key = 'tip_rack'",
+                (state_id,),
+            ).fetchall()
+        )
+        operation_types = connection.execute(
+            "SELECT operation_type, status FROM tip_operations "
+            "WHERE fluid_state_id = ? ORDER BY id",
+            (state_id,),
+        ).fetchall()
+    assert tip_status["A1"] == "consumed"
+    assert tip_status["A2"] == "consumed"
+    assert tip_status["B1"] == "available"
+    assert operation_types == [
+        ("pick_up_tip", "applied"),
+        ("drop_tip", "applied"),
+        ("pick_up_tip", "applied"),
+        ("drop_tip", "applied"),
+    ]
+
+    second_store = DataStore(db_path)
+    try:
+        run_on_hardware(
+            FIXTURES / "gantry.yaml",
+            FIXTURES / "deck.yaml",
+            PROTOCOL_PATHS[1],
+            mock_mode=True,
+            data_store=second_store,
+            fluid_state_id=state_id,
+        )
+    finally:
+        second_store.close()
+
+    repick_protocol = tmp_path / "repick_a1.yaml"
+    repick_protocol.write_text(
+        "protocol:\n"
+        "  - home:\n"
+        "  - pick_up_tip:\n"
+        "      position: tip_rack.A1\n",
+        encoding="utf-8",
+    )
+
+    # A fresh deck load reports every tip present in memory; only the
+    # durable DB state must gate a re-pick.
+    fresh_deck = load_deck_from_yaml_safe(FIXTURES / "deck.yaml")
+    assert fresh_deck.labware["tip_rack"].is_tip_present("A1") is True
+
+    third_store = DataStore(db_path)
+    try:
+        with pytest.raises(ProtocolExecutionError, match="not available"):
+            run_on_hardware(
+                FIXTURES / "gantry.yaml",
+                FIXTURES / "deck.yaml",
+                repick_protocol,
+                mock_mode=True,
+                data_store=third_store,
+                fluid_state_id=state_id,
+            )
+    finally:
+        third_store.close()
+
+    with sqlite3.connect(db_path) as connection:
+        final_status = connection.execute(
+            "SELECT status FROM tip_containers WHERE fluid_state_id = ? "
+            "AND rack_key = 'tip_rack' AND slot_id = 'A1'",
+            (state_id,),
+        ).fetchone()[0]
+    assert final_status == "consumed"

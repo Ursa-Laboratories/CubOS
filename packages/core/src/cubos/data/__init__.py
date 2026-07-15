@@ -33,6 +33,17 @@ from .fluid_state import (
 )
 from .fluid_state_reader import FluidStateReader
 from .protocol_runs import create_campaign_for_protocol_run, register_deck_labware
+from .tip_state import (
+    PipetteAttachmentSnapshot,
+    TipContainerSnapshot,
+    TipOperationSnapshot,
+    TipStateConflictError,
+    TipStateDeckMismatchError,
+    TipStateError,
+    TipStateNotFoundError,
+    TipStateReconciliationRequiredError,
+    TipStateSnapshot,
+)
 
 __all__ = [
     "DataStore",
@@ -67,4 +78,13 @@ __all__ = [
     "load_replacement_state",
     "create_campaign_for_protocol_run",
     "register_deck_labware",
+    "PipetteAttachmentSnapshot",
+    "TipContainerSnapshot",
+    "TipOperationSnapshot",
+    "TipStateConflictError",
+    "TipStateDeckMismatchError",
+    "TipStateError",
+    "TipStateNotFoundError",
+    "TipStateReconciliationRequiredError",
+    "TipStateSnapshot",
 ]

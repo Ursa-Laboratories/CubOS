@@ -228,6 +228,11 @@ def create_fluid_state(
         for labware_key, labware in descriptors:
             _insert_container_rows(connection, fluid_state_id, labware_key, labware)
 
+        # Tip/attached-pipette state hangs off this same session (one durable
+        # session carries both fluids and consumables).
+        from . import tip_state
+        tip_state.seed_tip_state(connection, fluid_state_id, deck)
+
         for (labware_key, location_id), definition in canonical_initial.items():
             _seed_fluid_row(
                 connection,
@@ -291,7 +296,15 @@ def resume_fluid_state(
 
     _verify_container_registry(connection, fluid_state_id, descriptors)
 
-    pending = _pending_operations(connection, fluid_state_id)
+    # Tip/attached-pipette registry and reconciliation state share this
+    # session; both must be checked before it can be safely resumed.
+    from . import tip_state
+    tip_state.verify_tip_container_registry(connection, fluid_state_id, deck)
+
+    pending = [
+        *_pending_operations(connection, fluid_state_id),
+        *tip_state.pending_tip_operations(connection, fluid_state_id),
+    ]
     if pending:
         details = ", ".join(f"{key} ({status})" for key, status in pending)
         raise FluidStateReconciliationRequiredError(
@@ -1386,7 +1399,16 @@ def _require_no_pending_operation(
     fluid_state_id: int,
     operation_key: str,
 ) -> None:
-    pending = _pending_operations(connection, fluid_state_id)
+    # Tip operations share this session's single-physical-action-at-a-time
+    # journal: a pending pick_up_tip/drop_tip blocks new fluid operations
+    # exactly like a pending fluid operation blocks new tip operations (see
+    # tip_state._require_no_pending_fluid_operation).
+    from . import tip_state
+
+    pending = [
+        *_pending_operations(connection, fluid_state_id),
+        *tip_state.pending_tip_operations(connection, fluid_state_id),
+    ]
     if pending:
         details = ", ".join(f"{key} ({status})" for key, status in pending)
         raise FluidStateReconciliationRequiredError(
@@ -1694,6 +1716,19 @@ def _pending_operations(
     ).fetchall()
 
 
+def pending_operations(
+    connection: sqlite3.Connection,
+    fluid_state_id: int,
+) -> list[tuple[str, str]]:
+    """Public sibling of :func:`_pending_operations` for cross-module checks.
+
+    Used by ``tip_state`` to block new tip operations while a fluid
+    operation is pending, mirroring ``_require_no_pending_operation``'s
+    check of tip operations here.
+    """
+    return _pending_operations(connection, fluid_state_id)
+
+
 def _normalize_initial_fluids(
     fluids: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]]:
@@ -1918,6 +1953,7 @@ __all__ = [
     "load_replacement_state",
     "list_fluid_states",
     "mark_fluid_reconciliation_required",
+    "pending_operations",
     "resolve_fluid_operation",
     "resume_fluid_state",
     "seed_fluid",
