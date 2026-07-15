@@ -612,6 +612,7 @@ class GantrySession:
                     gantry_file=gantry_file,
                     deck_file=deck_file,
                     protocol_file=protocol_file,
+                    fluid_state_id=fluid_state_id,
                 )
                 protocol, context = setup_protocol(
                     gantry_path,
