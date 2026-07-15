@@ -233,6 +233,13 @@ def create_fluid_state(
         from . import tip_state
         tip_state.seed_tip_state(connection, fluid_state_id, deck)
 
+        # Durable per-vial cap state hangs off this same session too, seeded
+        # from every vial/vial-grid position that declares `capped` in YAML
+        # (see cubos.data.cap_state; vials without `capped` set are simply
+        # not capper-managed and are skipped).
+        from . import cap_state
+        cap_state.seed_cap_state(connection, fluid_state_id, deck)
+
         for (labware_key, location_id), definition in canonical_initial.items():
             _seed_fluid_row(
                 connection,
@@ -301,9 +308,14 @@ def resume_fluid_state(
     from . import tip_state
     tip_state.verify_tip_container_registry(connection, fluid_state_id, deck)
 
+    # Cap-state registry shares this session too.
+    from . import cap_state
+    cap_state.verify_cap_container_registry(connection, fluid_state_id, deck)
+
     pending = [
         *_pending_operations(connection, fluid_state_id),
         *tip_state.pending_tip_operations(connection, fluid_state_id),
+        *cap_state.pending_cap_operations(connection, fluid_state_id),
     ]
     if pending:
         details = ", ".join(f"{key} ({status})" for key, status in pending)
@@ -954,6 +966,11 @@ def _container_descriptor_rows(
                 sorted(labware.allowed_solutions)
                 if labware.allowed_solutions is not None else None
             ),
+            # Capped identity participates in the resume boundary exactly
+            # like role/solution: it seeds cubos.data.cap_state at session
+            # creation (see create_fluid_state below), so a deck edit that
+            # changes it must invalidate an old fluid-state session.
+            "capped": labware.capped,
         }]
     if isinstance(labware, VialGrid):
         return [
@@ -974,6 +991,7 @@ def _container_descriptor_rows(
                     sorted(vial.allowed_solutions)
                     if vial.allowed_solutions is not None else None
                 ),
+                "capped": vial.capped,
             }
             for location_id, vial in sorted(
                 labware.vials.items(), key=lambda item: _location_sort_key(item[0])
@@ -1458,15 +1476,17 @@ def _require_no_pending_operation(
     fluid_state_id: int,
     operation_key: str,
 ) -> None:
-    # Tip operations share this session's single-physical-action-at-a-time
-    # journal: a pending pick_up_tip/drop_tip blocks new fluid operations
-    # exactly like a pending fluid operation blocks new tip operations (see
-    # tip_state._require_no_pending_fluid_operation).
-    from . import tip_state
+    # Tip and cap operations share this session's single-physical-action-at-
+    # a-time journal: a pending pick_up_tip/drop_tip/decap/cap blocks new
+    # fluid operations exactly like a pending fluid operation blocks new tip
+    # operations (see tip_state._require_no_pending_fluid_operation) and cap
+    # operations (see cap_state._require_no_pending_fluid_operation).
+    from . import cap_state, tip_state
 
     pending = [
         *_pending_operations(connection, fluid_state_id),
         *tip_state.pending_tip_operations(connection, fluid_state_id),
+        *cap_state.pending_cap_operations(connection, fluid_state_id),
     ]
     if pending:
         details = ", ".join(f"{key} ({status})" for key, status in pending)

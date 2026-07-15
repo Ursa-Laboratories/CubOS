@@ -6,6 +6,14 @@
 # offset unchanged (instrument_mount.py: gantry_x = target_x - offset_x,
 # gantry_z = target_z + depth -- algebraically identical to PANDA-BEAR's
 # gantry = tool_target + tool_offset when offset_cubos = -offset_pandabear).
+#
+# Feature 06: `vial_capper_decapper` is additionally upgraded in place from
+# the source file's generic `mounted_tool`/`mount_only` placeholder to the
+# real `capper`/`pawduino` type+vendor (see
+# cubos.tools.panda_bear_import.build._upgrade_capper_entry). Its
+# `engage_depth_mm`/`park_position`/`capture_retries`/`capture_settle_s`
+# are PLACEHOLDER values -- confirm/recalibrate against real hardware
+# before trusting physical decap/cap motion.
 
 cnc:
   factory_z_travel_mm: 100.0
@@ -50,12 +58,17 @@ instruments:
     type: potentiostat
     vendor: admiral
   vial_capper_decapper:
+    capture_retries: 2
+    capture_settle_s: 1.0
     depth: 61.5
+    engage_depth_mm: -15.0
     offline: true
     offset_x: 62.9
     offset_y: 5.1
-    type: mounted_tool
-    vendor: mount_only
+    park_position: [-10.0, -10.0]
+    port: ''
+    type: capper
+    vendor: pawduino
 origin_policy: home_origin
 serial_port: /dev/ttyUSB0
 working_volume:

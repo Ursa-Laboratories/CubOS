@@ -8,6 +8,7 @@ that pair to choose the concrete class.
 |-------------|-----------------|------------|-------|
 | `asmi/` | `vernier` | GoDirect Force Sensor | Force measurement via USB (GoDirect SDK) |
 | `camera/` | `mount_only`, `raspberry_pi` | Mounted camera | `mount_only` is calibration-only; `capture()` is intentionally not implemented |
+| `capper/` | `mock`, `pawduino` | Vial capper/decapper | Electromagnet capture/release + line-break sensor confirm via Arduino serial (Pawduino firmware); `mock` is an offline in-memory simulation |
 | `filmetrics/` | `kla` | F-Series (via FilmetricsTool.exe) | Thin-film thickness measurement via spectral reflectance |
 | `mounted_tool/` | `mount_only` | Mounted non-instrumented tool | Calibration-only stand-in for physical tools without control code |
 | `pipette/` | `opentrons` | OT-2 / Flex pipettes | Pipette control via Arduino serial (Pawduino firmware) |

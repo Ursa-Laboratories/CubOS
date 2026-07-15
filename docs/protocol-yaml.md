@@ -135,6 +135,8 @@ Commands available in YAML:
 - `flush_pipette`
 - `purge_pipette`
 - `clear_well`
+- `decap`
+- `cap`
 
 ### `home`
 
@@ -275,6 +277,15 @@ applied and a rerun never re-applies committed liquid.
   (`{multiplier, offset_ul}` per class). The correction adjusts only the
   driver-commanded stroke volume; tracked fluid state always moves the
   requested volume. Disabled (identity) when omitted.
+- `require_uncapped` *(list of str, default `null`)* — deck targets
+  (typically `source`/`destination` themselves) that must be durably
+  tracked `uncapped` (see [Capper commands](#capper-commands) and [Deck:
+  Cap State](deck.md#cap-state)) before any motion or other preflight
+  runs. Fails immediately, naming exactly which target needs `decap`
+  first, when any named target is `capped` or its cap state is unknown
+  (`reconciliation_required`, or never registered). Explicit opt-in only —
+  never runs `decap` itself; a target with no durable cap state at all is
+  not constrained by this check.
 
 #### `serial_transfer`
 
@@ -303,6 +314,41 @@ Move to a position and drop the tip.
 - `position` *(str, required)* — deck target where the tip is dropped.
 - `speed` *(float, default `50.0`)* — approach/drop speed.
 
+### Capper commands
+
+`decap`/`cap` drive a generic vial capper/decapper instrument (`type:
+capper` in the gantry YAML — see [Gantry Setup: Define
+Instruments](gantry-setup.md#define-instruments)). Both take:
+
+- `instrument` *(str, required)* — capper instrument registered on the
+  gantry.
+- `vial` *(str, required)* — deck target naming the vial (or vial-grid
+  position) to decap/cap.
+
+Motion is fixed and built entirely from generic gantry primitives, never
+hardcoded per vial: **approach** at `safe_z` → **engage** at the
+instrument's configured `engage_depth_mm` (a labware-relative Z offset) →
+**capture**/**release** (sensor-confirmed, retried up to the instrument's
+`capture_retries`) → **retract** to `safe_z` → **park** at the
+instrument's configured `park_position`. A sensor timeout or a reading
+that contradicts the expected post-actuation state after all retries
+fails closed: the tool retracts to `safe_z` on a best-effort basis, the
+command raises, and — when durable fluid/cap tracking is active (see
+[Deck: Cap State](deck.md#cap-state)) — the vial's durable cap state is
+marked `reconciliation_required`, blocking further `decap`/`cap` on that
+vial and any `transfer` that names it via `require_uncapped` until an
+operator reconciles it.
+
+#### `decap`
+
+Remove the cap from `vial`. When durable tracking is active, the vial
+must currently be tracked `capped`.
+
+#### `cap`
+
+Replace the cap on `vial`. When durable tracking is active, the vial must
+currently be tracked `uncapped`.
+
 ### Compound liquid commands
 
 `rinse_well`, `flush_pipette`, `purge_pipette`, and `clear_well` express
@@ -311,7 +357,9 @@ reusable multi-step liquid-handling sequences by composing `transfer`/`mix`
 stroke split, and durable begin/complete step described under `transfer`
 above applies to each transfer they issue). `mix`'s existing `repetitions`
 argument already covers "mix N times"; there is no separate compound mix
-command.
+command. Each also accepts `require_uncapped` (same contract as
+`transfer`'s — see [`transfer`](#transfer)), checked once up front before
+any cycle/leg runs.
 
 Each container argument is either an **explicit deck target** or
 **automatic selection**:

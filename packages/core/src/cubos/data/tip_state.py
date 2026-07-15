@@ -916,15 +916,19 @@ def _require_no_pending_fluid_operation(
     fluid_state_id: int,
     operation_key: str,
 ) -> None:
+    from . import cap_state as _cap_state
     from . import fluid_state as _fluid_state
 
-    pending = _fluid_state.pending_operations(connection, fluid_state_id)
+    pending = [
+        *_fluid_state.pending_operations(connection, fluid_state_id),
+        *_cap_state.pending_cap_operations(connection, fluid_state_id),
+    ]
     if pending:
         details = ", ".join(f"{key} ({status})" for key, status in pending)
         raise TipStateReconciliationRequiredError(
             f"Fluid state {fluid_state_id} cannot start tip operation "
-            f"{operation_key!r} while these fluid operations require physical "
-            f"reconciliation: {details}."
+            f"{operation_key!r} while these fluid/cap operations require "
+            f"physical reconciliation: {details}."
         )
 
 

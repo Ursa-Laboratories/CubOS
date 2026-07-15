@@ -18,6 +18,11 @@ from cubos.deck.yaml_schema import WellPlateYamlEntry
 
 from .conflicts import Conflict
 from .constants import (
+    CAPPER_CAPTURE_RETRIES,
+    CAPPER_CAPTURE_SETTLE_S,
+    CAPPER_ENGAGE_DEPTH_MM,
+    CAPPER_INSTRUMENT_KEY,
+    CAPPER_PARK_POSITION,
     ELECTRODE_FRAME_TOOL,
     ENVELOPE_TOLERANCE_MM,
     PIPETTE_FRAME_TOOL,
@@ -616,8 +621,44 @@ def _build_gantry_full(gantry_raw: dict, pipette_offset: ToolOffset) -> dict:
         "offset_y": round_mm(-pipette_offset.y),
         "depth": round_mm(pipette_offset.z),
     }
+    _upgrade_capper_entry(instruments)
     merged["instruments"] = instruments
     return merged
+
+
+def _upgrade_capper_entry(instruments: dict) -> None:
+    """Upgrade a generic `mounted_tool`/`mount_only` capper mount in place.
+
+    The raw source gantry YAML predates the dedicated `capper` instrument
+    type (Feature 06) and still declares the capper/decapper mount as a
+    calibration-only `mounted_tool`/`mount_only` placeholder. This rewrites
+    it to `type: capper, vendor: pawduino` (see
+    cubos.instruments.capper.vendors.pawduino), preserving its calibrated
+    `offset_x`/`offset_y`/`depth`/`offline` and adding the motion-sequence
+    config the `decap`/`cap` protocol commands read
+    (`engage_depth_mm`/`park_position`/`capture_retries`/
+    `capture_settle_s` -- placeholder values, see constants.py).
+
+    A no-op when the mount entry is absent (the capper instrument stays
+    optional -- existing non-capper gantry configs import unchanged) or
+    already something other than the generic mount_only placeholder (never
+    clobbers an already-upgraded or hand-authored entry).
+    """
+    entry = instruments.get(CAPPER_INSTRUMENT_KEY)
+    if not isinstance(entry, dict):
+        return
+    if entry.get("type") != "mounted_tool" or entry.get("vendor") != "mount_only":
+        return
+    instruments[CAPPER_INSTRUMENT_KEY] = {
+        **entry,
+        "type": "capper",
+        "vendor": "pawduino",
+        "port": "",
+        "engage_depth_mm": CAPPER_ENGAGE_DEPTH_MM,
+        "park_position": list(CAPPER_PARK_POSITION),
+        "capture_retries": CAPPER_CAPTURE_RETRIES,
+        "capture_settle_s": CAPPER_CAPTURE_SETTLE_S,
+    }
 
 
 def _row_label(row_number: int) -> str:

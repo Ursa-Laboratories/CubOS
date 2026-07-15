@@ -125,6 +125,9 @@ class VialGridYamlEntry(BaseModel):
     vial_role: Optional[str] = None
     vial_solution: Optional[str] = None
     vial_allowed_solutions: Optional[List[str]] = None
+    # Uniformly applied to every vial in the grid, mirroring vial_role/
+    # vial_solution (see cubos.deck.labware.vial.Vial.capped).
+    vial_capped: Optional[bool] = None
 
     @property
     def a1_point(self) -> _YamlPoint3D:
@@ -193,6 +196,7 @@ class VialYamlEntry(BaseModel):
     role: Optional[str] = None
     solution: Optional[str] = None
     allowed_solutions: Optional[List[str]] = None
+    capped: Optional[bool] = None
 
     @field_validator("role")
     def _validate_role_field(cls, value: Optional[str]) -> Optional[str]:
@@ -225,6 +229,7 @@ class NestedVialYamlEntry(BaseModel):
     role: Optional[str] = None
     solution: Optional[str] = None
     allowed_solutions: Optional[List[str]] = None
+    capped: Optional[bool] = None
 
     @field_validator("role")
     def _validate_role_field(cls, value: Optional[str]) -> Optional[str]:

@@ -1,5 +1,15 @@
 """Data persistence layer for CubOS campaigns and measurements."""
 
+from .cap_state import (
+    CapContainerSnapshot,
+    CapOperationSnapshot,
+    CapStateConflictError,
+    CapStateDeckMismatchError,
+    CapStateError,
+    CapStateNotFoundError,
+    CapStateReconciliationRequiredError,
+    CapStateSnapshot,
+)
 from .data_reader import DataReader
 from .data_store import DATA_DB_PATH_ENV, DataStore, default_database_path
 from .exports import (
@@ -46,6 +56,14 @@ from .tip_state import (
 )
 
 __all__ = [
+    "CapContainerSnapshot",
+    "CapOperationSnapshot",
+    "CapStateConflictError",
+    "CapStateDeckMismatchError",
+    "CapStateError",
+    "CapStateNotFoundError",
+    "CapStateReconciliationRequiredError",
+    "CapStateSnapshot",
     "DataStore",
     "DataReader",
     "DATA_DB_PATH_ENV",

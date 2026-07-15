@@ -452,6 +452,7 @@ def _build_vial_grid(
             role=entry.vial_role,
             solution=entry.vial_solution,
             allowed_solutions=entry.vial_allowed_solutions,
+            capped=entry.vial_capped,
         )
         for position_id, coordinate in positions.items()
     }
@@ -532,6 +533,7 @@ def _build_nested_vial(
         role=entry.role,
         solution=entry.solution,
         allowed_solutions=entry.allowed_solutions,
+        capped=entry.capped,
     )
 
 

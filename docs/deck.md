@@ -169,6 +169,45 @@ labware:
 unset/accept-all; a vial with no `role` is simply never a candidate for
 automatic selection.
 
+## Cap State
+
+A vial (or vial-grid position) opts into durable capper tracking by
+setting `capped` explicitly — `true` if it starts physically capped,
+`false` if uncapped:
+
+```yaml
+labware:
+  reagent:
+    type: vial
+    name: reagent
+    capped: true
+    height: 40.0
+    diameter: 15.0
+    location: {x: 5.0, y: 5.0, z: 20.0}
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+```
+
+`vial_grid` uses a grid-uniform `vial_capped` field, mirroring
+`vial_role`/`vial_dead_volume_ul`. Leaving `capped` unset (the default)
+means the vial has **no** durable cap state at all — it is not
+capper-managed, and neither the `decap`/`cap` protocol commands nor a
+`transfer`'s `require_uncapped` check constrain it. `capped` participates
+in the fluid-state session fingerprint exactly like `role`/`solution`: a
+deck edit that changes it invalidates an old durable session, so a fresh
+one seeds from the new value.
+
+At runtime the durable state is one of `capped`, `uncapped`, or
+`reconciliation_required` (see [Fluid State
+Tracking](fluid-state.md) for the create/resume session lifecycle this
+hangs off of, and [Protocol YAML: Capper
+commands](protocol-yaml.md#capper-commands) for `decap`/`cap` and
+`transfer`'s `require_uncapped`). `reconciliation_required` means a
+`decap`/`cap` action's physical outcome was uncertain (sensor timeout or
+a contradictory reading) — an operator must resolve it (via
+`DataStore.resolve_cap_operation`) before that vial can be decapped,
+capped, or referenced by a `require_uncapped` check again.
+
 ## Existing Nested Deck Files
 
 Existing deck YAML files do not need to be rewritten. CubOS continues to load

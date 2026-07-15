@@ -72,6 +72,22 @@ VIAL_CATEGORY_ROLES: Mapping[int, str] = {
 
 ROUND_NDIGITS = 3  # 0.001mm determinism, matches cubos.deck.loader rounding.
 
+# Feature 06: the raw source gantry YAML still declares the capper/decapper
+# mount as generic `mounted_tool`/`mount_only` (CubOS had no dedicated
+# capper instrument type when that mount entry was written). The importer
+# upgrades it in place to the real `capper`/`pawduino` type+vendor (see
+# cubos.instruments.capper) so the generated gantry config drives real
+# decap/cap motion instead of being a calibration-only placeholder.
+# `engage_depth_mm`/`park_position`/`capture_retries`/`capture_settle_s` are
+# PLACEHOLDER values -- they parameterize the decap/cap motion sequence
+# (cubos.protocol_engine.commands.capper) but were never measured against
+# real PANDA hardware; confirm/recalibrate before trusting physical motion.
+CAPPER_INSTRUMENT_KEY = "vial_capper_decapper"
+CAPPER_ENGAGE_DEPTH_MM = -15.0
+CAPPER_PARK_POSITION = [-10.0, -10.0]
+CAPPER_CAPTURE_RETRIES = 2
+CAPPER_CAPTURE_SETTLE_S = 1.0
+
 # Rows/wells/tips whose converted gantry position falls outside the gantry's
 # working volume by more than this are flagged as warning-level conflicts
 # (never blocking -- see packages/core/src/cubos/tools/import_panda_bear.py).

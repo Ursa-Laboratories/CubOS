@@ -16,6 +16,7 @@ from cubos.instruments.pipette.liquid_class import IDENTITY_CORRECTION
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
+from ._cap_preflight import require_uncapped as _require_uncapped
 from ._liquid_selection import (
     LiquidSelectionError,
     select_stock_container,
@@ -488,8 +489,18 @@ def transfer(
     source_height: Optional[float] = None,
     destination_height: Optional[float] = None,
     liquid_class: Optional[str] = None,
+    require_uncapped: Optional[List[str]] = None,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*.
+
+    ``require_uncapped`` (optional list of deck targets, typically
+    ``source``/``destination`` themselves) is checked FIRST, before any
+    other preflight or motion: every named target must be durably tracked
+    ``uncapped`` (see ``cubos.data.cap_state``) or the command fails
+    immediately with an error naming exactly which vial needs `decap`
+    first. This is an explicit opt-in check only -- it never runs `decap`
+    itself. A target with no durable cap state at all (not capper-managed)
+    is not constrained by this check.
 
     Safety preflight runs entirely before any motion or durable journaling:
     rejects ``volume_ul <= 0``, volume below the configured pipette model's
@@ -533,6 +544,8 @@ def transfer(
     hardware receives whatever correction is calibrated to actually deliver
     it.
     """
+    _require_uncapped(context, require_uncapped, command_label="transfer")
+
     tracked = _tracked_fluid_state(context)
     pipette = _get_pipette(context)
     capacity = pipette_capacity(pipette)
@@ -1104,6 +1117,7 @@ def rinse_well(
     source_height: Optional[float] = None,
     well_height: Optional[float] = None,
     waste_height: Optional[float] = None,
+    require_uncapped: Optional[List[str]] = None,
 ) -> None:
     """Rinse *well* with a stock solution, ``cycles`` times.
 
@@ -1123,6 +1137,7 @@ def rinse_well(
     ``mix_repetitions > 0``), ``rinse:cycle{N}:remove``. A crash mid-rinse
     resumes by skipping every already-applied substep and cycle.
     """
+    _require_uncapped(context, require_uncapped, command_label="rinse_well")
     if not isinstance(cycles, int) or isinstance(cycles, bool) or cycles <= 0:
         raise ProtocolExecutionError(
             f"rinse_well cycles must be a positive integer, got {cycles!r}."
@@ -1169,6 +1184,7 @@ def flush_pipette(
     speed: float = 50.0,
     source_height: Optional[float] = None,
     waste_height: Optional[float] = None,
+    require_uncapped: Optional[List[str]] = None,
 ) -> None:
     """Flush the pipette by drawing from stock and dispensing to waste, xN.
 
@@ -1179,6 +1195,7 @@ def flush_pipette(
 
     Substep keys: ``flush:cycle{N}`` (0-indexed).
     """
+    _require_uncapped(context, require_uncapped, command_label="flush_pipette")
     if not isinstance(cycles, int) or isinstance(cycles, bool) or cycles <= 0:
         raise ProtocolExecutionError(
             f"flush_pipette cycles must be a positive integer, got {cycles!r}."
@@ -1210,6 +1227,7 @@ def purge_pipette(
     speed: float = 50.0,
     source_height: Optional[float] = None,
     waste_height: Optional[float] = None,
+    require_uncapped: Optional[List[str]] = None,
 ) -> None:
     """Empty the pipette's currently-loaded volume into waste.
 
@@ -1229,6 +1247,7 @@ def purge_pipette(
 
     Substep key: ``purge``.
     """
+    _require_uncapped(context, require_uncapped, command_label="purge_pipette")
     resolved_source = _resolve_stock_source(
         context, source=source, solution=solution, volume_ul=volume_ul,
         command_label="purge_pipette",
@@ -1256,6 +1275,7 @@ def clear_well(
     speed: float = 50.0,
     well_height: Optional[float] = None,
     waste_height: Optional[float] = None,
+    require_uncapped: Optional[List[str]] = None,
 ) -> None:
     """Remove *well*'s contents to waste until empty (or *target_volume_ul*).
 
@@ -1270,6 +1290,7 @@ def clear_well(
     A no-op (no substep, no motion) when the computed removal volume is at
     or below zero. Substep key: ``clear``.
     """
+    _require_uncapped(context, require_uncapped, command_label="clear_well")
     resolved_volume_ul = volume_ul
     if resolved_volume_ul is None:
         if not _tracked_fluid_state(context):

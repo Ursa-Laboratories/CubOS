@@ -607,6 +607,112 @@ def test_wellplate_calibration_a1_z_equals_converted_db_top(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Feature 06: capper/decapper instrument upgrade
+# ---------------------------------------------------------------------------
+
+
+def _gantry_raw_with_capper_mount(**overrides) -> dict:
+    import copy
+
+    raw = copy.deepcopy(MIN_GANTRY_RAW)
+    entry = {
+        "type": "mounted_tool",
+        "vendor": "mount_only",
+        "offline": True,
+        "offset_x": 62.9,
+        "offset_y": 5.1,
+        "depth": 61.5,
+    }
+    entry.update(overrides)
+    raw["instruments"]["vial_capper_decapper"] = entry
+    return raw
+
+
+def test_capper_mount_only_placeholder_upgraded_to_real_instrument(tmp_path):
+    snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
+    gantry_raw = _gantry_raw_with_capper_mount()
+    result = build_import(
+        snapshot, empty_resolutions(), ZERO_OFFSETS, WIDE_OPEN_VOLUME, gantry_raw,
+    )
+
+    entry = result.gantry_full["instruments"]["vial_capper_decapper"]
+    assert entry["type"] == "capper"
+    assert entry["vendor"] == "pawduino"
+    # Calibrated mount geometry is preserved verbatim.
+    assert entry["offset_x"] == 62.9
+    assert entry["offset_y"] == 5.1
+    assert entry["depth"] == 61.5
+    assert entry["offline"] is True
+    # Motion-sequence config is present (parameterizes decap/cap -- see
+    # cubos.protocol_engine.commands.capper).
+    assert isinstance(entry["engage_depth_mm"], float)
+    assert isinstance(entry["park_position"], list) and len(entry["park_position"]) == 2
+    assert isinstance(entry["capture_retries"], int)
+    assert isinstance(entry["capture_settle_s"], float)
+
+
+def test_capper_instrument_absent_when_not_declared_in_source_gantry(tmp_path):
+    """Instrument optional: no vial_capper_decapper mount -> nothing emitted."""
+    snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
+    result = build_import(
+        snapshot, empty_resolutions(), ZERO_OFFSETS, WIDE_OPEN_VOLUME, MIN_GANTRY_RAW,
+    )
+    assert "vial_capper_decapper" not in result.gantry_full["instruments"]
+
+
+def test_capper_entry_not_clobbered_when_already_upgraded(tmp_path):
+    """A hand-authored/already-upgraded entry is left exactly as-is."""
+    snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
+    gantry_raw = _gantry_raw_with_capper_mount(
+        type="capper", vendor="pawduino", engage_depth_mm=-99.0,
+    )
+    result = build_import(
+        snapshot, empty_resolutions(), ZERO_OFFSETS, WIDE_OPEN_VOLUME, gantry_raw,
+    )
+    entry = result.gantry_full["instruments"]["vial_capper_decapper"]
+    assert entry["vendor"] == "pawduino"
+    assert entry["engage_depth_mm"] == -99.0
+
+
+def test_capper_registry_accepts_the_generated_pawduino_entry(tmp_path):
+    """The emitted capper entry is a valid type/vendor pair in the registry."""
+    from cubos.instruments import registry
+
+    snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
+    gantry_raw = _gantry_raw_with_capper_mount()
+    result = build_import(
+        snapshot, empty_resolutions(), ZERO_OFFSETS, WIDE_OPEN_VOLUME, gantry_raw,
+    )
+    entry = result.gantry_full["instruments"]["vial_capper_decapper"]
+    registry.validate_instrument(entry["type"], entry["vendor"])
+
+
+def test_committed_home_origin_full_yaml_matches_current_upgrade_logic():
+    """Regression: the checked-in generated config must match what the
+    importer would produce today from the real source gantry YAML -- a
+    drifted committed artifact would otherwise go unnoticed.
+    """
+    import yaml as yaml_module
+
+    from cubos.tools.panda_bear_import.build import _build_gantry_full
+
+    configs_dir = Path(__file__).resolve().parents[2] / "configs" / "gantry"
+    raw = yaml_module.safe_load(
+        (configs_dir / "cub_xl_panda_home_origin.yaml").read_text(encoding="utf-8")
+    )
+    committed = yaml_module.safe_load(
+        (configs_dir / "cub_xl_panda_home_origin_full.yaml").read_text(encoding="utf-8")
+    )
+    pipette_offset = ToolOffset(x=-115.9, y=-6.1, z=100.0)
+    produced = _build_gantry_full(raw, pipette_offset)
+
+    assert (
+        produced["instruments"]["vial_capper_decapper"]
+        == committed["instruments"]["vial_capper_decapper"]
+    )
+
+
+# ---------------------------------------------------------------------------
 # Resolutions file parsing
 # ---------------------------------------------------------------------------
 

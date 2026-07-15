@@ -79,6 +79,18 @@ class Vial(Labware):
             "(the default). Only meaningful when role='waste'."
         ),
     )
+    capped: Optional[bool] = Field(
+        default=None,
+        description=(
+            "Optional initial cap state for a capper-managed vial: True if "
+            "physically capped, False if uncapped. None (the default) means "
+            "this vial has no capper-tracked cap state at all -- durable "
+            "cap-state seeding (cubos.data.cap_state) skips it entirely, and "
+            "protocol `decap`/`cap` commands and `require_uncapped` preflight "
+            "checks reject it as not capper-managed. Set explicitly (even to "
+            "False) to opt a vial into durable cap-state tracking."
+        ),
+    )
 
     @field_validator("name")
     def _validate_non_empty_text(cls, value: str) -> str:

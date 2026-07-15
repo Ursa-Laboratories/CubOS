@@ -269,6 +269,57 @@ CREATE UNIQUE INDEX IF NOT EXISTS tip_operations_one_pending_per_state
 ON tip_operations(fluid_state_id)
 WHERE status IN ('started', 'reconciliation_required');
 
+CREATE TABLE IF NOT EXISTS cap_containers (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id     INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                   ON DELETE CASCADE,
+    labware_key        TEXT    NOT NULL,
+    location_id        TEXT    NOT NULL DEFAULT '',
+    status             TEXT    NOT NULL CHECK (
+                                   status IN (
+                                       'capped',
+                                       'uncapped',
+                                       'reconciliation_required'
+                                   )
+                               ),
+    version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(fluid_state_id, labware_key, location_id)
+);
+
+CREATE TABLE IF NOT EXISTS cap_operations (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id           INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                        ON DELETE CASCADE,
+    operation_key            TEXT    NOT NULL UNIQUE,
+    operation_type           TEXT    NOT NULL CHECK (
+                                        operation_type IN ('decap', 'cap')
+                                    ),
+    labware_key              TEXT    NOT NULL,
+    location_id              TEXT    NOT NULL DEFAULT '',
+    previous_status          TEXT    NOT NULL,
+    container_version        INTEGER NOT NULL,
+    status                   TEXT    NOT NULL CHECK (
+                                        status IN (
+                                            'started',
+                                            'applied',
+                                            'reconciliation_required',
+                                            'cancelled',
+                                            'reconciled'
+                                        )
+                                    ),
+    campaign_id              INTEGER REFERENCES campaigns(id),
+    detail                   TEXT,
+    created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    applied_at               TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS cap_operations_one_pending_per_state
+ON cap_operations(fluid_state_id)
+WHERE status IN ('started', 'reconciliation_required');
+
 CREATE TABLE IF NOT EXISTS pipette_attachment (
     id                    INTEGER PRIMARY KEY AUTOINCREMENT,
     fluid_state_id        INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
@@ -1302,6 +1353,87 @@ class DataStore:
         from .tip_state import restore_pipette_attachment
 
         restore_pipette_attachment(self._conn, fluid_state_id, pipette)
+
+    # ── Durable per-vial cap state ──────────────────────────────────────────
+    #
+    # Cap state hangs off the same fluid_state_id session as fluid/tip state
+    # (create_fluid_state/resume_fluid_state seed and verify all three). See
+    # cubos.data.cap_state for the full journal semantics.
+
+    def get_cap_snapshot(self, fluid_state_id: int) -> Any:
+        """Return a deterministic JSON-ready snapshot of cap state."""
+        from .cap_state import get_cap_snapshot
+
+        return get_cap_snapshot(self._conn, fluid_state_id)
+
+    def get_cap_state(
+        self,
+        fluid_state_id: int,
+        labware_key: str,
+        location_id: str,
+    ) -> Optional[str]:
+        """Return one vial's durable cap status, or None if not capper-managed."""
+        from .cap_state import get_cap_state
+
+        return get_cap_state(self._conn, fluid_state_id, labware_key, location_id)
+
+    def begin_cap_operation(
+        self,
+        fluid_state_id: int,
+        operation_key: str,
+        operation_type: str,
+        labware_key: str,
+        location_id: str,
+        *,
+        campaign_id: int | None = None,
+    ) -> bool:
+        """Preflight and journal a decap/cap operation before hardware acts."""
+        from .cap_state import begin_cap_operation
+
+        return begin_cap_operation(
+            self._conn,
+            fluid_state_id,
+            operation_key,
+            operation_type,
+            labware_key,
+            location_id,
+            campaign_id,
+        )
+
+    def complete_cap_operation(self, operation_key: str) -> None:
+        """Atomically apply a successfully actuated decap/cap."""
+        from .cap_state import complete_cap_operation
+
+        complete_cap_operation(self._conn, operation_key)
+
+    def mark_cap_reconciliation_required(
+        self,
+        operation_key: str,
+        detail: str,
+    ) -> None:
+        """Flag an indeterminate physical decap/cap action for operator review."""
+        from .cap_state import mark_cap_reconciliation_required
+
+        mark_cap_reconciliation_required(self._conn, operation_key, detail)
+
+    def resolve_cap_operation(
+        self,
+        operation_key: str,
+        resolution: str,
+        *,
+        detail: str,
+        final_status: str | None = None,
+    ) -> None:
+        """Resolve an uncertain cap operation using an operator decision."""
+        from .cap_state import resolve_cap_operation
+
+        resolve_cap_operation(
+            self._conn,
+            operation_key,
+            resolution,
+            detail=detail,
+            final_status=final_status,
+        )
 
     # ── Labware tracking ────────────────────────────────────────────────────
 
