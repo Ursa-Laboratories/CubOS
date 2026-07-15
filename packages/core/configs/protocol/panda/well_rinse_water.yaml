@@ -1,0 +1,115 @@
+# Water-substitution port of PANDA-BEAR's well-rinse pipetting shape onto
+# CubOS Feature 05 compound commands (rinse_well / flush_pipette /
+# clear_well), targeting the imported ITO-PAMA plate, well A1.
+#
+# This is a WORKFLOW-SHAPE port, not a literal translation: fc_cv_protocol.py
+# and ca_test_protocol.py (the exact production sources for experiments
+# 1-84) are unreachable from this machine -- they live only on the offline
+# PANDA-BEAR machine (~/github/PANDA-BEAR) -- so they are not read or
+# reconstructed from their names. Instead this ports the reachable,
+# documented primitive that implements the same rinse shape:
+# panda_lib.actions.pipetting.rinse_well
+# (PANDA-BEAR src/panda_lib/actions/pipetting.py:533-593): each of `count`
+# cycles fills the target well from a solution-selected stock vial with
+# `vol` uL (line 575-580: `_forward_pipette_v3(volume=vol,
+# src_vessel=sol_name, ...)`, `sol_name`/`vol` resolved via automatic
+# solution selection, not a hardcoded vial), then removes the same `vol` uL
+# to an automatically-selected waste vial (line 583-591:
+# `_forward_pipette_v3(volume=vol, src_vessel=instructions.well,
+# dst_vessel=waste_selector("waste", instructions.rinse_vol), ...)`). No mix
+# step. CubOS's `rinse_well` command (packages/core/src/cubos/protocol_engine
+# /commands/pipette.py) is a direct port of that same fill/remove-by-cycle
+# shape, generalized to name the stock solution instead of a hardcoded vial
+# ID, with `mix_repetitions=0` (the default here) matching pipetting.py's
+# no-mix rinse.
+#
+# The surrounding pick-tip -> rinse -> flush -> clear-residual -> drop-tip
+# order is corroborated by the two named production protocols read locally
+# (read-only, never imported):
+#   - PANDA-BEAR panda_experiment_protocols/dmfc_cv_protocol.py:102-105 picks
+#     a tip before any liquid handling (`if not toolkit.pipette.has_tip:
+#     replace_tip(...)`; CubOS's semantics validator requires the slot to be
+#     explicit, hence tip_rack.A2 -- A1 is used by
+#     vial_transfer_acceptance.yaml, so the two protocols can share one
+#     durable tip-state session without a re-pick conflict); its LIVE
+#     (non-dead-code) rinse loop at lines
+#     203-218 fills the well from a named solution then empties it to waste,
+#     3x, matching rinse_well's cycle shape (cycles=3 here).
+#   - PANDA-BEAR panda_experiment_protocols/pama_ca_drying_protocol.py
+#     contains an equivalent 3x DMF/ACN/IPA rinse-loop block at lines
+#     227-312, but it lives inside `pama_deposition()`, which is DEAD CODE:
+#     `pama_ca_drying()` (lines 43-64) only calls `pama_contact_angle()`,
+#     never `pama_deposition()` (its call is commented out at line 58). Cited
+#     here only as corroborating shape evidence, not as an executed path in
+#     the current source tree.
+#   - Both protocols perform a "flush the pipette tip" transfer of a named
+#     solution straight to waste immediately after well dispensing/rinsing
+#     (pama_ca_drying_protocol.py:159-164, dmfc_cv_protocol.py:122-127) --
+#     the same shape as CubOS's `flush_pipette` (pipetting.py:596-641 is the
+#     PANDA-BEAR analogue: `flush_volume=200.0` uL, `flush_count=1` default,
+#     matched here).
+#   - Both protocols follow each rinse with a residual-clearing pipette
+#     action against the well (`clear_well_res` = `_pipette_action` alias,
+#     e.g. pama_ca_drying_protocol.py:217-222/249-254, dmfc_cv_protocol.py:
+#     189-194/220-226, desired_volume=200 each time) -- the same shape as
+#     CubOS's dedicated `clear_well` command (pipette.py:1267-1332), used
+#     here as the final step before dropping the tip.
+#
+# Water substitution: production rinses with dmf/acn/ipa via named-solution
+# automatic stock selection. This port substitutes "water" everywhere (the
+# only solution reliably present locally, seeded on s1 by the PANDA-BEAR
+# production snapshot import) -- same automatic-selection mechanism
+# (role=stock/role=waste, cubos.protocol_engine.commands._liquid_selection),
+# different solvent identity. `rinse_well`/`flush_pipette`/`clear_well` all
+# omit `source`/`waste` here so the deck resolves them automatically:
+# solution=water resolves to s1 (the only role=stock vial with solution:
+# water); waste resolves to w1 (first alphabetically among w1/w2/w3 with
+# working-volume headroom -- see _liquid_selection.py's documented
+# sorted(deck.volume_labware) selection order).
+#
+# Because this simulation's transfers are exact (no correction-factor
+# rounding, unlike PANDA-BEAR's viscosity-corrected `_pipette_action`), the
+# final rinse cycle's removal already drains the well to exactly 0 uL, so
+# `clear_well` is a documented no-op here (see its docstring: "A no-op...
+# when the computed removal volume is at or below zero"). Kept in the
+# protocol to preserve the production step shape/order and its safety-net
+# role on real hardware, where residual liquid is physically possible.
+#
+# Run in mock mode (uses the *_pipetting_mock gantry/deck pair -- the
+# generated cub_xl_panda_home_origin_full.yaml + panda_imported_deck.yaml
+# trio cannot pass bounds validation for any real `pipette` motion; see
+# gantry/cub_xl_panda_pipetting_mock.yaml's header for the documented
+# blocker):
+#   PYTHONPATH=packages/core/src .venv/bin/python -m cubos.tools.run_protocol \
+#     --mock \
+#     --database /tmp/panda-well-rinse.db \
+#     --initial-fluids packages/core/configs/deck/panda_initial_fluids.yaml \
+#     packages/core/configs/gantry/cub_xl_panda_pipetting_mock.yaml \
+#     packages/core/configs/deck/panda_imported_deck_pipetting_mock.yaml \
+#     packages/core/configs/protocol/panda/well_rinse_water.yaml
+
+protocol:
+  - home:
+
+  - pick_up_tip:
+      position: tip_rack.A2
+
+  - rinse_well:
+      well: ito_pama_plate.A1
+      volume_ul: 200.0
+      cycles: 3
+      solution: water
+
+  - flush_pipette:
+      volume_ul: 200.0
+      cycles: 1
+      solution: water
+
+  - clear_well:
+      well: ito_pama_plate.A1
+      solution: water
+
+  - drop_tip:
+      position: tip_disposal.discard
+
+  - home:

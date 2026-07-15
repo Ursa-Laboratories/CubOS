@@ -1,0 +1,127 @@
+# MOCK-ONLY companion to gantry/cub_xl_panda_home_origin_full.yaml, for
+# running real (non-camera) pipette motion -- pick_up_tip / transfer /
+# drop_tip -- against the PANDA-BEAR-imported labware identities in MOCK
+# mode. Do NOT use this file to drive real hardware.
+#
+# Why this file exists (recovery-blocker, discovered building Feature 08's
+# acceptance harness): cub_xl_panda_home_origin_full.yaml + deck/
+# panda_imported_deck.yaml pass validate_setup today ONLY because
+# protocol/panda/position_tour.yaml exclusively uses the zero-offset
+# `camera` instrument and never descends past the gantry's absolute
+# `safe_z` (see position_tour.yaml's header: "hover-only... not a working
+# protocol"). The instant a protocol uses the real `pipette` instrument
+# (mandatory for pick_up_tip/transfer/drop_tip -- see
+# cubos.protocol_engine.commands.pipette._get_pipette, which hardcodes the
+# instrument key "pipette"), bounds validation
+# (cubos.validation.bounds.validate_protocol_motion_bounds:
+# `gz = target.z + instrument.depth + tip_extension`) fails unconditionally:
+#
+#   1. `cnc.safe_z: -5.0` (inter-labware travel height) plus the pipette's
+#      calibrated `depth: 100.0` alone already produces gantry z=95.0,
+#      violating `working_volume.z_max: 0.0` by 95mm -- independent of any
+#      deck coordinate, since safe_z travel happens for every command.
+#   2. Once a tip is attached (`tip_length: 59.3` from tip_rack), every
+#      subsequent action adds another 59.3mm on top.
+#
+# panda_imported_deck.yaml's own coordinates are -- by explicit, tested
+# design (see cubos.tools.panda_bear_import.conversion.to_gantry's
+# docstring) -- already-converted CubOS gantry-frame values meant to be
+# visited by a ZERO-OFFSET instrument, not raw PANDA-BEAR tool-point
+# targets a real, non-zero-offset instrument could resolve without
+# double-applying the offset. Reconciling that (so real hardware can drive
+# `pipette`/`potentiostat` against the imported deck) is out of scope here
+# -- it requires either re-deriving the importer's coordinate convention
+# (cubos/tools/panda_bear_import/build.py, currently covered by ~15
+# dedicated, deliberately-passing tests asserting the converted-value
+# semantics) or physically re-measuring `cnc.safe_z` / tool depths against
+# real PANDA hardware. Recorded here as a documented, unresolved recovery
+# blocker for real-hardware PANDA pipetting bring-up -- see
+# docs/panda-cub-quickstart.md.
+#
+# This file unblocks OFFLINE/MOCK acceptance of Feature 08's fluid/tip-state
+# tracking (the actual mission bar) without touching the committed,
+# generated, importer-produced trio: it keeps every instrument's calibrated
+# offset_x/offset_y/depth from cub_xl_panda_home_origin_full.yaml verbatim,
+# and only deepens the Z envelope so pipette-frame arithmetic clears:
+#
+#   - `cnc.safe_z: -170.0` satisfies `safe_z + depth(100) <= z_max(0)` bare
+#     and `safe_z + depth + tip(59.3) = -10.7 <= 0` with a tip attached,
+#     while staying inside `working_volume` itself (gantry/yaml_schema.py
+#     validates safe_z against working_volume directly, independent of the
+#     depth arithmetic).
+#   - `working_volume.z_min: -250.0` (real machine: -85.0) exists solely so
+#     safe_z=-170 and the mock deck's placeholder Z targets fit; it is NOT
+#     a real machine limit.
+#   - `factory_z_travel_mm: 250.0` / `max_travel_z: 250.0` follow the
+#     schema rule `factory_z_travel_mm >= z_max - z_min`; equally NOT real.
+#
+# Paired with deck/panda_imported_deck_pipetting_mock.yaml (same labware
+# identities/roles/solutions/capacities as the real import; only the
+# pipette-frame Z coordinates differ, chosen to satisfy the same
+# `+depth[+tip_extension]` arithmetic for pick_up_tip/transfer/drop_tip).
+
+cnc:
+  factory_z_travel_mm: 250.0
+  safe_z: -170.0
+  y_axis_motion: head
+gantry_type: cub_xl
+grbl_settings:
+  dir_invert_mask: 1
+  homing_dir_mask: 0
+  homing_enable: true
+  max_travel_x: 401.0
+  max_travel_y: 301.0
+  max_travel_z: 250.0
+  status_report: 0
+  steps_per_mm_x: 400.0
+  steps_per_mm_y: 400.0
+  steps_per_mm_z: 400.0
+instruments:
+  camera:
+    depth: 0.0
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    type: camera
+    vendor: mount_only
+  pipette:
+    depth: 100.0
+    offline: true
+    offset_x: 115.9
+    offset_y: 6.1
+    pipette_model: p300_single_gen2
+    port: ''
+    type: pipette
+    vendor: opentrons
+  potentiostat:
+    channel: 0
+    depth: 100.0
+    offline: true
+    offset_x: -56.7
+    offset_y: 3.8
+    port: ''
+    type: potentiostat
+    vendor: admiral
+  vial_capper_decapper:
+    capture_retries: 2
+    capture_settle_s: 1.0
+    depth: 61.5
+    engage_depth_mm: -15.0
+    offline: true
+    offset_x: 62.9
+    offset_y: 5.1
+    park_position:
+    - -10.0
+    - -10.0
+    port: ''
+    type: capper
+    vendor: pawduino
+origin_policy: home_origin
+serial_port: /dev/ttyUSB0
+working_volume:
+  x_max: 0.0
+  x_min: -401.0
+  y_max: 0.0
+  y_min: -301.0
+  z_max: 0.0
+  z_min: -250.0

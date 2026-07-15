@@ -1,25 +1,38 @@
-# GENERATED FILE -- do not hand-edit. Regenerate with:
-#   python -m cubos.tools.import_panda_bear <db_path> [--resolutions ...] [--out-dir ...]
+# MOCK-ONLY companion to deck/panda_imported_deck.yaml, for running real
+# `pipette`-instrument motion (pick_up_tip / transfer / drop_tip) against
+# the PANDA-BEAR-imported labware identities in MOCK mode. Do NOT use this
+# file to drive real hardware -- see gantry/cub_xl_panda_pipetting_mock.yaml
+# for the full explanation of why panda_imported_deck.yaml itself cannot
+# satisfy bounds validation for any non-camera instrument today.
 #
-# Imported from a PANDA-BEAR production SQLite snapshot (read-only; see
-# panda_import_report.json next to this file for the source DB path/hash
-# and the full conflict report).
+# Every field is identical to deck/panda_imported_deck.yaml (same labware
+# keys, roles, solutions, capacities, calibration shape, X/Y coordinates --
+# the pipette's offset_x/offset_y are small relative to the 401x301mm
+# working volume, so X/Y bounds hold for the vials/tip rack/disposal either
+# way) EXCEPT (a) ito_pama_plate's calibration X, moved from -356.5 to
+# -240.0 because `gantry_x = -356.5 - offset_x(115.9) = -472.4` falls
+# outside working_volume x_min=-401.0 (the same double-offset blocker
+# documented in the gantry mock's header, in X form), and (b) the
+# pipette-frame Z values (vial `location.z`, well-plate/tip-rack `calibration.a1.z`,
+# tip-rack `pickup_z`/`drop_z`, tip-disposal `location.z` /
+# `slots.discard.location.z`), which are replaced with placeholder values
+# chosen so `gantry_z = target_z + pipette.depth(100.0) [+ tip_extension
+# (59.3, tip_rack.tip_length)]` lands inside working_volume [-85, 0] for
+# both tip_rack (pickup happens before any tip is attached) and every
+# other pipette-frame target (touched only after tip pickup in these
+# protocols, so tip_extension always applies), while also sitting at or
+# below the gantry's safe_z (-170.0; protocol-semantics rule: every
+# resolved action Z must satisfy z <= safe_z): -180.0 for tip_rack, -200.0
+# for everything else. `e1` (electrode-frame; never targeted by the
+# `pipette` instrument) is left untouched. These Z values are NOT measured
+# from real PANDA-BEAR hardware -- panda_import_report.json's real
+# conflict/warning data is untouched by this file.
 #
-# Coordinates are CubOS home-origin GANTRY-frame values, not instrument-
-# frame: gantry = panda_bear_tool_point + panda_bear_tool_offset (pipette
-# frame for wells/tips/stock/waste vials, electrode frame for e1). See
-# cubos.tools.panda_bear_import.conversion for the exact formula and
-# protocol/panda/position_tour.yaml's header for why the tour hovers with
-# a zero-offset instrument.
-#
-# Vial location.z / well-plate calibration.a1.z are the converted mouth
-# (DB 'top' generated column), matching CubOS's vial/well-plate Z
-# semantics (calibration anchor = labware-surface reference).
-#
-# Positions are NOT guaranteed physically exact -- labware will be moved
-# and positions re-derived after the hardware gate; out-of-envelope
-# coordinates are written as-is with a WARNING in the conflict report,
-# never clamped or blocked.
+# panda_initial_fluids.yaml (unchanged, real production-imported volumes/
+# compositions) seeds against this deck exactly as it does against
+# deck/panda_imported_deck.yaml -- labware keys and capacities are
+# byte-identical, so fluid-state tracking here exercises the real imported
+# data, only motion bounds differ.
 
 labware:
   e1:
@@ -38,11 +51,11 @@ labware:
   ito_pama_plate:
     calibration:
       a1:
-        x: -356.5
+        x: -240.0
         y: -188.1
-        z: -81.8
+        z: -200.0
       a2:
-        x: -356.5
+        x: -240.0
         y: -203.1
     capacity_ul: 700.0
     columns: 4
@@ -59,7 +72,7 @@ labware:
     location:
       x: -133.0
       y: -7.0
-      z: -15.0
+      z: -200.0
     name: s1
     role: stock
     solution: water
@@ -72,7 +85,7 @@ labware:
     location:
       x: -133.0
       y: -40.0
-      z: -15.0
+      z: -200.0
     name: s2
     role: stock
     solution: dmfc
@@ -85,7 +98,7 @@ labware:
     location:
       x: -133.0
       y: -73.0
-      z: -15.0
+      z: -200.0
     name: s3
     role: stock
     solution: electrolyte
@@ -98,7 +111,7 @@ labware:
     location:
       x: -133.0
       y: -106.0
-      z: -15.0
+      z: -200.0
     name: s4
     role: stock
     solution: dmf
@@ -111,7 +124,7 @@ labware:
     location:
       x: -133.0
       y: -139.0
-      z: -15.0
+      z: -200.0
     name: s5
     role: stock
     solution: dmf
@@ -124,7 +137,7 @@ labware:
     location:
       x: -133.0
       y: -172.0
-      z: -15.0
+      z: -200.0
     name: s6
     role: stock
     solution: acn
@@ -134,7 +147,7 @@ labware:
     location:
       x: -188.0
       y: -183.4
-      z: -69.0
+      z: -200.0
     name: tip_disposal
     slots:
       discard:
@@ -142,7 +155,7 @@ labware:
         location:
           x: -188.0
           y: -183.4
-          z: -69.0
+          z: -200.0
         supported_labware_types:
         - pipette_tip
     type: tip_disposal
@@ -151,14 +164,14 @@ labware:
       a1:
         x: -229.0
         y: -12.4
-        z: -88.8
+        z: -180.0
       a2:
         x: -229.0
         y: -21.4
     columns: 12
-    drop_z: -69.0
+    drop_z: -180.0
     name: tip_rack
-    pickup_z: -88.8
+    pickup_z: -180.0
     rows: 2
     tip_length: 59.3
     type: tip_rack
@@ -171,7 +184,7 @@ labware:
     location:
       x: -133.0
       y: -205.0
-      z: -15.0
+      z: -200.0
     name: w1
     role: waste
     solution: wastedmfc
@@ -184,7 +197,7 @@ labware:
     location:
       x: -133.0
       y: -238.0
-      z: -15.0
+      z: -200.0
     name: w2
     role: waste
     solution: waste
@@ -197,7 +210,7 @@ labware:
     location:
       x: -133.0
       y: -271.0
-      z: -15.0
+      z: -200.0
     name: w3
     role: waste
     solution: waste
