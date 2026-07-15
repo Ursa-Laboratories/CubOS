@@ -62,7 +62,6 @@ export default function GantryPositionWidget({
   const status = position?.status ?? "Not connected";
   const isAlarm = status.toLowerCase().includes("alarm");
   const isMoving = status === "Run" || status === "Jog";
-  const calibrationWarning = connected ? position?.calibration_warning : null;
   const calibrationInterrupted = connected && !calibrationOpen && (position?.calibration_active ?? false);
 
   useEffect(() => {
@@ -438,27 +437,6 @@ export default function GantryPositionWidget({
         </div>
       )}
 
-      {calibrationWarning && (
-        <div style={{
-          ...theme.notice.warning,
-          marginBottom: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}>
-          <span style={{ color: theme.color.warning, fontWeight: 700, fontSize: 13 }}>CALIBRATION NEEDED</span>
-          <span style={{ color: theme.color.warningText, fontSize: 11 }}>
-            {calibrationWarning}
-          </span>
-          <button
-            onClick={() => setCalibrationOpen(true)}
-            disabled={!canOpenCalibration}
-            style={buttonStateStyle(calibrationBannerButtonStyle, !canOpenCalibration)}
-          >
-            Calibrate now
-          </button>
-        </div>
-      )}
 
       {calibrationInterrupted && (
         <div style={interruptedCalibrationStyle}>
@@ -999,16 +977,6 @@ const moveErrorStyle: React.CSSProperties = {
   color: theme.color.dangerText,
   fontSize: 11,
   marginTop: 6,
-};
-
-const calibrationBannerButtonStyle: React.CSSProperties = {
-  ...theme.btn.secondary,
-  ...theme.btnSmall,
-  color: theme.color.warningText,
-  border: `1px solid ${theme.color.warningBorder}`,
-  background: theme.color.warningBg,
-  fontWeight: 600,
-  marginLeft: "auto",
 };
 
 const settingsTableStyle: React.CSSProperties = {

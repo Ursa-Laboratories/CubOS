@@ -89,7 +89,7 @@ const WORKING_DECK_FILENAME = "panda-deck.yaml";
 
 export default function App() {
   const qc = useQueryClient();
-  const [activeView, setActiveView] = useState<"Workflow" | "State" | "Results">("Workflow");
+  const [activeView, setActiveView] = useState<"Workflow" | "Visualize" | "State" | "Results">("Workflow");
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
@@ -268,7 +268,6 @@ export default function App() {
 
   const displayGantry = localGantry ?? gantryQuery.data ?? null;
   const gantryConnected = gantryPosition.data?.connected ?? false;
-  const calibrationWarning = gantryPosition.data?.calibration_warning ?? null;
   const workingVolume: WorkingVolume | null = displayGantry?.config.working_volume ?? null;
   const yAxisMotion = displayGantry?.config.cnc?.y_axis_motion ?? "head";
   const machineXRange: [number, number] = workingVolume
@@ -372,11 +371,6 @@ export default function App() {
     if (!gantryConnected) {
       setRunResult(null);
       setRunError("Connect gantry before running a protocol.");
-      return;
-    }
-    if (calibrationWarning) {
-      setRunResult(null);
-      setRunError(calibrationWarning);
       return;
     }
     const state = buildStateSelection(fluidStateChoice);
@@ -488,7 +482,7 @@ export default function App() {
         </div>
       </div>
       <div style={viewToggleStyle} aria-label="Workspace view">
-        {(["Workflow", "State", "Results"] as const).map((view) => (
+        {(["Workflow", "Visualize", "State", "Results"] as const).map((view) => (
           <button
             key={view}
             type="button"
@@ -717,8 +711,8 @@ export default function App() {
             onRun={handleRunProtocol}
             onCancelRun={handleCancelRun}
             unsavedConfigs={unsavedConfigs}
-            canRun={gantryConnected && !calibrationWarning}
-            runDisabledReason={calibrationWarning}
+            canRun={gantryConnected}
+            runDisabledReason={null}
             isRunning={protocolRunActive}
             isCancelingRun={isCancelingRun}
             runResult={runResult}
@@ -730,6 +724,21 @@ export default function App() {
         </>
           )}
         </>
+      )}
+      {activeView === "Visualize" && (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+          <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Deck Visualization</h3>
+          <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+            <DeckVisualization
+              deck={displayDeck}
+              instruments={displayGantry?.config.instruments ?? null}
+              gantryPosition={gantryPosition.data ?? null}
+              machineXRange={machineXRange}
+              machineYRange={machineYRange}
+              yAxisMotion={yAxisMotion}
+            />
+          </div>
+        </div>
       )}
       {activeView === "State" && <StatePanel />}
       {activeView === "Results" && (

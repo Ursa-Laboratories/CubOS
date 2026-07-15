@@ -976,7 +976,7 @@ describe("CubOS editor interactions", () => {
     );
   });
 
-  it("disables Run Protocol and shows the calibration warning while connected", async () => {
+  it("allows Run Protocol despite a GRBL settings mismatch (calibration is advisory, not blocking)", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock(createState(), {
       calibrationWarning: "Finish gantry calibration before running protocols.",
@@ -989,11 +989,16 @@ describe("CubOS editor interactions", () => {
     await user.click(screen.getByRole("button", { name: "Protocol" }));
     await importConfig(user, "Import protocol config", "move.yaml");
 
-    expect(await screen.findAllByText("Finish gantry calibration before running protocols.")).not.toHaveLength(0);
-    const runButton = screen.getByRole("button", { name: "Run Protocol" });
-    expect(runButton).toBeDisabled();
+    // A GRBL-settings mismatch must not block running or surface a
+    // "calibration needed" banner: commissioning machines legitimately
+    // differ from the YAML, and the operator owns that decision.
+    expect(screen.queryByText("CALIBRATION NEEDED")).not.toBeInTheDocument();
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
     await user.click(runButton);
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything());
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything()),
+    );
   });
 
   it("blocks Run Protocol after editing a loaded protocol until the change is saved", async () => {
