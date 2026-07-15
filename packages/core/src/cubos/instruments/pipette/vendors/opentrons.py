@@ -31,6 +31,10 @@ _CMD_DRIP_STOP = 28
 
 _ARDUINO_SETTLE_TIME = 2.0
 
+# Homing runs open-loop until a limit switch; firmware allows up to 60 s
+# before it gives up, so the serial wait must outlast that.
+_HOME_TIMEOUT = 90.0
+
 
 class OpentronsPipette(PipetteInstrument):
     """Driver for Opentrons pipettes via Arduino serial (Pawduino firmware).
@@ -128,14 +132,31 @@ class OpentronsPipette(PipetteInstrument):
             ) from exc
 
         time.sleep(_ARDUINO_SETTLE_TIME)
+        # Opening the port resets the Arduino; discard any boot banner so it
+        # is not mistaken for the first command's response.
+        self._serial.reset_input_buffer()
 
         try:
-            self.get_status()
+            status = self.get_status()
         except (PipetteCommandError, PipetteTimeoutError) as exc:
             self._close_serial()
             raise PipetteConnectionError(
                 f"Arduino did not respond after connect: {exc}"
             ) from exc
+
+        # The reset also wipes the firmware's plunger reference: it believes
+        # position 0.0 wherever the plunger physically sits, and no motion
+        # command guards against that. Re-establish a real reference now.
+        if not status.is_homed:
+            self.logger.info("Plunger not homed after connect; homing and priming")
+            try:
+                self.home()
+                self.prime()
+            except (PipetteCommandError, PipetteTimeoutError) as exc:
+                self._close_serial()
+                raise PipetteConnectionError(
+                    f"Plunger home/prime after connect failed: {exc}"
+                ) from exc
 
         self.logger.info(
             "Connected to %s on %s", self._config.name, self._port
@@ -170,7 +191,9 @@ class OpentronsPipette(PipetteInstrument):
             self._position_mm = self._config.zero_position
             self._is_homed = True
             return
-        self._send_command(_CMD_HOME)
+        self._send_command(_CMD_HOME, timeout=_HOME_TIMEOUT)
+        self._position_mm = self._config.zero_position
+        self._is_homed = True
 
     def prime(self, speed: float = 50.0) -> None:
         if self._offline:
@@ -178,6 +201,8 @@ class OpentronsPipette(PipetteInstrument):
             self._is_primed = True
             return
         self._send_command(_CMD_MOVE_TO, self._config.prime_position, speed)
+        self._position_mm = self._config.prime_position
+        self._is_primed = True
 
     def aspirate(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
         self._validate_volume(volume_ul)
@@ -264,9 +289,12 @@ class OpentronsPipette(PipetteInstrument):
 
     # ── Private helpers ───────────────────────────────────────────────────
 
-    def _send_command(self, code: int, *args: float) -> str:
+    def _send_command(
+        self, code: int, *args: float, timeout: Optional[float] = None
+    ) -> str:
         if self._serial is None or not self._serial.is_open:
             raise PipetteCommandError("Not connected to Arduino")
+        wait = self._command_timeout if timeout is None else timeout
 
         parts = [str(code)] + [str(a) for a in args]
         message = ",".join(parts) + "\n"
@@ -280,7 +308,7 @@ class OpentronsPipette(PipetteInstrument):
                     f"Failed to send command {code}: {exc}"
                 ) from exc
 
-            deadline = time.monotonic() + self._command_timeout
+            deadline = time.monotonic() + wait
             while time.monotonic() < deadline:
                 try:
                     line = self._serial.readline().decode().strip()
@@ -299,12 +327,17 @@ class OpentronsPipette(PipetteInstrument):
                     )
 
             raise PipetteTimeoutError(
-                f"Timed out ({self._command_timeout}s) waiting for "
-                f"response to command {code}"
+                f"Timed out ({wait}s) waiting for response to command {code}"
             )
 
     @staticmethod
     def _parse_key_value(response: str) -> dict[str, float]:
+        """Parse ``OK:{...}`` bodies with quoted or bare keys.
+
+        The Pawduino firmware emits JSON-quoted keys
+        (``OK:{"homed":1,"pos":0.00,"max_vol":300.00}``); bare keys are
+        tolerated for older firmware and tests.
+        """
         result: dict[str, float] = {}
         body = response.removeprefix("OK:").strip()
         if body.startswith("{") and body.endswith("}"):
@@ -314,7 +347,7 @@ class OpentronsPipette(PipetteInstrument):
                 continue
             key, _, val = pair.partition(":")
             try:
-                result[key.strip()] = float(val.strip())
+                result[key.strip().strip('"')] = float(val.strip().strip('"'))
             except ValueError:
                 continue
         return result

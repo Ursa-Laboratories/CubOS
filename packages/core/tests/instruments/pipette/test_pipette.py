@@ -171,6 +171,19 @@ class TestParsing:
         response = "OK:{homed:1}"
         assert OpentronsPipette._parse_position(response) == 0.0
 
+    def test_parse_key_value_quoted_keys(self):
+        # Exact format the Pawduino firmware sends for CMD_PIPETTE_STATUS.
+        response = 'OK:{"homed":0,"pos":0.00,"max_vol":300.00}'
+        result = OpentronsPipette._parse_key_value(response)
+        assert result["homed"] == 0.0
+        assert result["pos"] == pytest.approx(0.0)
+        assert result["max_vol"] == pytest.approx(300.0)
+
+    def test_parse_key_value_quoted_string_values_skipped(self):
+        response = 'OK:{"msg":"Pipette moved","v":[55.00]}'
+        result = OpentronsPipette._parse_key_value(response)
+        assert "msg" not in result
+
 
 # --- Driver constructor tests -------------------------------------------------
 
@@ -221,6 +234,72 @@ class TestPipetteLifecycle:
             port="/dev/ttyUSB0", baudrate=115200, timeout=30.0,
         )
         mock_sleep.assert_called_once()
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_connect_homes_and_primes_unhomed_plunger(
+        self, mock_sleep, mock_serial_cls
+    ):
+        # Port-open resets the Arduino, so real hardware reports homed:0;
+        # connect must re-home and prime before any protocol motion.
+        responses = [
+            'OK:{"homed":0,"pos":0.00,"max_vol":300.00}\n',  # status
+            'OK:{"msg":"Pipette homed"}\n',                   # home
+            'OK:{"msg":"Pipette moved","v":[36.00]}\n',       # prime
+        ]
+        mock_ser = self._make_mock_serial(responses)
+        mock_serial_cls.return_value = mock_ser
+
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip.connect()
+
+        written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
+        assert written[0].startswith("14")      # status
+        assert written[1].startswith("10")      # home
+        assert written[2].startswith("11,36.0")  # prime = move to prime_position
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_connect_skips_homing_when_already_homed(
+        self, mock_sleep, mock_serial_cls
+    ):
+        mock_ser = self._make_mock_serial(
+            ['OK:{"homed":1,"pos":36.00,"max_vol":300.00}\n']
+        )
+        mock_serial_cls.return_value = mock_ser
+
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip.connect()
+
+        written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
+        assert len(written) == 1
+        assert written[0].startswith("14")
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_connect_discards_boot_banner(self, mock_sleep, mock_serial_cls):
+        mock_ser = self._make_mock_serial()
+        mock_serial_cls.return_value = mock_ser
+
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip.connect()
+
+        mock_ser.reset_input_buffer.assert_called_once()
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_connect_raises_when_homing_fails(self, mock_sleep, mock_serial_cls):
+        responses = [
+            'OK:{"homed":0,"pos":0.00,"max_vol":300.00}\n',
+            'ERR:{"error":"Failed to home pipette"}\n',
+        ]
+        mock_ser = self._make_mock_serial(responses)
+        mock_serial_cls.return_value = mock_ser
+
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        with pytest.raises(PipetteConnectionError, match="home/prime"):
+            pip.connect()
+        mock_ser.close.assert_called_once()
 
     @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
     @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
