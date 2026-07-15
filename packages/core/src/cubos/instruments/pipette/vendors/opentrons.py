@@ -232,7 +232,8 @@ class OpentronsPipette(PipetteInstrument):
                 success=True, volume_ul=volume_ul, position_mm=self._position_mm
             )
         response = self._send_command(
-            _CMD_ASPIRATE, mm_travel, speed, timeout=_MOTION_TIMEOUT
+            _CMD_ASPIRATE, mm_travel, _FIRMWARE_DEFAULT_SPEED,
+            timeout=_MOTION_TIMEOUT
         )
         position = self._parse_position(response)
         return AspirateResult(
@@ -248,7 +249,8 @@ class OpentronsPipette(PipetteInstrument):
                 success=True, volume_ul=volume_ul, position_mm=self._position_mm
             )
         response = self._send_command(
-            _CMD_DISPENSE, mm_travel, speed, timeout=_MOTION_TIMEOUT
+            _CMD_DISPENSE, mm_travel, _FIRMWARE_DEFAULT_SPEED,
+            timeout=_MOTION_TIMEOUT
         )
         position = self._parse_position(response)
         return AspirateResult(
@@ -271,7 +273,8 @@ class OpentronsPipette(PipetteInstrument):
         if not self._offline:
             mm_travel = volume_ul * self._config.mm_to_ul
             self._send_command(
-                _CMD_MIX, mm_travel, repetitions, speed, timeout=_MOTION_TIMEOUT
+                _CMD_MIX, mm_travel, repetitions, _FIRMWARE_DEFAULT_SPEED,
+                timeout=_MOTION_TIMEOUT
             )
         return MixResult(
             success=True, volume_ul=volume_ul, repetitions=repetitions
@@ -346,7 +349,10 @@ class OpentronsPipette(PipetteInstrument):
         if self._offline:
             return
         mm_travel = volume_ul * self._config.mm_to_ul
-        self._send_command(_CMD_DRIP_STOP, mm_travel, speed, timeout=_MOTION_TIMEOUT)
+        self._send_command(
+            _CMD_DRIP_STOP, mm_travel, _FIRMWARE_DEFAULT_SPEED,
+            timeout=_MOTION_TIMEOUT,
+        )
 
     # ── Private helpers ───────────────────────────────────────────────────
 
