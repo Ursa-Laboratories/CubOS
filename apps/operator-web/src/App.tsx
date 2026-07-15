@@ -23,6 +23,7 @@ import {
 import { useProtocolCommands, useProtocolConfigs, useProtocol, useSaveProtocol, useValidateProtocolSetup, useRunStatus } from "./hooks/useProtocol";
 import { useExperimentData } from "./hooks/useExperimentData";
 import { useFluidStates } from "./hooks/useFluidState";
+import { buildSeedFluids, validateSeedRows } from "./utils/fluidSeeds";
 import type {
   DeckResponse,
   WellPosition,
@@ -56,7 +57,9 @@ const RUN_TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 function buildStateSelection(choice: FluidStateChoice): RunStateSelection | undefined {
   if (choice.mode === "new") {
     const label = choice.newLabel.trim();
-    return { initial_state: { label: label || undefined, fluids: {} } };
+    // Seed per-container starting volumes from the operator's rows. No rows
+    // → `{}`, keeping the original empty-state behavior byte-identical.
+    return { initial_state: { label: label || undefined, fluids: buildSeedFluids(choice.seeds) } };
   }
   if (choice.mode === "resume" && choice.resumeId !== null) {
     return { fluid_state_id: choice.resumeId };
@@ -113,6 +116,7 @@ export default function App() {
     mode: "none",
     newLabel: "",
     resumeId: null,
+    seeds: [],
   });
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
@@ -372,6 +376,17 @@ export default function App() {
       setRunResult(null);
       setRunError("Connect gantry before running a protocol.");
       return;
+    }
+    if (fluidStateChoice.mode === "new") {
+      // Catch bad seed rows (negative volumes, mismatched composition sums,
+      // duplicate containers) before submit so the operator gets an inline
+      // message instead of a server 4xx.
+      const seedErrors = validateSeedRows(fluidStateChoice.seeds);
+      if (seedErrors.length > 0) {
+        setRunResult(null);
+        setRunError(`Fix the fluid-state seed rows before running: ${seedErrors.join(" ")}`);
+        return;
+      }
     }
     const state = buildStateSelection(fluidStateChoice);
     if (fluidStateChoice.mode === "resume" && !state) {

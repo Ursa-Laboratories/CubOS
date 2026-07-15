@@ -1,7 +1,9 @@
 import { useState } from "react";
 import type {
   CommandInfo,
+  CompositionSeedRow,
   DeckResponse,
+  FluidSeedRow,
   FluidStateChoice,
   FluidStateSummary,
   GantryResponse,
@@ -14,7 +16,15 @@ import type {
 } from "../../types";
 import { CoordinateField, NumberField, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
+import {
+  createCompositionRow,
+  createSeedRow,
+  validateSeedRows,
+  volumeContainerKeys,
+} from "../../utils/fluidSeeds";
 import * as theme from "../../theme";
+
+const SEED_CONTAINER_LIST_ID = "fluid-seed-container-keys";
 
 interface Props {
   configs: string[];
@@ -140,7 +150,7 @@ export default function ProtocolEditor({
   isCancelingRun,
   runResult,
   runError,
-  fluidStateChoice = { mode: "none", newLabel: "", resumeId: null },
+  fluidStateChoice = { mode: "none", newLabel: "", resumeId: null, seeds: [] },
   onFluidStateChoiceChange,
   availableFluidStates = [],
 }: Props) {
@@ -309,12 +319,53 @@ export default function ProtocolEditor({
   // enabled — resume specifically needs a picked state id. "none" (the
   // default) never blocks Run, so every pre-Feature-07 flow is unaffected.
   const stateChoiceIncomplete = fluidStateChoice.mode === "resume" && fluidStateChoice.resumeId === null;
-  const runDisabled = isRunning || !hasSteps || !canRun || hasUnsaved || stateChoiceIncomplete;
+  // "new" fluid-state seed rows are validated the same way the server would
+  // (Feature 07b): a negative volume, a composition that doesn't sum, or a
+  // duplicate container blocks Run with an inline message instead of a 4xx.
+  const seedErrors = fluidStateChoice.mode === "new"
+    ? validateSeedRows(fluidStateChoice.seeds)
+    : [];
+  const seedRowsInvalid = seedErrors.length > 0;
+  const seedContainerOptions = volumeContainerKeys(deck);
+  const runDisabled = isRunning || !hasSteps || !canRun || hasUnsaved || stateChoiceIncomplete || seedRowsInvalid;
   const runButtonTitle = hasUnsaved
     ? "Save your changes before running"
     : stateChoiceIncomplete
       ? "Select a fluid state to resume before running"
-      : runDisabledReason ?? undefined;
+      : seedRowsInvalid
+        ? "Fix the fluid-state seed rows before running"
+        : runDisabledReason ?? undefined;
+
+  // Seed-row mutations flow up through onFluidStateChoiceChange so the
+  // parent (App) stays the single owner of the choice. Each helper rebuilds
+  // the choice immutably; they no-op when the callback isn't wired.
+  const updateSeeds = (nextSeeds: FluidSeedRow[]) => {
+    onFluidStateChoiceChange?.({ ...fluidStateChoice, seeds: nextSeeds });
+  };
+  const addSeedRow = () => updateSeeds([...fluidStateChoice.seeds, createSeedRow()]);
+  const patchSeedRow = (id: string, patch: Partial<Omit<FluidSeedRow, "id">>) => {
+    updateSeeds(fluidStateChoice.seeds.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  };
+  const removeSeedRow = (id: string) => {
+    updateSeeds(fluidStateChoice.seeds.filter((row) => row.id !== id));
+  };
+  const addCompositionRow = (seedId: string) => {
+    updateSeeds(fluidStateChoice.seeds.map((row) => (
+      row.id === seedId ? { ...row, composition: [...row.composition, createCompositionRow()] } : row
+    )));
+  };
+  const patchCompositionRow = (seedId: string, compId: string, patch: Partial<Omit<CompositionSeedRow, "id">>) => {
+    updateSeeds(fluidStateChoice.seeds.map((row) => (
+      row.id === seedId
+        ? { ...row, composition: row.composition.map((comp) => (comp.id === compId ? { ...comp, ...patch } : comp)) }
+        : row
+    )));
+  };
+  const removeCompositionRow = (seedId: string, compId: string) => {
+    updateSeeds(fluidStateChoice.seeds.map((row) => (
+      row.id === seedId ? { ...row, composition: row.composition.filter((comp) => comp.id !== compId) } : row
+    )));
+  };
   const runButtonLabel = isCancelingRun
     ? "Cancelling — waiting for protocol to stop"
     : isRunning
@@ -544,12 +595,121 @@ export default function ProtocolEditor({
               </label>
             </div>
             {fluidStateChoice.mode === "new" && (
-              <input
-                value={fluidStateChoice.newLabel}
-                onChange={(e) => onFluidStateChoiceChange({ ...fluidStateChoice, newLabel: e.target.value })}
-                placeholder="Label for the new fluid state (optional)"
-                style={{ ...theme.input, marginTop: 8, width: "100%", maxWidth: 360 }}
-              />
+              <div style={{ marginTop: 8 }}>
+                <input
+                  aria-label="Label for the new fluid state"
+                  value={fluidStateChoice.newLabel}
+                  onChange={(e) => onFluidStateChoiceChange({ ...fluidStateChoice, newLabel: e.target.value })}
+                  placeholder="Label for the new fluid state (optional)"
+                  style={{ ...theme.input, width: "100%", maxWidth: 360 }}
+                />
+                <datalist id={SEED_CONTAINER_LIST_ID}>
+                  {seedContainerOptions.map((key) => (
+                    <option key={key} value={key} />
+                  ))}
+                </datalist>
+                <div style={seedSectionHeaderStyle}>
+                  <div>
+                    <div style={seedSectionTitleStyle}>Starting volumes</div>
+                    <p style={seedSectionSubtextStyle}>
+                      Seed each container's volume (µL). Containers you leave out start at 0 µL.
+                    </p>
+                  </div>
+                  <button type="button" onClick={addSeedRow} style={addBtnStyle}>
+                    Add container
+                  </button>
+                </div>
+                {fluidStateChoice.seeds.length === 0 ? (
+                  <div style={emptySeedsStyle}>No starting volumes — every container starts empty.</div>
+                ) : (
+                  <div style={seedRowsStyle}>
+                    {fluidStateChoice.seeds.map((row, i) => (
+                      <div key={row.id} style={seedRowStyle}>
+                        <div style={seedRowMainStyle}>
+                          <label style={seedFieldStyle}>
+                            <span style={theme.fieldLabel}>Container</span>
+                            <input
+                              aria-label={`Seed container ${i + 1}`}
+                              list={SEED_CONTAINER_LIST_ID}
+                              value={row.container}
+                              onChange={(e) => patchSeedRow(row.id, { container: e.target.value })}
+                              placeholder="e.g. s1 or plate_1.A1"
+                              style={inputStyle}
+                            />
+                          </label>
+                          <label style={seedVolumeFieldStyle}>
+                            <span style={theme.fieldLabel}>Volume (µL)</span>
+                            <input
+                              aria-label={`Seed volume ${i + 1}`}
+                              type="number"
+                              min={0}
+                              value={row.volume}
+                              onChange={(e) => patchSeedRow(row.id, { volume: e.target.value })}
+                              placeholder="0"
+                              style={inputStyle}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => removeSeedRow(row.id)}
+                            style={removeBtnStyle}
+                            aria-label={`Remove container row ${i + 1}`}
+                            title="Remove container"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                        <div style={seedCompositionStyle}>
+                          {row.composition.map((comp, j) => (
+                            <div key={comp.id} style={seedCompositionRowStyle}>
+                              <input
+                                aria-label={`Seed ${i + 1} component ${j + 1} name`}
+                                value={comp.component}
+                                onChange={(e) => patchCompositionRow(row.id, comp.id, { component: e.target.value })}
+                                placeholder="component (e.g. water)"
+                                style={inputStyle}
+                              />
+                              <input
+                                aria-label={`Seed ${i + 1} component ${j + 1} volume`}
+                                type="number"
+                                min={0}
+                                value={comp.volume}
+                                onChange={(e) => patchCompositionRow(row.id, comp.id, { volume: e.target.value })}
+                                placeholder="µL"
+                                style={inputStyle}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => removeCompositionRow(row.id, comp.id)}
+                                style={reorderBtnStyle}
+                                aria-label={`Remove component ${j + 1} from container ${i + 1}`}
+                                title="Remove component"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                          <button
+                            type="button"
+                            onClick={() => addCompositionRow(row.id)}
+                            style={addComponentBtnStyle}
+                            aria-label={`Add component to container ${i + 1}`}
+                          >
+                            + Add component
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {seedErrors.length > 0 && (
+                  <div role="alert" style={seedErrorStyle}>
+                    {seedErrors.map((message, index) => (
+                      <div key={index}>{message}</div>
+                    ))}
+                  </div>
+                )}
+              </div>
             )}
             {fluidStateChoice.mode === "resume" && (
               <select
@@ -1173,6 +1333,92 @@ const stateChoiceOptionStyle: React.CSSProperties = {
   fontSize: 13,
   color: theme.color.text,
   cursor: "pointer",
+};
+
+const seedSectionHeaderStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
+  gap: 10,
+  marginTop: 12,
+};
+
+const seedSectionTitleStyle: React.CSSProperties = {
+  ...theme.sectionLabel,
+  fontSize: 11,
+};
+
+const seedSectionSubtextStyle: React.CSSProperties = {
+  color: theme.color.textMuted,
+  fontSize: 11,
+  margin: "2px 0 0",
+};
+
+const emptySeedsStyle: React.CSSProperties = {
+  color: theme.color.textMuted,
+  fontSize: 12,
+  marginTop: 8,
+};
+
+const seedRowsStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 10,
+  marginTop: 8,
+};
+
+const seedRowStyle: React.CSSProperties = {
+  border: `1px solid ${theme.color.border}`,
+  borderRadius: theme.radius.md,
+  background: theme.color.surfaceMuted,
+  padding: 10,
+  display: "grid",
+  gap: 8,
+};
+
+const seedRowMainStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(160px, 2fr) minmax(110px, 1fr) auto",
+  gap: 10,
+  alignItems: "end",
+};
+
+const seedFieldStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 2,
+  fontSize: 12,
+};
+
+const seedVolumeFieldStyle: React.CSSProperties = {
+  ...seedFieldStyle,
+};
+
+const seedCompositionStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 6,
+  paddingLeft: 4,
+  borderLeft: `2px solid ${theme.color.border}`,
+};
+
+const seedCompositionRowStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(140px, 2fr) minmax(90px, 1fr) auto",
+  gap: 8,
+  alignItems: "center",
+};
+
+const addComponentBtnStyle: React.CSSProperties = {
+  ...theme.btn.ghost,
+  ...theme.btnSmall,
+  justifySelf: "start",
+  color: theme.color.textMuted,
+};
+
+const seedErrorStyle: React.CSSProperties = {
+  ...theme.notice.error,
+  marginTop: 8,
+  display: "grid",
+  gap: 2,
 };
 
 const protocolButtonGroupStyle: React.CSSProperties = {
