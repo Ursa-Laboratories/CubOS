@@ -6,14 +6,15 @@
 # the gantry XY equals the target XY exactly.
 #
 # Z targets are instrument-point positions: gantry Z = target Z + depth.
-# Camera depth is 32.0, so target/travel Z of -37.0 keeps the gantry at -5.0.
+# The camera/lens is the zero-offset reference tool (depth 0.0), so a target
+# Z of -5.0 puts the gantry exactly at the -5.0 safe ceiling.
 #
 # Run only after the cub_xl_panda_home_origin.yaml preflight passes: E-stop
 # in reach, machine clear, tool retracted, homing verified, WPos (0,0,0)
 # confirmed at the homed corner.
 
 positions:
-  near_home_park: [-20.0, -20.0, -37.0]
+  near_home_park: [-20.0, -20.0, -5.0]
 
 protocol:
   - home:
@@ -21,6 +22,6 @@ protocol:
   - move:
       instrument: camera
       position: near_home_park
-      travel_z: -37.0
+      travel_z: -5.0
 
   - home:
