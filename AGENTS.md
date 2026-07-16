@@ -8,6 +8,7 @@ Prefer repo source over model memory; keep retrieval focused.
 1. Read this file and `CLAUDE.md`.
 2. Use `docs/agent-index.md` to find the source/docs for the area you are touching.
 3. Read only the files needed for the task unless you are changing shared interfaces, coordinate semantics, hardware motion, YAML schemas, or protocol setup.
+4. Before opening a PR, follow `CONTRIBUTING.md`: tests for the behavior you changed, the hardware-validation report, and the abstraction checklist. The PR template mirrors that checklist; fill in every section.
 
 ## Hardware Safety
 
@@ -62,6 +63,17 @@ python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
 - `src/protocol_engine/measurements.py`, `data/data_store.py` — persisted measurements.
 - Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
 
+## Where New Things Go
+
+Placement rules for new code — decide the layer before writing:
+
+- **New vendor driver for an existing instrument type**: `src/instruments/<type>/vendors/<vendor>.py` plus an entry in `src/instruments/registry.yaml`. Vendor SDK imports stay lazy (tied to connect or the method that needs them); the SDK dependency goes in a `pyproject.toml` optional extra, never core dependencies. Support `offline=True` when a meaningful dry-run exists.
+- **New instrument type**: `src/instruments/<type>/` with `interface.py`, `models.py`, `exceptions.py`, `vendors/`. Generic behavior lives in the interface/models/exceptions; device-specific quirks live only in the vendor module.
+- **New measurement method or result**: method on the type interface, result models in that type's `models.py`, persistence through `src/protocol_engine/measurements.py` and `data/data_store.py`. Do not add a parallel storage path.
+- **Heights and limits** (measurement heights, indentation limits, and similar): labware-relative offsets on the protocol command schema (`src/protocol_engine/yaml_schema.py` + `commands/`), never on instrument config or gantry YAML. See "Heights: absolute vs. labware-relative" above.
+- **Vendor-specific behavior** must never appear in protocol engine code, generic interfaces, or shared models. If a shared layer seems to need a vendor special case, the abstraction is wrong — re-check against `CONTRIBUTING.md` before opening the PR.
+- **External or proprietary drivers**: register via `cubos.instrument_registries` entry points or `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlays; do not merge private code into CubOS.
+
 ## Calibration Scripts
 
 - `setup/calibrate_gantry.py` — only supported user-facing calibration entrypoint. Loads input gantry YAML, dispatches single- or multi-instrument flow by instrument count. Without `--output-gantry`, prompts before overwriting input; with it, writes the explicit path without extra prompt.
@@ -86,16 +98,16 @@ Do not treat the pull-off reserve as usable WPos.
 - `setup/keyboard_input.py` — single-keypress reader (Unix `tty`/`termios`).
 `scan.plate` may target either a top-level `WellPlate` key or a nested holder path such as `plate_holder.plate`, as long as that path resolves to a `WellPlate`.
 
-## Hardware Iteration Mode
+## Development Modes
 
-Covers two situations where TDD is deferred:
+**TDD Mode** is the default: planning sessions, new features, and cross-repo interface changes. Write tests alongside implementation and update docs as you go. New or changed lines must be exercised by tests before the PR is final — CI enforces this with a diff-coverage gate.
+
+**Hardware Iteration Mode** covers two situations where TDD is deferred:
 
 - **Debugging**: fast diagnosis of an existing bug — skip tests until the fix is confirmed, then add a regression test.
 - **Iterative hardware testing**: small changes (calibration, GRBL params, YAML tweaks, motion adjustments) where physical validation must come before tests are meaningful.
 
-In both cases: make the minimal targeted change, mark deferred work `# TODO(iter): test` or `# TODO(iter): doc`, and sweep those tags at close-out. Temporary instrumentation is OK if tagged and removed before finalizing.
-
-See root `AGENTS.md` for the full Development Modes definition.
+In both cases: make the minimal targeted change, mark deferred work `# TODO(iter): test` or `# TODO(iter): doc`, and sweep those tags at close-out. Temporary instrumentation is OK if tagged and removed before finalizing. Deferral is within a working session, not past the PR: sweep `# TODO(iter)` tags before the PR is ready for review.
 
 ## Progress Notes
 
@@ -113,6 +125,13 @@ python setup/validate_setup.py configs/gantry/cub_xl_asmi.yaml configs/deck/asmi
 ```
 
 Report exact commands and observed results in the PR body.
+
+CI runs the full suite plus a diff-coverage gate: lines added or changed by the PR must be at least 90% covered. Check locally with:
+
+```bash
+python -m pytest --cov=src --cov-report=xml -q
+diff-cover coverage.xml --compare-branch=origin/main --fail-under=90
+```
 
 ## When to Update This File
 

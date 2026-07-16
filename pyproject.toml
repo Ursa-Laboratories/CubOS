@@ -11,6 +11,8 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-cov",
+    "diff-cover",
 ]
 # Per-vendor SDKs — opt in only when you actually use that driver.
 # The drivers import these lazily and raise a clear error if missing, so the core

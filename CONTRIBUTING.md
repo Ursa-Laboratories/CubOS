@@ -23,6 +23,15 @@ All CI checks should pass before a PR is merged. You do not need to run the
 entire test suite locally for every small change, but run the smallest useful
 tests while developing and make sure the PR is not relying on untested behavior.
 
+CI enforces a diff-coverage gate in addition to the full test suite: at least
+90% of the lines added or changed by a PR must be executed by tests. To check
+locally before pushing:
+
+```bash
+python -m pytest --cov=src --cov-report=xml -q
+diff-cover coverage.xml --compare-branch=origin/main --fail-under=90
+```
+
 ## Hardware-Facing Changes
 
 Hardware-facing changes require hardware validation before merge. This includes
@@ -135,8 +144,9 @@ Common types are `fix`, `feat`, `docs`, `test`, `refactor`, `chore`, and
 
 ## PR Checklist
 
-Include this checklist in hardware-facing PRs, and use the relevant parts for
-all other PRs:
+The checklist below is pre-populated automatically by
+`.github/PULL_REQUEST_TEMPLATE.md` when you open a PR. Fill in every section
+for hardware-facing PRs, and use the relevant parts for all other PRs:
 
 ```markdown
 ## Summary

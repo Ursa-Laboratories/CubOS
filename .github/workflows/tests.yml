@@ -17,6 +17,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # diff-cover needs the base branch to compute changed lines.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -26,7 +29,13 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests
-        run: python -m pytest tests/ -v
+        run: python -m pytest tests/ -v --cov=src --cov-report=xml
+
+      - name: Diff coverage gate (changed lines must be >=90% covered)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          diff-cover coverage.xml --compare-branch="origin/${{ github.base_ref }}" --fail-under=90
 
   docs:
     runs-on: ubuntu-latest
