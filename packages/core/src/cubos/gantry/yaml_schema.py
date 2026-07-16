@@ -70,6 +70,7 @@ class GantryYamlSchema(BaseModel):
     gantry_type: Literal["cub", "cub_xl"]
     cnc: CncYaml
     working_volume: WorkingVolumeYaml
+    origin_policy: Literal["deck_origin", "home_origin"] = "deck_origin"
     grbl_settings: Optional[GrblSettingsYaml] = None
     instruments: Dict[str, InstrumentYamlEntry] = Field(default_factory=dict)
 

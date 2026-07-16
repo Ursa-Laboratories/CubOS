@@ -156,16 +156,38 @@ export function buildCalibratedConfig({
   cameraBlockDistances?: Record<string, number>;
 }): GantryConfig {
   const next = structuredClone(config);
-  next.working_volume = {
-    x_min: 0,
-    x_max: roundMm(measuredVolume.x),
-    y_min: 0,
-    y_max: roundMm(measuredVolume.y),
-    z_min: roundMm(zMin),
-    z_max: roundMm(zMax),
-  };
+  const originPolicy = config.origin_policy ?? "deck_origin";
+  next.origin_policy = originPolicy;
+
+  if (originPolicy === "home_origin") {
+    // home_origin: WPos zero is the homed back-right-top corner, so the
+    // whole reachable volume is non-positive. The physical span per axis
+    // is unchanged from deck_origin — X: measuredVolume.x, Y: measuredVolume.y,
+    // Z: (zMax - zMin) — only the reference corner flips, remapping
+    // [0, span] -> [-span, 0] instead of scaling or re-measuring anything.
+    next.working_volume = {
+      x_min: -roundMm(measuredVolume.x),
+      x_max: 0,
+      y_min: -roundMm(measuredVolume.y),
+      y_max: 0,
+      z_min: -roundMm(zMax - zMin),
+      z_max: 0,
+    };
+  } else {
+    next.working_volume = {
+      x_min: 0,
+      x_max: roundMm(measuredVolume.x),
+      y_min: 0,
+      y_max: roundMm(measuredVolume.y),
+      z_min: roundMm(zMin),
+      z_max: roundMm(zMax),
+    };
+  }
   if (next.cnc.safe_z != null) {
-    next.cnc.safe_z = Math.min(Math.max(roundMm(next.cnc.safe_z), roundMm(zMin)), roundMm(zMax));
+    next.cnc.safe_z = Math.min(
+      Math.max(roundMm(next.cnc.safe_z), next.working_volume.z_min),
+      next.working_volume.z_max,
+    );
   }
   next.grbl_settings = {
     ...(next.grbl_settings ?? {}),

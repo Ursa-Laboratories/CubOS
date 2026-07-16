@@ -6,6 +6,7 @@ import App from "./App";
 import type {
   DeckConfig,
   DeckResponse,
+  FluidStateSummary,
   GantryConfig,
   GantryPosition,
   GantryResponse,
@@ -28,6 +29,8 @@ type FetchMockOptions = {
   runStatus?: () => ProtocolRunStatus;
   validateSetup?: () => Response | Promise<Response>;
   calibrationWarning?: string | null;
+  fluidStates?: FluidStateSummary[];
+  runsSubmit?: (body: Record<string, unknown> | null) => Response | Promise<Response>;
 };
 
 function createState(): ApiState {
@@ -157,6 +160,8 @@ function toProtocolResponse(filename: string, body: ProtocolConfig): ProtocolRes
 
 function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
   let gantryConnected = false;
+  let lastSubmittedRunId: string | null = null;
+  let lastSubmittedFluidStateId: number | null = null;
   const gantryPosition = (x = 0, y = 0, z = 0): GantryPosition => ({
     x,
     y,
@@ -322,6 +327,46 @@ function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
     }
     if (path === "/api/v1/deck/preview-wells" && method === "POST") {
       return jsonResponse(previewWells(body as WellPlateConfig));
+    }
+    if (path === "/api/v1/fluid-states" && method === "GET") {
+      return jsonResponse(options.fluidStates ?? []);
+    }
+    if (path === "/api/v1/runs" && method === "POST") {
+      if (options.runsSubmit) return options.runsSubmit(body);
+      lastSubmittedRunId = (body?.run_id as string) ?? null;
+      lastSubmittedFluidStateId = (body?.state as { fluid_state_id?: number } | undefined)?.fluid_state_id
+        ?? null;
+      return jsonResponse({
+        run_id: lastSubmittedRunId,
+        state: "queued",
+        created_at: 0,
+        started_at: null,
+        finished_at: null,
+        mock_mode: false,
+        metadata: {},
+        digests: {},
+        result: null,
+        error: null,
+        artifacts: [],
+        fluid_state_id: lastSubmittedFluidStateId,
+      });
+    }
+    if (path.startsWith("/api/v1/runs/") && method === "GET") {
+      const runId = path.slice("/api/v1/runs/".length);
+      return jsonResponse({
+        run_id: runId,
+        state: "succeeded",
+        created_at: 0,
+        started_at: 0,
+        finished_at: 1,
+        mock_mode: false,
+        metadata: {},
+        digests: {},
+        result: { status: "ok", steps_executed: 1, campaign_id: 456 },
+        error: null,
+        artifacts: [],
+        fluid_state_id: lastSubmittedRunId === runId ? lastSubmittedFluidStateId : null,
+      });
     }
 
     const [, api, version, kind, filename] = path.split("/");
@@ -931,7 +976,7 @@ describe("CubOS editor interactions", () => {
     );
   });
 
-  it("disables Run Protocol and shows the calibration warning while connected", async () => {
+  it("allows Run Protocol despite a GRBL settings mismatch (calibration is advisory, not blocking)", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock(createState(), {
       calibrationWarning: "Finish gantry calibration before running protocols.",
@@ -944,11 +989,16 @@ describe("CubOS editor interactions", () => {
     await user.click(screen.getByRole("button", { name: "Protocol" }));
     await importConfig(user, "Import protocol config", "move.yaml");
 
-    expect(await screen.findAllByText("Finish gantry calibration before running protocols.")).not.toHaveLength(0);
-    const runButton = screen.getByRole("button", { name: "Run Protocol" });
-    expect(runButton).toBeDisabled();
+    // A GRBL-settings mismatch must not block running or surface a
+    // "calibration needed" banner: commissioning machines legitimately
+    // differ from the YAML, and the operator owns that decision.
+    expect(screen.queryByText("CALIBRATION NEEDED")).not.toBeInTheDocument();
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
     await user.click(runButton);
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything());
+    await waitFor(() =>
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything()),
+    );
   });
 
   it("blocks Run Protocol after editing a loaded protocol until the change is saved", async () => {
@@ -1316,5 +1366,210 @@ describe("CubOS editor interactions", () => {
     const afterSaveEvent = new Event("beforeunload", { cancelable: true });
     window.dispatchEvent(afterSaveEvent);
     expect(afterSaveEvent.defaultPrevented).toBe(false);
+  });
+
+  // ── Feature 07: create-new/resume-existing fluid-state run submission ──
+
+  it("keeps Run Protocol disabled while Resume is chosen without a state selected", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      fluidStates: [{
+        id: 5,
+        label: "seed",
+        deck_path: "/deck.yaml",
+        deck_fingerprint: "abc",
+        created_at: "now",
+        updated_at: "now",
+        container_count: 1,
+        operation_count: 0,
+      }],
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+
+    await user.click(screen.getByRole("radio", { name: "Resume existing state" }));
+    expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
+    await waitFor(() => expect(screen.getByRole("button", { name: "Run Protocol" })).toBeEnabled());
+  });
+
+  it("submits a stateful run through the versioned runs resource when resuming a state", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(createState(), {
+      fluidStates: [{
+        id: 5,
+        label: "seed",
+        deck_path: "/deck.yaml",
+        deck_fingerprint: "abc",
+        created_at: "now",
+        updated_at: "now",
+        container_count: 1,
+        operation_count: 0,
+      }],
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "Resume existing state" }));
+    await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
+
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await user.click(runButton);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    const [, submitInit] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/runs")!;
+    expect(JSON.parse(String(submitInit?.body))).toMatchObject({
+      gantry_file: "cubos.yaml",
+      deck_file: "panda-deck.yaml",
+      protocol_file: "move.yaml",
+      state: { fluid_state_id: 5 },
+    });
+
+    expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
+    // The legacy synchronous endpoint must never be used for a stateful run.
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything());
+  });
+
+  it("surfaces a deck-fingerprint mismatch error clearly when resuming", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      fluidStates: [{
+        id: 5,
+        label: "seed",
+        deck_path: "/deck.yaml",
+        deck_fingerprint: "abc",
+        created_at: "now",
+        updated_at: "now",
+        container_count: 1,
+        operation_count: 0,
+      }],
+      runsSubmit: async () => new Response(
+        JSON.stringify({
+          detail: "Fluid state 5 belongs to deck fingerprint abc123, but the "
+            + "supplied deck resolves to def456.",
+        }),
+        { status: 409, headers: { "Content-Type": "application/json" } },
+      ),
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "Resume existing state" }));
+    await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
+    await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
+
+    expect(await screen.findByText(/deck fingerprint/i)).toBeInTheDocument();
+  });
+
+  it("seeds per-container starting volumes into a new-state run submission", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(createState());
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "New fluid state" }));
+
+    await user.click(screen.getByRole("button", { name: "Add container" }));
+    await user.type(screen.getByLabelText("Seed container 1"), "plate_1.A1");
+    await user.type(screen.getByLabelText("Seed volume 1"), "150");
+    // A composition breakdown that sums to the volume.
+    await user.click(screen.getByRole("button", { name: "Add component to container 1" }));
+    await user.type(screen.getByLabelText("Seed 1 component 1 name"), "water");
+    await user.type(screen.getByLabelText("Seed 1 component 1 volume"), "150");
+
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await user.click(runButton);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    const [, submitInit] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/runs")!;
+    expect(JSON.parse(String(submitInit?.body))).toMatchObject({
+      deck_file: "panda-deck.yaml",
+      protocol_file: "move.yaml",
+      state: {
+        initial_state: {
+          fluids: { "plate_1.A1": { volume_ul: 150, composition: { water: 150 } } },
+        },
+      },
+    });
+  });
+
+  it("keeps the new-state submission empty when no seed rows are added", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(createState());
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "New fluid state" }));
+    await user.type(screen.getByLabelText("Label for the new fluid state"), "empty seed");
+
+    const runButton = await screen.findByRole("button", { name: "Run Protocol" });
+    await waitFor(() => expect(runButton).toBeEnabled());
+    await user.click(runButton);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    const [, submitInit] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/runs")!;
+    expect(JSON.parse(String(submitInit?.body))).toMatchObject({
+      state: { initial_state: { label: "empty seed", fluids: {} } },
+    });
+  });
+
+  it("blocks a new-state run when a seed composition does not sum to its volume", async () => {
+    const user = userEvent.setup();
+    const fetchMock = installFetchMock(createState());
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(screen.getByRole("radio", { name: "New fluid state" }));
+
+    await user.click(screen.getByRole("button", { name: "Add container" }));
+    await user.type(screen.getByLabelText("Seed container 1"), "plate_1.A1");
+    await user.type(screen.getByLabelText("Seed volume 1"), "150");
+    await user.click(screen.getByRole("button", { name: "Add component to container 1" }));
+    await user.type(screen.getByLabelText("Seed 1 component 1 name"), "water");
+    await user.type(screen.getByLabelText("Seed 1 component 1 volume"), "40");
+
+    // Run is blocked client-side and never reaches the runs resource.
+    expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled();
+    expect(screen.getByRole("alert")).toHaveTextContent(/composition sums to 40/i);
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/runs", expect.anything());
   });
 });

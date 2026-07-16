@@ -13,6 +13,7 @@ nav:
     - Set Up Deck and Labware: deck.md
     - Run a Protocol with YAML: protocol-yaml.md
     - Fluid State Tracking: fluid-state.md
+    - PANDA-CUB Quickstart: panda-cub-quickstart.md
     - Data: data.md
     - Troubleshooting & Recovery: troubleshooting.md
   - Contributing to CubOS:

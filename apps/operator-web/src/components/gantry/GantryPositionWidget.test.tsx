@@ -28,6 +28,17 @@ const workingVolume: WorkingVolume = {
   z_max: 80,
 };
 
+// home_origin fixture: WPos zero at the homed back-right-top corner, so the
+// entire reachable volume is negative (see calibrationMath.buildCalibratedConfig).
+const negativeWorkingVolume: WorkingVolume = {
+  x_min: -400,
+  x_max: 0,
+  y_min: -300,
+  y_max: 0,
+  z_min: -100,
+  z_max: 0,
+};
+
 function gantryConfig(): GantryConfig {
   return {
     serial_port: "/dev/ttyUSB0",
@@ -374,8 +385,111 @@ describe("GantryPositionWidget manual move safety", () => {
     await user.type(screen.getByLabelText("X (mm)"), "-1");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
-    expect(await screen.findByText("Coordinates must be 0 or greater.")).toBeInTheDocument();
+    // -1 is outside this fixture's (nonnegative) working volume, so it's
+    // rejected by the generic range check rather than a sign check — there
+    // is no standalone "must be 0 or greater" rule anymore (home_origin
+    // configs have an entirely negative working volume).
+    expect(await screen.findByText(/Move target outside working volume/)).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a manual move to negative coordinates inside a home_origin (negative) working volume", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={negativeWorkingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("X (mm)"), "-200");
+    await user.type(screen.getByLabelText("Y (mm)"), "-150");
+    await user.type(screen.getByLabelText("Z (mm)"), "-50");
+    await user.click(screen.getByRole("button", { name: "Go" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/move-to",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ x: -200, y: -150, z: -50 }),
+      }),
+    );
+    expect(screen.queryByText(/Move target outside working volume/)).not.toBeInTheDocument();
+  });
+
+  it("rejects a positive move target outside a home_origin (negative) working volume", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={negativeWorkingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("X (mm)"), "10");
+    await user.type(screen.getByLabelText("Y (mm)"), "-150");
+    await user.type(screen.getByLabelText("Z (mm)"), "-50");
+    await user.click(screen.getByRole("button", { name: "Go" }));
+
+    expect(await screen.findByText(/Move target outside working volume/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("allows a jog that stays inside a negative (home_origin) working volume", () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position({ x: -5, y: -5, z: -5, work_x: -5, work_y: -5, work_z: -5 })}
+        workingVolume={negativeWorkingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByTitle("X-"));
+    fireEvent.mouseUp(screen.getByTitle("X-"));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/jog",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ x: -0.5, y: 0, z: 0 }) }),
+    );
+  });
+
+  it("rejects a jog that would push past a negative (home_origin) working-volume bound", () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        // x_min=-400; already within 0.5mm of it, so an X- jog would cross the bound.
+        position={position({ x: -399.7, y: -5, z: -5, work_x: -399.7, work_y: -5, work_z: -5 })}
+        workingVolume={negativeWorkingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByTitle("X-"));
+    fireEvent.mouseUp(screen.getByTitle("X-"));
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.getByText("At working-volume limit")).toBeInTheDocument();
   });
 
   it("stops held jog requests once the predicted target reaches the working volume edge", async () => {

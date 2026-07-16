@@ -50,6 +50,17 @@ instruments:
         module: cubos.instruments.uvvis_ccs.vendors.thorlabs
         class_name: ThorlabsUVVisCCS
 
+  capper:
+    interface: cubos.instruments.capper.interface.CapperInstrument
+    calibration_mode: contact
+    vendors:
+      mock:
+        module: cubos.instruments.capper.vendors.mock
+        class_name: MockCapper
+      pawduino:
+        module: cubos.instruments.capper.vendors.pawduino
+        class_name: PawduinoCapper
+
   camera:
     interface: cubos.instruments.camera.interface.CameraInstrument
     calibration_mode: non_contact

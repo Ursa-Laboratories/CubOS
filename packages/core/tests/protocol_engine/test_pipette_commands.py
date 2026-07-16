@@ -420,6 +420,31 @@ def _tip_rack_context(*, has_pipette: bool = True) -> tuple[ProtocolContext, Tip
     return ctx, rack, pipette
 
 
+def _two_tip_rack_context(*, has_pipette: bool = True) -> tuple[ProtocolContext, TipRack, MagicMock]:
+    rack = TipRack(
+        name="tips",
+        model_name="test_tip_rack",
+        rows=1,
+        columns=2,
+        pickup_z=42.0,
+        drop_z=32.0,
+        tip_length=DEFAULT_TIP_LENGTH_MM,
+        location=Coordinate3D(x=10.0, y=20.0, z=42.0),
+        length=8.0,
+        width=1.0,
+        height=10.0,
+        tips={
+            "A1": Coordinate3D(x=10.0, y=20.0, z=42.0),
+            "A2": Coordinate3D(x=18.0, y=20.0, z=42.0),
+        },
+    )
+    board = MagicMock()
+    pipette = MagicMock() if has_pipette else None
+    board.instruments = {"pipette": pipette} if has_pipette else {}
+    ctx = ProtocolContext(gantry=board, deck=Deck({"tips": rack}))
+    return ctx, rack, pipette
+
+
 class TestPickUpTipCommand:
 
     def test_moves_then_picks_up(self):
@@ -479,6 +504,132 @@ class TestPickUpTipCommand:
         with pytest.raises(ProtocolExecutionError, match="not available"):
             pick_up_tip(ctx, position="tips.A1")
 
+    def test_untracked_next_available_selection_picks_first_present_tip(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _two_tip_rack_context()
+        rack.mark_tip_used("A1")
+
+        pick_up_tip(ctx, position="tips")
+
+        pipette.pick_up_tip.assert_called_once_with(50.0)
+        pipette.set_attached_tip_extension.assert_called_once_with(
+            DEFAULT_TIP_LENGTH_MM,
+        )
+        assert rack.is_tip_present("A2") is False
+
+    def test_untracked_next_available_raises_when_rack_is_empty(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, _pipette = _tip_rack_context()
+        rack.mark_tip_used("A1")
+        with pytest.raises(ProtocolExecutionError, match="no available tips"):
+            pick_up_tip(ctx, position="tips")
+
+    def test_tracked_pick_up_tip_journals_before_motion_and_commits_after_success(
+        self,
+    ):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        events = []
+        store = MagicMock()
+        store.begin_pick_up_tip.side_effect = (
+            lambda *args, **kwargs: events.append("begin") or (True, "A1", 59.3)
+        )
+        store.complete_pick_up_tip.side_effect = (
+            lambda operation_key: events.append("complete")
+        )
+        ctx.data_store = store
+        ctx.gantry.move_to_labware.side_effect = (
+            lambda *args, **kwargs: events.append("move")
+        )
+        pipette.pick_up_tip.side_effect = lambda *args: events.append("pick_up_tip")
+
+        pick_up_tip(ctx, position="tips.A1")
+
+        assert events == ["begin", "move", "pick_up_tip", "complete"]
+        store.begin_pick_up_tip.assert_called_once()
+        args = store.begin_pick_up_tip.call_args.args
+        assert args[0] == 11
+        assert args[1].endswith(":pick_up_tip")
+        assert args[2:] == ("tips", "A1", rack.tip_length)
+        assert store.begin_pick_up_tip.call_args.kwargs == {"campaign_id": 7}
+        pipette.set_attached_tip_extension.assert_called_once_with(rack.tip_length)
+        assert rack.is_tip_present("A1") is False
+
+    def test_tracked_pick_up_tip_skips_already_applied_replay_and_restores_extension(
+        self,
+    ):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_pick_up_tip.return_value = (False, "A1", 59.3)
+
+        assert pick_up_tip(ctx, position="tips.A1") is None
+
+        ctx.gantry.move_to_labware.assert_not_called()
+        pipette.pick_up_tip.assert_not_called()
+        ctx.data_store.complete_pick_up_tip.assert_not_called()
+        pipette.set_attached_tip_extension.assert_called_once_with(59.3)
+        # The replay must not consume a second physical tip.
+        assert rack.is_tip_present("A1") is True
+
+    def test_tracked_pick_up_tip_failure_marks_reconciliation_required(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, pipette = _tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_pick_up_tip.return_value = (True, "A1", 59.3)
+        pipette.pick_up_tip.side_effect = RuntimeError("pickup outcome unknown")
+
+        with pytest.raises(RuntimeError, match="pickup outcome unknown"):
+            pick_up_tip(ctx, position="tips.A1")
+
+        ctx.data_store.mark_tip_reconciliation_required.assert_called_once()
+        ctx.data_store.complete_pick_up_tip.assert_not_called()
+
+    def test_tracked_pick_up_tip_commit_failure_is_not_silently_ignored(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, _pipette = _tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_pick_up_tip.return_value = (True, "A1", 59.3)
+        ctx.data_store.complete_pick_up_tip.side_effect = RuntimeError(
+            "database is locked"
+        )
+
+        with pytest.raises(ProtocolExecutionError, match="commit"):
+            pick_up_tip(ctx, position="tips.A1")
+
+        ctx.data_store.mark_tip_reconciliation_required.assert_called_once()
+
+    def test_tracked_pick_up_tip_preflight_failure_stops_before_motion(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, pipette = _tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_pick_up_tip.side_effect = ValueError(
+            "no available tip in rack"
+        )
+
+        with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+            pick_up_tip(ctx, position="tips.A1")
+
+        ctx.gantry.move_to_labware.assert_not_called()
+        pipette.pick_up_tip.assert_not_called()
+
 
 # ─── drop_tip tests ──────────────────────────────────────────────────────────
 
@@ -531,6 +682,69 @@ class TestDropTipCommand:
         ctx = _mock_context(has_pipette=False)
         with pytest.raises(ProtocolExecutionError, match="[Nn]o pipette"):
             drop_tip(ctx, position="waste_1")
+
+    def test_tracked_drop_tip_journals_before_motion_and_commits_after_success(self):
+        from cubos.protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        events = []
+        store = MagicMock()
+        store.begin_drop_tip.side_effect = (
+            lambda *args, **kwargs: events.append("begin") or (True, "tips", "A1")
+        )
+        store.complete_drop_tip.side_effect = (
+            lambda operation_key: events.append("complete")
+        )
+        ctx.data_store = store
+        ctx.gantry.move_to_labware.side_effect = (
+            lambda *args, **kwargs: events.append("move")
+        )
+        pipette = _get_pipette(ctx)
+        pipette.drop_tip.side_effect = lambda *args: events.append("drop_tip")
+
+        drop_tip(ctx, position="waste_1")
+
+        assert events == ["begin", "move", "drop_tip", "complete"]
+        store.begin_drop_tip.assert_called_once()
+        args = store.begin_drop_tip.call_args.args
+        assert args[0] == 11
+        assert args[1].endswith(":drop_tip")
+        assert store.begin_drop_tip.call_args.kwargs == {"campaign_id": 7}
+        pipette.clear_attached_tip_extension.assert_called_once_with()
+
+    def test_tracked_drop_tip_skips_already_applied_replay(self):
+        from cubos.protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_drop_tip.return_value = (False, "tips", "A1")
+
+        assert drop_tip(ctx, position="waste_1") is None
+
+        ctx.gantry.move_to_labware.assert_not_called()
+        _get_pipette(ctx).drop_tip.assert_not_called()
+        ctx.data_store.complete_drop_tip.assert_not_called()
+        _get_pipette(ctx).clear_attached_tip_extension.assert_called_once_with()
+
+    def test_tracked_drop_tip_failure_marks_reconciliation_required(self):
+        from cubos.protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_drop_tip.return_value = (True, "tips", "A1")
+        _get_pipette(ctx).drop_tip.side_effect = RuntimeError("drop outcome unknown")
+
+        with pytest.raises(RuntimeError, match="drop outcome unknown"):
+            drop_tip(ctx, position="waste_1")
+
+        ctx.data_store.mark_tip_reconciliation_required.assert_called_once()
+        ctx.data_store.complete_drop_tip.assert_not_called()
 
 
 # ─── transfer tests ──────────────────────────────────────────────────────────

@@ -8,7 +8,7 @@ import tempfile
 import pytest
 
 from cubos.gantry.errors import GantryLoaderError
-from cubos.gantry.gantry_config import GantryConfig
+from cubos.gantry.gantry_config import GantryConfig, OriginPolicy
 from cubos.gantry.loader import load_gantry_from_yaml, load_gantry_from_yaml_safe
 
 
@@ -68,6 +68,22 @@ class TestLoadGantryFromYaml:
             assert vol.z_max == 80.0
             assert config.factory_z_travel_mm == 90.0
             assert config.safe_z == 75.0
+        finally:
+            os.unlink(path)
+
+    def test_loaded_gantry_defaults_to_deck_origin_policy(self):
+        path = _write_temp_yaml(VALID_GANTRY_YAML)
+        try:
+            config = load_gantry_from_yaml(path)
+            assert config.origin_policy == OriginPolicy.DECK_ORIGIN
+        finally:
+            os.unlink(path)
+
+    def test_loaded_gantry_threads_home_origin_policy(self):
+        path = _write_temp_yaml(VALID_GANTRY_YAML + "origin_policy: home_origin\n")
+        try:
+            config = load_gantry_from_yaml(path)
+            assert config.origin_policy == OriginPolicy.HOME_ORIGIN
         finally:
             os.unlink(path)
 

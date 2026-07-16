@@ -646,12 +646,73 @@ def test_run_protocol_uses_existing_gantry_and_preserves_connection(monkeypatch,
     ]
 
 
-def test_run_protocol_blocks_when_calibration_warning_active(tmp_path):
+def test_run_protocol_links_fluid_state_to_campaign_and_context(monkeypatch, tmp_path):
+    """The fluid state must reach BOTH the campaign record (tip/cap state
+    journals resolve it through the campaign) and setup_protocol (context
+    tracking) — missing either silently breaks durable tracking."""
+    import cubos.gantry.session as session_module
+
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    seen = {}
+
+    class FakeStore:
+        def __init__(self, db_path=None):
+            self.db_path = db_path
+
+        def close(self):
+            pass
+
+    class FakeInstrumented:
+        def connect_instruments(self):
+            pass
+
+        def disconnect_instruments(self):
+            pass
+
+    class FakeProtocol:
+        def execute(self, context):
+            return []
+
+    context = type("Context", (), {"gantry": FakeInstrumented()})()
+
+    def fake_create_campaign(data_store, **kwargs):
+        seen["campaign_fluid_state_id"] = kwargs.get("fluid_state_id")
+        return 78
+
+    def fake_setup_protocol(*args, **kwargs):
+        seen["setup_fluid_state_id"] = kwargs.get("fluid_state_id")
+        return FakeProtocol(), context
+
+    monkeypatch.setattr(session_module, "DataStore", FakeStore)
+    monkeypatch.setattr(session_module, "create_campaign_for_protocol_run", fake_create_campaign)
+    monkeypatch.setattr(session_module, "setup_protocol", fake_setup_protocol)
+
+    session.run_protocol(
+        gantry_path=tmp_path / "gantry.yaml",
+        deck_path=tmp_path / "deck.yaml",
+        protocol_path=tmp_path / "protocol.yaml",
+        gantry_file="gantry.yaml",
+        deck_file="deck.yaml",
+        protocol_file="protocol.yaml",
+        db_path=tmp_path / "data.db",
+        fluid_state_id=3,
+    )
+
+    assert seen["campaign_fluid_state_id"] == 3
+    assert seen["setup_fluid_state_id"] == 3
+
+
+def test_run_protocol_does_not_block_on_calibration_warning(tmp_path):
     session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
     session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
     session._calibration_warning = "settings differ"
 
-    with pytest.raises(CalibrationBlockedError):
+    # A GRBL-settings mismatch is advisory, not blocking: run_protocol must get
+    # past the calibration gate. It still fails here on the missing deck/protocol
+    # fixtures, but never with CalibrationBlockedError.
+    with pytest.raises(Exception) as excinfo:
         session.run_protocol(
             gantry_path=tmp_path / "gantry.yaml",
             deck_path=tmp_path / "deck.yaml",
@@ -660,6 +721,7 @@ def test_run_protocol_blocks_when_calibration_warning_active(tmp_path):
             deck_file="deck.yaml",
             protocol_file="protocol.yaml",
         )
+    assert not isinstance(excinfo.value, CalibrationBlockedError)
 
 
 def test_run_protocol_blocks_initial_unhealthy_gantry(tmp_path):

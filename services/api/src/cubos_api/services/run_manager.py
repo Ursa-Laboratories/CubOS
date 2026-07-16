@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import tempfile
 import threading
 import time
 import traceback
@@ -13,8 +14,13 @@ from typing import Any
 
 import yaml
 
+from cubos.data import DataStore
+from cubos.deck import load_deck_from_yaml
+from cubos.deck.errors import DeckLoaderError
+
 from cubos_api.config import CubOSSettings, get_settings
 from cubos_api.models.runs import RunRecord, RunSubmission
+from cubos_api.models.state import RunStateSelection
 from cubos_api.services.run_store import RunStore, sha256_text
 from cubos_api.services.yaml_io import resolve_config_path
 
@@ -130,12 +136,14 @@ class RunManager:
 
             gantry_yaml, deck_yaml, protocol_yaml = self._resolve_bundle(submission)
             self._validate_bundle(gantry_yaml, deck_yaml, protocol_yaml)
+            fluid_state_id = self._resolve_run_state(deck_yaml, submission.state)
             record = RunRecord(
                 run_id=run_id,
                 state="queued",
                 created_at=time.time(),
                 mock_mode=submission.mock_mode,
                 metadata=submission.metadata,
+                fluid_state_id=fluid_state_id,
             )
             self.store.create(
                 record,
@@ -216,6 +224,58 @@ class RunManager:
         if expected_deck and sha256_text(deck_yaml) != expected_deck:
             raise RunPolicyError("deck configuration digest does not match the device pin")
 
+    def _resolve_run_state(
+        self, deck_yaml: str, state: RunStateSelection | None
+    ) -> int | None:
+        """Create or resume the run's fluid state, ahead of hardware execution.
+
+        Returns ``None`` for a stateless run (``state`` omitted entirely —
+        every run submitted before Feature 07 keeps behaving exactly as it
+        did). ``cubos.data`` state exceptions (not-found, deck-fingerprint
+        mismatch, reconciliation-required) propagate unchanged so the router
+        can map each to a distinct HTTP status.
+        """
+        if state is None:
+            return None
+
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w", suffix=".yaml", delete=False, encoding="utf-8"
+            ) as tmp:
+                tmp.write(deck_yaml)
+                tmp_path = Path(tmp.name)
+            try:
+                deck = load_deck_from_yaml(tmp_path)
+            except DeckLoaderError as exc:
+                raise RunPolicyError(f"cannot load run deck: {exc}") from exc
+
+            store = DataStore(self.settings.data_db_path)
+            try:
+                if state.initial_state is not None:
+                    fluids = {
+                        key: {
+                            "volume_ul": item.volume_ul,
+                            "composition": item.composition,
+                        }
+                        for key, item in state.initial_state.fluids.items()
+                    }
+                    return store.create_fluid_state(
+                        str(tmp_path),
+                        deck,
+                        label=state.initial_state.label,
+                        initial_fluids=fluids,
+                    )
+                assert state.fluid_state_id is not None
+                return store.resume_fluid_state(
+                    state.fluid_state_id, str(tmp_path), deck
+                )
+            finally:
+                store.close()
+        finally:
+            if tmp_path is not None:
+                tmp_path.unlink(missing_ok=True)
+
     def _execute(self, run_id: str) -> None:
         from cubos_api.routers import gantry as gantry_router
 
@@ -247,6 +307,7 @@ class RunManager:
                     deck_file="deck.yaml",
                     protocol_file="protocol.yaml",
                     db_path=self.settings.data_db_path,
+                    fluid_state_id=record.fluid_state_id,
                 )
             result = _jsonable(raw_result)
             record = self.store.read(run_id) or record

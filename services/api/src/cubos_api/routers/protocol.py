@@ -264,7 +264,15 @@ def cancel_protocol_run() -> dict:
 
 @router.post("/run")
 def run_protocol_endpoint(body: RunProtocolRequest) -> dict:
-    """Run a protocol through the persistent CubOS gantry session."""
+    """Run a protocol through the persistent CubOS gantry session.
+
+    Legacy synchronous run surface, kept for compatibility. It has no
+    ``fluid_state_id``/``initial_state`` parameter and creates no durable
+    run record, so it structurally cannot select or persist fluid-state
+    linkage (Feature 07) — that requires the versioned, addressable
+    ``POST /api/v1/runs`` resource (``cubos_api.routers.runs``), which is
+    the sole hardware owner for stateful protocol execution.
+    """
     from cubos_api.routers import gantry as gantry_router
 
     settings = get_settings()

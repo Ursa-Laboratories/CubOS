@@ -19,7 +19,8 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
 from cubos.gantry import Gantry, load_gantry_from_yaml  # noqa: E402
-from cubos.gantry.origin import validate_deck_origin_minima  # noqa: E402
+from cubos.gantry.gantry_config import OriginPolicy  # noqa: E402
+from cubos.gantry.origin import validate_working_volume_origin  # noqa: E402
 from cubos.instruments.registry import get_calibration_mode  # noqa: E402
 from cubos.tools.calibration.single_instrument_calibration import (  # noqa: E402
     _assert_near_xyz,
@@ -192,16 +193,28 @@ def _updated_yaml_text(
     z_max_mm: float,
     calibration_block_height_mm: float,
     homing_pull_off_mm: float | None = None,
+    origin_policy: str = "deck_origin",
 ) -> str:
     updated = copy.deepcopy(raw_config)
-    updated["working_volume"] = {
-        "x_min": 0.0,
-        "x_max": _round_mm(measured_coords["x"]),
-        "y_min": 0.0,
-        "y_max": _round_mm(measured_coords["y"]),
-        "z_min": _round_mm(z_min_mm),
-        "z_max": _round_mm(z_max_mm),
-    }
+    if origin_policy == OriginPolicy.HOME_ORIGIN.value:
+        updated["origin_policy"] = OriginPolicy.HOME_ORIGIN.value
+        updated["working_volume"] = {
+            "x_min": _round_mm(-measured_coords["x"]),
+            "x_max": 0.0,
+            "y_min": _round_mm(-measured_coords["y"]),
+            "y_max": 0.0,
+            "z_min": _round_mm(z_min_mm - z_max_mm),
+            "z_max": 0.0,
+        }
+    else:
+        updated["working_volume"] = {
+            "x_min": 0.0,
+            "x_max": _round_mm(measured_coords["x"]),
+            "y_min": 0.0,
+            "y_max": _round_mm(measured_coords["y"]),
+            "z_min": _round_mm(z_min_mm),
+            "z_max": _round_mm(z_max_mm),
+        }
     updated["grbl_settings"] = _build_grbl_settings(
         raw_config,
         max_travel,
@@ -431,7 +444,8 @@ def run_multi_instrument_calibration(
     """Run the guided multi-instrument calibration flow."""
     gantry_path = gantry_path.resolve()
     gantry_config = load_gantry_from_yaml(gantry_path)
-    validate_deck_origin_minima(gantry_config)
+    validate_working_volume_origin(gantry_config)
+    origin_policy = OriginPolicy(gantry_config.origin_policy)
     raw_config = _load_raw_config(gantry_path)
     factory_z_travel_mm = _factory_z_travel_mm(raw_config)
     if output_gantry_path is not None:
@@ -445,7 +459,7 @@ def run_multi_instrument_calibration(
             "instrument. Non-contact instruments are calibrated after a contact "
             "instrument establishes the block reference."
         )
-    output(f"Loaded deck-origin gantry config: {gantry_path}")
+    output(f"Loaded {origin_policy.value} gantry config: {gantry_path}")
     output("Calibration overview:")
     output("  This guided routine creates the shared CubOS deck frame for all mounted instruments.")
     output("  Step 1 sets the system origin: place the origin block/artifact in the front-left")
@@ -476,7 +490,7 @@ def run_multi_instrument_calibration(
             "choose a contact-capable instrument."
         )
     if dry_run:
-        output(f"Loaded deck-origin gantry config: {gantry_path}")
+        output(f"Loaded {origin_policy.value} gantry config: {gantry_path}")
         output("Dry run only. Physical calibration flow:")
         output("  $H")
         output("  temporarily disable stale GRBL soft limits during calibration jogs")
@@ -511,7 +525,10 @@ def run_multi_instrument_calibration(
 
     output("Preflight:")
     output("  - Keep E-stop reachable; calibration can move mounted tools and changes G54 WPos.")
-    output(f"  - First/left-most tool for front-left origin: {reference_instrument}")
+    if origin_policy is OriginPolicy.HOME_ORIGIN:
+        output(f"  - First/left-most tool for back-right-top origin: {reference_instrument}")
+    else:
+        output(f"  - First/left-most tool for front-left origin: {reference_instrument}")
     if lowest_instrument is None:
         output("  - The lowest mounted tool will be selected later, after all mounted instruments are attached/verified.")
     else:
@@ -810,6 +827,7 @@ def run_multi_instrument_calibration(
             z_max_mm=z_max_mm,
             calibration_block_height_mm=z_reference_height,
             homing_pull_off_mm=homing_pull_off_mm,
+            origin_policy=origin_policy.value,
         )
         _print_yaml_block(
             title="Full calibrated multi-instrument gantry YAML to copy/paste:",

@@ -26,6 +26,7 @@ from cubos.gantry.instrument_loader import build_instrumented_gantry
 EXPECTED_TYPES = [
     "asmi",
     "camera",
+    "capper",
     "filmetrics",
     "mounted_tool",
     "pipette",

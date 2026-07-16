@@ -8,7 +8,8 @@ import DeckEditor from "./components/editor/DeckEditor";
 import GantryEditor from "./components/editor/GantryEditor";
 import ProtocolEditor from "./components/editor/ProtocolEditor";
 import DataOutputPanel from "./components/data/DataOutputPanel";
-import { settingsApi, deckApi, protocolApi, gantryApi } from "./api/client";
+import StatePanel from "./components/state/StatePanel";
+import { settingsApi, deckApi, protocolApi, gantryApi, runsApi } from "./api/client";
 import { useDeckConfigs, useDeck, useSaveDeck } from "./hooks/useDeck";
 import {
   useGantryPosition,
@@ -21,6 +22,8 @@ import {
 } from "./hooks/useGantryPosition";
 import { useProtocolCommands, useProtocolConfigs, useProtocol, useSaveProtocol, useValidateProtocolSetup, useRunStatus } from "./hooks/useProtocol";
 import { useExperimentData } from "./hooks/useExperimentData";
+import { useFluidStates } from "./hooks/useFluidState";
+import { buildSeedFluids, validateSeedRows } from "./utils/fluidSeeds";
 import type {
   DeckResponse,
   WellPosition,
@@ -30,6 +33,9 @@ import type {
   GantryResponse,
   WorkingVolume,
   ProtocolRunResponse,
+  FluidStateChoice,
+  RunRecord,
+  RunStateSelection,
 } from "./types";
 import type { SettingsResponse } from "./api/client";
 import * as theme from "./theme";
@@ -40,6 +46,37 @@ function configDirFromSettings(settings: SettingsResponse): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const RUN_TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
+
+// Feature 07: translate the operator's create-new/resume-existing choice
+// into the run submission's `state` selection. "none" (never made a
+// choice) returns undefined, keeping submission on the legacy stateless
+// path — see handleRunProtocol.
+function buildStateSelection(choice: FluidStateChoice): RunStateSelection | undefined {
+  if (choice.mode === "new") {
+    const label = choice.newLabel.trim();
+    // Seed per-container starting volumes from the operator's rows. No rows
+    // → `{}`, keeping the original empty-state behavior byte-identical.
+    return { initial_state: { label: label || undefined, fluids: buildSeedFluids(choice.seeds) } };
+  }
+  if (choice.mode === "resume" && choice.resumeId !== null) {
+    return { fluid_state_id: choice.resumeId };
+  }
+  return undefined;
+}
+
+async function pollVersionedRun(runId: string, maxWaitMs = 30 * 60 * 1000): Promise<RunRecord> {
+  const deadline = Date.now() + maxWaitMs;
+  for (;;) {
+    const record = await runsApi.get(runId);
+    if (RUN_TERMINAL_STATES.has(record.state)) return record;
+    if (Date.now() > deadline) {
+      throw new Error(`Run ${runId} did not finish within ${Math.round(maxWaitMs / 1000)}s.`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
 }
 
 function errorHasStatus(error: unknown, status: number): boolean {
@@ -55,7 +92,7 @@ const WORKING_DECK_FILENAME = "panda-deck.yaml";
 
 export default function App() {
   const qc = useQueryClient();
-  const [activeView, setActiveView] = useState<"Workflow" | "Results">("Workflow");
+  const [activeView, setActiveView] = useState<"Workflow" | "Visualize" | "State" | "Results">("Workflow");
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
@@ -70,6 +107,18 @@ export default function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isCancelingRun, setIsCancelingRun] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  // Feature 07: explicit create-new-state vs resume-existing-state choice.
+  // "none" (the default) is a stateless run through the unchanged legacy
+  // /protocol/run flow; "new"/"resume" route submission through the
+  // versioned /api/v1/runs resource instead, so activeRunId tracks which
+  // resource owns the in-flight run for cancellation.
+  const [fluidStateChoice, setFluidStateChoice] = useState<FluidStateChoice>({
+    mode: "none",
+    newLabel: "",
+    resumeId: null,
+    seeds: [],
+  });
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
 
   // Load the local config directory on mount.
   React.useEffect(() => {
@@ -134,6 +183,7 @@ export default function App() {
   const protocolRunActive = isRunning || serverRunActive;
   const gantryPosition = useGantryPosition(true);
   const experimentData = useExperimentData();
+  const fluidStates = useFluidStates();
 
   // Local working copies of each editor's edits, kept in App state so
   // they survive tab switches (each editor unmounts on tab-away, which
@@ -222,7 +272,6 @@ export default function App() {
 
   const displayGantry = localGantry ?? gantryQuery.data ?? null;
   const gantryConnected = gantryPosition.data?.connected ?? false;
-  const calibrationWarning = gantryPosition.data?.calibration_warning ?? null;
   const workingVolume: WorkingVolume | null = displayGantry?.config.working_volume ?? null;
   const yAxisMotion = displayGantry?.config.cnc?.y_axis_motion ?? "head";
   const machineXRange: [number, number] = workingVolume
@@ -328,9 +377,21 @@ export default function App() {
       setRunError("Connect gantry before running a protocol.");
       return;
     }
-    if (calibrationWarning) {
+    if (fluidStateChoice.mode === "new") {
+      // Catch bad seed rows (negative volumes, mismatched composition sums,
+      // duplicate containers) before submit so the operator gets an inline
+      // message instead of a server 4xx.
+      const seedErrors = validateSeedRows(fluidStateChoice.seeds);
+      if (seedErrors.length > 0) {
+        setRunResult(null);
+        setRunError(`Fix the fluid-state seed rows before running: ${seedErrors.join(" ")}`);
+        return;
+      }
+    }
+    const state = buildStateSelection(fluidStateChoice);
+    if (fluidStateChoice.mode === "resume" && !state) {
       setRunResult(null);
-      setRunError(calibrationWarning);
+      setRunError("Select a fluid state to resume before running.");
       return;
     }
     setIsRunning(true);
@@ -338,19 +399,57 @@ export default function App() {
     setRunResult(null);
     setRunError(null);
     qc.setQueryData(["protocol", "run-status"], { active: true, protocol_file: protocolFile });
+
+    if (!state) {
+      // No state choice was made: byte-identical to the pre-Feature-07
+      // stateless flow, through the legacy synchronous endpoint.
+      try {
+        const result = await protocolApi.run({
+          gantry_file: gantryFile,
+          deck_file: deckFile,
+          protocol_file: protocolFile,
+        });
+        setRunResult(result);
+        qc.invalidateQueries({ queryKey: ["data", "campaigns"] });
+      } catch (err: unknown) {
+        setRunError(err instanceof Error ? err.message : String(err));
+      } finally {
+        setIsRunning(false);
+        setIsCancelingRun(false);
+        qc.invalidateQueries({ queryKey: ["protocol", "run-status"] });
+      }
+      return;
+    }
+
+    // A fluid-state choice was made: only the versioned /api/v1/runs
+    // resource accepts state selection (the legacy endpoint structurally
+    // cannot), so submission and polling go through it instead.
+    const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    setActiveRunId(runId);
     try {
-      const result = await protocolApi.run({
+      const submitted = await runsApi.submit({
+        run_id: runId,
         gantry_file: gantryFile,
         deck_file: deckFile,
         protocol_file: protocolFile,
+        state,
       });
-      setRunResult(result);
+      const finalRecord = RUN_TERMINAL_STATES.has(submitted.state)
+        ? submitted
+        : await pollVersionedRun(runId);
+      if (finalRecord.state === "succeeded") {
+        setRunResult((finalRecord.result as ProtocolRunResponse | null) ?? null);
+      } else {
+        setRunError(finalRecord.error ?? `Run ended as ${finalRecord.state}.`);
+      }
       qc.invalidateQueries({ queryKey: ["data", "campaigns"] });
+      qc.invalidateQueries({ queryKey: ["fluid-states"] });
     } catch (err: unknown) {
       setRunError(err instanceof Error ? err.message : String(err));
     } finally {
       setIsRunning(false);
       setIsCancelingRun(false);
+      setActiveRunId(null);
       qc.invalidateQueries({ queryKey: ["protocol", "run-status"] });
     }
   };
@@ -360,8 +459,13 @@ export default function App() {
     setIsCancelingRun(true);
     setRunError(null);
     try {
-      const result = await protocolApi.cancelRun();
-      setRunError(result.warning ? `Protocol cancellation requested: ${result.warning}` : "Protocol cancellation requested.");
+      if (activeRunId) {
+        await runsApi.cancel(activeRunId);
+        setRunError("Protocol cancellation requested.");
+      } else {
+        const result = await protocolApi.cancelRun();
+        setRunError(result.warning ? `Protocol cancellation requested: ${result.warning}` : "Protocol cancellation requested.");
+      }
     } catch (err: unknown) {
       setRunError(`Cancel failed: ${err instanceof Error ? err.message : String(err)}`);
       setIsCancelingRun(false);
@@ -393,7 +497,7 @@ export default function App() {
         </div>
       </div>
       <div style={viewToggleStyle} aria-label="Workspace view">
-        {(["Workflow", "Results"] as const).map((view) => (
+        {(["Workflow", "Visualize", "State", "Results"] as const).map((view) => (
           <button
             key={view}
             type="button"
@@ -622,17 +726,36 @@ export default function App() {
             onRun={handleRunProtocol}
             onCancelRun={handleCancelRun}
             unsavedConfigs={unsavedConfigs}
-            canRun={gantryConnected && !calibrationWarning}
-            runDisabledReason={calibrationWarning}
+            canRun={gantryConnected}
+            runDisabledReason={null}
             isRunning={protocolRunActive}
             isCancelingRun={isCancelingRun}
             runResult={runResult}
             runError={runError}
+            fluidStateChoice={fluidStateChoice}
+            onFluidStateChoiceChange={setFluidStateChoice}
+            availableFluidStates={fluidStates.data ?? []}
           />
         </>
           )}
         </>
       )}
+      {activeView === "Visualize" && (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+          <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Deck Visualization</h3>
+          <div style={{ flex: "1 1 auto", minHeight: 0 }}>
+            <DeckVisualization
+              deck={displayDeck}
+              instruments={displayGantry?.config.instruments ?? null}
+              gantryPosition={gantryPosition.data ?? null}
+              machineXRange={machineXRange}
+              machineYRange={machineYRange}
+              yAxisMotion={yAxisMotion}
+            />
+          </div>
+        </div>
+      )}
+      {activeView === "State" && <StatePanel />}
       {activeView === "Results" && (
         <DataOutputPanel
           campaigns={experimentData.data ?? []}

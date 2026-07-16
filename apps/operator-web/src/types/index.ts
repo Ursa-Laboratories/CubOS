@@ -203,6 +203,8 @@ export interface GrblSettingsConfig {
   max_travel_z?: number | null;
 }
 
+export type OriginPolicy = "deck_origin" | "home_origin";
+
 export interface GantryConfig {
   serial_port: string;
   gantry_type: "cub" | "cub_xl";
@@ -210,6 +212,11 @@ export interface GantryConfig {
   working_volume: WorkingVolume;
   grbl_settings?: GrblSettingsConfig | null;
   instruments: Record<string, InstrumentConfig>;
+  // Selects which physical corner WPos zero is calibrated to. Absent means
+  // "deck_origin" (existing behavior: WPos zero at the front-left-bottom,
+  // workspace nonnegative). See calibrationMath.buildCalibratedConfig for
+  // how this changes the emitted working_volume sign convention.
+  origin_policy?: OriginPolicy;
 }
 
 export interface GantryResponse {
@@ -348,4 +355,212 @@ export interface ProtocolSetupValidationRequest {
   gantry_file: string;
   deck_file: string;
   protocol_file: string;
+}
+
+// ── Fluid/tip/cap state (Feature 07) ────────────────────────────────────
+
+export type RunState = "queued" | "running" | "cancel_requested" | "succeeded" | "failed" | "cancelled";
+
+export interface RunRecord {
+  run_id: string;
+  state: RunState;
+  created_at: number;
+  started_at: number | null;
+  finished_at: number | null;
+  mock_mode: boolean;
+  metadata: Record<string, unknown>;
+  digests: Record<string, string>;
+  result: unknown;
+  error: string | null;
+  artifacts: string[];
+  fluid_state_id: number | null;
+}
+
+export interface FluidSeedItem {
+  volume_ul: number;
+  composition?: Record<string, number> | null;
+}
+
+export interface InitialStateSeed {
+  label?: string | null;
+  fluids: Record<string, FluidSeedItem>;
+}
+
+export type RunStateSelection =
+  | { initial_state: InitialStateSeed; fluid_state_id?: undefined }
+  | { fluid_state_id: number; initial_state?: undefined };
+
+export interface RunSubmissionBody {
+  run_id: string;
+  gantry_file: string;
+  deck_file: string;
+  protocol_file: string;
+  mock_mode?: boolean;
+  metadata?: Record<string, unknown>;
+  state?: RunStateSelection;
+}
+
+export interface FluidStateSummary {
+  id: number;
+  label: string | null;
+  deck_path: string;
+  deck_fingerprint: string;
+  created_at: string;
+  updated_at: string;
+  container_count: number;
+  operation_count: number;
+}
+
+export interface ContainerView {
+  labware_key: string;
+  location_id: string;
+  labware_type: string;
+  capacity_ul: number;
+  working_volume_ul: number;
+  current_volume_ul: number;
+  composition: Record<string, number>;
+  version: number;
+  updated_at: string;
+  role?: string | null;
+  solution?: string | null;
+  allowed_solutions?: string[] | null;
+}
+
+export interface FluidStateDetail {
+  id: number;
+  deck_path: string;
+  deck_fingerprint: string;
+  label: string | null;
+  created_at: string;
+  updated_at: string;
+  containers: ContainerView[];
+  pending_operation_count: number;
+  reconciliation_required_count: number;
+}
+
+export interface TipContainerView {
+  rack_key: string;
+  slot_id: string;
+  status: string;
+  tip_length_mm: number;
+  version: number;
+  updated_at: string;
+}
+
+export interface PipetteAttachmentView {
+  pipette_key: string;
+  rack_key: string | null;
+  slot_id: string | null;
+  tip_extension_mm: number | null;
+  contents_known_empty: boolean;
+  attachment_uncertain: boolean;
+  updated_at: string;
+}
+
+export interface TipStateResponse {
+  fluid_state_id: number;
+  containers: TipContainerView[];
+  pipette: PipetteAttachmentView;
+}
+
+export interface CapContainerView {
+  labware_key: string;
+  location_id: string;
+  status: string;
+  version: number;
+  updated_at: string;
+}
+
+export interface CapStateResponse {
+  fluid_state_id: number;
+  containers: CapContainerView[];
+}
+
+export type StateDomain = "fluid" | "tip" | "cap";
+
+export interface OperationView {
+  domain: StateDomain;
+  id: number;
+  operation_key: string;
+  operation_type: string;
+  status: string;
+  campaign_id: number | null;
+  detail: string | null;
+  created_at: string;
+  updated_at: string;
+  applied_at: string | null;
+  context: Record<string, unknown>;
+}
+
+export interface OperationsResponse {
+  fluid_state_id: number;
+  operations: OperationView[];
+}
+
+export interface ReconciliationResponse {
+  fluid_state_id: number;
+  items: OperationView[];
+}
+
+export interface ResolveReconciliationRequest {
+  domain: StateDomain;
+  operation_key: string;
+  resolution: string;
+  operator: string;
+  reason: string;
+  source_volume_ul?: number | null;
+  source_composition?: Record<string, number> | null;
+  destination_volume_ul?: number | null;
+  destination_composition?: Record<string, number> | null;
+  final_slot_status?: string | null;
+  final_status?: string | null;
+}
+
+export interface ResolveReconciliationResponse {
+  domain: StateDomain;
+  operation_key: string;
+  status: string;
+  detail: string | null;
+}
+
+export interface CreateFluidStateRequest {
+  deck_file: string;
+  label?: string | null;
+  fluids?: Record<string, FluidSeedItem>;
+}
+
+// Run-submission state choice, owned by App.tsx and threaded into
+// ProtocolEditor. "none" preserves the exact pre-Feature-07 run flow;
+// "new"/"resume" require an explicit operator choice before Run is
+// enabled, and route submission through the versioned /api/v1/runs
+// resource instead of the legacy synchronous endpoint.
+export type FluidStateChoiceMode = "none" | "new" | "resume";
+
+// One component of a seed row's composition, kept as raw input strings so
+// the controlled inputs can hold partial/empty values while editing. Parsed
+// and validated only when the run payload is assembled (see utils/fluidSeeds).
+export interface CompositionSeedRow {
+  id: string;
+  component: string;
+  volume: string;
+}
+
+// One "New fluid state" seed row: a container target plus its starting
+// volume and optional composition breakdown. Volumes stay as strings for
+// the same controlled-input reason as CompositionSeedRow.
+export interface FluidSeedRow {
+  id: string;
+  container: string;
+  volume: string;
+  composition: CompositionSeedRow[];
+}
+
+export interface FluidStateChoice {
+  mode: FluidStateChoiceMode;
+  newLabel: string;
+  resumeId: number | null;
+  // Per-container starting volumes for a "new" fluid state. Empty (the
+  // default) sends `fluids: {}`, preserving the pre-Feature-07b empty-state
+  // behavior. Only consulted when `mode === "new"`.
+  seeds: FluidSeedRow[];
 }

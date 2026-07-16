@@ -1,0 +1,63 @@
+# GENERATED FILE -- do not hand-edit. See panda_imported_deck.yaml's header.
+#
+# Hover-only positional tour: home, then visit every imported labware
+# target at the gantry's safe_z (deck-target moves never descend), then
+# home again. No aspirate/dispense/measure -- this is a bring-up sanity
+# tour, not a working protocol.
+#
+# Uses `instrument: camera` (0 offset, 0 depth) for every step, including
+# the electrode-frame e1 vial. The imported deck already stores GANTRY-
+# frame coordinates (see panda_imported_deck.yaml's header), so a
+# zero-offset instrument hovers the gantry reference directly over each
+# stored point. Using `instrument: pipette` here would double-apply the
+# pipette's mounting offset on top of the frame conversion already baked
+# into the deck YAML.
+
+protocol:
+- home: null
+- move:
+    instrument: camera
+    position: ito_pama_plate.A1
+- move:
+    instrument: camera
+    position: ito_pama_plate.C4
+- move:
+    instrument: camera
+    position: tip_rack.A1
+- move:
+    instrument: camera
+    position: tip_rack.B12
+- move:
+    instrument: camera
+    position: s1
+- move:
+    instrument: camera
+    position: s2
+- move:
+    instrument: camera
+    position: s3
+- move:
+    instrument: camera
+    position: s4
+- move:
+    instrument: camera
+    position: s5
+- move:
+    instrument: camera
+    position: s6
+- move:
+    instrument: camera
+    position: w1
+- move:
+    instrument: camera
+    position: w2
+- move:
+    instrument: camera
+    position: w3
+- move:
+    instrument: camera
+    position: e1
+- move:
+    instrument: camera
+    position: tip_disposal.discard
+- home: null

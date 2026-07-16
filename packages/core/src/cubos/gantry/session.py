@@ -590,18 +590,16 @@ class GantrySession:
         deck_file: str,
         protocol_file: str,
         db_path: str | Path | None = None,
+        fluid_state_id: int | None = None,
     ) -> ProtocolRunResult:
         context = None
         data_store = None
         with self._lock:
             gantry = self._require_connected()
-            if self._calibration_warning:
-                raise CalibrationBlockedError(
-                    "Gantry calibration warning is active. Calibration and jog "
-                    "recovery remain available, but protocol runs are blocked "
-                    "until the selected gantry YAML matches the controller. "
-                    f"{self._calibration_warning}"
-                )
+            # A GRBL-settings mismatch (self._calibration_warning) is advisory,
+            # not blocking: commissioning machines legitimately differ from the
+            # selected gantry YAML, and the operator owns that decision. The
+            # warning is still computed and surfaced; it no longer blocks runs.
             if not gantry.is_healthy():
                 raise GantrySessionHealthCheckError("Gantry is not connected")
 
@@ -614,6 +612,7 @@ class GantrySession:
                     gantry_file=gantry_file,
                     deck_file=deck_file,
                     protocol_file=protocol_file,
+                    fluid_state_id=fluid_state_id,
                 )
                 protocol, context = setup_protocol(
                     gantry_path,
@@ -622,6 +621,7 @@ class GantrySession:
                     gantry=gantry,
                     data_store=data_store,
                     campaign_id=campaign_id,
+                    fluid_state_id=fluid_state_id,
                 )
                 gantry.prepare_for_protocol_run()
                 context.gantry.connect_instruments()

@@ -250,6 +250,56 @@ export const protocolApi = {
     request<import("../types").ProtocolRunStatus>("/protocol/run-status"),
 };
 
+// Versioned async runs resource (Feature 07: the only submission path that
+// accepts fluid-state selection — see protocolApi.run above for the legacy
+// synchronous, stateless path)
+export const runsApi = {
+  submit: (body: import("../types").RunSubmissionBody) =>
+    request<import("../types").RunRecord>("/runs", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  get: (runId: string) => request<import("../types").RunRecord>(`/runs/${runId}`),
+  cancel: (runId: string) =>
+    request<import("../types").RunRecord>(`/runs/${runId}/cancel`, {
+      method: "POST",
+    }),
+};
+
+// Fluid/tip/cap state (Feature 07)
+export const fluidStateApi = {
+  create: (body: import("../types").CreateFluidStateRequest) =>
+    request<import("../types").FluidStateSummary>("/fluid-states", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  list: () => request<import("../types").FluidStateSummary[]>("/fluid-states"),
+  get: (fluidStateId: number) =>
+    request<import("../types").FluidStateDetail>(`/fluid-states/${fluidStateId}`),
+  getContainers: (fluidStateId: number) =>
+    request<import("../types").ContainerView[]>(`/fluid-states/${fluidStateId}/containers`),
+  getTips: (fluidStateId: number) =>
+    request<import("../types").TipStateResponse>(`/fluid-states/${fluidStateId}/tips`),
+  getCaps: (fluidStateId: number) =>
+    request<import("../types").CapStateResponse>(`/fluid-states/${fluidStateId}/caps`),
+  getOperations: (fluidStateId: number, pendingOnly = true) =>
+    request<import("../types").OperationsResponse>(
+      `/fluid-states/${fluidStateId}/operations?pending_only=${pendingOnly}`,
+    ),
+  getReconciliation: (fluidStateId: number) =>
+    request<import("../types").ReconciliationResponse>(
+      `/fluid-states/${fluidStateId}/reconciliation`,
+    ),
+  resolveReconciliation: (
+    fluidStateId: number,
+    body: import("../types").ResolveReconciliationRequest,
+  ) =>
+    request<import("../types").ResolveReconciliationResponse>(
+      `/fluid-states/${fluidStateId}/reconciliation/resolve`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+};
+
 // Settings
 export const settingsApi = {
   get: () => request<SettingsResponse>("/settings"),

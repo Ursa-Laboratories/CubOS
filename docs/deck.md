@@ -110,6 +110,104 @@ override `vial_model_name`, `vial_height`, `vial_diameter`, `capacity_ul`, or
 `working_volume_ul`. Calibration remains deck-specific even when every other
 value comes from the definition.
 
+Vial-like labware may also declare an unreachable residual volume:
+`dead_volume_ul` on a `vial` (and nested holder vials), or
+`vial_dead_volume_ul` on a `vial_grid` (applied to every vial in the grid).
+It is optional and defaults to `0`. Tracked `transfer` steps refuse to draw a
+source below this floor before any motion, and state-derived aspiration
+heights never descend beneath the level at which this volume remains.
+
+## Container Role And Solution Identity
+
+Vial-like labware may declare generic, machine-agnostic metadata that the
+compound liquid-handling commands (`rinse_well`, `flush_pipette`,
+`purge_pipette`, `clear_well` -- see [Protocol YAML: Compound liquid
+commands](protocol-yaml.md#compound-liquid-commands)) use for automatic
+container selection instead of naming a specific vial ID:
+
+- `role` -- one of `stock`, `waste`, `process`, `rinse` (see
+  `cubos.deck.labware.container_role.KNOWN_CONTAINER_ROLES`). `stock`
+  containers are automatic-selection sources; `waste` containers are
+  automatic-selection sinks. `process`/`rinse` are not yet consumed by any
+  automatic-selection command but are recognized, reserved roles.
+- `solution` -- the canonical solution identity (e.g. `water`), distinct
+  from any display `label`/alias. Automatic stock selection matches a
+  requested `solution=` against this field.
+- `allowed_solutions` -- optional, waste containers only: a list of solution
+  identities this container may receive. Omitted (the default) means
+  accept-all.
+
+```yaml
+labware:
+  water_stock:
+    type: vial
+    name: water_stock
+    role: stock
+    solution: water
+    height: 57.0
+    diameter: 28.0
+    location: {x: -50.0, y: -10.0, z: -70.0}
+    capacity_ul: 5000.0
+    working_volume_ul: 4500.0
+    dead_volume_ul: 200.0
+
+  aqueous_waste:
+    type: vial
+    name: aqueous_waste
+    role: waste
+    allowed_solutions: [water, buffer]
+    height: 57.0
+    diameter: 28.0
+    location: {x: -50.0, y: -40.0, z: -70.0}
+    capacity_ul: 5000.0
+    working_volume_ul: 4500.0
+```
+
+`vial_grid` uses grid-uniform `vial_role`/`vial_solution`/
+`vial_allowed_solutions` fields (applied to every position, mirroring
+`vial_dead_volume_ul`). All three fields are optional and default to
+unset/accept-all; a vial with no `role` is simply never a candidate for
+automatic selection.
+
+## Cap State
+
+A vial (or vial-grid position) opts into durable capper tracking by
+setting `capped` explicitly — `true` if it starts physically capped,
+`false` if uncapped:
+
+```yaml
+labware:
+  reagent:
+    type: vial
+    name: reagent
+    capped: true
+    height: 40.0
+    diameter: 15.0
+    location: {x: 5.0, y: 5.0, z: 20.0}
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+```
+
+`vial_grid` uses a grid-uniform `vial_capped` field, mirroring
+`vial_role`/`vial_dead_volume_ul`. Leaving `capped` unset (the default)
+means the vial has **no** durable cap state at all — it is not
+capper-managed, and neither the `decap`/`cap` protocol commands nor a
+`transfer`'s `require_uncapped` check constrain it. `capped` participates
+in the fluid-state session fingerprint exactly like `role`/`solution`: a
+deck edit that changes it invalidates an old durable session, so a fresh
+one seeds from the new value.
+
+At runtime the durable state is one of `capped`, `uncapped`, or
+`reconciliation_required` (see [Fluid State
+Tracking](fluid-state.md) for the create/resume session lifecycle this
+hangs off of, and [Protocol YAML: Capper
+commands](protocol-yaml.md#capper-commands) for `decap`/`cap` and
+`transfer`'s `require_uncapped`). `reconciliation_required` means a
+`decap`/`cap` action's physical outcome was uncertain (sensor timeout or
+a contradictory reading) — an operator must resolve it (via
+`DataStore.resolve_cap_operation`) before that vial can be decapped,
+capped, or referenced by a `require_uncapped` check again.
+
 ## Existing Nested Deck Files
 
 Existing deck YAML files do not need to be rewritten. CubOS continues to load

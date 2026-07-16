@@ -95,6 +95,7 @@ export default function CalibrationWizard({
 
   const filename = gantry?.filename ?? "";
   const config = gantry?.config ?? null;
+  const originPolicy = config?.origin_policy ?? "deck_origin";
   const instruments = useMemo(() => Object.keys(config?.instruments ?? {}), [config]);
   const nonContactInstruments = useMemo(
     () => instruments.filter((name) => isNonContactInstrument(config?.instruments[name]?.type)),
@@ -749,7 +750,7 @@ export default function CalibrationWizard({
           <div>
             <h2 style={{ margin: 0, fontSize: 18, color: theme.color.ink, letterSpacing: "-0.01em" }}>Calibrate gantry</h2>
             <div style={{ marginTop: 3, fontSize: 12, color: theme.color.textMuted }}>
-              {filename || "No file selected"} · {isMulti ? "multi-instrument board" : "single-instrument deck origin"}
+              {filename || "No file selected"} · {isMulti ? "multi-instrument board" : originPolicy === "home_origin" ? "single-instrument home origin" : "single-instrument deck origin"}
             </div>
           </div>
           <div style={headerActionsStyle}>
@@ -895,7 +896,9 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Set Origin</h3>
                 <p style={instructionStyle}>
-                  Place your calibration reference at the front-left-most point your protocols will use — the calibration block at the deck corner, or a fixed feature such as the corner-most well of a plate. Jog the tool until it just touches the top of the reference surface, then continue.
+                  {originPolicy === "home_origin"
+                    ? "Place your calibration reference at the back-right-top-most point your protocols will use — the calibration block at the deck corner, or a fixed feature such as the corner-most well of a plate. Jog the tool until it just touches the top of the reference surface, then continue."
+                    : "Place your calibration reference at the front-left-most point your protocols will use — the calibration block at the deck corner, or a fixed feature such as the corner-most well of a plate. Jog the tool until it just touches the top of the reference surface, then continue."}
                 </p>
                 <JogPanel
                   xyStep={xyStep}
@@ -927,7 +930,9 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Set XY Origin</h3>
                 <p style={instructionStyle}>
-                  Place the calibration block at the front-left origin. Use the jog controls until the active tool point is over the mark, then set X=0 and Y=0.
+                  {originPolicy === "home_origin"
+                    ? "Place the calibration block at the back-right-top origin. Use the jog controls until the active tool point is over the mark, then set X=0 and Y=0."
+                    : "Place the calibration block at the front-left origin. Use the jog controls until the active tool point is over the mark, then set X=0 and Y=0."}
                 </p>
                 <JogPanel
                   xyStep={xyStep}

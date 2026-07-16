@@ -1,0 +1,51 @@
+# GENERATED FILE -- do not hand-edit. See panda_imported_deck.yaml's header.
+#
+# Seeded from surviving PANDA-BEAR vials' recorded volume + contents.
+# A few production rows have a contents JSON that doesn't sum to their
+# own volume column; those are rescaled proportionally to match volume_ul
+# and flagged as a `vial_contents_volume_mismatch` warning in the
+# conflict report (cubos.data.fluid_state.load_initial_fluids requires
+# composition to sum exactly to volume_ul).
+
+fluids:
+  e1:
+    composition:
+      ebath: 15000.0
+    volume_ul: 15000.0
+  s1:
+    composition:
+      water: 6500.0
+    volume_ul: 6500.0
+  s2:
+    composition:
+      dmfc: 2500.0
+    volume_ul: 2500.0
+  s3:
+    composition:
+      electrolyte: 4242.0
+    volume_ul: 4242.0
+  s4:
+    composition: {}
+    volume_ul: 0.0
+  s5:
+    composition:
+      dmf: 14400.0
+    volume_ul: 14400.0
+  s6:
+    composition:
+      acn: 2100.0
+    volume_ul: 2100.0
+  w1:
+    composition:
+      dmfc: 3600.0
+    volume_ul: 3600.0
+  w2:
+    composition:
+      acn: 6300.0
+      dmf: 13500.0
+    volume_ul: 19800.0
+  w3:
+    composition:
+      acn: 3600.0
+      dmf: 8100.0
+    volume_ul: 11700.0

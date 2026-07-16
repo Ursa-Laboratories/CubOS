@@ -11,7 +11,7 @@ from cubos.deck.labware.vial import Vial
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.deck.labware.well_plate_holder import WellPlateHolder
 from cubos.instruments.base_instrument import BaseInstrument
-from cubos.gantry.gantry_config import GantryConfig, GantryType, WorkingVolume
+from cubos.gantry.gantry_config import GantryConfig, GantryType, OriginPolicy, WorkingVolume
 from cubos.protocol_engine.protocol import Protocol, ProtocolStep
 from cubos.validation.bounds import (
     collect_protocol_motion_targets,
@@ -33,6 +33,7 @@ def _make_gantry(
     z_max: float = 80.0,
     factory_z_travel_mm: float = 90.0,
     safe_z: float | None = None,
+    origin_policy: OriginPolicy = OriginPolicy.DECK_ORIGIN,
 ) -> GantryConfig:
     return GantryConfig(
         serial_port="/dev/ttyUSB0",
@@ -44,6 +45,19 @@ def _make_gantry(
             z_min=z_min, z_max=z_max,
         ),
         safe_z=safe_z,
+        origin_policy=origin_policy,
+    )
+
+
+def _make_signed_gantry(*, safe_z: float | None = -5.0) -> GantryConfig:
+    """Home-origin gantry matching the mock_panda_signed.yaml fixture bounds."""
+    return _make_gantry(
+        x_min=-400.0, x_max=0.0,
+        y_min=-300.0, y_max=0.0,
+        z_min=-100.0, z_max=0.0,
+        factory_z_travel_mm=100.0,
+        safe_z=safe_z,
+        origin_policy=OriginPolicy.HOME_ORIGIN,
     )
 
 
@@ -498,3 +512,114 @@ class TestValidateProtocolMotionBounds:
             "A1.indentation_limit_z",
         ]
         assert targets[-1].z == 15.0
+
+
+# ── Signed (home_origin) working-volume bounds ──────────────────────────
+
+
+class TestSignedWorkingVolumeBounds:
+    """Bounds checks for a home_origin gantry (non-positive working volume)."""
+
+    def test_targets_on_every_negative_axis_are_accepted(self):
+        gantry = _make_signed_gantry()
+        deck = _make_deck(vial=_make_vial(x=-30.0, y=-40.0, z=-20.0))
+        instrumented_gantry = _make_instrumented_gantry(("probe", _make_instrument()))
+        protocol = _make_protocol(
+            "measure", instrument="probe", position="vial", measurement_height=0.0,
+        )
+
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry) == []
+
+    def test_move_target_on_every_negative_axis_is_accepted(self):
+        gantry = _make_signed_gantry()
+        deck = _make_deck()
+        instrumented_gantry = _make_instrumented_gantry(("probe", _make_instrument()))
+        protocol = Protocol(
+            [
+                ProtocolStep(
+                    index=0,
+                    command_name="move",
+                    handler=MagicMock(),
+                    args={
+                        "instrument": "probe",
+                        "position": [-30.0, -40.0, -20.0],
+                        "travel_z": -5.0,
+                    },
+                ),
+            ],
+        )
+
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry) == []
+
+    def test_target_above_zero_is_rejected(self):
+        gantry = _make_signed_gantry()
+        deck = _make_deck(vial=_make_vial(x=10.0, y=-40.0, z=-20.0))
+        instrumented_gantry = _make_instrumented_gantry(("probe", _make_instrument()))
+        protocol = _make_protocol(
+            "measure", instrument="probe", position="vial", measurement_height=0.0,
+        )
+
+        violations = validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry)
+
+        assert violations
+        assert any(v.axis == "x" and v.bound_name == "x_max" for v in violations)
+
+    def test_target_below_configured_minimum_is_rejected(self):
+        gantry = _make_signed_gantry()
+        deck = _make_deck(vial=_make_vial(x=-30.0, y=-40.0, z=-150.0))
+        instrumented_gantry = _make_instrumented_gantry(("probe", _make_instrument()))
+        protocol = _make_protocol(
+            "measure", instrument="probe", position="vial", measurement_height=0.0,
+        )
+
+        violations = validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry)
+
+        assert violations
+        assert any(v.axis == "z" and v.bound_name == "z_min" for v in violations)
+
+
+class TestSignedTipRackPickupBounds:
+    """pickup_z targets must be bounds-checked in both frame policies."""
+
+    def _make_tip_rack(self, *, pickup_z: float) -> "TipRack":
+        from cubos.deck.labware.tip_rack import TipRack
+
+        return TipRack(
+            name="tips",
+            model_name="tip_rack",
+            rows=1,
+            columns=1,
+            pickup_z=pickup_z,
+            tip_length=10.0,
+            tips={"A1": Coordinate3D(x=-30.0, y=-40.0, z=pickup_z)},
+        )
+
+    def test_signed_pickup_z_within_signed_volume_is_accepted(self):
+        gantry = _make_signed_gantry()
+        deck = _make_deck(tips=self._make_tip_rack(pickup_z=-20.0))
+        instrumented_gantry = _make_instrumented_gantry(("pipette", _make_instrument()))
+        protocol = _make_protocol("pick_up_tip", instrument="pipette", position="tips.A1")
+
+        assert validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry) == []
+
+    def test_out_of_volume_pickup_z_rejected_for_positive_config(self):
+        gantry = _make_gantry(z_min=0.0, z_max=80.0, safe_z=80.0)
+        deck = _make_deck(tips=self._make_tip_rack(pickup_z=150.0))
+        instrumented_gantry = _make_instrumented_gantry(("pipette", _make_instrument()))
+        protocol = _make_protocol("pick_up_tip", instrument="pipette", position="tips.A1")
+
+        violations = validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry)
+
+        assert violations
+        assert any(v.axis == "z" for v in violations)
+
+    def test_out_of_volume_pickup_z_rejected_for_signed_config(self):
+        gantry = _make_signed_gantry()
+        deck = _make_deck(tips=self._make_tip_rack(pickup_z=-150.0))
+        instrumented_gantry = _make_instrumented_gantry(("pipette", _make_instrument()))
+        protocol = _make_protocol("pick_up_tip", instrument="pipette", position="tips.A1")
+
+        violations = validate_protocol_motion_bounds(gantry, protocol, deck, instrumented_gantry)
+
+        assert violations
+        assert any(v.axis == "z" and v.bound_name == "z_min" for v in violations)

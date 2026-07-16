@@ -9,11 +9,58 @@ from threading import Event
 from tests.api_client import api_request
 from cubos_api.app import create_app
 from cubos_api.config import get_settings
+from cubos_api.services.run_manager import reset_run_manager
 
 
 GANTRY_YAML = "name: test-gantry\n"
 DECK_YAML = "labware: {}\n"
 PROTOCOL_YAML = "protocol:\n  - home: null\n"
+
+STATE_DECK_YAML = """\
+labware:
+  source:
+    type: vial
+    name: source
+    model_name: source_vial
+    height: 50.0
+    diameter: 20.0
+    location: {x: 5.0, y: 5.0, z: 20.0}
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+
+  waste:
+    type: vial
+    name: waste
+    model_name: waste_vial
+    height: 50.0
+    diameter: 20.0
+    location: {x: 40.0, y: 5.0, z: 20.0}
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+"""
+
+OTHER_STATE_DECK_YAML = """\
+labware:
+  source:
+    type: vial
+    name: source
+    model_name: source_vial
+    height: 50.0
+    diameter: 20.0
+    location: {x: 5.0, y: 5.0, z: 20.0}
+    capacity_ul: 999.0
+    working_volume_ul: 900.0
+
+  waste:
+    type: vial
+    name: waste
+    model_name: waste_vial
+    height: 50.0
+    diameter: 20.0
+    location: {x: 40.0, y: 5.0, z: 20.0}
+    capacity_ul: 500.0
+    working_volume_ul: 400.0
+"""
 
 
 def _payload(run_id: str = "run-001") -> dict:
@@ -23,6 +70,16 @@ def _payload(run_id: str = "run-001") -> dict:
         "deck_config": DECK_YAML,
         "protocol_yaml": PROTOCOL_YAML,
         "metadata": {"sample": "A1"},
+    }
+
+
+def _stateful_payload(run_id: str, *, state: dict, deck_yaml: str = STATE_DECK_YAML) -> dict:
+    return {
+        "run_id": run_id,
+        "gantry_config": GANTRY_YAML,
+        "deck_config": deck_yaml,
+        "protocol_yaml": PROTOCOL_YAML,
+        "state": state,
     }
 
 
@@ -193,3 +250,198 @@ def test_missing_run_and_artifact_return_404():
         api_request(app, "GET", "/api/v1/runs/missing/artifacts/result.json").status_code
         == 404
     )
+
+
+# ── Feature 07: run submission state exclusivity ────────────────────────
+
+
+def test_run_state_selection_rejects_both_initial_state_and_existing_id():
+    app = create_app()
+    payload = _stateful_payload(
+        "state-both",
+        state={
+            "initial_state": {"fluids": {"source": {"volume_ul": 10.0}}},
+            "fluid_state_id": 1,
+        },
+    )
+    response = api_request(app, "POST", "/api/v1/runs", json=payload)
+    assert response.status_code == 422
+
+
+def test_run_state_selection_rejects_neither_initial_state_nor_existing_id():
+    app = create_app()
+    payload = _stateful_payload("state-neither", state={})
+    response = api_request(app, "POST", "/api/v1/runs", json=payload)
+    assert response.status_code == 422
+
+
+def test_run_without_state_stays_unlinked(monkeypatch):
+    """Every run submitted before Feature 07 keeps behaving identically:
+    omitting `state` entirely persists no fluid_state_id."""
+    from cubos_api.routers import gantry as gantry_router
+
+    monkeypatch.setattr(gantry_router, "run_protocol_on_session", lambda **_kwargs: {"ok": True})
+    app = create_app()
+    api_request(app, "POST", "/api/v1/runs", json=_payload("stateless"))
+    completed = _wait_for_state(app, "stateless", "succeeded")
+    assert completed["fluid_state_id"] is None
+
+
+def test_run_submission_creates_new_fluid_state_and_persists_link(monkeypatch):
+    from cubos_api.routers import gantry as gantry_router
+
+    monkeypatch.setattr(gantry_router, "run_protocol_on_session", lambda **_kwargs: {"ok": True})
+    app = create_app()
+    payload = _stateful_payload(
+        "state-new",
+        state={
+            "initial_state": {
+                "label": "run-seeded",
+                "fluids": {"source": {"volume_ul": 50.0, "composition": {"water": 50.0}}},
+            }
+        },
+    )
+    response = api_request(app, "POST", "/api/v1/runs", json=payload)
+    assert response.status_code == 202
+    fluid_state_id = response.json()["fluid_state_id"]
+    assert isinstance(fluid_state_id, int)
+
+    completed = _wait_for_state(app, "state-new", "succeeded")
+    assert completed["fluid_state_id"] == fluid_state_id
+
+    snapshot = api_request(app, "GET", f"/api/v1/fluid-states/{fluid_state_id}")
+    assert snapshot.status_code == 200
+    assert snapshot.json()["label"] == "run-seeded"
+
+
+def test_run_execution_receives_fluid_state_id(monkeypatch):
+    """The linked fluid state must reach the execution context, not just the
+    run record — otherwise runs silently execute untracked (no volume
+    journaling, no state-derived liquid heights)."""
+    from cubos_api.routers import gantry as gantry_router
+
+    seen_kwargs = {}
+
+    def capture(**kwargs):
+        seen_kwargs.update(kwargs)
+        return {"ok": True}
+
+    monkeypatch.setattr(gantry_router, "run_protocol_on_session", capture)
+    app = create_app()
+    payload = _stateful_payload(
+        "state-exec",
+        state={
+            "initial_state": {
+                "label": "exec-linked",
+                "fluids": {"source": {"volume_ul": 50.0, "composition": {"water": 50.0}}},
+            }
+        },
+    )
+    response = api_request(app, "POST", "/api/v1/runs", json=payload)
+    assert response.status_code == 202
+    fluid_state_id = response.json()["fluid_state_id"]
+
+    _wait_for_state(app, "state-exec", "succeeded")
+    assert seen_kwargs["fluid_state_id"] == fluid_state_id
+
+
+def test_run_submission_resumes_existing_fluid_state(monkeypatch):
+    from cubos_api.routers import gantry as gantry_router
+
+    monkeypatch.setattr(gantry_router, "run_protocol_on_session", lambda **_kwargs: {"ok": True})
+    app = create_app()
+
+    created = api_request(
+        app,
+        "POST",
+        "/api/v1/runs",
+        json=_stateful_payload(
+            "state-seed-for-resume",
+            state={"initial_state": {"fluids": {"source": {"volume_ul": 20.0}}}},
+        ),
+    )
+    fluid_state_id = created.json()["fluid_state_id"]
+    _wait_for_state(app, "state-seed-for-resume", "succeeded")
+
+    resumed = api_request(
+        app,
+        "POST",
+        "/api/v1/runs",
+        json=_stateful_payload(
+            "state-resume", state={"fluid_state_id": fluid_state_id}
+        ),
+    )
+    assert resumed.status_code == 202
+    assert resumed.json()["fluid_state_id"] == fluid_state_id
+    _wait_for_state(app, "state-resume", "succeeded")
+
+
+def test_run_submission_unknown_fluid_state_id_is_404():
+    app = create_app()
+    response = api_request(
+        app,
+        "POST",
+        "/api/v1/runs",
+        json=_stateful_payload("state-missing", state={"fluid_state_id": 99999}),
+    )
+    assert response.status_code == 404
+
+
+def test_run_submission_deck_fingerprint_mismatch_is_409(monkeypatch):
+    from cubos_api.routers import gantry as gantry_router
+
+    monkeypatch.setattr(gantry_router, "run_protocol_on_session", lambda **_kwargs: {"ok": True})
+    app = create_app()
+
+    created = api_request(
+        app,
+        "POST",
+        "/api/v1/runs",
+        json=_stateful_payload(
+            "state-seed-for-mismatch",
+            state={"initial_state": {"fluids": {"source": {"volume_ul": 20.0}}}},
+        ),
+    )
+    fluid_state_id = created.json()["fluid_state_id"]
+    _wait_for_state(app, "state-seed-for-mismatch", "succeeded")
+
+    mismatched = api_request(
+        app,
+        "POST",
+        "/api/v1/runs",
+        json=_stateful_payload(
+            "state-mismatch",
+            state={"fluid_state_id": fluid_state_id},
+            deck_yaml=OTHER_STATE_DECK_YAML,
+        ),
+    )
+    assert mismatched.status_code == 409
+    assert "fingerprint" in mismatched.text
+
+
+def test_run_record_fluid_state_link_survives_restart(monkeypatch):
+    """RunRecord (JSON-on-disk via RunStore) already survives a service
+    restart; this proves the new `fluid_state_id` field rides along."""
+    from cubos_api.routers import gantry as gantry_router
+
+    monkeypatch.setattr(gantry_router, "run_protocol_on_session", lambda **_kwargs: {"ok": True})
+    app = create_app()
+    submitted = api_request(
+        app,
+        "POST",
+        "/api/v1/runs",
+        json=_stateful_payload(
+            "state-restart",
+            state={"initial_state": {"fluids": {"source": {"volume_ul": 15.0}}}},
+        ),
+    )
+    fluid_state_id = submitted.json()["fluid_state_id"]
+    _wait_for_state(app, "state-restart", "succeeded")
+
+    # Simulate a service restart: drop the in-memory RunManager singleton so
+    # the next request rebuilds it purely from what's on disk.
+    reset_run_manager()
+    reopened_app = create_app()
+    reread = api_request(reopened_app, "GET", "/api/v1/runs/state-restart")
+    assert reread.status_code == 200
+    assert reread.json()["fluid_state_id"] == fluid_state_id

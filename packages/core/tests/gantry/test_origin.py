@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import pytest
 
-from cubos.gantry.gantry_config import GantryConfig, GantryType, WorkingVolume
+from cubos.gantry.gantry_config import GantryConfig, GantryType, OriginPolicy, WorkingVolume
 from cubos.gantry.origin import (
     DeckOriginCalibrationPlan,
     build_deck_origin_calibration_plan,
     format_gcode_number,
     format_set_work_position_command,
     validate_deck_origin_minima,
+    validate_home_origin_maxima,
+    validate_working_volume_origin,
 )
 
 
@@ -35,6 +37,31 @@ def _deck_origin_config(
             z_min=z_min,
             z_max=z_max,
         ),
+    )
+
+
+def _home_origin_config(
+    *,
+    x_min: float = -300.0,
+    y_min: float = -200.0,
+    z_min: float = -80.0,
+    x_max: float = 0.0,
+    y_max: float = 0.0,
+    z_max: float = 0.0,
+) -> GantryConfig:
+    return GantryConfig(
+        serial_port="/dev/null",
+        gantry_type=GantryType.CUB_XL,
+        factory_z_travel_mm=abs(z_min - z_max) or 80.0,
+        working_volume=WorkingVolume(
+            x_min=x_min,
+            x_max=x_max,
+            y_min=y_min,
+            y_max=y_max,
+            z_min=z_min,
+            z_max=z_max,
+        ),
+        origin_policy=OriginPolicy.HOME_ORIGIN,
     )
 
 
@@ -108,6 +135,58 @@ class TestValidateDeckOriginMinima:
     def test_rejects_negative_z_min(self):
         with pytest.raises(ValueError, match="z_min"):
             validate_deck_origin_minima(_deck_origin_config(z_min=-1.0))
+
+
+class TestValidateHomeOriginMaxima:
+
+    def test_valid_zero_maxima(self):
+        validate_home_origin_maxima(_home_origin_config())
+
+    def test_z_max_at_positive_tolerance(self):
+        validate_home_origin_maxima(_home_origin_config(z_max=1e-12))
+
+    def test_rejects_nonzero_x_max(self):
+        with pytest.raises(ValueError, match="x_max"):
+            validate_home_origin_maxima(_home_origin_config(x_max=0.5))
+
+    def test_rejects_nonzero_y_max(self):
+        with pytest.raises(ValueError, match="y_max"):
+            validate_home_origin_maxima(_home_origin_config(y_max=-0.5))
+
+    def test_rejects_both_x_and_y_max(self):
+        with pytest.raises(ValueError) as info:
+            validate_home_origin_maxima(_home_origin_config(x_max=0.1, y_max=0.2))
+        assert "x_max" in str(info.value)
+        assert "y_max" in str(info.value)
+
+    def test_rejects_positive_z_max(self):
+        with pytest.raises(ValueError, match="z_max"):
+            validate_home_origin_maxima(_home_origin_config(z_max=1.0))
+
+
+class TestValidateWorkingVolumeOrigin:
+
+    def test_dispatches_deck_origin_config_to_deck_minima(self):
+        validate_working_volume_origin(_deck_origin_config())
+
+    def test_dispatches_home_origin_config_to_home_maxima(self):
+        validate_working_volume_origin(_home_origin_config())
+
+    def test_deck_origin_config_still_rejected_for_nonzero_minima(self):
+        with pytest.raises(ValueError, match="x_min"):
+            validate_working_volume_origin(_deck_origin_config(x_min=5.0))
+
+    def test_home_origin_config_rejected_for_nonzero_x_max(self):
+        with pytest.raises(ValueError, match="x_max"):
+            validate_working_volume_origin(_home_origin_config(x_max=5.0))
+
+    def test_home_origin_config_rejected_for_nonzero_y_max(self):
+        with pytest.raises(ValueError, match="y_max"):
+            validate_working_volume_origin(_home_origin_config(y_max=-5.0))
+
+    def test_home_origin_config_rejected_for_positive_z_max(self):
+        with pytest.raises(ValueError, match="z_max"):
+            validate_working_volume_origin(_home_origin_config(z_max=10.0))
 
 
 class TestBuildDeckOriginCalibrationPlan:

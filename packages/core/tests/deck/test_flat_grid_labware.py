@@ -814,7 +814,7 @@ def test_current_deck_yaml_bytes_and_all_existing_addresses_are_unchanged(
     filename: str,
     expected: dict[str, tuple[float, float, float]],
 ) -> None:
-    path = Path("configs/deck") / filename
+    path = Path(__file__).resolve().parents[2] / "configs" / "deck" / filename
     before = path.read_bytes()
 
     deck = load_deck_from_yaml(path)

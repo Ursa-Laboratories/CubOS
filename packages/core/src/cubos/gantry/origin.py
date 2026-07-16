@@ -1,11 +1,26 @@
-"""Helpers for deck-origin work-coordinate calibration."""
+"""Helpers for signed work-coordinate calibration.
+
+CubOS gantry configs select one of two coordinate frames via
+``GantryConfig.origin_policy``:
+
+* ``deck_origin`` (default): WPos zero at the front-left-bottom deck
+  corner; +X operator-right, +Y back, +Z up. The reachable working volume
+  is non-negative (``x_min == 0``, ``y_min == 0``, ``z_min >= 0``).
+* ``home_origin``: WPos zero at the homed back-right-top corner. The
+  reachable working volume is non-positive (``x_max == 0``, ``y_max == 0``,
+  ``z_max <= 0``), mirror-symmetric with ``deck_origin``.
+
+``validate_working_volume_origin`` dispatches to the policy-appropriate
+shape validator; use it instead of calling ``validate_deck_origin_minima``
+directly unless a caller is intentionally deck-origin-only.
+"""
 
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
 
-from .gantry_config import GantryConfig
+from .gantry_config import GantryConfig, OriginPolicy
 
 
 _ZERO_TOLERANCE = 1e-9
@@ -156,6 +171,83 @@ def validate_deck_origin_minima(config: GantryConfig) -> None:
         )
 
 
+def validate_home_origin_maxima(config: GantryConfig) -> None:
+    """Validate that a gantry config is in the home-origin frame shape.
+
+    Mirror of :func:`validate_deck_origin_minima`: WPos zero sits at the
+    homed back-right-top corner, so the working volume must have X/Y maxima
+    at 0.0 and a non-positive Z maximum.
+    """
+    volume = config.working_volume
+    non_zero_xy_maxes = [
+        (axis, value)
+        for axis, value in (
+            ("x_max", volume.x_max),
+            ("y_max", volume.y_max),
+        )
+        if abs(value) > _ZERO_TOLERANCE
+    ]
+    if non_zero_xy_maxes:
+        formatted = ", ".join(f"{axis}={value}" for axis, value in non_zero_xy_maxes)
+        raise ValueError(
+            "Home-origin calibration requires working_volume X/Y maxima at 0.0; "
+            f"got {formatted}. Use a home-origin gantry config before setting "
+            "back-right-top origin."
+        )
+    if volume.z_max > _ZERO_TOLERANCE:
+        raise ValueError(
+            "Home-origin calibration requires working_volume.z_max <= 0.0; "
+            f"got z_max={volume.z_max}. Use a home-origin gantry config before "
+            "setting back-right-top origin."
+        )
+
+
+def validate_working_volume_origin(config: GantryConfig) -> None:
+    """Validate a gantry config's working volume against its origin_policy.
+
+    Dispatches to :func:`validate_deck_origin_minima` for ``deck_origin``
+    configs (the default) or :func:`validate_home_origin_maxima` for
+    ``home_origin`` configs. Prefer this over calling either validator
+    directly so callers stay policy-agnostic.
+    """
+    if OriginPolicy(config.origin_policy) is OriginPolicy.HOME_ORIGIN:
+        validate_home_origin_maxima(config)
+    else:
+        validate_deck_origin_minima(config)
+
+
+# Generic GRBL command skeleton shared by both origin policies: jog to the
+# reference corner, zero WPos there, home, then program soft-limit travel
+# spans from the measured WPos. Reused as-is for home_origin calibration
+# (see ``cubos.tools.calibration.single_instrument_calibration``); the
+# reference-corner placeholder text is deck_origin-flavored but the GRBL
+# command sequence itself is policy-agnostic.
+_CALIBRATION_COMMAND_SKELETON: tuple[str, ...] = (
+    "$H",
+    "$10=0",
+    "G90",
+    "G54",
+    "G92.1",
+    "<interactive jog to front-left XY origin/lower reach point>",
+    "G10 L20 P1 X0 Y0",
+    "<confirm deck-bottom contact or enter ruler-measured TCP gap>",
+    "G10 L20 P1 Z<z_min_mm>",
+    "$H",
+    "?",
+    "<compute max travel spans from measured WPos>",
+    "$20=0",
+    "$130=<x_span_mm>",
+    "$131=<y_span_mm>",
+    "$132=<z_span_mm>",
+    "$22=1",
+    "$20=1",
+    "$H",
+    "G54",
+    "G10 L20 P1 X<x_max_mm> Y<y_max_mm> Z<z_max_mm>",
+    "?",
+)
+
+
 def build_deck_origin_calibration_plan(
     config: GantryConfig,
 ) -> DeckOriginCalibrationPlan:
@@ -170,28 +262,5 @@ def build_deck_origin_calibration_plan(
     validate_deck_origin_minima(config)
     return DeckOriginCalibrationPlan(
         origin_wpos=(0.0, 0.0, 0.0),
-        commands=(
-            "$H",
-            "$10=0",
-            "G90",
-            "G54",
-            "G92.1",
-            "<interactive jog to front-left XY origin/lower reach point>",
-            "G10 L20 P1 X0 Y0",
-            "<confirm deck-bottom contact or enter ruler-measured TCP gap>",
-            "G10 L20 P1 Z<z_min_mm>",
-            "$H",
-            "?",
-            "<compute max travel spans from measured WPos>",
-            "$20=0",
-            "$130=<x_span_mm>",
-            "$131=<y_span_mm>",
-            "$132=<z_span_mm>",
-            "$22=1",
-            "$20=1",
-            "$H",
-            "G54",
-            "G10 L20 P1 X<x_max_mm> Y<y_max_mm> Z<z_max_mm>",
-            "?",
-        ),
+        commands=_CALIBRATION_COMMAND_SKELETON,
     )

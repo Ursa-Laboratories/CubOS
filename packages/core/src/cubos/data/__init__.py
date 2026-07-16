@@ -1,5 +1,15 @@
 """Data persistence layer for CubOS campaigns and measurements."""
 
+from .cap_state import (
+    CapContainerSnapshot,
+    CapOperationSnapshot,
+    CapStateConflictError,
+    CapStateDeckMismatchError,
+    CapStateError,
+    CapStateNotFoundError,
+    CapStateReconciliationRequiredError,
+    CapStateSnapshot,
+)
 from .data_reader import DataReader
 from .data_store import DATA_DB_PATH_ENV, DataStore, default_database_path
 from .exports import (
@@ -33,8 +43,27 @@ from .fluid_state import (
 )
 from .fluid_state_reader import FluidStateReader
 from .protocol_runs import create_campaign_for_protocol_run, register_deck_labware
+from .tip_state import (
+    PipetteAttachmentSnapshot,
+    TipContainerSnapshot,
+    TipOperationSnapshot,
+    TipStateConflictError,
+    TipStateDeckMismatchError,
+    TipStateError,
+    TipStateNotFoundError,
+    TipStateReconciliationRequiredError,
+    TipStateSnapshot,
+)
 
 __all__ = [
+    "CapContainerSnapshot",
+    "CapOperationSnapshot",
+    "CapStateConflictError",
+    "CapStateDeckMismatchError",
+    "CapStateError",
+    "CapStateNotFoundError",
+    "CapStateReconciliationRequiredError",
+    "CapStateSnapshot",
     "DataStore",
     "DataReader",
     "DATA_DB_PATH_ENV",
@@ -67,4 +96,13 @@ __all__ = [
     "load_replacement_state",
     "create_campaign_for_protocol_run",
     "register_deck_labware",
+    "PipetteAttachmentSnapshot",
+    "TipContainerSnapshot",
+    "TipOperationSnapshot",
+    "TipStateConflictError",
+    "TipStateDeckMismatchError",
+    "TipStateError",
+    "TipStateNotFoundError",
+    "TipStateReconciliationRequiredError",
+    "TipStateSnapshot",
 ]

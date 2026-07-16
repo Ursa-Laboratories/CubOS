@@ -20,7 +20,7 @@ from cubos.gantry.gantry_config import GantryConfig
 from cubos.gantry.instrument_loader import load_instrumented_gantry_from_config
 from cubos.gantry.instrument_mount import InstrumentedGantry
 from cubos.gantry.loader import load_gantry_from_yaml_safe
-from cubos.gantry.origin import validate_deck_origin_minima
+from cubos.gantry.origin import validate_working_volume_origin
 from cubos.protocol_engine.errors import GantryHealthCheckError
 from cubos.protocol_engine.loader import load_protocol_from_yaml_safe
 from cubos.protocol_engine.protocol import Protocol
@@ -89,7 +89,7 @@ def setup_protocol(
     protocol = _validate_protocol_input(protocol_path)
 
     gantry_config: GantryConfig = load_gantry_from_yaml_safe(gantry_path)
-    validate_deck_origin_minima(gantry_config)
+    validate_working_volume_origin(gantry_config)
     deck: Deck = load_deck_from_yaml_safe(
         deck_path,
         factory_z_travel_mm=gantry_config.factory_z_travel_mm,
@@ -258,6 +258,13 @@ def run_on_hardware(
                 deck_path,
                 context.deck,
             )
+            pipette = context.gantry.instruments.get("pipette")
+            if pipette is not None:
+                # Restores the attached-tip extension onto the pipette
+                # instrument, or raises if attachment is uncertain -- resume
+                # already refuses when a tip operation needs reconciliation,
+                # so this is primarily a same-session consistency guarantee.
+                data_store.restore_pipette_attachment(fluid_state_id, pipette)
         elif initial_fluids is not None:
             from cubos.data import load_initial_fluids
 

@@ -715,40 +715,16 @@ class Mill:
                 f"Raw status query failed: {exc}"
             ) from exc
 
-    def current_coordinates(self) -> Coordinates:
+    def _parse_position_from_status(self, status: str) -> Optional[Coordinates]:
+        """Extract deck-frame WPos from a status frame, whatever the $10 mode.
+
+        Prefers WPos when present; falls back to MPos minus the cached WCO.
+        Also refreshes the cached WCO whenever the frame carries one.
+        Returns ``None`` when the frame has neither position field (or MPos
+        with no WCO available) — parsing is deliberately independent of the
+        configured ``$10`` value so a controller in an unexpected reporting
+        mode still yields a position.
         """
-        Get the current coordinates of the mill.
-
-        Returns:
-            Coordinates: current GRBL WPos in the CubOS deck frame.
-        """
-        self._require_open_serial()
-        self.ser_mill.write(b"?")
-        time.sleep(0.05)
-        status = self._read_serial()
-        attempts = 0
-        while (not status or status[0] != "<") and attempts < 3:
-            if "alarm" in status.lower() or "error" in status.lower():
-                self.logger.error("Error in status: %s", status)
-                self.last_status = status
-                raise StatusReturnError(f"Error in status: {status}")
-            if "ok" in status.lower():
-                self.logger.debug("OK in status: %s", status)
-            status = self._read_serial()
-            attempts += 1
-
-        self.last_status = status
-        status_mode = int(self.config.get("$10", "0"))
-
-        if int(status_mode) not in [0, 1, 2, 3]:
-            self.logger.error("Invalid status mode")
-            raise ValueError("Invalid status mode")
-
-        max_attempts = 3
-        pattern = wpos_pattern if status_mode in [0, 2] else mpos_pattern
-        coord_type = "WPos" if status_mode in [0, 2] else "MPos"
-
-        # Update cached WCO whenever GRBL includes it in the status
         wco_match = wco_pattern.search(status)
         if wco_match:
             self._wco = Coordinates(
@@ -757,53 +733,79 @@ class Mill:
                 float(wco_match.group(3)),
             )
 
-        for i in range(max_attempts):
-            match = pattern.search(status)
-            if match:
-                x_coord = round(float(match.group(1)), 3)
-                y_coord = round(float(match.group(2)), 3)
-                z_coord = round(float(match.group(3)), 3)
-                if coord_type == "MPos":
-                    if self._wco is None:
-                        self.seed_wco()
-                    if self._wco is not None:
-                        x_coord = round(x_coord - self._wco.x, 3)
-                        y_coord = round(y_coord - self._wco.y, 3)
-                        z_coord = round(z_coord - self._wco.z, 3)
-                    else:
-                        raise LocationNotFound(
-                            "MPos reported but WCO was unavailable; cannot "
-                            "derive safe WPos coordinates."
-                        )
+        match = wpos_pattern.search(status)
+        if match:
+            return Coordinates(
+                round(float(match.group(1)), 3),
+                round(float(match.group(2)), 3),
+                round(float(match.group(3)), 3),
+            )
+
+        match = mpos_pattern.search(status)
+        if match:
+            if self._wco is None:
+                self.seed_wco()
+            if self._wco is None:
+                return None
+            return Coordinates(
+                round(float(match.group(1)) - self._wco.x, 3),
+                round(float(match.group(2)) - self._wco.y, 3),
+                round(float(match.group(3)) - self._wco.z, 3),
+            )
+        return None
+
+    def current_coordinates(self) -> Coordinates:
+        """
+        Get the current coordinates of the mill.
+
+        Returns:
+            Coordinates: current GRBL WPos in the CubOS deck frame.
+
+        Raises:
+            LocationNotFound: no parsable position after several queries —
+                callers that can proceed safely without a position (absolute
+                moves) may catch this and fall back.
+        """
+        self._require_open_serial()
+        max_attempts = 4
+        status = ""
+        for attempt in range(max_attempts):
+            self.ser_mill.write(b"?")
+            time.sleep(0.05)
+            status = self._read_serial()
+            # Skim past stale acknowledgments ("ok") and blank reads that
+            # can queue ahead of the status frame mid-protocol.
+            skims = 0
+            while (not status or status[0] != "<") and skims < 6:
+                if status and (
+                    "alarm" in status.lower() or "error" in status.lower()
+                ):
+                    self.logger.error("Error in status: %s", status)
+                    self.last_status = status
+                    raise StatusReturnError(f"Error in status: {status}")
+                status = self._read_serial()
+                skims += 1
+
+            self.last_status = status
+            coords = self._parse_position_from_status(status)
+            if coords is not None:
                 self.logger.info(
                     "WPos coordinates: X = %s, Y = %s, Z = %s",
-                    x_coord,
-                    y_coord,
-                    z_coord,
+                    coords.x, coords.y, coords.z,
                 )
-                break
-            else:
-                self.logger.warning(
-                    "%s coordinates not found in status: %r. Retrying query...",
-                    coord_type,
-                    status,
-                )
-                if i == max_attempts - 1:
-                    self.logger.error(
-                        "Error occurred while getting %s coordinates", coord_type
-                    )
-                    raise LocationNotFound
-                # Re-query status for next attempt
-                time.sleep(0.2)
-                self.ser_mill.write(b"?")
-                time.sleep(0.2)
-                status = self._read_serial()
-                retry_attempts = 0
-                while (not status or status[0] != "<") and retry_attempts < 3:
-                    status = self._read_serial()
-                    retry_attempts += 1
+                return coords
 
-        return Coordinates(x_coord, y_coord, z_coord)
+            self.logger.warning(
+                "No position in GRBL status (attempt %d/%d): %r",
+                attempt + 1, max_attempts, status,
+            )
+            time.sleep(0.2)
+
+        self.logger.error("Error occurred while getting WPos coordinates")
+        raise LocationNotFound(
+            f"No parsable position in GRBL status after {max_attempts} "
+            f"queries; last frame: {status!r}"
+        )
 
     def _require_open_serial(self) -> None:
         if self.ser_mill is None or not getattr(self.ser_mill, "is_open", False):
@@ -846,11 +848,24 @@ class Mill:
         self._validate_target_coordinates(goto)
         if travel_z is not None:
             self._validate_finite_coordinate(travel_z, "travel Z")
-        current_coordinates = self.current_coordinates()
+        # The current position only prunes redundant steps below; every
+        # emitted G-code is absolute, so a transient status-read failure
+        # must not kill a run mid-motion. Fall back to emitting the full
+        # unpruned sequence instead.
+        try:
+            current_coordinates = self.current_coordinates()
+        except LocationNotFound as exc:
+            self.logger.warning(
+                "Position read failed before move (%s); emitting full "
+                "absolute move sequence without pruning.", exc,
+            )
+            current_coordinates = None
 
         target_coordinates = goto
 
-        if self._is_already_at_target(target_coordinates, current_coordinates):
+        if current_coordinates is not None and self._is_already_at_target(
+            target_coordinates, current_coordinates
+        ):
             self.logger.debug(
                 "Mill is already at the target coordinates of [%s, %s, %s]",
                 x_coordinate,
@@ -916,15 +931,19 @@ class Mill:
         motion — combining axes in a single G01 would couple their
         motion into a straight interpolation that could graze
         obstacles the caller didn't plan for.
+
+        ``current_coordinates`` may be ``None`` (position read failed);
+        every axis is then emitted unconditionally — safe because the
+        commands are absolute.
         """
         f = f" F{DEFAULT_FEED_RATE}"
         self._validate_target_coordinates(target_coordinates)
         commands = []
-        if target_coordinates.x != current_coordinates.x:
+        if current_coordinates is None or target_coordinates.x != current_coordinates.x:
             commands.append(f"G01 X{target_coordinates.x}{f}")
-        if target_coordinates.y != current_coordinates.y:
+        if current_coordinates is None or target_coordinates.y != current_coordinates.y:
             commands.append(f"G01 Y{target_coordinates.y}{f}")
-        if target_coordinates.z != current_coordinates.z:
+        if current_coordinates is None or target_coordinates.z != current_coordinates.z:
             commands.append(f"G01 Z{target_coordinates.z}{f}")
         return commands
 
@@ -941,16 +960,21 @@ class Mill:
         (or same-Y) move skips that axis, and a final Z matching
         ``travel_z`` skips the descent. X and Y always move in
         separate G-codes — no diagonal.
+
+        ``current_coordinates`` may be ``None`` (position read failed);
+        the full lift → X → Y → descend sequence is then emitted
+        unconditionally — safe because the commands are absolute and the
+        lift happens first.
         """
         f = f" F{DEFAULT_FEED_RATE}"
         self._validate_target_coordinates(target_coordinates)
         self._validate_finite_coordinate(travel_z, "travel Z")
         commands = []
-        if current_coordinates.z != travel_z:
+        if current_coordinates is None or current_coordinates.z != travel_z:
             commands.append(f"G01 Z{travel_z}{f}")
-        if target_coordinates.x != current_coordinates.x:
+        if current_coordinates is None or target_coordinates.x != current_coordinates.x:
             commands.append(f"G01 X{target_coordinates.x}{f}")
-        if target_coordinates.y != current_coordinates.y:
+        if current_coordinates is None or target_coordinates.y != current_coordinates.y:
             commands.append(f"G01 Y{target_coordinates.y}{f}")
         if target_coordinates.z != travel_z:
             commands.append(f"G01 Z{target_coordinates.z}{f}")

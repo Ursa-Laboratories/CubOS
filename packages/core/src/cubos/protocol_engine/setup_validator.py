@@ -16,7 +16,7 @@ from cubos.deck.loader import load_deck_from_yaml
 from cubos.gantry.gantry import Gantry
 from cubos.gantry.instrument_loader import load_instrumented_gantry_from_config
 from cubos.gantry.loader import load_gantry_from_yaml
-from cubos.gantry.origin import validate_deck_origin_minima
+from cubos.gantry.origin import validate_working_volume_origin
 from cubos.protocol_engine.loader import load_protocol_from_yaml
 from cubos.validation.bounds import (
     collect_protocol_motion_targets,
@@ -95,8 +95,17 @@ def run_setup_validation(
     gantry_path: str | Path,
     deck_path: str | Path,
     protocol_path: str | Path,
+    initial_fluids_path: str | Path | None = None,
 ) -> SetupValidationResult:
-    """Run full offline setup validation and return a structured result."""
+    """Run full offline setup validation and return a structured result.
+
+    ``initial_fluids_path`` optionally names a fluid seed YAML (the same
+    ``fluids:`` shape ``run_protocol --initial-fluids`` accepts). When
+    provided, protocol liquid handling is additionally simulated statically:
+    pipette-model volume bounds, vial dead-volume floors, and destination
+    working-volume overflow are all validated offline before any hardware
+    run (see ``cubos.validation.fluid_volumes``).
+    """
     lines: list[str] = []
 
     def out(text: str = "") -> None:
@@ -110,7 +119,7 @@ def run_setup_validation(
     out("[1/4] Loading gantry config...")
     try:
         gantry_config = load_gantry_from_yaml(gantry_path)
-        validate_deck_origin_minima(gantry_config)
+        validate_working_volume_origin(gantry_config)
     except Exception as exc:
         _log.error("Failed to load gantry config from %s", gantry_path, exc_info=True)
         return _error_result(
@@ -257,6 +266,48 @@ def run_setup_validation(
     else:
         out("  OK")
     out()
+
+    if initial_fluids_path is not None:
+        out("Validating protocol fluid volumes (initial fluids provided)...")
+        try:
+            from cubos.data.fluid_state import load_initial_fluids
+            from cubos.protocol_engine.commands._liquid_transfer import (
+                pipette_capacity,
+            )
+            from cubos.validation.fluid_volumes import (
+                validate_protocol_fluid_volumes,
+            )
+
+            initial_fluids = load_initial_fluids(initial_fluids_path)
+            pipette_config = pipette_capacity(
+                instrumented_gantry.instruments.get("pipette")
+            )
+            fluid_violations = validate_protocol_fluid_volumes(
+                protocol,
+                deck,
+                initial_fluids,
+                pipette_config=pipette_config,
+            )
+        except Exception as exc:
+            _log.exception("Fluid-volume validation raised unexpectedly")
+            return _error_result(
+                lines,
+                stage="validation",
+                message=f"{type(exc).__name__}: {exc}",
+                result_message="RESULT: ERROR - validation engine failure",
+            )
+        if fluid_violations:
+            out(f"  FAIL - {len(fluid_violations)} violation(s):")
+            for violation in fluid_violations:
+                error = (
+                    f"step {violation.step_index} ({violation.command_name}): "
+                    f"{violation.message}"
+                )
+                errors.append(error)
+                out(f"  - {error}")
+        else:
+            out("  OK")
+        out()
 
     out(SEPARATOR)
     if errors:

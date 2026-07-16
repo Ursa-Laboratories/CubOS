@@ -3,9 +3,19 @@
 from __future__ import annotations
 
 from types import MappingProxyType
-from typing import Annotated, Dict, Literal, Mapping, Optional, Type, Union
+from typing import Annotated, Dict, List, Literal, Mapping, Optional, Type, Union
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .labware.container_role import KNOWN_CONTAINER_ROLES
+
+
+def _validate_optional_role(value: Optional[str]) -> Optional[str]:
+    if value is not None and value not in KNOWN_CONTAINER_ROLES:
+        raise ValueError(
+            f"role must be one of {sorted(KNOWN_CONTAINER_ROLES)}, got {value!r}."
+        )
+    return value
 
 
 
@@ -108,7 +118,16 @@ class VialGridYamlEntry(BaseModel):
     vial_diameter: Optional[float] = Field(default=None, gt=0)
     capacity_ul: float = Field(..., gt=0)
     working_volume_ul: float = Field(..., gt=0)
+    vial_dead_volume_ul: float = Field(default=0.0, ge=0)
     aliases: Dict[str, str] = Field(default_factory=dict)
+    # Uniformly applied to every vial in the grid -- a vial grid has one
+    # physical role/solution identity (see cubos.deck.labware.container_role).
+    vial_role: Optional[str] = None
+    vial_solution: Optional[str] = None
+    vial_allowed_solutions: Optional[List[str]] = None
+    # Uniformly applied to every vial in the grid, mirroring vial_role/
+    # vial_solution (see cubos.deck.labware.vial.Vial.capped).
+    vial_capped: Optional[bool] = None
 
     @property
     def a1_point(self) -> _YamlPoint3D:
@@ -116,6 +135,10 @@ class VialGridYamlEntry(BaseModel):
         if a1 is None:
             raise ValueError("Vial grid calibration must define `a1`.")
         return a1
+
+    @field_validator("vial_role")
+    def _validate_vial_role(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_optional_role(value)
 
     @model_validator(mode="after")
     def _validate_vial_grid(self) -> "VialGridYamlEntry":
@@ -131,6 +154,8 @@ class VialGridYamlEntry(BaseModel):
             )
         if self.working_volume_ul > self.capacity_ul:
             raise ValueError("working_volume_ul must be <= capacity_ul.")
+        if self.vial_dead_volume_ul > self.working_volume_ul:
+            raise ValueError("vial_dead_volume_ul must be <= working_volume_ul.")
 
         positions = {
             f"{chr(65 + row_index)}{column_index}"
@@ -167,6 +192,15 @@ class VialYamlEntry(BaseModel):
     location: _YamlPoint3D
     capacity_ul: float
     working_volume_ul: float
+    dead_volume_ul: float = Field(default=0.0, ge=0)
+    role: Optional[str] = None
+    solution: Optional[str] = None
+    allowed_solutions: Optional[List[str]] = None
+    capped: Optional[bool] = None
+
+    @field_validator("role")
+    def _validate_role_field(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_optional_role(value)
 
     @model_validator(mode="after")
     def _validate_vial_volumes(self) -> "VialYamlEntry":
@@ -174,6 +208,8 @@ class VialYamlEntry(BaseModel):
             raise ValueError("working_volume_ul must be <= capacity_ul.")
         if self.capacity_ul <= 0 or self.working_volume_ul <= 0:
             raise ValueError("capacity_ul and working_volume_ul must be positive.")
+        if self.dead_volume_ul > self.working_volume_ul:
+            raise ValueError("dead_volume_ul must be <= working_volume_ul.")
         return self
 
 
@@ -189,6 +225,15 @@ class NestedVialYamlEntry(BaseModel):
     location: _YamlPoint3D
     capacity_ul: float
     working_volume_ul: float
+    dead_volume_ul: float = Field(default=0.0, ge=0)
+    role: Optional[str] = None
+    solution: Optional[str] = None
+    allowed_solutions: Optional[List[str]] = None
+    capped: Optional[bool] = None
+
+    @field_validator("role")
+    def _validate_role_field(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_optional_role(value)
 
     @model_validator(mode="after")
     def _validate_nested_vial(self) -> "NestedVialYamlEntry":
@@ -198,6 +243,8 @@ class NestedVialYamlEntry(BaseModel):
             raise ValueError("capacity_ul and working_volume_ul must be positive.")
         if self.working_volume_ul > self.capacity_ul:
             raise ValueError("working_volume_ul must be <= capacity_ul.")
+        if self.dead_volume_ul > self.working_volume_ul:
+            raise ValueError("dead_volume_ul must be <= working_volume_ul.")
         return self
 
 
@@ -307,8 +354,8 @@ class TipRackYamlEntry(_BaseHolderYamlEntry):
     model_name: str = "tip_rack"
     rows: int = Field(..., gt=0, le=26)
     columns: int = Field(..., gt=0)
-    pickup_z: float = Field(..., gt=0)
-    drop_z: Optional[float] = Field(default=None, gt=0)
+    pickup_z: float
+    drop_z: Optional[float] = None
     tip_length: float = Field(..., gt=0)
     calibration: _YamlCalibrationPoints
     x_offset: float = Field(..., gt=0)

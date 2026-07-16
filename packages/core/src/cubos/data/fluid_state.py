@@ -228,6 +228,18 @@ def create_fluid_state(
         for labware_key, labware in descriptors:
             _insert_container_rows(connection, fluid_state_id, labware_key, labware)
 
+        # Tip/attached-pipette state hangs off this same session (one durable
+        # session carries both fluids and consumables).
+        from . import tip_state
+        tip_state.seed_tip_state(connection, fluid_state_id, deck)
+
+        # Durable per-vial cap state hangs off this same session too, seeded
+        # from every vial/vial-grid position that declares `capped` in YAML
+        # (see cubos.data.cap_state; vials without `capped` set are simply
+        # not capper-managed and are skipped).
+        from . import cap_state
+        cap_state.seed_cap_state(connection, fluid_state_id, deck)
+
         for (labware_key, location_id), definition in canonical_initial.items():
             _seed_fluid_row(
                 connection,
@@ -291,7 +303,20 @@ def resume_fluid_state(
 
     _verify_container_registry(connection, fluid_state_id, descriptors)
 
-    pending = _pending_operations(connection, fluid_state_id)
+    # Tip/attached-pipette registry and reconciliation state share this
+    # session; both must be checked before it can be safely resumed.
+    from . import tip_state
+    tip_state.verify_tip_container_registry(connection, fluid_state_id, deck)
+
+    # Cap-state registry shares this session too.
+    from . import cap_state
+    cap_state.verify_cap_container_registry(connection, fluid_state_id, deck)
+
+    pending = [
+        *_pending_operations(connection, fluid_state_id),
+        *tip_state.pending_tip_operations(connection, fluid_state_id),
+        *cap_state.pending_cap_operations(connection, fluid_state_id),
+    ]
     if pending:
         details = ", ".join(f"{key} ({status})" for key, status in pending)
         raise FluidStateReconciliationRequiredError(
@@ -800,6 +825,48 @@ def get_fluid_snapshot(
     }
 
 
+def get_fluid_container(
+    connection: sqlite3.Connection,
+    fluid_state_id: int,
+    labware_key: str,
+    location_id: str,
+) -> FluidContainerSnapshot:
+    """Return a single container's current durable state.
+
+    Lightweight sibling of :func:`get_fluid_snapshot` for callers (transfer
+    preflight) that need one container's volume/composition without paying
+    for the whole session snapshot.
+    """
+    with _read_transaction(connection):
+        _require_state(connection, fluid_state_id)
+        row = connection.execute(
+            "SELECT labware_key, location_id, labware_type, capacity_ul, "
+            "working_volume_ul, current_volume_ul, composition_json, version, "
+            "updated_at FROM fluid_containers WHERE fluid_state_id = ? AND "
+            "labware_key = ? AND location_id = ?",
+            (fluid_state_id, labware_key, location_id),
+        ).fetchone()
+    if row is None:
+        raise FluidStateError(
+            f"Fluid target {_format_target(labware_key, location_id)!r} is not "
+            f"registered in state {fluid_state_id}."
+        )
+    volume = float(row[5])
+    return {
+        "labware_key": row[0],
+        "location_id": row[1],
+        "labware_type": row[2],
+        "capacity_ul": float(row[3]),
+        "working_volume_ul": float(row[4]),
+        "current_volume_ul": volume,
+        "composition": _decode_composition(
+            row[6], volume, target=_format_target(row[0], row[1]),
+        ),
+        "version": int(row[7]),
+        "updated_at": row[8],
+    }
+
+
 def _resolved_deck_provenance(deck_path: str | Path) -> tuple[str, str]:
     """Return the resolved source YAML as provenance, not compatibility state."""
     path = Path(deck_path).expanduser().resolve()
@@ -888,6 +955,22 @@ def _container_descriptor_rows(
             },
             "capacity_ul": float(labware.capacity_ul),
             "working_volume_ul": float(labware.working_volume_ul),
+            # Role/solution identity participates in the resume boundary:
+            # automatic stock/waste selection (Feature 05) depends on it, so
+            # a deck edit that reassigns a container's role/solution must
+            # invalidate an old fluid-state session exactly like a moved
+            # coordinate or changed volume limit does.
+            "role": labware.role,
+            "solution": labware.solution,
+            "allowed_solutions": (
+                sorted(labware.allowed_solutions)
+                if labware.allowed_solutions is not None else None
+            ),
+            # Capped identity participates in the resume boundary exactly
+            # like role/solution: it seeds cubos.data.cap_state at session
+            # creation (see create_fluid_state below), so a deck edit that
+            # changes it must invalidate an old fluid-state session.
+            "capped": labware.capped,
         }]
     if isinstance(labware, VialGrid):
         return [
@@ -902,6 +985,13 @@ def _container_descriptor_rows(
                 },
                 "capacity_ul": float(vial.capacity_ul),
                 "working_volume_ul": float(vial.working_volume_ul),
+                "role": vial.role,
+                "solution": vial.solution,
+                "allowed_solutions": (
+                    sorted(vial.allowed_solutions)
+                    if vial.allowed_solutions is not None else None
+                ),
+                "capped": vial.capped,
             }
             for location_id, vial in sorted(
                 labware.vials.items(), key=lambda item: _location_sort_key(item[0])
@@ -1386,7 +1476,18 @@ def _require_no_pending_operation(
     fluid_state_id: int,
     operation_key: str,
 ) -> None:
-    pending = _pending_operations(connection, fluid_state_id)
+    # Tip and cap operations share this session's single-physical-action-at-
+    # a-time journal: a pending pick_up_tip/drop_tip/decap/cap blocks new
+    # fluid operations exactly like a pending fluid operation blocks new tip
+    # operations (see tip_state._require_no_pending_fluid_operation) and cap
+    # operations (see cap_state._require_no_pending_fluid_operation).
+    from . import cap_state, tip_state
+
+    pending = [
+        *_pending_operations(connection, fluid_state_id),
+        *tip_state.pending_tip_operations(connection, fluid_state_id),
+        *cap_state.pending_cap_operations(connection, fluid_state_id),
+    ]
     if pending:
         details = ", ".join(f"{key} ({status})" for key, status in pending)
         raise FluidStateReconciliationRequiredError(
@@ -1694,6 +1795,19 @@ def _pending_operations(
     ).fetchall()
 
 
+def pending_operations(
+    connection: sqlite3.Connection,
+    fluid_state_id: int,
+) -> list[tuple[str, str]]:
+    """Public sibling of :func:`_pending_operations` for cross-module checks.
+
+    Used by ``tip_state`` to block new tip operations while a fluid
+    operation is pending, mirroring ``_require_no_pending_operation``'s
+    check of tip operations here.
+    """
+    return _pending_operations(connection, fluid_state_id)
+
+
 def _normalize_initial_fluids(
     fluids: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]]:
@@ -1913,11 +2027,13 @@ __all__ = [
     "complete_fluid_mix",
     "complete_fluid_transfer",
     "create_fluid_state",
+    "get_fluid_container",
     "get_fluid_snapshot",
     "load_initial_fluids",
     "load_replacement_state",
     "list_fluid_states",
     "mark_fluid_reconciliation_required",
+    "pending_operations",
     "resolve_fluid_operation",
     "resume_fluid_state",
     "seed_fluid",

@@ -17,7 +17,7 @@ sys.path.append(str(project_root))
 
 from cubos.gantry import Gantry, load_gantry_from_yaml_safe
 from cubos.gantry.errors import CommandExecutionError, StatusReturnError
-from cubos.gantry.origin import validate_deck_origin_minima
+from cubos.gantry.origin import validate_working_volume_origin
 from cubos.tools.keyboard_input import flush_stdin, read_keypress
 
 STEP = 1.0
@@ -78,7 +78,7 @@ def main() -> None:
     print("=" * 50)
 
     config = load_gantry_from_yaml_safe(gantry_path)
-    validate_deck_origin_minima(config)
+    validate_working_volume_origin(config)
     print(f"\nLoaded: {gantry_path}")
 
     gantry = Gantry(config=config)

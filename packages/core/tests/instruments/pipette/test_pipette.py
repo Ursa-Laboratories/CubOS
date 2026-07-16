@@ -171,6 +171,19 @@ class TestParsing:
         response = "OK:{homed:1}"
         assert OpentronsPipette._parse_position(response) == 0.0
 
+    def test_parse_key_value_quoted_keys(self):
+        # Exact format the Pawduino firmware sends for CMD_PIPETTE_STATUS.
+        response = 'OK:{"homed":0,"pos":0.00,"max_vol":300.00}'
+        result = OpentronsPipette._parse_key_value(response)
+        assert result["homed"] == 0.0
+        assert result["pos"] == pytest.approx(0.0)
+        assert result["max_vol"] == pytest.approx(300.0)
+
+    def test_parse_key_value_quoted_string_values_skipped(self):
+        response = 'OK:{"msg":"Pipette moved","v":[55.00]}'
+        result = OpentronsPipette._parse_key_value(response)
+        assert "msg" not in result
+
 
 # --- Driver constructor tests -------------------------------------------------
 
@@ -203,6 +216,7 @@ class TestPipetteLifecycle:
         """Create a mock serial.Serial that returns canned responses."""
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.in_waiting = 0
         if responses is None:
             responses = ["OK:{homed:1,pos:0.0,max_vol:200}\n"]
         mock_ser.readline.side_effect = [r.encode() for r in responses]
@@ -220,7 +234,76 @@ class TestPipetteLifecycle:
         mock_serial_cls.assert_called_once_with(
             port="/dev/ttyUSB0", baudrate=115200, timeout=30.0,
         )
-        mock_sleep.assert_called_once()
+        assert mock_sleep.called
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_connect_homes_and_primes_unhomed_plunger(
+        self, mock_sleep, mock_serial_cls
+    ):
+        # Port-open resets the Arduino, so real hardware reports homed:0;
+        # connect must re-home and prime before any protocol motion.
+        responses = [
+            'OK:{"homed":0,"pos":0.00,"max_vol":300.00}\n',  # status
+            'OK:{"msg":"Pipette homed"}\n',                   # home
+            'OK:{"msg":"Pipette moved","v":[36.00]}\n',       # prime
+        ]
+        mock_ser = self._make_mock_serial(responses)
+        mock_serial_cls.return_value = mock_ser
+
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip.connect()
+
+        written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
+        assert written[0].startswith("14")      # status
+        assert written[1].startswith("10")      # home
+        assert written[2].startswith("11,36.0")  # prime = move to prime_position
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_connect_skips_homing_when_already_homed(
+        self, mock_sleep, mock_serial_cls
+    ):
+        mock_ser = self._make_mock_serial(
+            ['OK:{"homed":1,"pos":36.00,"max_vol":300.00}\n']
+        )
+        mock_serial_cls.return_value = mock_ser
+
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip.connect()
+
+        written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
+        assert len(written) == 1
+        assert written[0].startswith("14")
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_connect_discards_boot_banner(self, mock_sleep, mock_serial_cls):
+        mock_ser = self._make_mock_serial()
+        # Banner bytes pending on the first check, quiet on the second.
+        type(mock_ser).in_waiting = PropertyMock(side_effect=[1, 0])
+        mock_serial_cls.return_value = mock_ser
+
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        pip.connect()
+
+        mock_ser.reset_input_buffer.assert_called_once()
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_connect_raises_when_homing_fails(self, mock_sleep, mock_serial_cls):
+        responses = [
+            'OK:{"homed":0,"pos":0.00,"max_vol":300.00}\n',
+            'ERR:{"error":"Failed to home pipette"}\n',
+            'ERR:{"error":"Failed to home pipette"}\n',
+        ]
+        mock_ser = self._make_mock_serial(responses)
+        mock_serial_cls.return_value = mock_ser
+
+        pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/ttyUSB0")
+        with pytest.raises(PipetteConnectionError, match="home/prime"):
+            pip.connect()
+        mock_ser.close.assert_called_once()
 
     @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
     @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
@@ -237,6 +320,7 @@ class TestPipetteLifecycle:
     def test_connect_raises_on_no_response(self, mock_sleep, mock_serial_cls):
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.in_waiting = 0
         mock_ser.readline.return_value = b""
         mock_serial_cls.return_value = mock_ser
 
@@ -292,6 +376,7 @@ class TestPipetteCommands:
         all_responses = ["OK:{homed:1,pos:0.0,max_vol:200}\n"] + responses
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.in_waiting = 0
         mock_ser.readline.side_effect = [r.encode() for r in all_responses]
         mock_serial_cls.return_value = mock_ser
 
@@ -388,7 +473,12 @@ class TestPipetteCommands:
     def test_drop_tip_clears_flag(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
-            ["OK:{pos:0.0}\n", "OK:{pos:60.0}\n", "OK:{homed:1,pos:60.0,max_vol:200}\n"],
+            [
+                "OK:{pos:0.0}\n",   # pick_up_tip
+                "OK:{pos:60.0}\n",  # drop move
+                "OK:{pos:36.0}\n",  # return to prime
+                "OK:{homed:1,pos:36.0,max_vol:200}\n",
+            ],
         )
         pip.pick_up_tip()
         pip.drop_tip()
@@ -397,13 +487,105 @@ class TestPipetteCommands:
 
     @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
     @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
-    def test_command_error_on_err_response(self, mock_sleep, mock_serial_cls):
+    def test_drop_tip_returns_plunger_to_prime(self, mock_sleep, mock_serial_cls):
+        # The ejector stroke parks the plunger at the bottom of travel; the
+        # driver must move it back to prime so the next cycle starts ready.
+        pip, mock_ser = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            ["OK:{pos:60.0}\n", "OK:{pos:36.0}\n"],
+        )
+        pip.drop_tip()
+        written = [c[0][0].decode().strip() for c in mock_ser.write.call_args_list]
+        moves = [w for w in written if w.startswith("11,")]
+        assert moves[0].startswith("11,60.0")  # drop
+        assert moves[1].startswith("11,36.0")  # return to prime
+        assert pip._position_mm == pytest.approx(36.0)
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_drop_tip_failed_return_to_prime_does_not_raise(
+        self, mock_sleep, mock_serial_cls
+    ):
+        # The tip is off once the drop move succeeds; a failure returning to
+        # prime must not surface as a failed drop.
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
-            ["ERR:motor stall detected\n"],
+            [
+                "OK:{pos:0.0}\n",           # pick_up_tip
+                "OK:{pos:60.0}\n",          # drop move
+                "ERR:motor stall detected\n",  # return to prime fails
+                "OK:{homed:1,pos:60.0,max_vol:200}\n",
+            ],
+        )
+        pip.pick_up_tip()
+        pip.drop_tip()  # must not raise
+        status = pip.get_status()
+        assert status.has_tip is False
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_command_error_on_err_response(self, mock_sleep, mock_serial_cls):
+        # home() retries once, so it takes two ERR responses to fail.
+        pip, _ = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            ["ERR:motor stall detected\n", "ERR:motor stall detected\n"],
         )
         with pytest.raises(PipetteCommandError, match="motor stall"):
             pip.home()
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_home_retries_once_when_first_attempt_falls_short(
+        self, mock_sleep, mock_serial_cls
+    ):
+        # Firmware caps upward travel per homing attempt below full plunger
+        # travel, so a plunger parked low fails once and succeeds on retry.
+        pip, mock_ser = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            [
+                'ERR:{"error":"Failed to home pipette"}\n',
+                'OK:{"msg":"Pipette homed"}\n',
+            ],
+        )
+        pip.home()
+        written = [c[0][0].decode().strip() for c in mock_ser.write.call_args_list]
+        assert [w.split(",")[0] for w in written].count("10") == 2
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_status_skips_stray_ok_lines(self, mock_sleep, mock_serial_cls):
+        # A late boot banner must not be taken as the status response.
+        pip, _ = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            ["OK:Ready\n", 'OK:{"homed":1,"pos":36.00,"max_vol":300.00}\n'],
+        )
+        status = pip.get_status()
+        assert status.is_homed is True
+        assert status.position_mm == pytest.approx(36.0)
+
+    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
+    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    def test_plunger_moves_use_firmware_default_speed(
+        self, mock_sleep, mock_serial_cls
+    ):
+        # Firmware reads the speed arg as steps/second; 0 selects its own
+        # calibrated default instead of a floor-clamped crawl.
+        pip, mock_ser = self._make_connected_pipette(
+            mock_serial_cls, mock_sleep,
+            [
+                "OK:{pos:36.0}\n",  # prime
+                "OK:{pos:0.0}\n",   # pick_up_tip
+                "OK:{pos:60.0}\n",  # drop move
+                "OK:{pos:36.0}\n",  # return to prime
+            ],
+        )
+        pip.prime()
+        pip.pick_up_tip()
+        pip.drop_tip()
+        written = [c[0][0].decode().strip() for c in mock_ser.write.call_args_list]
+        moves = [w for w in written if w.startswith("11,")]
+        assert len(moves) == 4
+        assert all(w.split(",")[2] == "0.0" for w in moves)
 
     @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
     @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
@@ -541,3 +723,51 @@ class TestOfflinePipette:
         pip = OpentronsPipette(pipette_model="flex_1channel_1000", offline=True)
         assert pip.config.family == PipetteFamily.FLEX
         assert pip.config.max_volume == 1000.0
+
+
+# --- Liquid-class correction tests --------------------------------------------
+
+
+class TestLiquidClassCorrection:
+
+    def test_identity_by_default(self):
+        pip = OpentronsPipette(offline=True)
+        assert pip.liquid_classes == {}
+        assert pip.correction_for(None).apply(123.0) == pytest.approx(123.0)
+
+    def test_configured_multiplier_and_offset_applied(self):
+        pip = OpentronsPipette(
+            offline=True,
+            liquid_classes={"viscous": {"multiplier": 1.1, "offset_ul": 5.0}},
+        )
+        correction = pip.correction_for("viscous")
+        assert correction.apply(100.0) == pytest.approx(115.0)
+
+    def test_unknown_liquid_class_raises(self):
+        from cubos.instruments.pipette.liquid_class import LiquidClassConfigError
+
+        pip = OpentronsPipette(offline=True)
+        with pytest.raises(LiquidClassConfigError, match="Unknown liquid class"):
+            pip.correction_for("does_not_exist")
+
+    def test_disabled_when_liquid_classes_omitted(self):
+        pip = OpentronsPipette(offline=True)
+        assert pip.correction_for(None).apply(50.0) == pytest.approx(50.0)
+
+    def test_multiplier_must_be_positive(self):
+        from cubos.instruments.pipette.liquid_class import LiquidClassConfigError
+
+        with pytest.raises(LiquidClassConfigError):
+            OpentronsPipette(
+                offline=True,
+                liquid_classes={"bad": {"multiplier": 0.0}},
+            )
+
+    def test_rejects_unknown_config_fields(self):
+        from cubos.instruments.pipette.liquid_class import LiquidClassConfigError
+
+        with pytest.raises(LiquidClassConfigError, match="unknown fields"):
+            OpentronsPipette(
+                offline=True,
+                liquid_classes={"bad": {"scale": 2.0}},
+            )

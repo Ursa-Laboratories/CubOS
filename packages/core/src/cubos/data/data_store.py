@@ -15,7 +15,7 @@ from cubos.instruments.uvvis_ccs.models import UVVisSpectrum
 from cubos.protocol_engine.measurements import InstrumentMeasurement, MeasurementType
 
 if TYPE_CHECKING:
-    from .fluid_state import FluidStateSnapshot, FluidStateSummary
+    from .fluid_state import FluidContainerSnapshot, FluidStateSnapshot, FluidStateSummary
 
 DATA_DB_PATH_ENV = "CUBOS_DATA_DB_PATH"
 SQLITE_MEMORY_DATABASE = ":memory:"
@@ -212,6 +212,127 @@ CREATE TABLE IF NOT EXISTS fluid_operations (
     created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
     updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
     applied_at               TEXT
+);
+
+CREATE TABLE IF NOT EXISTS tip_containers (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id     INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                   ON DELETE CASCADE,
+    rack_key           TEXT    NOT NULL,
+    slot_id            TEXT    NOT NULL,
+    tip_length_mm      REAL    NOT NULL CHECK (tip_length_mm > 0),
+    status             TEXT    NOT NULL CHECK (
+                                   status IN (
+                                       'available',
+                                       'reserved',
+                                       'attached',
+                                       'consumed',
+                                       'reconciliation_required'
+                                   )
+                               ),
+    version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(fluid_state_id, rack_key, slot_id)
+);
+
+CREATE TABLE IF NOT EXISTS tip_operations (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id           INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                        ON DELETE CASCADE,
+    operation_key            TEXT    NOT NULL UNIQUE,
+    operation_type           TEXT    NOT NULL CHECK (
+                                        operation_type IN ('pick_up_tip', 'drop_tip')
+                                    ),
+    rack_key                 TEXT    NOT NULL,
+    slot_id                  TEXT    NOT NULL,
+    tip_extension_mm         REAL    NOT NULL,
+    previous_slot_status     TEXT    NOT NULL,
+    slot_version             INTEGER NOT NULL,
+    status                   TEXT    NOT NULL CHECK (
+                                        status IN (
+                                            'started',
+                                            'applied',
+                                            'reconciliation_required',
+                                            'cancelled',
+                                            'reconciled'
+                                        )
+                                    ),
+    campaign_id              INTEGER REFERENCES campaigns(id),
+    detail                   TEXT,
+    created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    applied_at               TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS tip_operations_one_pending_per_state
+ON tip_operations(fluid_state_id)
+WHERE status IN ('started', 'reconciliation_required');
+
+CREATE TABLE IF NOT EXISTS cap_containers (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id     INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                   ON DELETE CASCADE,
+    labware_key        TEXT    NOT NULL,
+    location_id        TEXT    NOT NULL DEFAULT '',
+    status             TEXT    NOT NULL CHECK (
+                                   status IN (
+                                       'capped',
+                                       'uncapped',
+                                       'reconciliation_required'
+                                   )
+                               ),
+    version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(fluid_state_id, labware_key, location_id)
+);
+
+CREATE TABLE IF NOT EXISTS cap_operations (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id           INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                        ON DELETE CASCADE,
+    operation_key            TEXT    NOT NULL UNIQUE,
+    operation_type           TEXT    NOT NULL CHECK (
+                                        operation_type IN ('decap', 'cap')
+                                    ),
+    labware_key              TEXT    NOT NULL,
+    location_id              TEXT    NOT NULL DEFAULT '',
+    previous_status          TEXT    NOT NULL,
+    container_version        INTEGER NOT NULL,
+    status                   TEXT    NOT NULL CHECK (
+                                        status IN (
+                                            'started',
+                                            'applied',
+                                            'reconciliation_required',
+                                            'cancelled',
+                                            'reconciled'
+                                        )
+                                    ),
+    campaign_id              INTEGER REFERENCES campaigns(id),
+    detail                   TEXT,
+    created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    applied_at               TEXT
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS cap_operations_one_pending_per_state
+ON cap_operations(fluid_state_id)
+WHERE status IN ('started', 'reconciliation_required');
+
+CREATE TABLE IF NOT EXISTS pipette_attachment (
+    id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id        INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                       ON DELETE CASCADE,
+    pipette_key           TEXT    NOT NULL DEFAULT 'pipette',
+    rack_key              TEXT,
+    slot_id               TEXT,
+    tip_extension_mm      REAL,
+    contents_known_empty  INTEGER NOT NULL DEFAULT 1,
+    attachment_uncertain  INTEGER NOT NULL DEFAULT 0,
+    version               INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
+    updated_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(fluid_state_id, pipette_key)
 );
 """
 
@@ -967,6 +1088,19 @@ class DataStore:
 
         return list_fluid_states(self._conn)
 
+    def get_fluid_container(
+        self,
+        fluid_state_id: int,
+        labware_key: str,
+        location_id: str,
+    ) -> FluidContainerSnapshot:
+        """Return one container's current durable volume/composition."""
+        from .fluid_state import get_fluid_container
+
+        return get_fluid_container(
+            self._conn, fluid_state_id, labware_key, location_id,
+        )
+
     def seed_fluid(
         self,
         fluid_state_id: int,
@@ -1113,6 +1247,192 @@ class DataStore:
             source_composition=source_composition,
             destination_volume_ul=destination_volume_ul,
             destination_composition=destination_composition,
+        )
+
+    # ── Durable tip / pipette-attachment state ──────────────────────────────
+    #
+    # Tip and attached-pipette state hangs off the same fluid_state_id session
+    # as fluid state (create_fluid_state/resume_fluid_state seed and verify
+    # both). See cubos.data.tip_state for the full journal semantics.
+
+    def get_tip_snapshot(self, fluid_state_id: int) -> Any:
+        """Return a deterministic JSON-ready snapshot of tip/pipette state."""
+        from .tip_state import get_tip_snapshot
+
+        return get_tip_snapshot(self._conn, fluid_state_id)
+
+    def begin_pick_up_tip(
+        self,
+        fluid_state_id: int,
+        operation_key: str,
+        rack_key: str,
+        slot_id: str | None,
+        tip_length_mm: float,
+        *,
+        campaign_id: int | None = None,
+    ) -> tuple[bool, str, float]:
+        """Preflight and journal a tip pickup before hardware acts.
+
+        ``slot_id=None`` requests next-available selection within
+        *rack_key*, using durable per-slot status. Returns
+        ``(should_execute, resolved_slot_id, tip_extension_mm)``.
+        """
+        from .tip_state import begin_pick_up_tip
+
+        return begin_pick_up_tip(
+            self._conn,
+            fluid_state_id,
+            operation_key,
+            rack_key,
+            slot_id,
+            tip_length_mm,
+            campaign_id,
+        )
+
+    def complete_pick_up_tip(self, operation_key: str) -> None:
+        """Atomically apply a successfully actuated tip pickup."""
+        from .tip_state import complete_pick_up_tip
+
+        complete_pick_up_tip(self._conn, operation_key)
+
+    def begin_drop_tip(
+        self,
+        fluid_state_id: int,
+        operation_key: str,
+        *,
+        campaign_id: int | None = None,
+    ) -> tuple[bool, str, str]:
+        """Preflight and journal dropping the currently attached tip."""
+        from .tip_state import begin_drop_tip
+
+        return begin_drop_tip(
+            self._conn, fluid_state_id, operation_key, campaign_id,
+        )
+
+    def complete_drop_tip(self, operation_key: str) -> None:
+        """Atomically apply a successfully actuated tip drop."""
+        from .tip_state import complete_drop_tip
+
+        complete_drop_tip(self._conn, operation_key)
+
+    def mark_tip_reconciliation_required(
+        self,
+        operation_key: str,
+        detail: str,
+    ) -> None:
+        """Flag an indeterminate physical tip action for operator review."""
+        from .tip_state import mark_tip_reconciliation_required
+
+        mark_tip_reconciliation_required(self._conn, operation_key, detail)
+
+    def resolve_tip_operation(
+        self,
+        operation_key: str,
+        resolution: str,
+        *,
+        detail: str,
+        final_slot_status: str | None = None,
+    ) -> None:
+        """Resolve an uncertain tip operation using an operator decision."""
+        from .tip_state import resolve_tip_operation
+
+        resolve_tip_operation(
+            self._conn,
+            operation_key,
+            resolution,
+            detail=detail,
+            final_slot_status=final_slot_status,
+        )
+
+    def restore_pipette_attachment(self, fluid_state_id: int, pipette: Any) -> None:
+        """Restore the pipette's attached-tip extension after resume.
+
+        Raises when attachment is uncertain -- callers must block liquid
+        handling until it is reconciled.
+        """
+        from .tip_state import restore_pipette_attachment
+
+        restore_pipette_attachment(self._conn, fluid_state_id, pipette)
+
+    # ── Durable per-vial cap state ──────────────────────────────────────────
+    #
+    # Cap state hangs off the same fluid_state_id session as fluid/tip state
+    # (create_fluid_state/resume_fluid_state seed and verify all three). See
+    # cubos.data.cap_state for the full journal semantics.
+
+    def get_cap_snapshot(self, fluid_state_id: int) -> Any:
+        """Return a deterministic JSON-ready snapshot of cap state."""
+        from .cap_state import get_cap_snapshot
+
+        return get_cap_snapshot(self._conn, fluid_state_id)
+
+    def get_cap_state(
+        self,
+        fluid_state_id: int,
+        labware_key: str,
+        location_id: str,
+    ) -> Optional[str]:
+        """Return one vial's durable cap status, or None if not capper-managed."""
+        from .cap_state import get_cap_state
+
+        return get_cap_state(self._conn, fluid_state_id, labware_key, location_id)
+
+    def begin_cap_operation(
+        self,
+        fluid_state_id: int,
+        operation_key: str,
+        operation_type: str,
+        labware_key: str,
+        location_id: str,
+        *,
+        campaign_id: int | None = None,
+    ) -> bool:
+        """Preflight and journal a decap/cap operation before hardware acts."""
+        from .cap_state import begin_cap_operation
+
+        return begin_cap_operation(
+            self._conn,
+            fluid_state_id,
+            operation_key,
+            operation_type,
+            labware_key,
+            location_id,
+            campaign_id,
+        )
+
+    def complete_cap_operation(self, operation_key: str) -> None:
+        """Atomically apply a successfully actuated decap/cap."""
+        from .cap_state import complete_cap_operation
+
+        complete_cap_operation(self._conn, operation_key)
+
+    def mark_cap_reconciliation_required(
+        self,
+        operation_key: str,
+        detail: str,
+    ) -> None:
+        """Flag an indeterminate physical decap/cap action for operator review."""
+        from .cap_state import mark_cap_reconciliation_required
+
+        mark_cap_reconciliation_required(self._conn, operation_key, detail)
+
+    def resolve_cap_operation(
+        self,
+        operation_key: str,
+        resolution: str,
+        *,
+        detail: str,
+        final_status: str | None = None,
+    ) -> None:
+        """Resolve an uncertain cap operation using an operator decision."""
+        from .cap_state import resolve_cap_operation
+
+        resolve_cap_operation(
+            self._conn,
+            operation_key,
+            resolution,
+            detail=detail,
+            final_status=final_status,
         )
 
     # ── Labware tracking ────────────────────────────────────────────────────
