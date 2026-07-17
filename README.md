@@ -5,6 +5,10 @@ GRBL gantry motion, mounted instruments, deck labware, YAML protocols, offline
 motion validation, and SQLite-backed experiment data into one operator and
 developer workflow.
 
+<p align="center">
+  <img src="docs/images/cubos-demo.gif" alt="A CubOS-driven gantry running an automated protocol over a 96-well plate" width="360">
+</p>
+
 Use CubOS to:
 
 - define gantry, deck, and protocol state in versioned YAML files
@@ -12,6 +16,13 @@ Use CubOS to:
 - run reproducible measurement and liquid-handling protocols
 - persist experiment state and measurement data for later analysis
 - extend the platform with new instruments, labware, and command handlers
+
+The Operator web interface loads the same gantry, deck, and protocol YAML
+configs, visualizes the deck, and drives calibration and protocol runs with
+per-container fluid state tracking — shown here with the PANDA
+liquid-handling platform's configs loaded and a seeded fluid state:
+
+![CubOS Operator interface with PANDA gantry, deck, and protocol configs loaded](docs/images/operator-ui.png)
 
 CubOS can move real lab hardware. Always validate configs offline, calibrate
 the gantry work frame, keep an E-stop reachable, and start with minimal motion
