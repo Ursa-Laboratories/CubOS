@@ -12,6 +12,8 @@ nav:
     - Calibrate Gantry: calibration.md
     - Set Up Deck and Labware: deck.md
     - Run a Protocol with YAML: protocol-yaml.md
+    - Fluid State Tracking: fluid-state.md
+    - PANDA-CUB Quickstart: panda-cub-quickstart.md
     - Data: data.md
     - Troubleshooting & Recovery: troubleshooting.md
   - Contributing to CubOS:
@@ -24,25 +26,25 @@ nav:
     - Appendix: appendix.md
   - API Reference:
     - Overview: reference/index.md
-    - deck: reference/src/deck/index.md
-    - gantry: reference/src/gantry/index.md
-    - instruments: reference/src/instruments/index.md
+    - cubos: reference/cubos/index.md
+    - deck: reference/cubos/deck/index.md
+    - gantry: reference/cubos/gantry/index.md
+    - instruments: reference/cubos/instruments/index.md
     - protocol_engine:
-      - Overview: reference/src/protocol_engine/index.md
+      - Overview: reference/cubos/protocol_engine/index.md
       - Commands:
-        - move: reference/src/protocol_engine/commands/move.md
-        - scan: reference/src/protocol_engine/commands/scan.md
-        - measure: reference/src/protocol_engine/commands/measure.md
-        - pipette: reference/src/protocol_engine/commands/pipette.md
-        - home: reference/src/protocol_engine/commands/home.md
-        - pause: reference/src/protocol_engine/commands/pause.md
-    - validation: reference/src/validation/index.md
-    - data: reference/data/index.md
+        - move: reference/cubos/protocol_engine/commands/move.md
+        - scan: reference/cubos/protocol_engine/commands/scan.md
+        - measure: reference/cubos/protocol_engine/commands/measure.md
+        - pipette: reference/cubos/protocol_engine/commands/pipette.md
+        - home: reference/cubos/protocol_engine/commands/home.md
+        - pause: reference/cubos/protocol_engine/commands/pause.md
+    - validation: reference/cubos/validation/index.md
+    - data: reference/cubos/data/index.md
 
 not_in_nav: |
   agent-index.md
-  reference/src/**
-  reference/data/**
+  reference/cubos/**
 
 plugins:
   - search
@@ -53,8 +55,7 @@ plugins:
       handlers:
         python:
           paths:
-            - src
-            - .
+            - packages/core/src
           options:
             members_order: source
             merge_init_into_class: true

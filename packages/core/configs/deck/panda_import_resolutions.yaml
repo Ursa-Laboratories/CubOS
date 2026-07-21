@@ -1,0 +1,55 @@
+# Default resolutions for the PANDA-BEAR -> CubOS production import
+# (cubos.tools.import_panda_bear). Encodes only row-selection facts verified
+# against the production snapshot (panda_prod_db.db,
+# sha256 209d085b5370ee4e83c8ffe0bf0ccc83edc925b4042f292600f9529f811ab21f).
+#
+# Positional/geometric issues (out-of-envelope coordinates, well-grid pitch
+# residuals, vial content/volume rescale) are NOT resolved here -- they are
+# always reported as warnings in the conflict report and never block the
+# import. Alex will move labware and re-derive exact positions after the
+# hardware gate; this file exists to make row *selection* (which rows are
+# real vs. corrupt/duplicate/undersized) deterministic and reviewable.
+
+exclude_vial_ids: [10, 12, 13, 14]
+# id 10: duplicate w3 row. capacity=0 (corrupt -- every other vial has
+#        capacity=20000) and its DB y-coordinate falls outside the declared
+#        vial-rail envelope.
+# id 12: inactive (active=0) duplicate of s1.
+# id 13: active duplicate of s1 with a corrupt x=-417.7 -- that's e1's rack
+#        column, not s1's.
+# id 14: duplicate of w1, same corrupt x=-417.7 as id 13.
+# Kept: ids 1-9 (s1-s6, w1-w3) and id 11 (e1) -- matches the production
+# panda_vial_status view's own dedup choice (it independently picks the same
+# 10 rows via a ROW_NUMBER-per-position window function).
+
+tiprack_shape_overrides:
+  1: {rows: 2, columns: 12}
+  # Rack 1 declares rows="ABCD" (4) x cols=15 in panda_tipracks /
+  # panda_tiprack_types, but panda_tips only has 24 real rows for rack_id=1
+  # (A1-A12, B1-B12; tip_length is NULL for all of them -- see
+  # tip_length_mm below). Trust the actual tip rows over the declared shape;
+  # this override just confirms the derived 2x12 grid is expected.
+
+exclude_tiprack_ids: [2]
+# Rack 2 (type_id=2, declared "AB" x 14) has zero rows in panda_tips -- it
+# was never actually populated.
+
+tip_length_mm: 59.3
+# panda_tips.tip_length is NULL for all 24 rows on rack 1. 59.3mm is the
+# Opentrons standard 300uL tip length -- matches
+# cubos.deck.labware.tip_rack.DEFAULT_TIP_LENGTH_MM.
+
+wellplate_height_overrides:
+  120: 9.0
+  # panda_wellplates.height for the current plate (id=120, "ITO-PAMA") is 8,
+  # but every one of its 12 panda_well_hx rows independently records
+  # height=9.0 (and that's the value that actually generated each well's
+  # `top`/`bottom` columns). Trust the per-well well_hx data over the
+  # plate-level column.
+  #
+  # Note (reported, not resolved here): converted tip-rack pickup_z lands
+  # ~3.8mm below the gantry's working-volume z_min, consistent with an
+  # unverified ~4mm homing pull-off / Z-datum offset between the production
+  # DB's frame and the current home_origin config. See the
+  # `position_out_of_envelope` warnings in the conflict report; pending live
+  # controller $#/WPos confirmation before physical use.

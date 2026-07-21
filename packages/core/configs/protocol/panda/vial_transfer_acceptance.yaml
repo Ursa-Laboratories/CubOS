@@ -1,0 +1,56 @@
+# Feature 08 out-of-the-box acceptance harness: pick up a tip, aspirate water
+# from a stock vial, dispense into two different waste vials (the second
+# transfer forces the P300's capacity-bounded multi-stroke split), then drop
+# the tip in the disposal. Explicit source/destination containers throughout
+# (no automatic stock/waste selection) -- see well_rinse_water.yaml for the
+# production-shaped automatic-selection port.
+#
+# require_uncapped is intentionally omitted on both transfers: none of
+# s1/w1/w3 carry a `capped:` field in panda_imported_deck.yaml, so they are
+# not durably cap-tracked and the preflight would be a no-op anyway (see
+# cubos.protocol_engine.commands._cap_preflight.require_uncapped).
+#
+# Destination deviation from the original plan: the second (400 uL) transfer
+# targets w3, not w2. panda_initial_fluids.yaml (generated from the real
+# PANDA-BEAR production snapshot) seeds w2 at 19800 uL against its 20000 uL
+# working volume -- only 200 uL of headroom, one working_volume_ul short of
+# the requested 400 uL. cubos.protocol_engine.commands._liquid_transfer.
+# validate_destination_overflow hard-rejects that before any motion
+# (Feature 04 safety preflight), so w2 cannot accept a 400 uL transfer
+# regardless of how it is split into strokes. w3 has 8300 uL of headroom and
+# is otherwise identical (role: waste). See docs/panda-cub-quickstart.md for
+# the full expected-final-state table.
+#
+# Run in mock mode (uses the *_pipetting_mock gantry/deck pair -- the
+# generated cub_xl_panda_home_origin_full.yaml + panda_imported_deck.yaml
+# trio cannot pass bounds validation for any real `pipette` motion; see
+# gantry/cub_xl_panda_pipetting_mock.yaml's header for the documented
+# blocker):
+#   PYTHONPATH=packages/core/src .venv/bin/python -m cubos.tools.run_protocol \
+#     --mock \
+#     --database /tmp/panda-acceptance.db \
+#     --initial-fluids packages/core/configs/deck/panda_initial_fluids.yaml \
+#     packages/core/configs/gantry/cub_xl_panda_pipetting_mock.yaml \
+#     packages/core/configs/deck/panda_imported_deck_pipetting_mock.yaml \
+#     packages/core/configs/protocol/panda/vial_transfer_acceptance.yaml
+
+protocol:
+  - home:
+
+  - pick_up_tip:
+      position: tip_rack.A1
+
+  - transfer:
+      source: s1
+      destination: w1
+      volume_ul: 200.0
+
+  - transfer:
+      source: s1
+      destination: w3
+      volume_ul: 400.0
+
+  - drop_tip:
+      position: tip_disposal.discard
+
+  - home:
