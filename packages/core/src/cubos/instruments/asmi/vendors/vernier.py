@@ -5,7 +5,12 @@ import statistics
 import time
 from typing import Optional
 
-from cubos.instruments.asmi.interface import ASMIInstrument
+from cubos.instruments.asmi.interface import (
+    ASMIInstrument,
+    DEFAULT_SURFACE_FORCE_THRESHOLD_N,
+    DEFAULT_SURFACE_SEARCH_MAX_TRAVEL_MM,
+    DEFAULT_SURFACE_SEARCH_STEP_MM,
+)
 from cubos.instruments.asmi.exceptions import (
     ASMICommandError,
     ASMIConnectionError,
@@ -56,6 +61,9 @@ class VernierASMI(ASMIInstrument):
         force_limit: float = 15.0,
         baseline_samples: int = 10,
         idle_timeout: float = 10.0,
+        surface_search_step: float = DEFAULT_SURFACE_SEARCH_STEP_MM,
+        surface_force_threshold: float = DEFAULT_SURFACE_FORCE_THRESHOLD_N,
+        surface_search_max_travel: float = DEFAULT_SURFACE_SEARCH_MAX_TRAVEL_MM,
     ):
         super().__init__(
             name=name, offset_x=offset_x, offset_y=offset_y,
@@ -68,6 +76,9 @@ class VernierASMI(ASMIInstrument):
         self._force_limit = force_limit
         self._baseline_samples = baseline_samples
         self._idle_timeout = idle_timeout
+        self._surface_search_step = surface_search_step
+        self._surface_force_threshold = surface_force_threshold
+        self._surface_search_max_travel = surface_search_max_travel
         self._godirect = None
         self._device = None
         self._sensor = None
@@ -240,6 +251,11 @@ class VernierASMI(ASMIInstrument):
         measurement_height: float,
         indentation_limit_height: float,
         step_size: float,
+        *,
+        detect_surface: bool = False,
+        surface_search_step: float | None = None,
+        surface_force_threshold: float | None = None,
+        surface_search_max_travel: float | None = None,
     ) -> None:
         """Validate indentation parameters.
 
@@ -250,10 +266,37 @@ class VernierASMI(ASMIInstrument):
         indentation collects baseline force samples and returns) and
         matches the inclusive ``≤`` spec used by the engine and
         validator.
+
+        With ``detect_surface`` the limit is anchored to the detected
+        surface instead, so it must be at or below zero — the two heights
+        live in different frames and are not compared to each other.
         """
         if step_size <= 0:
             raise ValueError(f"step_size must be positive, got {step_size}")
-        if indentation_limit_height > measurement_height:
+        if detect_surface:
+            if surface_search_step is None or surface_search_step <= 0:
+                raise ValueError(
+                    f"surface_search_step must be positive, got "
+                    f"{surface_search_step}"
+                )
+            if surface_force_threshold is None or surface_force_threshold <= 0:
+                raise ValueError(
+                    f"surface_force_threshold must be positive, got "
+                    f"{surface_force_threshold}"
+                )
+            if surface_search_max_travel is None or surface_search_max_travel <= 0:
+                raise ValueError(
+                    f"surface_search_max_travel must be positive, got "
+                    f"{surface_search_max_travel}"
+                )
+            if indentation_limit_height > 0:
+                raise ValueError(
+                    f"indentation_limit_height ({indentation_limit_height}) "
+                    "must be at or below 0 when detect_surface is enabled — "
+                    "it is anchored to the detected sample surface "
+                    "(negative = into the sample)."
+                )
+        elif indentation_limit_height > measurement_height:
             raise ValueError(
                 f"indentation_limit_height ({indentation_limit_height}) "
                 f"must be at or below measurement_height "
@@ -271,12 +314,25 @@ class VernierASMI(ASMIInstrument):
         force_limit: float | None = None,
         baseline_samples: int | None = None,
         measure_with_return: bool = False,
+        detect_surface: bool = False,
+        surface_search_step: float | None = None,
+        surface_force_threshold: float | None = None,
+        surface_search_max_travel: float | None = None,
     ) -> dict:
         """Perform step-by-step indentation at the current XY position.
 
         Z inputs are labware-relative offsets resolved against ``well_z``.
         Descent decreases deck-frame Z; optional return samples increase Z
         back to the action plane. Every measurement is tagged with direction.
+
+        With ``detect_surface`` the probe first coarse-searches downward
+        from the measurement plane until the baseline-corrected force
+        changes by more than ``surface_force_threshold``, backs off one
+        ``surface_search_step``, and anchors ``indentation_limit_height``
+        to that detected surface. Search samples are not recorded in the
+        measurement list — only the detected surface is reported in the
+        result. The search aborts with :class:`ASMICommandError` if no
+        surface is found within ``surface_search_max_travel`` mm.
         """
         _step_size, _force_limit, _baseline_samples = (
             self._resolve_indentation_settings(
@@ -285,8 +341,19 @@ class VernierASMI(ASMIInstrument):
                 baseline_samples=baseline_samples,
             )
         )
+        _search_step, _search_threshold, _search_max_travel = (
+            self._resolve_surface_search_settings(
+                surface_search_step=surface_search_step,
+                surface_force_threshold=surface_force_threshold,
+                surface_search_max_travel=surface_search_max_travel,
+            )
+        )
         self._validate_indentation_parameters(
             measurement_height, indentation_limit_height, _step_size,
+            detect_surface=detect_surface,
+            surface_search_step=_search_step,
+            surface_force_threshold=_search_threshold,
+            surface_search_max_travel=_search_max_travel,
         )
         action_z, target_z = self._resolve_indentation_z_targets(
             well_z=well_z,
@@ -295,7 +362,19 @@ class VernierASMI(ASMIInstrument):
         )
 
         if self._offline:
-            return self._offline_indentation(
+            # Offline detection is deterministic: the surface is "found"
+            # at the measurement plane itself, so the geometry matches a
+            # normal run with the limit re-anchored to ``action_z``.
+            surface_info = None
+            if detect_surface:
+                target_z = action_z + indentation_limit_height
+                surface_info = self._surface_detection_info(
+                    surface_z=action_z,
+                    trigger_force_n=0.0,
+                    search_step=_search_step,
+                    force_threshold=_search_threshold,
+                )
+            result = self._offline_indentation(
                 gantry,
                 target_z,
                 _step_size,
@@ -303,6 +382,11 @@ class VernierASMI(ASMIInstrument):
                 _force_limit,
                 measure_with_return=measure_with_return,
             )
+            result["detect_surface"] = detect_surface
+            if surface_info is not None:
+                result.update(surface_info)
+                result["z_target_mm"] = target_z
+            return result
 
         cur_x, cur_y = self._move_to_indentation_start(
             gantry,
@@ -311,6 +395,30 @@ class VernierASMI(ASMIInstrument):
         baseline_avg, baseline_std = self._collect_indentation_baseline(
             baseline_samples=_baseline_samples,
         )
+
+        surface_info = None
+        if detect_surface:
+            surface_z, trigger_force = self._run_surface_search(
+                gantry,
+                cur_x=cur_x,
+                cur_y=cur_y,
+                action_z=action_z,
+                search_step=_search_step,
+                force_threshold=_search_threshold,
+                max_travel=_search_max_travel,
+                baseline_avg=baseline_avg,
+            )
+            # Re-anchor: the descent starts at the detected surface and
+            # the deepest plane is surface-relative.
+            action_z = surface_z
+            target_z = surface_z + indentation_limit_height
+            surface_info = self._surface_detection_info(
+                surface_z=surface_z,
+                trigger_force_n=trigger_force,
+                search_step=_search_step,
+                force_threshold=_search_threshold,
+            )
+
         measurements, force_exceeded = self._run_indentation_descent(
             gantry,
             cur_x=cur_x,
@@ -334,7 +442,7 @@ class VernierASMI(ASMIInstrument):
                 measurements=measurements,
             )
 
-        return self._indentation_result(
+        result = self._indentation_result(
             measurements=measurements,
             baseline_avg=baseline_avg,
             baseline_std=baseline_std,
@@ -344,6 +452,10 @@ class VernierASMI(ASMIInstrument):
             z_target_mm=target_z,
             force_limit_n=_force_limit,
         )
+        result["detect_surface"] = detect_surface
+        if surface_info is not None:
+            result.update(surface_info)
+        return result
 
     def _resolve_indentation_settings(
         self,
@@ -362,6 +474,97 @@ class VernierASMI(ASMIInstrument):
             else self._baseline_samples
         )
         return resolved_step_size, resolved_force_limit, resolved_baseline_samples
+
+    def _resolve_surface_search_settings(
+        self,
+        *,
+        surface_search_step: float | None,
+        surface_force_threshold: float | None,
+        surface_search_max_travel: float | None,
+    ) -> tuple[float, float, float]:
+        resolved_step = (
+            surface_search_step
+            if surface_search_step is not None
+            else self._surface_search_step
+        )
+        resolved_threshold = (
+            surface_force_threshold
+            if surface_force_threshold is not None
+            else self._surface_force_threshold
+        )
+        resolved_max_travel = (
+            surface_search_max_travel
+            if surface_search_max_travel is not None
+            else self._surface_search_max_travel
+        )
+        return resolved_step, resolved_threshold, resolved_max_travel
+
+    @staticmethod
+    def _surface_detection_info(
+        *,
+        surface_z: float,
+        trigger_force_n: float,
+        search_step: float,
+        force_threshold: float,
+    ) -> dict:
+        return {
+            "surface_z_mm": surface_z,
+            "surface_trigger_force_n": trigger_force_n,
+            "surface_search_step_mm": search_step,
+            "surface_force_threshold_n": force_threshold,
+        }
+
+    def _run_surface_search(
+        self,
+        gantry,
+        *,
+        cur_x: float,
+        cur_y: float,
+        action_z: float,
+        search_step: float,
+        force_threshold: float,
+        max_travel: float,
+        baseline_avg: float,
+    ) -> tuple[float, float]:
+        """Coarse-step down from ``action_z`` until the surface is felt.
+
+        Returns ``(surface_z, trigger_force_n)`` where ``surface_z`` is one
+        search step above the trigger height (clamped to ``action_z``) and
+        the gantry has been backed off to it. Search readings are not part
+        of the measurement record. Raises :class:`ASMICommandError` when
+        the corrected force never exceeds ``force_threshold`` before the
+        search floor ``action_z - max_travel``.
+        """
+        floor_z = action_z - max_travel
+        max_steps = _step_count_bound(action_z, floor_z, search_step)
+
+        for _ in range(max_steps):
+            coords = gantry.get_coordinates()
+            current_z = coords["z"]
+            if current_z <= floor_z:
+                break
+
+            next_z = max(current_z - search_step, floor_z)
+            self._move_z(gantry, cur_x, cur_y, next_z)
+            coords = gantry.get_coordinates()
+            force = self.get_force_reading()
+            corrected = force - baseline_avg
+            if abs(corrected) > force_threshold:
+                surface_z = min(coords["z"] + search_step, action_z)
+                self.logger.info(
+                    "Surface detected at Z=%.3f mm (dF=%.4f N); "
+                    "backing off to %.3f mm",
+                    coords["z"], corrected, surface_z,
+                )
+                self._move_z(gantry, cur_x, cur_y, surface_z)
+                return surface_z, corrected
+
+        raise ASMICommandError(
+            f"Surface not detected within {max_travel:g} mm below the "
+            f"measurement plane (corrected force never exceeded "
+            f"{force_threshold:g} N). Check surface_force_threshold, "
+            "surface_search_max_travel, or the well's calibrated Z."
+        )
 
     @staticmethod
     def _resolve_indentation_z_targets(

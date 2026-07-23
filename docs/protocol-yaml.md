@@ -170,7 +170,9 @@ instrument method, and persist the result if a campaign is attached.
 - `method` *(str, default `"measure"`)* — instrument method to call.
 - `indentation_limit_height` *(float, default `null`)* — signed labware-relative
   offset for the deepest descent plane (closed-loop methods such as ASMI
-  `indentation`); must be at or below `measurement_height`.
+  `indentation`); must be at or below `measurement_height`. With ASMI surface
+  detection enabled (`detect_surface: true` in `method_kwargs`) it is anchored
+  to the sensor-detected sample surface instead and must be at or below `0`.
 - `method_kwargs` *(dict, default `{}`)* — forwarded verbatim to the instrument
   method. See [method_kwargs](#method_kwargs) below.
 
@@ -186,7 +188,9 @@ instrument method at each well. Returns a `{well_id: result}` mapping.
 - `interwell_scan_height` *(float, required)* — labware-relative offset for
   between-well XY travel; must be at or above `measurement_height`.
 - `indentation_limit_height` *(float, default `null`)* — deepest plane for ASMI
-  indentation; must be at or below `measurement_height`.
+  indentation; must be at or below `measurement_height`. With
+  `detect_surface: true` in `method_kwargs` it is anchored to the detected
+  sample surface instead and must be at or below `0`.
 - `delay_s` *(float, default `0.0`)* — seconds to pause between wells.
 - `method_kwargs` *(dict, default `null`)* — forwarded to the method per well.
 
@@ -493,3 +497,32 @@ rejected inside `method_kwargs` — `measurement_height`, `interwell_scan_height
 those. The engine also injects `well_z`, `measurement_height`,
 `indentation_limit_height`, and `gantry` into the method call when (and only when)
 the method declares those parameters; injected values win over `method_kwargs`.
+
+#### ASMI surface detection
+
+ASMI `indentation` supports sensor-based surface detection through
+`method_kwargs`, useful for deep samples (partially filled wells, vials) where
+descending the whole approach at the fine measurement `step_size` is slow, or
+where the sample surface Z varies with fill level:
+
+- `detect_surface` *(bool, default `false`)* — approach to `measurement_height`
+  as usual, then coarse-step downward until the baseline-corrected force
+  changes by more than the threshold, back off one search step, and run the
+  fine-step indentation from that detected surface. While enabled,
+  `indentation_limit_height` is anchored to the detected surface (negative =
+  into the sample) and must be at or below `0`.
+- `surface_search_step` *(float, default `0.5`)* — mm per coarse search step.
+- `surface_force_threshold` *(float, default `0.01`)* — force change in Newtons
+  (10 mN) that marks the surface.
+- `surface_search_max_travel` *(float, default `10.0`)* — search window in mm
+  below `measurement_height`; the well errors out instead of descending past
+  it. Static validation bounds the worst-case depth
+  (`measurement_height - surface_search_max_travel + indentation_limit_height`)
+  against the working volume.
+
+Search readings are not recorded as measurement samples; the detected surface
+Z, trigger force, and search parameters are reported in the result metadata
+(`surface_z_mm`, `surface_trigger_force_n`, `surface_search_step_mm`,
+`surface_force_threshold_n`). See
+`packages/core/configs/protocol/asmi/indentation_detect_surface.yaml` for a
+complete example.

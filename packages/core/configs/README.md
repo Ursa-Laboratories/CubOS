@@ -69,6 +69,7 @@ python -m cubos.tools.validate_setup \
   `deck/filmetrics_deck.yaml`, `deck/panda_deck.yaml`,
   `deck/sharc_uv_deck.yaml`.
 - `protocol/asmi/move_a1.yaml`, `protocol/asmi/indentation.yaml`,
+  `protocol/asmi/indentation_detect_surface.yaml`,
   `protocol/sterling/park.yaml`, `protocol/sterling/vial_scan.yaml`,
   `protocol/sterling/2_instrument_vial_scan.yaml`,
   `protocol/filmetrics/scan.yaml`, `protocol/sharc_uv/curing_scan.yaml`,
@@ -94,6 +95,9 @@ sanity check, not for motion math.
 - ASMI `indentation_limit_height` (top-level on `scan`): signed
   labware-relative offset (mm above the well surface; negative = below)
   for the deepest descent plane. Must be at or below `measurement_height`.
+  With `detect_surface: true` in `method_kwargs` it is instead anchored
+  to the sensor-detected sample surface and must be at or below `0`
+  (see `protocol/asmi/indentation_detect_surface.yaml`).
 - gantry `safe_z`: absolute deck-frame Z used for inter-labware travel
   (the only absolute Z in the engagement path)
 

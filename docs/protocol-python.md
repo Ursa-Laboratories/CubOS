@@ -134,7 +134,9 @@ Append a `home` step. No arguments.
 - `measurement_height` *(float, required)* — labware-relative action plane.
 - `method` *(str, optional)* — instrument method to call (default `"measure"`).
 - `indentation_limit_height` *(float, optional)* — deepest descent plane for
-  closed-loop methods; at or below `measurement_height`.
+  closed-loop methods; at or below `measurement_height` (or at or below `0`,
+  anchored to the detected surface, when `method_kwargs` enables ASMI
+  `detect_surface`).
 - `method_kwargs` *(dict, optional)* — forwarded verbatim to the instrument
   method (instrument-method-specific keys; not schema-validated).
 
@@ -147,7 +149,8 @@ Append a `home` step. No arguments.
 - `interwell_scan_height` *(float, required)* — between-well travel offset; at or
   above `measurement_height`.
 - `indentation_limit_height` *(float, optional)* — deepest plane for ASMI
-  indentation; at or below `measurement_height`.
+  indentation; at or below `measurement_height` (or at or below `0`, anchored
+  to the detected surface, when `method_kwargs` enables ASMI `detect_surface`).
 - `delay_s` *(float, optional)* — seconds to pause between wells (default `0.0`).
 - `method_kwargs` *(dict, optional)* — forwarded to the method per well.
 

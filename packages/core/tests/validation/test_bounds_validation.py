@@ -513,6 +513,29 @@ class TestValidateProtocolMotionBounds:
         ]
         assert targets[-1].z == 15.0
 
+    def test_collector_reports_detect_surface_worst_case_depth(self):
+        """With detect_surface the deepest statically-checkable Z is the
+        bottom of the search window plus the surface-relative limit:
+        a1_z=20 + measurement_height(-1) - max_travel(5) + limit(-2) = 12."""
+        gantry = _make_gantry(safe_z=80.0)
+        deck = _make_deck(plate=_make_plate(rows=1, columns=1, a1_z=20.0))
+        protocol = _make_protocol(
+            "measure",
+            instrument="probe",
+            position="plate.A1",
+            measurement_height=-1.0,
+            indentation_limit_height=-2.0,
+            method_kwargs={
+                "detect_surface": True,
+                "surface_search_max_travel": 5.0,
+            },
+        )
+
+        targets = collect_protocol_motion_targets(gantry, protocol, deck)
+
+        assert targets[-1].position_id == "A1.indentation_limit_z"
+        assert targets[-1].z == 12.0
+
 
 # ── Signed (home_origin) working-volume bounds ──────────────────────────
 

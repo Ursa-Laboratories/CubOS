@@ -586,3 +586,60 @@ def test_measure_rejects_inverted_indentation_height_before_motion():
     ctx.gantry.move_to_labware.assert_not_called()
     ctx.gantry.move.assert_not_called()
     instr.measure.assert_not_called()
+
+
+def test_measure_detect_surface_skips_frame_mismatched_height_check():
+    """With detect_surface the limit is surface-relative: a limit above
+    measurement_height must be accepted (different frames)."""
+    calls = []
+
+    class _DetectASMI:
+        def indentation(
+            self,
+            *,
+            gantry,
+            well_z,
+            measurement_height,
+            indentation_limit_height,
+            detect_surface=False,
+        ):
+            del gantry, well_z
+            calls.append((
+                measurement_height, indentation_limit_height, detect_surface,
+            ))
+            return {"measurements": []}
+
+    instr = _DetectASMI()
+    ctx = _ctx(MagicMock())
+    ctx.gantry.instruments = {"uvvis": instr}
+
+    measure(
+        ctx,
+        instrument="uvvis",
+        position="plate_1.A1",
+        method="indentation",
+        measurement_height=-2.0,
+        indentation_limit_height=-1.0,
+        method_kwargs={"detect_surface": True},
+    )
+
+    assert calls == [(-2.0, -1.0, True)]
+
+
+def test_measure_detect_surface_rejects_positive_limit_before_motion():
+    instr = _mock_instr()
+    ctx = _ctx(instr)
+
+    with pytest.raises(ProtocolExecutionError, match="detect_surface"):
+        measure(
+            ctx,
+            instrument="uvvis",
+            position="plate_1.A1",
+            measurement_height=0.0,
+            indentation_limit_height=0.5,
+            method_kwargs={"detect_surface": True},
+        )
+
+    ctx.gantry.move_to_labware.assert_not_called()
+    ctx.gantry.move.assert_not_called()
+    instr.measure.assert_not_called()

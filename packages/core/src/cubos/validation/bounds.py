@@ -328,6 +328,29 @@ def _append_measure_targets(
     coord = _resolve_deck_coord(deck, position)
     if coord is None:
         return
+
+    method_kwargs = step_args.get("method_kwargs") or {}
+    if isinstance(method_kwargs, dict) and method_kwargs.get("detect_surface"):
+        # Surface detection anchors the limit to a Z found at runtime; the
+        # statically-checkable worst case is a surface at the bottom of the
+        # search window, with the indentation continuing below it.
+        if not _is_finite_number(measurement_height):
+            return
+        from cubos.instruments.asmi.interface import (
+            DEFAULT_SURFACE_SEARCH_MAX_TRAVEL_MM,
+        )
+        max_travel = method_kwargs.get(
+            "surface_search_max_travel", DEFAULT_SURFACE_SEARCH_MAX_TRAVEL_MM,
+        )
+        if not _is_finite_number(max_travel):
+            return
+        deepest_z = (
+            coord.z + float(measurement_height) - float(max_travel)
+            + min(float(indentation_limit_height), 0.0)
+        )
+    else:
+        deepest_z = coord.z + float(indentation_limit_height)
+
     _append_target(
         targets,
         target=position,
@@ -335,7 +358,7 @@ def _append_measure_targets(
         instrument=instrument,
         x=coord.x,
         y=coord.y,
-        z=coord.z + float(indentation_limit_height),
+        z=deepest_z,
         tip_extension=tip_ext,
     )
 

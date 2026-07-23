@@ -36,6 +36,7 @@ from cubos.protocol_engine.registry import CommandRegistry
 from cubos.protocol_engine.scan_args import (
     NormalizedScanArguments,
     normalize_scan_arguments,
+    surface_detection_enabled,
 )
 
 from .errors import ProtocolSemanticViolation
@@ -777,21 +778,57 @@ def _validate_scan_command(
         instrumented_gantry=instrumented_gantry,
         gantry=gantry,
     ))
-    indentation_limit_height = args.get("indentation_limit_height")
+    violations.extend(_indentation_limit_frame_violations(
+        step_index=step_index,
+        command_name="scan",
+        indentation_limit_height=args.get("indentation_limit_height"),
+        relative_action=relative_action,
+        method_kwargs=normalized.method_kwargs,
+    ))
+    return violations
+
+
+def _indentation_limit_frame_violations(
+    *,
+    step_index: int,
+    command_name: str,
+    indentation_limit_height: Any,
+    relative_action: float,
+    method_kwargs: dict[str, Any],
+) -> list[ProtocolSemanticViolation]:
+    """Check ``indentation_limit_height`` against its anchoring frame.
+
+    Without surface detection the limit shares the calibrated-well frame
+    with ``measurement_height`` and must sit at or below it. With
+    ``detect_surface`` the limit is anchored to the sensor-detected sample
+    surface — comparing it to ``measurement_height`` would be a frame
+    mismatch — and must instead be at or below zero.
+    """
     if (
-        indentation_limit_height is not None
-        and isinstance(indentation_limit_height, (int, float))
-        and not isinstance(indentation_limit_height, bool)
-        and math.isfinite(float(indentation_limit_height))
-        and indentation_limit_height > relative_action
+        indentation_limit_height is None
+        or not isinstance(indentation_limit_height, (int, float))
+        or isinstance(indentation_limit_height, bool)
+        or not math.isfinite(float(indentation_limit_height))
     ):
-        violations.append(_violation(
-            step_index, "scan",
+        return []
+    if surface_detection_enabled(method_kwargs):
+        if indentation_limit_height > 0:
+            return [_violation(
+                step_index, command_name,
+                f"indentation_limit_height ({indentation_limit_height}) must "
+                "be at or below 0 when detect_surface is enabled — it is "
+                "anchored to the detected sample surface (negative = into "
+                "the sample).",
+            )]
+        return []
+    if indentation_limit_height > relative_action:
+        return [_violation(
+            step_index, command_name,
             f"indentation_limit_height ({indentation_limit_height}) is above "
             f"measurement_height ({relative_action}). The deepest descent "
             "plane must be at or below the action plane in +Z-up.",
-        ))
-    return violations
+        )]
+    return []
 
 
 def _validate_measure_command(
@@ -920,20 +957,13 @@ def _validate_measure_command(
         instrumented_gantry=instrumented_gantry,
         gantry=gantry,
     ))
-    indentation_limit_height = args.get("indentation_limit_height")
-    if (
-        indentation_limit_height is not None
-        and isinstance(indentation_limit_height, (int, float))
-        and not isinstance(indentation_limit_height, bool)
-        and math.isfinite(float(indentation_limit_height))
-        and indentation_limit_height > relative_action
-    ):
-        violations.append(_violation(
-            step_index, "measure",
-            f"indentation_limit_height ({indentation_limit_height}) is above "
-            f"measurement_height ({relative_action}). The deepest descent "
-            "plane must be at or below the action plane in +Z-up.",
-        ))
+    violations.extend(_indentation_limit_frame_violations(
+        step_index=step_index,
+        command_name="measure",
+        indentation_limit_height=args.get("indentation_limit_height"),
+        relative_action=relative_action,
+        method_kwargs=normalized.method_kwargs,
+    ))
     return violations
 
 
@@ -1681,6 +1711,30 @@ def _validate_asmi_indentation(
             f"ASMI step_size must be positive, got {step_size}.",
         ))
 
+    detect_surface = surface_detection_enabled(normalized.method_kwargs)
+    surface_kwargs_ok = True
+    if detect_surface:
+        for field in (
+            "surface_search_step",
+            "surface_force_threshold",
+            "surface_search_max_travel",
+        ):
+            value = normalized.method_kwargs.get(field)
+            if value is None:
+                continue
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or value <= 0
+            ):
+                surface_kwargs_ok = False
+                violations.append(_violation(
+                    step_index,
+                    "scan",
+                    f"ASMI {field} must be a positive number, got {value!r}.",
+                ))
+
     if indentation_limit_height is None:
         return violations
     finite_violation = _finite_field_violation(
@@ -1689,15 +1743,42 @@ def _validate_asmi_indentation(
     if finite_violation is not None:
         violations.append(finite_violation)
         return violations
-    deepest_abs = ref_z + indentation_limit_height
+
+    if detect_surface:
+        # The surface's Z is unknown statically; bound the worst case:
+        # the search may descend `surface_search_max_travel` below the
+        # measurement plane, and the indentation then continues
+        # `indentation_limit_height` below the surface found there.
+        if not surface_kwargs_ok:
+            return violations
+        from cubos.instruments.asmi.interface import (
+            DEFAULT_SURFACE_SEARCH_MAX_TRAVEL_MM,
+        )
+        max_travel = normalized.method_kwargs.get(
+            "surface_search_max_travel", DEFAULT_SURFACE_SEARCH_MAX_TRAVEL_MM,
+        )
+        deepest_abs = (
+            ref_z + relative_action - max_travel
+            + min(float(indentation_limit_height), 0.0)
+        )
+        limit_hint = (
+            "Raise `measurement_height`, lower `surface_search_max_travel`, "
+            "raise `indentation_limit_height`, raise the labware, or adjust "
+            "z_min."
+        )
+    else:
+        deepest_abs = ref_z + indentation_limit_height
+        limit_hint = (
+            "Raise `indentation_limit_height`, raise the labware, or adjust "
+            "z_min."
+        )
     if deepest_abs < gantry.working_volume.z_min:
         violations.append(_violation(
             step_index,
             "scan",
             f"ASMI indentation deepest absolute Z ({deepest_abs:.3f}) is "
             f"below working_volume.z_min ({gantry.working_volume.z_min}). "
-            "Raise `indentation_limit_height`, raise the labware, or adjust "
-            "z_min.",
+            + limit_hint,
         ))
     return violations
 

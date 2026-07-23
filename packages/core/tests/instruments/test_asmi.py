@@ -318,6 +318,159 @@ class TestASMIOnlineIndentation(unittest.TestCase):
         self.assertIn("measurements", result)
 
 
+class TestASMISurfaceDetection(unittest.TestCase):
+    """Exercise detect_surface: coarse search, back-off, re-anchored limit."""
+
+    SURFACE_Z = 6.0
+    CONTACT_FORCE = 0.5
+
+    def _make_online_asmi(self) -> VernierASMI:
+        asmi = VernierASMI(offline=False, default_force=0.0)
+        asmi._offline = False
+        return asmi
+
+    def _force_at(self, gantry) -> float:
+        """Force model: zero in air, CONTACT_FORCE at/below the surface."""
+        return self.CONTACT_FORCE if gantry._z <= self.SURFACE_Z else 0.0
+
+    def _run_detect_indentation(self, asmi, gantry, **overrides):
+        kwargs = dict(
+            well_z=0.0,
+            measurement_height=10.0,
+            indentation_limit_height=-1.0,
+            step_size=0.5,
+            force_limit=100.0,
+            baseline_samples=1,
+            detect_surface=True,
+            surface_search_step=1.0,
+            surface_force_threshold=0.01,
+            surface_search_max_travel=8.0,
+        )
+        kwargs.update(overrides)
+        with patch.object(asmi, "get_baseline_force", return_value=(0.0, 0.0)), \
+             patch.object(asmi, "get_force_reading",
+                          side_effect=lambda: self._force_at(gantry)):
+            return asmi.indentation(gantry, **kwargs)
+
+    def test_detection_backs_off_one_step_and_reanchors_limit(self):
+        """Trigger at Z=6 → surface set one search step above (Z=7); the
+        fine descent then runs from the surface to surface + limit."""
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+
+        result = self._run_detect_indentation(asmi, gantry)
+
+        self.assertTrue(result["detect_surface"])
+        self.assertAlmostEqual(result["surface_z_mm"], 7.0, places=6)
+        self.assertAlmostEqual(result["surface_trigger_force_n"],
+                               self.CONTACT_FORCE, places=6)
+        self.assertAlmostEqual(result["surface_search_step_mm"], 1.0)
+        self.assertAlmostEqual(result["surface_force_threshold_n"], 0.01)
+        # Limit re-anchored: -1.0 below the detected surface, not well_z.
+        self.assertAlmostEqual(result["z_target_mm"], 6.0, places=6)
+        down_z = [s["z_mm"] for s in result["measurements"]]
+        self.assertAlmostEqual(down_z[0], 6.5, places=6)
+        self.assertAlmostEqual(down_z[-1], 6.0, places=6)
+        # Coarse search samples (Z=9, 8, 7, 6) are not in the record.
+        self.assertTrue(all(z <= 7.0 for z in down_z))
+
+    def test_detection_return_sweep_ends_at_detected_surface(self):
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+
+        result = self._run_detect_indentation(
+            asmi, gantry, measure_with_return=True,
+        )
+
+        up_z = [s["z_mm"] for s in result["measurements"]
+                if s["direction"] == "up"]
+        self.assertAlmostEqual(up_z[-1], result["surface_z_mm"], places=6)
+
+    def test_no_surface_within_max_travel_raises(self):
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+
+        with patch.object(asmi, "get_baseline_force", return_value=(0.0, 0.0)), \
+             patch.object(asmi, "get_force_reading", return_value=0.0):
+            with self.assertRaises(ASMICommandError):
+                asmi.indentation(
+                    gantry,
+                    well_z=0.0,
+                    measurement_height=10.0,
+                    indentation_limit_height=-1.0,
+                    step_size=0.5,
+                    baseline_samples=1,
+                    detect_surface=True,
+                    surface_search_step=1.0,
+                    surface_search_max_travel=3.0,
+                )
+
+    def test_detect_mode_rejects_positive_limit(self):
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+
+        with self.assertRaises(ValueError, msg="indentation_limit_height"):
+            self._run_detect_indentation(
+                asmi, gantry, indentation_limit_height=0.5,
+            )
+
+    def test_detect_mode_allows_limit_above_measurement_height_frame(self):
+        """In detect mode the limit is surface-relative, so a limit above
+        measurement_height (different frame) must be accepted."""
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+
+        result = self._run_detect_indentation(
+            asmi, gantry, measurement_height=-2.0, well_z=12.0,
+        )
+        self.assertTrue(result["detect_surface"])
+
+    def test_detect_mode_rejects_non_positive_search_parameters(self):
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+
+        for overrides in (
+            {"surface_search_step": 0.0},
+            {"surface_force_threshold": -0.01},
+            {"surface_search_max_travel": 0.0},
+        ):
+            with self.assertRaises(ValueError):
+                self._run_detect_indentation(asmi, gantry, **overrides)
+
+    def test_offline_detection_anchors_at_measurement_plane(self):
+        from cubos.gantry.gantry import Gantry
+        asmi = VernierASMI(offline=True, default_force=0.0)
+        gantry = Gantry(offline=True)
+
+        result = asmi.indentation(
+            gantry,
+            well_z=0.0,
+            measurement_height=10.0,
+            indentation_limit_height=-1.0,
+            step_size=0.5,
+            detect_surface=True,
+        )
+
+        self.assertTrue(result["detect_surface"])
+        self.assertAlmostEqual(result["surface_z_mm"], 10.0, places=6)
+        self.assertAlmostEqual(result["z_target_mm"], 9.0, places=6)
+        down_z = [s["z_mm"] for s in result["measurements"]]
+        self.assertAlmostEqual(down_z[-1], 9.0, places=6)
+
+    def test_non_detect_result_has_no_surface_fields(self):
+        from cubos.gantry.gantry import Gantry
+        asmi = VernierASMI(offline=True, default_force=0.0)
+        gantry = Gantry(offline=True)
+
+        result = asmi.indentation(
+            gantry, well_z=0.0, measurement_height=10.0,
+            indentation_limit_height=8.0, step_size=0.1,
+        )
+
+        self.assertFalse(result["detect_surface"])
+        self.assertNotIn("surface_z_mm", result)
+
+
 class TestASMIOnlineRequiresHardware(unittest.TestCase):
     """Verify VernierASMI(offline=False) raises without hardware."""
 

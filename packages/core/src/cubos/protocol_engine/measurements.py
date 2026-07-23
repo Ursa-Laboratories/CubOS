@@ -216,21 +216,36 @@ def normalize_measurement(
             "corrected_forces_n": [s["corrected_force_n"] for s in steps],
             "directions": [s["direction"] for s in steps],
         }
+        metadata = {
+            "baseline_avg": raw_result.get("baseline_avg", 0.0),
+            "baseline_std": raw_result.get("baseline_std", 0.0),
+            "force_exceeded": raw_result.get("force_exceeded", False),
+            "data_points": raw_result.get("data_points", len(steps)),
+            "measure_with_return": raw_result.get("measure_with_return", False),
+            "step_size_mm": raw_result.get("step_size_mm"),
+            "z_target_mm": raw_result.get("z_target_mm"),
+            "force_limit_n": raw_result.get("force_limit_n"),
+            "instrument_name": instrument_name,
+            "method_name": method_name,
+        }
+        if raw_result.get("detect_surface"):
+            metadata.update({
+                "detect_surface": True,
+                "surface_z_mm": raw_result.get("surface_z_mm"),
+                "surface_trigger_force_n": raw_result.get(
+                    "surface_trigger_force_n"
+                ),
+                "surface_search_step_mm": raw_result.get(
+                    "surface_search_step_mm"
+                ),
+                "surface_force_threshold_n": raw_result.get(
+                    "surface_force_threshold_n"
+                ),
+            })
         return InstrumentMeasurement(
             measurement_type=MeasurementType.ASMI_INDENTATION,
             payload=payload,
-            metadata={
-                "baseline_avg": raw_result.get("baseline_avg", 0.0),
-                "baseline_std": raw_result.get("baseline_std", 0.0),
-                "force_exceeded": raw_result.get("force_exceeded", False),
-                "data_points": raw_result.get("data_points", len(steps)),
-                "measure_with_return": raw_result.get("measure_with_return", False),
-                "step_size_mm": raw_result.get("step_size_mm"),
-                "z_target_mm": raw_result.get("z_target_mm"),
-                "force_limit_n": raw_result.get("force_limit_n"),
-                "instrument_name": instrument_name,
-                "method_name": method_name,
-            },
+            metadata=metadata,
         )
 
     if _is_potentiostat_result(raw_result):
