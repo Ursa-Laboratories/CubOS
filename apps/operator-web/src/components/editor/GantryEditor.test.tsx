@@ -316,7 +316,6 @@ describe("GantryEditor", () => {
   it("discards local edits back to the last-saved baseline and notifies the parent", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     renderGantry({ dirty: true, onRefresh });
 
     // Per-field dirty markers (an amber "*") append to the accessible
@@ -327,18 +326,16 @@ describe("GantryEditor", () => {
     expect(screen.getByLabelText(/^Serial port/)).toHaveValue("/dev/ttyUSB9");
 
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Discard unsaved gantry changes?");
+    await user.click(screen.getByRole("button", { name: "Discard" }));
 
-    expect(confirmSpy).toHaveBeenCalled();
     expect(onRefresh).toHaveBeenCalled();
     expect(screen.getByLabelText("Serial port")).toHaveValue("/dev/ttyUSB0");
-
-    confirmSpy.mockRestore();
   });
 
   it("keeps edits when the user cancels the discard confirm", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderGantry({ dirty: true, onRefresh });
 
     const serialPort = screen.getByLabelText("Serial port");
@@ -346,11 +343,11 @@ describe("GantryEditor", () => {
     await user.type(serialPort, "/dev/ttyUSB9");
 
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onRefresh).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(screen.getByLabelText(/^Serial port/)).toHaveValue("/dev/ttyUSB9");
-
-    confirmSpy.mockRestore();
   });
 });
 

@@ -400,37 +400,34 @@ describe("ProtocolEditor", () => {
     const user = userEvent.setup();
     const baseline: ProtocolResponse = { filename: "move.yaml", steps: STEPS, positions: null };
     const onRefresh = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     renderProtocol({ unsavedConfigs: ["Protocol"], baseline, onRefresh });
 
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getAllByText(/^Step \d:$/)).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Discard unsaved protocol changes?");
+    await user.click(screen.getByRole("button", { name: "Discard" }));
 
-    expect(confirmSpy).toHaveBeenCalled();
     expect(onRefresh).toHaveBeenCalled();
     expect(screen.getAllByText(/^Step \d:$/)).toHaveLength(1);
-
-    confirmSpy.mockRestore();
   });
 
   it("keeps edits when the user cancels the discard confirm", async () => {
     const user = userEvent.setup();
     const baseline: ProtocolResponse = { filename: "move.yaml", steps: STEPS, positions: null };
     const onRefresh = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderProtocol({ unsavedConfigs: ["Protocol"], baseline, onRefresh });
 
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getAllByText(/^Step \d:$/)).toHaveLength(2);
 
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onRefresh).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(screen.getAllByText(/^Step \d:$/)).toHaveLength(2);
-
-    confirmSpy.mockRestore();
   });
 
   // ── Feature 07b: per-container starting-volume seed rows ──

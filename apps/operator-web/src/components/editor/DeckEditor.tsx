@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { DeckResponse, LabwareConfig, WellPlateConfig, VialConfig, DeckConfig } from "../../types";
 import { CoordinateField, NumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
+import { useConfirm } from "../common/useConfirm";
 import * as theme from "../../theme";
 
 interface Props {
@@ -96,6 +97,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [requestConfirm, confirmDialog] = useConfirm();
 
   useEffect(() => {
     setLabware(labwareFromDeck(deck));
@@ -158,8 +160,14 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
     }
   };
 
-  const handleDiscard = () => {
-    if (!window.confirm("Discard unsaved deck changes?")) return;
+  const handleDiscard = async () => {
+    const confirmed = await requestConfirm({
+      title: "Discard changes?",
+      message: "Discard unsaved deck changes?",
+      confirmLabel: "Discard",
+      danger: true,
+    });
+    if (!confirmed) return;
     setLabware(labwareFromDeck(baseline ?? null));
     setSaveError(null);
     onRefresh();
@@ -228,6 +236,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           <p style={hintTextStyle}>Add at least one well plate or vial before saving.</p>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }
