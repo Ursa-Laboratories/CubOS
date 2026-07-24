@@ -289,7 +289,6 @@ describe("GantryPositionWidget manual move safety", () => {
 
   it("confirms and sends home", async () => {
     const user = userEvent.setup();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = vi.fn(async () =>
       jsonResponse(position({ x: 300, y: 200, z: 80 })),
     );
@@ -307,12 +306,47 @@ describe("GantryPositionWidget manual move safety", () => {
 
     await user.click(screen.getByRole("button", { name: "Home" }));
 
-    expect(confirmSpy).toHaveBeenCalledWith("Confirm you want to go to home?");
-    expect(fetchMock).toHaveBeenCalledWith(
+    // Homing is gated on the in-app confirm dialog (window.confirm is
+    // silently auto-dismissed in embedded browser panes).
+    const dialog = await screen.findByRole("alertdialog", { name: "Home gantry" });
+    expect(dialog).toHaveTextContent("Confirm you want to go to home?");
+    expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/v1/gantry/home",
       expect.objectContaining({ method: "POST" }),
     );
-    confirmSpy.mockRestore();
+
+    await user.click(screen.getByRole("button", { name: "Go to home" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("does not home when the confirm dialog is cancelled", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse(position()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("renders incoming move errors as dismissible command errors", async () => {

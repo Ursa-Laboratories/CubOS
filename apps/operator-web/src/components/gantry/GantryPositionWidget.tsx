@@ -3,6 +3,7 @@ import { gantryApi } from "../../api/client";
 import type { GantryConfig, GantryPosition, GantryResponse, WorkingVolume } from "../../types";
 import * as theme from "../../theme";
 import CalibrationWizard from "./CalibrationWizard";
+import { useConfirm } from "../common/useConfirm";
 
 interface Props {
   position: GantryPosition | null;
@@ -52,6 +53,7 @@ export default function GantryPositionWidget({
   const [grblSettings, setGrblSettings] = useState<Record<string, string> | null>(null);
   const [settingKey, setSettingKey] = useState("$20");
   const [settingValue, setSettingValue] = useState("");
+  const [requestConfirm, confirmDialog] = useConfirm();
   const jogTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const jogRequestCount = useRef(0);
   const predictedJogPosition = useRef<AxisPosition | null>(null);
@@ -304,7 +306,12 @@ export default function GantryPositionWidget({
 
   const handleHome = async () => {
     if (!connected || isRunning) return;
-    if (!window.confirm("Confirm you want to go to home?")) return;
+    const confirmed = await requestConfirm({
+      title: "Home gantry",
+      message: "Confirm you want to go to home?",
+      confirmLabel: "Go to home",
+    });
+    if (!confirmed) return;
     setHomeBusy(true);
     try {
       await gantryApi.home();
@@ -743,6 +750,7 @@ export default function GantryPositionWidget({
       <div style={{ fontSize: 10, color: theme.color.textFaint, marginTop: 8 }}>
         Keyboard: Arrow keys = XY, X/Z keys = Z up/down
       </div>
+      {confirmDialog}
       <CalibrationWizard
         open={calibrationOpen}
         onClose={() => setCalibrationOpen(false)}

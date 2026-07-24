@@ -487,7 +487,6 @@ describe("CubOS editor interactions", () => {
   it("guards dirty config-directory changes", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetchMock(createState());
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderApp();
     await waitForSettingsLoad();
 
@@ -499,17 +498,17 @@ describe("CubOS editor interactions", () => {
 
     await user.click(screen.getByRole("button", { name: "Browse" }));
 
-    await waitFor(() => expect(confirmSpy).toHaveBeenCalledWith(
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent(
       "Discard unsaved config changes and switch config directory?",
-    ));
+    );
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
     expect(screen.getByDisplayValue("/mock/CubOS/configs")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Edited Plate")).toBeInTheDocument();
     expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/v1/settings",
       expect.objectContaining({ method: "PUT" }),
     );
-
-    confirmSpy.mockRestore();
   });
 
   it("loads and saves a gantry config across tab switches", async () => {
@@ -1263,18 +1262,15 @@ describe("CubOS editor interactions", () => {
     await user.type(nameField, "Edited Plate");
 
     // Cancelling the confirm keeps the edits and the current file.
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
     await importConfig(user, "Import deck config", "deck2.yaml");
-    expect(confirmSpy).toHaveBeenCalled();
-    expect(confirmSpy.mock.calls[0][0]).toContain("panda-deck.yaml");
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("panda-deck.yaml");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByDisplayValue("Edited Plate")).toBeInTheDocument();
 
     // Confirming discards the edit and switches to the newly imported file.
-    confirmSpy.mockReturnValueOnce(true);
     await importConfig(user, "Import deck config", "deck2.yaml");
+    await user.click(await screen.findByRole("button", { name: "Discard" }));
     expect(await screen.findByDisplayValue("Second Deck Plate")).toBeInTheDocument();
-
-    confirmSpy.mockRestore();
   });
 
   it("guards discarding unsaved gantry edits when switching the imported file", async () => {
@@ -1295,17 +1291,15 @@ describe("CubOS editor interactions", () => {
     // Cancelling the confirm keeps the edits and the current file. (The
     // field now shows a per-field amber "*" since it differs from the
     // saved baseline, so match loosely.)
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
     await importConfig(user, "Import gantry config", "cubos2.yaml");
-    expect(confirmSpy).toHaveBeenCalled();
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Discard unsaved gantry changes?");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByLabelText(/^Serial port/)).toHaveValue("-edited");
 
     // Confirming discards the edit and switches to the newly imported file.
-    confirmSpy.mockReturnValueOnce(true);
     await importConfig(user, "Import gantry config", "cubos2.yaml");
+    await user.click(await screen.findByRole("button", { name: "Discard" }));
     await waitFor(() => expect(screen.getByLabelText("Serial port")).toHaveValue("/dev/ttyUSB-second"));
-
-    confirmSpy.mockRestore();
   });
 
   it("guards discarding unsaved protocol edits when switching the imported file", async () => {
@@ -1328,17 +1322,15 @@ describe("CubOS editor interactions", () => {
     await user.type(travelZField, "77");
 
     // Cancelling the confirm keeps the edits and the current file.
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValueOnce(false);
     await importConfig(user, "Import protocol config", "move2.yaml");
-    expect(confirmSpy).toHaveBeenCalled();
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Discard unsaved protocol changes?");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByLabelText("Travel Z")).toHaveValue("77");
 
     // Confirming discards the edit and switches to the newly imported file.
-    confirmSpy.mockReturnValueOnce(true);
     await importConfig(user, "Import protocol config", "move2.yaml");
+    await user.click(await screen.findByRole("button", { name: "Discard" }));
     await waitFor(() => expect(screen.getByLabelText("Travel Z")).toHaveValue("9"));
-
-    confirmSpy.mockRestore();
   });
 
   it("guards page unload while any editor has unsaved edits", async () => {

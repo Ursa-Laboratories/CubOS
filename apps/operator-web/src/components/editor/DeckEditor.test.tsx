@@ -220,7 +220,6 @@ describe("DeckEditor", () => {
   it("discards local edits back to the last-saved baseline and notifies the parent", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     renderDeck({ dirty: true, onRefresh });
 
     const nameField = screen.getByDisplayValue("Plate A");
@@ -229,19 +228,17 @@ describe("DeckEditor", () => {
     expect(screen.getByDisplayValue("Edited Plate")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Discard unsaved deck changes?");
+    await user.click(screen.getByRole("button", { name: "Discard" }));
 
-    expect(confirmSpy).toHaveBeenCalled();
     expect(onRefresh).toHaveBeenCalled();
     expect(screen.getByDisplayValue("Plate A")).toBeInTheDocument();
     expect(screen.queryByDisplayValue("Edited Plate")).not.toBeInTheDocument();
-
-    confirmSpy.mockRestore();
   });
 
   it("keeps edits when the user cancels the discard confirm", async () => {
     const user = userEvent.setup();
     const onRefresh = vi.fn();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     renderDeck({ dirty: true, onRefresh });
 
     const nameField = screen.getByDisplayValue("Plate A");
@@ -249,11 +246,11 @@ describe("DeckEditor", () => {
     await user.type(nameField, "Edited Plate");
 
     await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
 
     expect(onRefresh).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("Edited Plate")).toBeInTheDocument();
-
-    confirmSpy.mockRestore();
   });
 });
 
