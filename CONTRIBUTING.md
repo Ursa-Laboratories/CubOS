@@ -23,12 +23,12 @@ All CI checks should pass before a PR is merged. You do not need to run the
 entire test suite locally for every small change, but run the smallest useful
 tests while developing and make sure the PR is not relying on untested behavior.
 
-CI enforces a diff-coverage gate in addition to the full test suite: at least
-90% of the lines added or changed by a PR must be executed by tests. To check
+CI enforces a diff-coverage gate for the core Python package: at least 90% of
+the core lines added or changed by a PR must be executed by tests. To check
 locally before pushing:
 
 ```bash
-python -m pytest --cov=src --cov-report=xml -q
+python -m pytest packages/core/tests --cov=packages/core/src/cubos --cov-report=xml -q
 diff-cover coverage.xml --compare-branch=origin/main --fail-under=90
 ```
 
@@ -64,19 +64,19 @@ Install development dependencies with the commands in [README.md](README.md).
 Use focused tests while iterating, for example:
 
 ```bash
-python -m pytest tests/instruments -q
-python -m pytest tests/protocol_engine -q
-python -m pytest tests/deck -q
+python -m pytest packages/core/tests/instruments -q
+python -m pytest packages/core/tests/protocol_engine -q
+python -m pytest packages/core/tests/deck -q
 ```
 
 For hardware-adjacent configuration or protocol changes, also run the relevant
 offline setup validation:
 
 ```bash
-PYTHONPATH=src python setup/validate_setup.py \
-  configs/gantry/<gantry>.yaml \
-  configs/deck/<deck>.yaml \
-  configs/protocol/<protocol>.yaml
+python -m cubos.tools.validate_setup \
+  packages/core/configs/gantry/<gantry>.yaml \
+  packages/core/configs/deck/<deck>.yaml \
+  packages/core/configs/protocol/<protocol>.yaml
 ```
 
 For documentation changes, run:
@@ -90,7 +90,7 @@ mkdocs build --strict
 Follow the existing instrument layout:
 
 ```text
-src/instruments/<type>/
+packages/core/src/cubos/instruments/<type>/
   interface.py
   models.py
   exceptions.py
@@ -108,11 +108,11 @@ Keep the boundary clear:
 - Do not make the core package import proprietary or optional SDKs at module
   import time. Vendor SDK imports should be lazy and tied to connection or the
   method that needs them.
-- New vendor dependencies should be optional extras in `pyproject.toml`, not
-  required core dependencies.
+- New vendor dependencies should be optional extras in
+  `packages/core/pyproject.toml`, not required core dependencies.
 - Drivers should support `offline=True` when a meaningful dry-run behavior is
   possible.
-- Register new built-in vendors in `src/instruments/registry.yaml`.
+- Register new built-in vendors in `packages/core/src/cubos/instruments/registry.yaml`.
 - External or proprietary drivers should use the instrument registry entry
   point or `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlay mechanism instead of
   merging private code into CubOS.

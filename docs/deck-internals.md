@@ -6,7 +6,7 @@ definitions, or validation behavior. Operators should use
 
 ## Labware Definitions
 
-Common labware is described under `src/deck/labware/definitions/`. A deck YAML
+Common labware is described under `packages/core/src/cubos/deck/labware/definitions/`. A deck YAML
 can use `load_name:` to start from one of those definitions and override the
 placement-specific fields.
 
@@ -68,15 +68,15 @@ labware:
 
 ## Add A New Definition
 
-1. Create `src/deck/labware/definitions/<new_name>/`.
+1. Create `packages/core/src/cubos/deck/labware/definitions/<new_name>/`.
 2. Add a YAML file that lists the labware class fields directly, without a
    top-level `labware:` wrapper.
-3. Register it in `src/deck/labware/definitions/registry.yaml`.
+3. Register it in `packages/core/src/cubos/deck/labware/definitions/registry.yaml`.
 4. Add a short README in the new definition folder with dimensions and
    compatibility notes.
 
 Run the focused deck tests after changing definitions:
 
 ```bash
-python -m pytest tests/deck/test_deck_loader.py tests/deck/test_holder_labware.py -q
+python -m pytest packages/core/tests/deck/test_deck_loader.py packages/core/tests/deck/test_holder_labware.py -q
 ```

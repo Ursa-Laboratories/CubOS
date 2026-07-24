@@ -1,0 +1,160 @@
+{
+  "conflict_count": 10,
+  "conflicts": [
+    {
+      "category": "missing_tip_length",
+      "message": "tiprack 1: 24 tip(s) have NULL tip_length.",
+      "resolution": "tip_length_mm",
+      "resolved": true,
+      "row_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "severity": "conflict"
+    },
+    {
+      "category": "position_out_of_envelope",
+      "message": "tiprack 1: pickup_z=-88.8 is out of the working volume for all 24 tips (z=-88.800 < z_min=-85.000 (by 3.800mm)). Pickup Z is uniform across the rack (panda_tips.pickup_height is identical for every tip); consistent with an unverified ~4mm homing pull-off / Z-datum offset -- pending live controller $#/WPos confirmation before physical use.",
+      "resolution": "reported only (positional; not blocking per project scope)",
+      "resolved": true,
+      "row_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24
+      ],
+      "severity": "warning"
+    },
+    {
+      "category": "tiprack_no_tips",
+      "message": "tiprack 2 (declared 'AB' x 14) has zero rows in panda_tips.",
+      "resolution": "exclude_tiprack_ids",
+      "resolved": true,
+      "row_ids": [
+        2
+      ],
+      "severity": "conflict"
+    },
+    {
+      "category": "tiprack_shape_mismatch",
+      "message": "tiprack 1 declares 'ABCD' x 15 (60 tips) but panda_tips has 24 row(s) forming a 2x12 grid.",
+      "resolution": "tiprack_shape_overrides",
+      "resolved": true,
+      "row_ids": [
+        1
+      ],
+      "severity": "conflict"
+    },
+    {
+      "category": "vial_contents_volume_mismatch",
+      "message": "vial 's6' (id 6) contents JSON does not sum to the recorded volume; rescaled proportionally to volume_ul=2100",
+      "resolution": "rescaled to match recorded volume",
+      "resolved": true,
+      "row_ids": [
+        6
+      ],
+      "severity": "warning"
+    },
+    {
+      "category": "vial_contents_volume_mismatch",
+      "message": "vial 'e1' (id 11) contents JSON does not sum to the recorded volume; rescaled proportionally to volume_ul=15000",
+      "resolution": "rescaled to match recorded volume",
+      "resolved": true,
+      "row_ids": [
+        11
+      ],
+      "severity": "warning"
+    },
+    {
+      "category": "vial_duplicate_position",
+      "message": "position 's1' has 2 active panda_vials rows (1, 13); expected exactly one.",
+      "resolution": "exclude_vial_ids",
+      "resolved": true,
+      "row_ids": [
+        1,
+        13
+      ],
+      "severity": "conflict"
+    },
+    {
+      "category": "vial_duplicate_position",
+      "message": "position 'w1' has 2 active panda_vials rows (7, 14); expected exactly one.",
+      "resolution": "exclude_vial_ids",
+      "resolved": true,
+      "row_ids": [
+        7,
+        14
+      ],
+      "severity": "conflict"
+    },
+    {
+      "category": "vial_duplicate_position",
+      "message": "position 'w3' has 2 active panda_vials rows (9, 10); expected exactly one.",
+      "resolution": "exclude_vial_ids",
+      "resolved": true,
+      "row_ids": [
+        9,
+        10
+      ],
+      "severity": "conflict"
+    },
+    {
+      "category": "wellplate_height_source_mismatch",
+      "message": "plate 120: panda_wellplates.height=8 disagrees with panda_well_hx height=9 recorded on every one of its wells",
+      "resolution": "wellplate_height_overrides",
+      "resolved": true,
+      "row_ids": [
+        120
+      ],
+      "severity": "conflict"
+    }
+  ],
+  "resolutions_path": "/Users/alexchan/Documents/Ursa/CubOS/packages/core/configs/deck/panda_import_resolutions.yaml",
+  "source_db": "/Users/alexchan/Documents/Ursa/PANDA-CUB/panda_prod_db.db",
+  "source_sha256": "209d085b5370ee4e83c8ffe0bf0ccc83edc925b4042f292600f9529f811ab21f",
+  "status": "ok",
+  "unresolved_conflict_count": 0,
+  "warning_count": 3
+}

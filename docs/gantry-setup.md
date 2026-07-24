@@ -5,7 +5,7 @@ instruments are mounted. Create it **before calibrating** — calibration reads
 the mounted instruments from this file and writes its measurements back into
 it.
 
-Don't write one from scratch. Copy the seed config from `configs/gantry/`
+Don't write one from scratch. Copy the seed config from `packages/core/configs/gantry/`
 that matches your machine and instrument, rename the copy for your setup,
 and adjust the instruments if needed.
 
@@ -51,12 +51,12 @@ instruments:
 - **Set `offline: true`** on an instrument to run without that hardware
   attached.
 
-Supported types: `asmi`, `filmetrics`, `pipette`, `potentiostat`,
+Supported types: `asmi`, `capper`, `filmetrics`, `pipette`, `potentiostat`,
 `uv_curing`, `uvvis_ccs`, `camera`, `mounted_tool`.
 
 Every instrument entry accepts these shared fields:
 
-- `type` *(str, required)* — a type from `src/instruments/registry.yaml`.
+- `type` *(str, required)* — a type from `packages/core/src/cubos/instruments/registry.yaml`.
 - `vendor` *(str, required)* — a vendor registered for that type. The
   `type`/`vendor` pair tells CubOS which Python driver class to load.
 - `offset_x`, `offset_y`, `depth` *(float, default `0.0`)* — physical mounting
@@ -191,12 +191,40 @@ instruments:
     depth: 32.0
 ```
 
-**`mounted_tool` / `mount_only`** — any other passive mounted tool, such as a
-vial capper/decapper, tracked for offsets only:
+**`capper` / `pawduino`** — an electromagnet-actuated vial capper/decapper
+over the same Arduino serial link family as the `pipette`/`opentrons`
+driver (see [Protocol YAML: Capper commands](protocol-yaml.md#capper-commands)
+for the `decap`/`cap` motion sequence these fields parameterize):
 
 ```yaml
 instruments:
   vial_capper_decapper:
+    type: capper
+    vendor: pawduino
+    port: "COM8"
+    baud_rate: 115200
+    offline: true
+    offset_x: 62.9
+    offset_y: 5.1
+    depth: 61.5
+    engage_depth_mm: -15.0
+    park_position: [-10.0, -10.0]
+    capture_retries: 2
+    capture_settle_s: 1.0
+```
+
+`engage_depth_mm`/`park_position`/`capture_retries`/`capture_settle_s` are
+required, not driver defaults — every capper's decap/cap motion sequence
+comes entirely from this config, never hardcoded. `vendor: mock` is an
+offline-only in-memory simulation useful for dry runs without any Arduino
+attached.
+
+**`mounted_tool` / `mount_only`** — any other passive mounted tool tracked
+for offsets only (no actuation, no sensor):
+
+```yaml
+instruments:
+  center_lens:
     type: mounted_tool
     vendor: mount_only
     offline: true

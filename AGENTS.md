@@ -53,32 +53,32 @@ These offsets live on the protocol command, never on instruments. `scan` require
 For setup validation:
 
 ```bash
-python setup/validate_setup.py <gantry.yaml> <deck.yaml> <protocol.yaml>
+python -m cubos.tools.validate_setup <gantry.yaml> <deck.yaml> <protocol.yaml>
 ```
 
 ### Instruments
-- `src/instruments/<type>/interface.py`, `vendors/<vendor>.py`, `models.py`, `exceptions.py`.
-- `src/instruments/registry.yaml`, `src/instruments/registry.py`, `src/instruments/yaml_schema.py`.
+- `packages/core/src/cubos/instruments/<type>/interface.py`, `vendors/<vendor>.py`, `models.py`, `exceptions.py`.
+- `packages/core/src/cubos/instruments/registry.yaml`, `packages/core/src/cubos/instruments/registry.py`, `packages/core/src/cubos/instruments/yaml_schema.py`.
 - Gantry YAML uses `type` + `vendor`; registry lookup is by that pair. External driver packages register via `cubos.instrument_registries` entry points or `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlays.
-- `src/protocol_engine/measurements.py`, `data/data_store.py` — persisted measurements.
-- Tests: `tests/instruments/`, `tests/protocol_engine/`, `tests/data/`.
+- `packages/core/src/cubos/protocol_engine/measurements.py`, `packages/core/src/cubos/data/data_store.py` — persisted measurements.
+- Tests: `packages/core/tests/instruments/`, `packages/core/tests/protocol_engine/`, `packages/core/tests/data/`.
 
 ## Where New Things Go
 
 Placement rules for new code — decide the layer before writing:
 
-- **New vendor driver for an existing instrument type**: `src/instruments/<type>/vendors/<vendor>.py` plus an entry in `src/instruments/registry.yaml`. Vendor SDK imports stay lazy (tied to connect or the method that needs them); the SDK dependency goes in a `pyproject.toml` optional extra, never core dependencies. Support `offline=True` when a meaningful dry-run exists.
-- **New instrument type**: `src/instruments/<type>/` with `interface.py`, `models.py`, `exceptions.py`, `vendors/`. Generic behavior lives in the interface/models/exceptions; device-specific quirks live only in the vendor module.
-- **New measurement method or result**: method on the type interface, result models in that type's `models.py`, persistence through `src/protocol_engine/measurements.py` and `data/data_store.py`. Do not add a parallel storage path.
-- **Heights and limits** (measurement heights, indentation limits, and similar): labware-relative offsets on the protocol command schema (`src/protocol_engine/yaml_schema.py` + `commands/`), never on instrument config or gantry YAML. See "Heights: absolute vs. labware-relative" above.
+- **New vendor driver for an existing instrument type**: `packages/core/src/cubos/instruments/<type>/vendors/<vendor>.py` plus an entry in `packages/core/src/cubos/instruments/registry.yaml`. Vendor SDK imports stay lazy (tied to connect or the method that needs them); the SDK dependency goes in a `packages/core/pyproject.toml` optional extra, never core dependencies. Support `offline=True` when a meaningful dry-run exists.
+- **New instrument type**: `packages/core/src/cubos/instruments/<type>/` with `interface.py`, `models.py`, `exceptions.py`, `vendors/`. Generic behavior lives in the interface/models/exceptions; device-specific quirks live only in the vendor module.
+- **New measurement method or result**: method on the type interface, result models in that type's `models.py`, persistence through `packages/core/src/cubos/protocol_engine/measurements.py` and `packages/core/src/cubos/data/data_store.py`. Do not add a parallel storage path.
+- **Heights and limits** (measurement heights, indentation limits, and similar): labware-relative offsets on the protocol command schema (`packages/core/src/cubos/protocol_engine/yaml_schema.py` + `commands/`), never on instrument config or gantry YAML. See "Heights: absolute vs. labware-relative" above.
 - **Vendor-specific behavior** must never appear in protocol engine code, generic interfaces, or shared models. If a shared layer seems to need a vendor special case, the abstraction is wrong — re-check against `CONTRIBUTING.md` before opening the PR.
 - **External or proprietary drivers**: register via `cubos.instrument_registries` entry points or `CUBOS_INSTRUMENT_REGISTRY_PATHS` overlays; do not merge private code into CubOS.
 
 ## Calibration Scripts
 
-- `setup/calibrate_gantry.py` — only supported user-facing calibration entrypoint. Loads input gantry YAML, dispatches single- or multi-instrument flow by instrument count. Without `--output-gantry`, prompts before overwriting input; with it, writes the explicit path without extra prompt.
-- `setup/calibration/single_instrument_calibration.py` — internal one-instrument flow.
-- `setup/calibration/multi_instrument_calibration.py` — internal multi-instrument flow.
+- `packages/core/src/cubos/tools/calibrate_gantry.py` — only supported user-facing calibration entrypoint. Loads input gantry YAML, dispatches single- or multi-instrument flow by instrument count. Without `--output-gantry`, prompts before overwriting input; with it, writes the explicit path without extra prompt.
+- `packages/core/src/cubos/tools/calibration/single_instrument_calibration.py` — internal one-instrument flow.
+- `packages/core/src/cubos/tools/calibration/multi_instrument_calibration.py` — internal multi-instrument flow.
 - Detailed operator steps and offset math live in `docs/calibration.md`.
 
 Calibration soft-limit rule: `working_volume` is the usable deck/WPos range
@@ -91,16 +91,16 @@ Do not treat the pull-off reserve as usable WPos.
 
 ## Setup Scripts
 
-- `setup/validate_setup.py` — offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
-- `setup/run_protocol.py` — load, validate, connect hardware, run protocol end-to-end. Delegates the hardware lifecycle to `protocol_engine.setup.run_on_hardware`, which connects the gantry (clearing expected GRBL alarm, restoring state) and instruments before the first step and disconnects both in `finally`.
+- `packages/core/src/cubos/tools/validate_setup.py` — offline gantry+deck+protocol bounds/semantics validation. PASS/FAIL.
+- `packages/core/src/cubos/tools/run_protocol.py` — load, validate, connect hardware, run protocol end-to-end. Delegates the hardware lifecycle to `protocol_engine.setup.run_on_hardware`, which connects the gantry (clearing expected GRBL alarm, restoring state) and instruments before the first step and disconnects both in `finally`.
 - Python-authored protocols use `ProtocolBuilder.with_setup(...)` (in `protocol_engine.builder`); `protocol.validate()` runs the offline checks and `protocol.run()` runs the same `run_on_hardware` lifecycle. The low-level `protocol.execute(context)` runs steps against a context the caller already prepared.
-- `setup/hello_world.py` — interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y ±1mm), Z (down 1mm), X (up 1mm), Q (quit).
-- `setup/keyboard_input.py` — single-keypress reader (Unix `tty`/`termios`).
+- `packages/core/src/cubos/tools/hello_world.py` — interactive deck-origin jog test. Homes without rewriting WCS, then jogs in the deck frame. Arrow keys (X/Y ±1mm), Z (down 1mm), X (up 1mm), Q (quit).
+- `packages/core/src/cubos/tools/keyboard_input.py` — single-keypress reader (Unix `tty`/`termios`).
 `scan.plate` may target either a top-level `WellPlate` key or a nested holder path such as `plate_holder.plate`, as long as that path resolves to a `WellPlate`.
 
 ## Development Modes
 
-**TDD Mode** is the default: planning sessions, new features, and cross-repo interface changes. Write tests alongside implementation and update docs as you go. New or changed lines must be exercised by tests before the PR is final — CI enforces this with a diff-coverage gate.
+**TDD Mode** is the default: planning sessions, new features, and cross-repo interface changes. Write tests alongside implementation and update docs as you go. New or changed core Python lines must be exercised by tests before the PR is final — CI enforces this with a diff-coverage gate.
 
 **Hardware Iteration Mode** covers two situations where TDD is deferred:
 
@@ -118,18 +118,19 @@ See `progress/README.md`. Default: no progress file. Create only for hardware-fa
 Smallest meaningful gate first, then broaden:
 
 ```bash
-python -m pytest tests/deck/test_deck_loader.py tests/deck/test_holder_labware.py -q
-python -m pytest tests/protocol_engine -q
-python -m pytest -q
-python setup/validate_setup.py configs/gantry/cub_xl_asmi.yaml configs/deck/asmi_deck.yaml configs/protocol/asmi/indentation.yaml
+python -m pytest packages/core/tests/deck/test_deck_loader.py packages/core/tests/deck/test_holder_labware.py -q
+python -m pytest packages/core/tests/protocol_engine -q
+python -m pytest packages/core/tests services/api/tests sdk/python/tests -q
+python -m cubos.tools.validate_setup packages/core/configs/gantry/cub_xl_asmi.yaml packages/core/configs/deck/asmi_deck.yaml packages/core/configs/protocol/asmi/indentation.yaml
 ```
 
 Report exact commands and observed results in the PR body.
 
-CI runs the full suite plus a diff-coverage gate: lines added or changed by the PR must be at least 90% covered. Check locally with:
+CI runs the core suite plus a diff-coverage gate: core Python lines added or
+changed by the PR must be at least 90% covered. Check locally with:
 
 ```bash
-python -m pytest --cov=src --cov-report=xml -q
+python -m pytest packages/core/tests --cov=packages/core/src/cubos --cov-report=xml -q
 diff-cover coverage.xml --compare-branch=origin/main --fail-under=90
 ```
 

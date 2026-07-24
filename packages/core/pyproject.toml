@@ -1,0 +1,66 @@
+[project]
+name = "cubos"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pyserial",
+    "pyyaml",
+    "pydantic",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "diff-cover",
+]
+# Per-vendor SDKs — opt in only when you actually use that driver.
+# The drivers import these lazily and raise a clear error if missing, so the core
+# install (and instruments that don't need them) stays light.
+asmi-vernier = [
+    "godirect>=1.0.0",
+]
+potentiostat-admiral = [
+    "SquidstatPyLibrary",
+]
+asmi = [
+    "godirect>=1.0.0",
+]
+potentiostat = [
+    "SquidstatPyLibrary",
+]
+docs = [
+    "mkdocs>=1.6",
+    # Pinned below 0.6: 0.6.0+ added a hard dependency on `properdocs`, which
+    # runs an unreviewed nag routine at import time on every build. Re-check
+    # this pin before bumping.
+    "mkdocs-gen-files>=0.5,<0.6",
+    "mkdocstrings[python]>=0.27",
+    "pymdown-extensions>=10.0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["cubos", "cubos.*"]
+
+[tool.setuptools.package-data]
+"cubos.instruments" = ["registry.yaml"]
+"cubos.gantry.gantry_driver" = ["*.json"]
+# Deck labware definitions: registry.yaml at the package root + each
+# definition's config YAML in a non-package subdir. Without these the
+# `load_name:` deck-yaml feature breaks under `pip install` because the
+# YAMLs don't get copied to site-packages.
+"cubos.deck.labware.definitions" = [
+    "registry.yaml",
+    "*/*.yaml",
+    "*/*.glb",
+    "*/*.stl",
+    "*/*.step",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

@@ -1,0 +1,124 @@
+protocol:
+- home: null
+- measure:
+    position: plate.A1
+    instrument: asmi
+    method: indentation
+    measurement_height: -1
+    indentation_limit_height: -3
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.A4
+    instrument: asmi
+    method: indentation
+    measurement_height: -3
+    indentation_limit_height: -5
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.A6
+    instrument: asmi
+    method: indentation
+    measurement_height: -5
+    indentation_limit_height: -7
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.B1
+    instrument: asmi
+    method: indentation
+    measurement_height: -1
+    indentation_limit_height: -4
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.B4
+    instrument: asmi
+    method: indentation
+    measurement_height: -3
+    indentation_limit_height: -5
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.B6
+    instrument: asmi
+    method: indentation
+    measurement_height: -6
+    indentation_limit_height: -8
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.C1
+    instrument: asmi
+    method: indentation
+    measurement_height: -1
+    indentation_limit_height: -4
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.C4
+    instrument: asmi
+    method: indentation
+    measurement_height: -5
+    indentation_limit_height: -7
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.D1
+    instrument: asmi
+    method: indentation
+    measurement_height: -2
+    indentation_limit_height: -4
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.F1
+    instrument: asmi
+    method: indentation
+    measurement_height: -1
+    indentation_limit_height: -4
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- measure:
+    position: plate.G1
+    instrument: asmi
+    method: indentation
+    measurement_height: -1
+    indentation_limit_height: -4
+    method_kwargs:
+      step_size: 0.01
+      force_limit: 3
+      baseline_samples: 10
+      measure_with_return: false
+- home: null

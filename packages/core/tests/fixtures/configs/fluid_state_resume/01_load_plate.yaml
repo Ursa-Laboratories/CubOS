@@ -1,0 +1,33 @@
+# Test fixture: run first so one state records withdrawals and dispenses.
+protocol:
+  - home:
+
+  - pick_up_tip:
+      position: tip_rack.A1
+  - transfer:
+      source: reagents.buffer
+      destination: assay_plate.A1
+      volume_ul: 100.0
+      source_height: -5.0
+      destination_height: -2.0
+  - blowout:
+      position: assay_plate.A1
+      height: 4.0
+  - drop_tip:
+      position: tip_disposal.discard
+
+  - pick_up_tip:
+      position: tip_rack.A2
+  - transfer:
+      source: reagents.buffer
+      destination: assay_plate.A2
+      volume_ul: 80.0
+      source_height: -5.0
+      destination_height: -2.0
+  - blowout:
+      position: assay_plate.A2
+      height: 4.0
+  - drop_tip:
+      position: tip_disposal.discard
+
+  - home:

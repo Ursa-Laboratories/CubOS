@@ -34,7 +34,7 @@ python -m pytest -q
 For focused changes, run the relevant focused tests first. Examples:
 
 ```bash
-python -m pytest tests/deck/test_deck_loader.py tests/deck/test_holder_labware.py -q
+python -m pytest packages/core/tests/deck/test_deck_loader.py packages/core/tests/deck/test_holder_labware.py -q
 python -m pytest tests/protocol_engine -q
 ```
 

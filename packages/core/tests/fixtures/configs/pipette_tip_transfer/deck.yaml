@@ -1,0 +1,42 @@
+# Automated-test pipette/tip fixture with fake coordinates.
+
+labware:
+  plate:
+    load_name: sbs_96_wellplate
+    name: pipette_tip_sim_plate
+    calibration:
+      a1: { x: 190.0, y: 90.0, z: 30.0 }
+      a2: { x: 199.0, y: 90.0, z: 30.0 }
+
+  tip_rack:
+    load_name: ursa_tip_rack
+    name: pipette_tip_sim_rack
+    # Opentrons OT-2 96 Tip Rack 300 uL labware definition: tipLength 59.3 mm.
+    # pickup_z is the bare-nozzle pickup plane; after pickup the simulated tip
+    # endpoint sits at z ~= 5.4 mm, matching the definition's well/tip bottom.
+    tip_length: 59.3
+    pickup_z: 64.7
+    drop_z: 34.0
+    calibration:
+      a1: { x: 210.0, y: 230.0 }
+      a2: { x: 218.5, y: 230.0 }
+
+  tip_disposal:
+    type: tip_disposal
+    name: pipette_tip_sim_disposal
+    model_name: pipette_tip_sim_disposal
+    length: 54.0
+    width: 54.0
+    height: 38.0
+    location:
+      x: 260.0
+      y: 260.0
+      z: 38.0
+    slots:
+      discard:
+        description: Center of the offline used-tip disposal target.
+        supported_labware_types: [pipette_tip]
+        location:
+          x: 260.0
+          y: 260.0
+          z: 38.0

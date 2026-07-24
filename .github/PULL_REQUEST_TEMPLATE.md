@@ -2,12 +2,12 @@
 change. See CONTRIBUTING.md for full expectations. -->
 
 ## Summary
-- 
+-
 
 ## Tests
 - [ ] Added or updated test coverage for the behavior changed
 - [ ] Ran focused tests:
-- [ ] Ran offline setup validation (`setup/validate_setup.py`), if relevant:
+- [ ] Ran offline setup validation (`python -m cubos.tools.validate_setup`), if relevant:
 - [ ] CI is expected to pass (full suite + diff-coverage gate)
 
 ## Hardware validation
@@ -28,5 +28,5 @@ summarize as "tested on hardware". -->
 - [ ] Height/limit parameters live on protocol command schemas, not on
       instrument or gantry config
 - [ ] Optional vendor dependencies remain optional (lazy SDK imports, extras
-      in `pyproject.toml`)
+      in `packages/core/pyproject.toml`)
 - [ ] Public docs/config examples were updated, if needed

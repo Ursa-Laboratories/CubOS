@@ -20,9 +20,9 @@ clear and validation-first.
 - Put implementation details in the contributing section or API reference.
 - Run the smallest meaningful validation first, then broaden when the change
   touches shared behavior.
-- Cover the lines you add or change with tests: CI enforces a 90% diff-coverage
-  gate on every PR (see the repository `CONTRIBUTING.md` for the local
-  commands).
+- Cover the core Python lines you add or change with tests: CI enforces a 90%
+  diff-coverage gate on pull requests (see the repository `CONTRIBUTING.md`
+  for the local commands).
 - For hardware-facing changes, report offline validation and the physical
   validation still required.
 
