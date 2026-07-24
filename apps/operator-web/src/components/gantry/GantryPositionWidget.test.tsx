@@ -138,6 +138,66 @@ describe("GantryPositionWidget manual move safety", () => {
 
     expect(await screen.findByText(/Connection failed/)).toHaveTextContent("serial port unavailable");
     expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled();
+    // A failed connect must not offer to home.
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("prompts to home after a successful connect and homes on accept", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position({ connected: false })}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    const dialog = await screen.findByRole("alertdialog", { name: "Gantry connected" });
+    expect(dialog).toHaveTextContent("Home the gantry now?");
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Home now" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("does not home when the post-connect prompt is declined", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position({ connected: false })}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Not now" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("reads GRBL settings and displays them in numeric setting order", async () => {
