@@ -32,7 +32,6 @@ const EMPTY_WELL_PLATE: WellPlateConfig = {
   length: 127.76,
   width: 85.47,
   height: 14.22,
-  a1: null,
   calibration: {
     a1: { x: 100.0, y: 50.0, z: 20.0 },
     a2: { x: 91.0, y: 50.0, z: 20.0 },
@@ -234,7 +233,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
 }
 
 function WellPlateFields({ entry, onChange, parentKey }: { entry: WellPlateConfig; onChange: (v: WellPlateConfig) => void; parentKey: string }) {
-  const a1 = entry.calibration.a1 ?? entry.a1 ?? { x: 0, y: 0, z: 0 };
+  const a1 = entry.calibration.a1 ?? { x: 0, y: 0, z: 0 };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <div style={{ display: "flex", gap: 8 }}>
