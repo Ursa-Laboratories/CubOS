@@ -23,6 +23,15 @@ All CI checks should pass before a PR is merged. You do not need to run the
 entire test suite locally for every small change, but run the smallest useful
 tests while developing and make sure the PR is not relying on untested behavior.
 
+CI enforces a diff-coverage gate for the core Python package: at least 90% of
+the core lines added or changed by a PR must be executed by tests. To check
+locally before pushing:
+
+```bash
+python -m pytest packages/core/tests --cov=packages/core/src/cubos --cov-report=xml -q
+diff-cover coverage.xml --compare-branch=origin/main --fail-under=90
+```
+
 ## Hardware-Facing Changes
 
 Hardware-facing changes require hardware validation before merge. This includes
@@ -55,16 +64,16 @@ Install development dependencies with the commands in [README.md](README.md).
 Use focused tests while iterating, for example:
 
 ```bash
-python -m pytest tests/instruments -q
-python -m pytest tests/protocol_engine -q
-python -m pytest tests/deck -q
+python -m pytest packages/core/tests/instruments -q
+python -m pytest packages/core/tests/protocol_engine -q
+python -m pytest packages/core/tests/deck -q
 ```
 
 For hardware-adjacent configuration or protocol changes, also run the relevant
 offline setup validation:
 
 ```bash
-PYTHONPATH=src python setup/validate_setup.py \
+python -m cubos.tools.validate_setup \
   packages/core/configs/gantry/<gantry>.yaml \
   packages/core/configs/deck/<deck>.yaml \
   packages/core/configs/protocol/<protocol>.yaml
@@ -99,8 +108,8 @@ Keep the boundary clear:
 - Do not make the core package import proprietary or optional SDKs at module
   import time. Vendor SDK imports should be lazy and tied to connection or the
   method that needs them.
-- New vendor dependencies should be optional extras in `pyproject.toml`, not
-  required core dependencies.
+- New vendor dependencies should be optional extras in
+  `packages/core/pyproject.toml`, not required core dependencies.
 - Drivers should support `offline=True` when a meaningful dry-run behavior is
   possible.
 - Register new built-in vendors in `packages/core/src/cubos/instruments/registry.yaml`.
@@ -135,8 +144,9 @@ Common types are `fix`, `feat`, `docs`, `test`, `refactor`, `chore`, and
 
 ## PR Checklist
 
-Include this checklist in hardware-facing PRs, and use the relevant parts for
-all other PRs:
+The checklist below is pre-populated automatically by
+`.github/PULL_REQUEST_TEMPLATE.md` when you open a PR. Fill in every section
+for hardware-facing PRs, and use the relevant parts for all other PRs:
 
 ```markdown
 ## Summary
