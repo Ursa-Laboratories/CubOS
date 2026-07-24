@@ -125,7 +125,6 @@ describe("DeckVisualization", () => {
             length: 10,
             width: 10,
             height: 5,
-            a1: null,
             calibration: {
               a1: { x: 0, y: 100, z: 10 },
               a2: { x: 9, y: 100, z: 10 },
@@ -200,7 +199,6 @@ describe("DeckVisualization", () => {
             length: 100,
             width: 50,
             height: 10,
-            a1: null,
             calibration: {
               a1: { x: 250, y: 50, z: 10 },
               a2: { x: 330, y: 50, z: 10 },

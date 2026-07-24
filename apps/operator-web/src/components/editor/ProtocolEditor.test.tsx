@@ -53,7 +53,6 @@ const DECK: DeckResponse = {
         length: 100,
         width: 80,
         height: 14,
-        a1: null,
         calibration: { a1: { x: 0, y: 0, z: 0 }, a2: { x: 9, y: 0, z: 0 } },
         x_offset: 9,
         y_offset: 9,

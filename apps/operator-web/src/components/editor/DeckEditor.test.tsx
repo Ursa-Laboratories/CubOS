@@ -19,7 +19,6 @@ function deckFixture(): DeckResponse {
           length: 127.76,
           width: 85.47,
           height: 14.22,
-          a1: null,
           calibration: { a1: { x: 10, y: 20, z: 30 }, a2: { x: 20, y: 20, z: 30 } },
           x_offset: 9,
           y_offset: 9,
@@ -120,6 +119,26 @@ describe("DeckEditor", () => {
 
     await user.clear(screen.getByDisplayValue("Plate A"));
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+  });
+
+  it("saves a newly added well plate without the legacy a1 key", async () => {
+    const user = userEvent.setup();
+    const props = renderDeck({ deck: { filename: "deck.yaml", labware: [] }, selectedFile: null });
+
+    await user.click(screen.getByRole("button", { name: "+ Well Plate" }));
+    await user.type(screen.getByPlaceholderText("my_deck.yaml"), "new_deck");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(props.onSave).toHaveBeenCalledTimes(1);
+    const [filename, body] = vi.mocked(props.onSave).mock.calls[0];
+    expect(filename).toBe("new_deck.yaml");
+    const plate = body.labware.wellplate_1;
+    expect(plate).toBeDefined();
+    // The backend schema uses extra="forbid"; a stray top-level `a1`
+    // (legacy calibration format) makes the save 400.
+    expect(plate).not.toHaveProperty("a1");
+    expect(plate.calibration.a1).toEqual({ x: 100, y: 50, z: 20 });
+    expect(plate.calibration.a2).toEqual({ x: 91, y: 50, z: 20 });
   });
 
   it("edits well-plate and vial detail fields", async () => {

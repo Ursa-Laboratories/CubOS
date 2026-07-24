@@ -26,7 +26,6 @@ export interface WellPlateConfig {
   width?: number | null;
   height?: number | null;
   well_depth?: number | null;
-  a1?: Coordinate3D | null;
   calibration: CalibrationPoints;
   x_offset: number;
   y_offset: number;

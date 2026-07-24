@@ -17,6 +17,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # diff-cover needs the base branch to compute changed lines.
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -26,7 +29,16 @@ jobs:
         run: pip install -e "packages/core[dev]"
 
       - name: Run tests
-        run: python -m pytest packages/core/tests -q
+        run: >-
+          python -m pytest packages/core/tests -q
+          --cov=packages/core/src/cubos
+          --cov-report=xml
+
+      - name: Diff coverage gate (changed core lines must be >=90% covered)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin "${{ github.base_ref }}"
+          diff-cover coverage.xml --compare-branch="origin/${{ github.base_ref }}" --fail-under=90
 
   docs:
     runs-on: ubuntu-latest

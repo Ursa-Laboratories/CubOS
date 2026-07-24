@@ -50,7 +50,6 @@ function createState(): ApiState {
               length: 127.76,
               width: 85.47,
               height: 14.22,
-              a1: null,
               calibration: {
                 a1: { x: 10, y: 20, z: 30 },
                 a2: { x: 20, y: 20, z: 30 },
@@ -128,7 +127,7 @@ function toDeckResponse(filename: string, body: DeckConfig): DeckResponse {
 }
 
 function previewWells(config: WellPlateConfig): Record<string, WellPosition> {
-  const a1 = config.calibration.a1 ?? config.a1 ?? { x: 0, y: 0, z: 0 };
+  const a1 = config.calibration.a1 ?? { x: 0, y: 0, z: 0 };
   const wells: Record<string, WellPosition> = {};
   for (let row = 0; row < config.rows; row += 1) {
     const rowName = String.fromCharCode("A".charCodeAt(0) + row);
