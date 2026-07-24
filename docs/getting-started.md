@@ -33,7 +33,7 @@ Windows, both are shown below.
   Bash it installs for the commands in these docs.
 - Install [Python 3.10 or newer](https://www.python.org/downloads/windows/).
   During setup, check "Add python.exe to PATH".
-- Verify, from Git Bash:
+- Verify, from Git Bash or PowerShell:
   ```bash
   python --version
   git --version
@@ -92,20 +92,23 @@ Activate the virtual environment:
   ```
 - **Windows, PowerShell:**
   ```powershell
-  .venv\Scripts\activate
+  .\.venv\Scripts\Activate.ps1
   ```
 
-Then install CubOS:
+Then upgrade pip and install CubOS. Pip may print a notice that a newer version
+is available; the first command below performs that update without depending on
+the version numbers shown in the notice.
 
 ```bash
-pip install -U pip
-pip install -e ".[dev]"
+python -m pip install --upgrade pip
+python -m pip install -e "packages/core[dev]"
 ```
 
 ### Instrument extras
 
 Instrument vendor SDKs are optional — install only the extras for hardware
-you actually use. The extras currently defined in `pyproject.toml`:
+you actually use. The extras currently defined in
+`packages/core/pyproject.toml`:
 
 | Extra | Installs | For |
 |---|---|---|
@@ -117,13 +120,13 @@ you actually use. The extras currently defined in `pyproject.toml`:
 For example, to work on an ASMI setup:
 
 ```bash
-pip install -e ".[asmi-vernier]"
+python -m pip install -e "packages/core[asmi-vernier]"
 ```
 
 Instrument types without a dedicated extra (`filmetrics`, `pipette`,
 `uv_curing`, `uvvis_ccs`, `camera`) don't require an extra vendor SDK install
 beyond CubOS's base dependencies.
 
-Customer/proprietary instruments ship as normal Python packages —
-`pip install` the package and its instruments become available in the gantry
-YAML like any built-in type.
+Customer/proprietary instruments ship as normal Python packages — install the
+package with `python -m pip install`, and its instruments become available in
+the gantry YAML like any built-in type.
