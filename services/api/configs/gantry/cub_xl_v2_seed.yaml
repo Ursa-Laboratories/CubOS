@@ -1,4 +1,4 @@
-# Seed config for the Genmitsu 4040-PRO MAX (cub_xl gantry class).
+# Seed config for the cub_xl v2 gantry: Genmitsu 4040-PRO MAX (cub_xl class).
 # Values mirror the Candle-verified controller state from the bear-den-asmi
 # bring-up (2026-07-22): factory GRBL max travel is 400/400/80 mm; the usable
 # working volume subtracts the 10mm homing pull-off reserve on X/Y and holds
