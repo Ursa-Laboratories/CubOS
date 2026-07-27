@@ -71,32 +71,68 @@ function Invoke-LoggedNative {
 
     $Label = if ($Activity) { $Activity } else { "working" }
 
-    # Pre-quote arguments so paths containing spaces (e.g. a wheelhouse under a
-    # user profile with a space in the name) survive Start-Process.
-    $QuotedArgs = @(
-        foreach ($Arg in $Arguments) {
-            if ($Arg -match '[\s"]') { '"' + ($Arg -replace '"', '\"') + '"' } else { $Arg }
-        }
-    )
-
     $OutFile = [System.IO.Path]::GetTempFileName()
     $ErrFile = [System.IO.Path]::GetTempFileName()
+    $ExitCodeFile = [System.IO.Path]::GetTempFileName()
+    Remove-Item -LiteralPath $ExitCodeFile -Force
     $StartTime = Get-Date
     $LastBeat = Get-Date
     $SeenOut = 0
     $SeenErr = 0
-    $ExitCode = 0
+    $ExitCode = $null
 
     try {
+        # Windows PowerShell 5.1 only populates Process.ExitCode when
+        # Start-Process uses -Wait. Waiting there would prevent the progress
+        # heartbeat, so a child PowerShell writes the native exit code to a
+        # side-channel file while this process continues streaming output.
+        $Payload = @{
+            FilePath = $FilePath
+            Arguments = @($Arguments)
+        } | ConvertTo-Json -Compress
+        $PayloadBase64 = [Convert]::ToBase64String(
+            [System.Text.Encoding]::UTF8.GetBytes($Payload)
+        )
+        $EscapedExitCodeFile = $ExitCodeFile.Replace("'", "''")
+        $Runner = @"
+`$PayloadJson = [System.Text.Encoding]::UTF8.GetString(
+    [Convert]::FromBase64String('$PayloadBase64')
+)
+`$Payload = `$PayloadJson | ConvertFrom-Json
+`$NativeExitCode = 1
+`$ProgressPreference = 'SilentlyContinue'
+try {
+    & ([string]`$Payload.FilePath) @(`$Payload.Arguments)
+    if (`$null -eq `$LASTEXITCODE) {
+        `$NativeExitCode = if (`$?) { 0 } else { 1 }
+    }
+    else {
+        `$NativeExitCode = [int]`$LASTEXITCODE
+    }
+}
+catch {
+    Write-Error `$_.Exception.Message
+}
+finally {
+    [System.IO.File]::WriteAllText('$EscapedExitCodeFile', [string]`$NativeExitCode)
+}
+exit `$NativeExitCode
+"@
+        $EncodedRunner = [Convert]::ToBase64String(
+            [System.Text.Encoding]::Unicode.GetBytes($Runner)
+        )
         $StartArgs = @{
-            FilePath               = $FilePath
+            FilePath               = (Join-Path $PSHOME "powershell.exe")
+            ArgumentList           = @(
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy", "Bypass",
+                "-EncodedCommand", $EncodedRunner
+            )
             NoNewWindow            = $true
             PassThru               = $true
             RedirectStandardOutput = $OutFile
             RedirectStandardError  = $ErrFile
-        }
-        if ($QuotedArgs.Count -gt 0) {
-            $StartArgs['ArgumentList'] = $QuotedArgs
         }
 
         $Process = Start-Process @StartArgs
@@ -134,7 +170,15 @@ function Invoke-LoggedNative {
         }
 
         $Process.WaitForExit()
-        $ExitCode = $Process.ExitCode
+        if (-not (Test-Path -LiteralPath $ExitCodeFile)) {
+            throw "Could not determine the exit code for $FilePath"
+        }
+        $ExitCodeText = (Get-Content -LiteralPath $ExitCodeFile -Raw).Trim()
+        $ParsedExitCode = 0
+        if (-not [int]::TryParse($ExitCodeText, [ref]$ParsedExitCode)) {
+            throw "Invalid exit code '$ExitCodeText' reported for $FilePath"
+        }
+        $ExitCode = $ParsedExitCode
 
         # Flush any trailing output, including a final line without a newline.
         $OutLines = @(Get-Content -LiteralPath $OutFile -ErrorAction SilentlyContinue)
@@ -154,7 +198,7 @@ function Invoke-LoggedNative {
         }
     }
     finally {
-        Remove-Item -LiteralPath $OutFile, $ErrFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $OutFile, $ErrFile, $ExitCodeFile -Force -ErrorAction SilentlyContinue
     }
 
     if ($ExitCode -ne 0) {
