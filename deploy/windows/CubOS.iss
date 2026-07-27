@@ -29,7 +29,7 @@ WizardStyle=modern
 UninstallDisplayName=CubOS
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 Name: "asmi"; Description: "ASMI Go Direct driver support (public godirect package, selected by default)"; GroupDescription: "Optional public hardware drivers:"
 
 [Dirs]
@@ -42,18 +42,19 @@ Source: "{#SourceDir}\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recurse
 Source: "{#SourceDir}\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\wheelhouse\*"; DestDir: "{app}\wheelhouse"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\requirements\*"; DestDir: "{app}\requirements"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\desktop\*"; DestDir: "{app}\desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\build-info.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Start-CubOS.ps1"" -InstallDir ""{app}"""; Description: "Start CubOS"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\desktop\CubOS.exe"; Description: "Start CubOS"; WorkingDir: "{app}\desktop"; Flags: nowait postinstall skipifsilent unchecked
 
 [Icons]
-Name: "{group}\Start CubOS"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Start-CubOS.ps1"" -InstallDir ""{app}"""; WorkingDir: "{app}"
+Name: "{group}\CubOS"; Filename: "{app}\desktop\CubOS.exe"; WorkingDir: "{app}\desktop"
 Name: "{group}\CubOS Configs"; Filename: "explorer.exe"; Parameters: """{localappdata}\UrsaLabs\CubOS\configs"""
 Name: "{group}\CubOS Logs"; Filename: "explorer.exe"; Parameters: """{localappdata}\UrsaLabs\CubOS\logs"""
 Name: "{group}\Export Diagnostics"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Export-Diagnostics.ps1"" -InstallDir ""{app}"""; WorkingDir: "{app}"
 Name: "{group}\Uninstall CubOS"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\CubOS"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Start-CubOS.ps1"" -InstallDir ""{app}"""; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\CubOS"; Filename: "{app}\desktop\CubOS.exe"; WorkingDir: "{app}\desktop"; Tasks: desktopicon
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\venv"

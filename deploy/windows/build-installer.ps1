@@ -28,11 +28,17 @@ function Invoke-Checked {
 function Invoke-RobocopyChecked {
     param(
         [string]$Source,
-        [string]$Destination
+        [string]$Destination,
+        [string[]]$ExcludeDirectories = @()
     )
 
     New-Item -ItemType Directory -Force -Path $Destination | Out-Null
-    & robocopy $Source $Destination /E /NFL /NDL /NJH /NJS /NC /NS /XD .git .venv venv node_modules .pytest_cache .omx build /XF *.pyc
+    $RobocopyArguments = @(
+        $Source, $Destination,
+        "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS",
+        "/XD", ".git", ".venv", "venv", "node_modules", ".pytest_cache", ".omx", "build"
+    ) + $ExcludeDirectories + @("/XF", "*.pyc")
+    & robocopy @RobocopyArguments
     if ($LASTEXITCODE -gt 7) {
         throw "robocopy from $Source to $Destination failed with exit code $LASTEXITCODE"
     }
@@ -130,6 +136,10 @@ if (-not $CubOSSourceDir -and $CubOSBranch -ne $Branch) {
     throw "CubOS clone is on $CubOSBranch, expected $Branch"
 }
 
+$DesktopProjectDir = Join-Path $CubOSSource "apps\operator-desktop"
+$DesktopBundle = Join-Path $DesktopProjectDir "dist\win-unpacked"
+$DesktopStage = Join-Path $Stage "desktop"
+
 Push-Location (Join-Path $CubOSSource "apps\operator-web")
 try {
     Invoke-Checked npm @("ci")
@@ -137,6 +147,20 @@ try {
 }
 finally {
     Pop-Location
+}
+
+Push-Location $DesktopProjectDir
+try {
+    Invoke-Checked npm @("ci")
+    Invoke-Checked npm @("test")
+    Invoke-Checked npm @("run", "pack:win")
+}
+finally {
+    Pop-Location
+}
+
+if (-not (Test-Path (Join-Path $DesktopBundle "CubOS.exe"))) {
+    throw "Desktop application was not packaged at $DesktopBundle"
 }
 
 $BuildPython = Resolve-BuildPython $BuildPythonPath
@@ -162,7 +186,10 @@ foreach ($DriverRequirements in Get-ChildItem -Path $DriverRequirementsDir -Filt
 Invoke-Checked $PythonExe ($PythonPrefixArgs + @("-m", "pip", "wheel", "--no-deps", "--wheel-dir", $Wheelhouse, (Join-Path $CubOSSource "packages\core")))
 Invoke-Checked $PythonExe ($PythonPrefixArgs + @("-m", "pip", "wheel", "--no-deps", "--wheel-dir", $Wheelhouse, (Join-Path $CubOSSource "services\api")))
 
-Invoke-RobocopyChecked $CubOSSource (Join-Path $Stage "app\CubOS")
+Invoke-RobocopyChecked $CubOSSource (Join-Path $Stage "app\CubOS") -ExcludeDirectories @(
+    (Join-Path $CubOSSource "apps\operator-desktop\dist")
+)
+Invoke-RobocopyChecked $DesktopBundle $DesktopStage
 Invoke-RobocopyChecked (Join-Path $PSScriptRoot "scripts") (Join-Path $Stage "scripts")
 Copy-Item $RuntimeRequirements (Join-Path $RequirementsDir "runtime-requirements.txt") -Force
 Copy-Item (Join-Path $PSScriptRoot "requirements\*") $RequirementsDir -Recurse -Force
@@ -184,6 +211,10 @@ $BuildInfo = [ordered]@{
     cubos_branch = $CubOSBranch
     cubos_commit = $CubOSCommit
     python_version = $PythonVersion
+    electron_version = (
+        Get-Content (Join-Path $DesktopProjectDir "package.json") -Raw |
+            ConvertFrom-Json
+    ).devDependencies.electron
     app_version = $AppVersion
 }
 $BuildInfo | ConvertTo-Json -Depth 3 | Set-Content -Path (Join-Path $Stage "build-info.json") -Encoding UTF8

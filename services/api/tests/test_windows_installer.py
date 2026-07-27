@@ -1,3 +1,4 @@
+import json
 import re
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WINDOWS_INSTALLER = REPO_ROOT / "deploy" / "windows"
+DESKTOP_APP = REPO_ROOT / "apps" / "operator-desktop"
 
 
 def _extract_ini_section(text: str, section: str) -> str:
@@ -97,6 +99,32 @@ def test_windows_installer_fails_when_runtime_setup_fails() -> None:
     assert "ewWaitUntilTerminated" in iss
     assert "if ResultCode <> 0 then" in iss
     assert "RaiseException" in iss
+
+
+def test_windows_installer_packages_native_desktop_app() -> None:
+    iss = (WINDOWS_INSTALLER / "CubOS.iss").read_text()
+    build_script = (WINDOWS_INSTALLER / "build-installer.ps1").read_text()
+    workflow = (REPO_ROOT / ".github" / "workflows" / "windows-installer.yml").read_text()
+    run_section = _extract_ini_section(iss, "Run")
+    icons_section = _extract_ini_section(iss, "Icons")
+    desktop_package = json.loads((DESKTOP_APP / "package.json").read_text())
+
+    assert 'Source: "{#SourceDir}\\desktop\\*"' in iss
+    assert 'Filename: "{app}\\desktop\\CubOS.exe"' in run_section
+    assert "powershell.exe" not in run_section
+    assert 'Name: "{group}\\CubOS"; Filename: "{app}\\desktop\\CubOS.exe"' in icons_section
+    assert 'Name: "{autodesktop}\\CubOS"; Filename: "{app}\\desktop\\CubOS.exe"' in icons_section
+    desktop_task = next(
+        line for line in iss.splitlines() if 'Name: "desktopicon"' in line
+    )
+    assert "unchecked" not in desktop_task.lower()
+
+    assert '"apps\\operator-desktop"' in build_script
+    assert '"pack:win"' in build_script
+    assert '"dist\\win-unpacked"' in build_script
+    assert "apps/operator-desktop/**" in workflow
+    assert desktop_package["build"]["productName"] == "CubOS"
+    assert desktop_package["build"]["win"]["target"] == "dir"
 
 
 def test_windows_installer_offers_asmi_as_optional_public_driver() -> None:
