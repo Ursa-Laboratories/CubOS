@@ -9,6 +9,7 @@ import GantryEditor from "./components/editor/GantryEditor";
 import ProtocolEditor from "./components/editor/ProtocolEditor";
 import DataOutputPanel from "./components/data/DataOutputPanel";
 import StatePanel from "./components/state/StatePanel";
+import { useConfirm } from "./components/common/useConfirm";
 import { settingsApi, deckApi, protocolApi, gantryApi, runsApi } from "./api/client";
 import { useDeckConfigs, useDeck, useSaveDeck } from "./hooks/useDeck";
 import {
@@ -119,6 +120,7 @@ export default function App() {
     seeds: [],
   });
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [requestConfirm, confirmDialog] = useConfirm();
 
   // Load the local config directory on mount.
   React.useEffect(() => {
@@ -134,10 +136,10 @@ export default function App() {
       const selectedPath = configDirFromSettings(browseResult);
       if (
         selectedPath !== configDir
-        && !confirmDiscard(
+        && !(await confirmDiscard(
           unsavedConfigs.length > 0,
           "Discard unsaved config changes and switch config directory?",
-        )
+        ))
       ) {
         return;
       }
@@ -325,23 +327,24 @@ export default function App() {
   // prompts when that specific tab actually has unsaved edits, so normal
   // (non-dirty) selection and the editors' own post-save onSelectFile
   // bookkeeping calls are never intercepted.
-  const confirmDiscard = (dirty: boolean, message: string): boolean => !dirty || window.confirm(message);
+  const confirmDiscard = async (dirty: boolean, message: string): Promise<boolean> =>
+    !dirty || requestConfirm({ title: "Discard changes?", message, confirmLabel: "Discard", danger: true });
 
-  const handleImportGantry = (filename: string) => {
-    if (!confirmDiscard(gantryDirty, "Discard unsaved gantry changes?")) return;
+  const handleImportGantry = async (filename: string) => {
+    if (!(await confirmDiscard(gantryDirty, "Discard unsaved gantry changes?"))) return;
     setGantryFile(filename);
   };
 
-  const handleImportProtocol = (filename: string) => {
-    if (!confirmDiscard(protocolDirty, "Discard unsaved protocol changes?")) return;
+  const handleImportProtocol = async (filename: string) => {
+    if (!(await confirmDiscard(protocolDirty, "Discard unsaved protocol changes?"))) return;
     setProtocolFile(filename);
   };
 
   const handleImportDeck = async (filename: string) => {
-    if (!confirmDiscard(
+    if (!(await confirmDiscard(
       deckDirty,
       `Discard unsaved deck changes and overwrite ${WORKING_DECK_FILENAME} with "${filename}"?`,
-    )) return;
+    ))) return;
     setImportError(null);
     try {
       const importedDeck = await deckApi.get(filename);
@@ -803,7 +806,12 @@ export default function App() {
     />
   );
 
-  return <AppLayout header={headerBar} left={left} topRight={topRight} bottomRight={bottomRight} />;
+  return (
+    <>
+      <AppLayout header={headerBar} left={left} topRight={topRight} bottomRight={bottomRight} />
+      {confirmDialog}
+    </>
+  );
 }
 
 const brandMarkStyle: React.CSSProperties = {
