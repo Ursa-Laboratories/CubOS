@@ -391,8 +391,6 @@ export default function GantryPositionWidget({
   const jogDisabled = homeDisabled || stepInvalid;
   const moveDisabled = !connected || isMoving || isRunning;
   const advancedDisabled = !connected || advancedBusy || isRunning;
-  const canCalibrate = !!gantry;
-  const canOpenCalibration = canCalibrate && !isRunning;
 
   const jogBtnProps = (x: number, y: number, z: number) => ({
     onMouseDown: () => !jogDisabled && startJog(x, y, z),
@@ -616,22 +614,11 @@ export default function GantryPositionWidget({
         </div>
       </div>
 
-      {/* Home and calibration */}
+      {/* Home (calibration entry point removed on this bench deploy —
+          the machine frame is hand-jogged; the wizard must not touch it) */}
       <div style={{ marginBottom: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button onClick={handleHome} disabled={homeDisabled} style={buttonStateStyle(homeBtnStyle, homeDisabled)}>
           {homeBusy ? "Homing…" : "Home"}
-        </button>
-        <button
-          onClick={() => setCalibrationOpen(true)}
-          disabled={!canOpenCalibration}
-          style={{
-            ...calibrateBtnStyle,
-            opacity: canOpenCalibration ? 1 : 0.45,
-            cursor: canOpenCalibration ? "pointer" : "not-allowed",
-          }}
-          title={canOpenCalibration ? "Open gantry calibration" : isRunning ? "Protocol running" : "Load a gantry config first"}
-        >
-          Calibrate
         </button>
       </div>
 
@@ -1045,12 +1032,6 @@ const homeBtnStyle: React.CSSProperties = {
   background: theme.color.warningBg,
   padding: "5px 16px",
   fontWeight: 600,
-};
-
-const calibrateBtnStyle: React.CSSProperties = {
-  ...theme.btn.primary,
-  ...theme.btnSmall,
-  padding: "5px 16px",
 };
 
 const jogBtnStyle: React.CSSProperties = {
