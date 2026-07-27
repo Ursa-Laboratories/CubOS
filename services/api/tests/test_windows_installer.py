@@ -40,6 +40,15 @@ def test_windows_runtime_uses_venv_and_installs_core_and_api() -> None:
     assert "& $RuntimePython -m cubos_api" in start_cubos
 
 
+def test_windows_installer_requires_build_python_to_match_bundled_python() -> None:
+    build_script = (WINDOWS_INSTALLER / "build-installer.ps1").read_text()
+
+    assert "$BuildPythonVersion" in build_script
+    assert "$ExpectedPythonVersion" in build_script
+    assert "does not match bundled Python" in build_script
+    assert "-BuildPythonPath" in build_script
+
+
 def test_windows_runtime_install_reports_visible_progress() -> None:
     """The runtime install is a long, mostly-silent sequence of offline pip
     commands. Without incremental feedback it looks frozen, so Install-Runtime
@@ -64,6 +73,30 @@ def test_windows_runtime_install_reports_visible_progress() -> None:
     assert "Set-TotalSteps (4 + $SelectedDriverGroups.Count)" in install_runtime
     start_step_calls = install_runtime.count('Start-Step "')
     assert start_step_calls == 5  # 4 fixed phases + the one inside the driver loop
+
+
+def test_windows_runtime_uses_exit_code_side_channel_for_progress_processes() -> None:
+    install_runtime = (WINDOWS_INSTALLER / "scripts" / "Install-Runtime.ps1").read_text()
+
+    assert "$ExitCodeFile" in install_runtime
+    assert "[System.IO.File]::WriteAllText" in install_runtime
+    assert "[int]::TryParse" in install_runtime
+    assert "$Process.ExitCode" not in install_runtime
+
+
+def test_windows_installer_fails_when_runtime_setup_fails() -> None:
+    iss = (WINDOWS_INSTALLER / "CubOS.iss").read_text()
+    run_section = _extract_ini_section(iss, "Run")
+
+    assert "Install-Python.ps1" not in run_section
+    assert "Install-Runtime.ps1" not in run_section
+    assert "procedure CurStepChanged" in iss
+    assert "CurStep <> ssPostInstall" in iss
+    assert "Install-Python.ps1" in iss
+    assert "Install-Runtime.ps1" in iss
+    assert "ewWaitUntilTerminated" in iss
+    assert "if ResultCode <> 0 then" in iss
+    assert "RaiseException" in iss
 
 
 def test_windows_installer_offers_asmi_as_optional_public_driver() -> None:
@@ -172,6 +205,14 @@ def test_windows_launcher_seeds_only_generic_config_templates() -> None:
         "sterling_deck",
     ):
         assert named_config not in start_cubos
+
+
+def test_windows_launcher_points_api_at_bundled_frontend() -> None:
+    start_cubos = (WINDOWS_INSTALLER / "scripts" / "Start-CubOS.ps1").read_text()
+
+    assert '$FrontendDist = Join-Path $CubOSDir "apps\\operator-web\\dist"' in start_cubos
+    assert '$env:CUBOS_WEB_DIR = Join-Path $CubOSDir "apps\\operator-web"' in start_cubos
+    assert "$env:CUBOS_WEB_DIST = $FrontendDist" in start_cubos
 
 
 @pytest.mark.skipif(

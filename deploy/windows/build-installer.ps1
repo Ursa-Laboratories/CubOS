@@ -142,6 +142,17 @@ finally {
 $BuildPython = Resolve-BuildPython $BuildPythonPath
 $PythonExe = $BuildPython.Path
 $PythonPrefixArgs = [string[]]$BuildPython.Args
+$ExpectedPythonSeries = ([version]$PythonVersion)
+$BuildPythonVersion = (
+    & $PythonExe @PythonPrefixArgs -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+).Trim()
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not determine the build Python version from $PythonExe"
+}
+$ExpectedPythonVersion = "$($ExpectedPythonSeries.Major).$($ExpectedPythonSeries.Minor)"
+if ($BuildPythonVersion -ne $ExpectedPythonVersion) {
+    throw "Build Python $BuildPythonVersion does not match bundled Python $ExpectedPythonVersion. Pass -BuildPythonPath with a compatible interpreter."
+}
 
 Invoke-Checked $PythonExe ($PythonPrefixArgs + @("-m", "pip", "install", "--upgrade", "pip", "build", "wheel"))
 Invoke-Checked $PythonExe ($PythonPrefixArgs + @("-m", "pip", "download", "--only-binary", ":all:", "--dest", $Wheelhouse, "-r", $RuntimeRequirements))

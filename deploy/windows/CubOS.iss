@@ -45,8 +45,6 @@ Source: "{#SourceDir}\requirements\*"; DestDir: "{app}\requirements"; Flags: ign
 Source: "{#SourceDir}\build-info.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Install-Python.ps1"" -InstallDir ""{app}"" -PythonInstaller ""{app}\installers\python-installer.exe"""; StatusMsg: "Installing private Python runtime..."; Flags: waituntilterminated runhidden
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Install-Runtime.ps1"" -InstallDir ""{app}"" -DriverGroups ""{code:GetDriverGroups}"""; StatusMsg: "Installing CubOS and CubOS API runtime packages..."; Flags: waituntilterminated runhidden
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Start-CubOS.ps1"" -InstallDir ""{app}"""; Description: "Start CubOS"; Flags: nowait postinstall skipifsilent unchecked
 
 [Icons]
@@ -69,4 +67,62 @@ begin
   Result := '';
   if WizardIsTaskSelected('asmi') then
     Result := 'asmi';
+end;
+
+procedure RunPowerShellChecked(
+  ScriptName: String;
+  ScriptArguments: String;
+  StatusText: String
+);
+var
+  ResultCode: Integer;
+  PowerShellPath: String;
+  Parameters: String;
+begin
+  WizardForm.StatusLabel.Caption := StatusText;
+  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  Parameters :=
+    '-NoProfile -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\scripts\' + ScriptName) + '" ' + ScriptArguments;
+
+  if not Exec(
+    PowerShellPath,
+    Parameters,
+    ExpandConstant('{app}'),
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  ) then
+    RaiseException(
+      Format('Unable to start %s (Windows error %d).', [ScriptName, ResultCode])
+    );
+
+  if ResultCode <> 0 then
+    RaiseException(
+      Format('%s failed with exit code %d. See the CubOS logs for details.', [ScriptName, ResultCode])
+    );
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  DriverGroups: String;
+begin
+  if CurStep <> ssPostInstall then
+    exit;
+
+  RunPowerShellChecked(
+    'Install-Python.ps1',
+    '-InstallDir "' + ExpandConstant('{app}') +
+      '" -PythonInstaller "' +
+      ExpandConstant('{app}\installers\python-installer.exe') + '"',
+    'Installing private Python runtime...'
+  );
+
+  DriverGroups := GetDriverGroups('');
+  RunPowerShellChecked(
+    'Install-Runtime.ps1',
+    '-InstallDir "' + ExpandConstant('{app}') +
+      '" -DriverGroups "' + DriverGroups + '"',
+    'Installing CubOS and CubOS API runtime packages...'
+  );
 end;
