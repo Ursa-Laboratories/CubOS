@@ -145,6 +145,8 @@ try {
     $env:CUBOS_HOST = "127.0.0.1"
     $env:CUBOS_PORT = "8742"
     $env:CUBOS_OPEN_BROWSER = "true"
+    $env:CUBOS_WEB_DIR = Join-Path $CubOSDir "apps\operator-web"
+    $env:CUBOS_WEB_DIST = $FrontendDist
     $env:PYTHONUTF8 = "1"
 
     Write-Log "Launching CubOS at http://127.0.0.1:8742"

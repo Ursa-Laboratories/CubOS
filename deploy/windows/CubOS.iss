@@ -29,7 +29,7 @@ WizardStyle=modern
 UninstallDisplayName=CubOS
 
 [Tasks]
-Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
+Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"
 Name: "asmi"; Description: "ASMI Go Direct driver support (public godirect package, selected by default)"; GroupDescription: "Optional public hardware drivers:"
 
 [Dirs]
@@ -42,20 +42,19 @@ Source: "{#SourceDir}\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recurse
 Source: "{#SourceDir}\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\wheelhouse\*"; DestDir: "{app}\wheelhouse"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\requirements\*"; DestDir: "{app}\requirements"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SourceDir}\desktop\*"; DestDir: "{app}\desktop"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: "{#SourceDir}\build-info.json"; DestDir: "{app}"; Flags: ignoreversion
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Install-Python.ps1"" -InstallDir ""{app}"" -PythonInstaller ""{app}\installers\python-installer.exe"""; StatusMsg: "Installing private Python runtime..."; Flags: waituntilterminated runhidden
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Install-Runtime.ps1"" -InstallDir ""{app}"" -DriverGroups ""{code:GetDriverGroups}"""; StatusMsg: "Installing CubOS and CubOS API runtime packages..."; Flags: waituntilterminated runhidden
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Start-CubOS.ps1"" -InstallDir ""{app}"""; Description: "Start CubOS"; Flags: nowait postinstall skipifsilent unchecked
+Filename: "{app}\desktop\CubOS.exe"; Description: "Start CubOS"; WorkingDir: "{app}\desktop"; Flags: nowait postinstall skipifsilent unchecked
 
 [Icons]
-Name: "{group}\Start CubOS"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Start-CubOS.ps1"" -InstallDir ""{app}"""; WorkingDir: "{app}"
+Name: "{group}\CubOS"; Filename: "{app}\desktop\CubOS.exe"; WorkingDir: "{app}\desktop"
 Name: "{group}\CubOS Configs"; Filename: "explorer.exe"; Parameters: """{localappdata}\UrsaLabs\CubOS\configs"""
 Name: "{group}\CubOS Logs"; Filename: "explorer.exe"; Parameters: """{localappdata}\UrsaLabs\CubOS\logs"""
 Name: "{group}\Export Diagnostics"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Export-Diagnostics.ps1"" -InstallDir ""{app}"""; WorkingDir: "{app}"
 Name: "{group}\Uninstall CubOS"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\CubOS"; Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\Start-CubOS.ps1"" -InstallDir ""{app}"""; WorkingDir: "{app}"; Tasks: desktopicon
+Name: "{autodesktop}\CubOS"; Filename: "{app}\desktop\CubOS.exe"; WorkingDir: "{app}\desktop"; Tasks: desktopicon
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\venv"
@@ -69,4 +68,62 @@ begin
   Result := '';
   if WizardIsTaskSelected('asmi') then
     Result := 'asmi';
+end;
+
+procedure RunPowerShellChecked(
+  ScriptName: String;
+  ScriptArguments: String;
+  StatusText: String
+);
+var
+  ResultCode: Integer;
+  PowerShellPath: String;
+  Parameters: String;
+begin
+  WizardForm.StatusLabel.Caption := StatusText;
+  PowerShellPath := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+  Parameters :=
+    '-NoProfile -ExecutionPolicy Bypass -File "' +
+    ExpandConstant('{app}\scripts\' + ScriptName) + '" ' + ScriptArguments;
+
+  if not Exec(
+    PowerShellPath,
+    Parameters,
+    ExpandConstant('{app}'),
+    SW_HIDE,
+    ewWaitUntilTerminated,
+    ResultCode
+  ) then
+    RaiseException(
+      Format('Unable to start %s (Windows error %d).', [ScriptName, ResultCode])
+    );
+
+  if ResultCode <> 0 then
+    RaiseException(
+      Format('%s failed with exit code %d. See the CubOS logs for details.', [ScriptName, ResultCode])
+    );
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  DriverGroups: String;
+begin
+  if CurStep <> ssPostInstall then
+    exit;
+
+  RunPowerShellChecked(
+    'Install-Python.ps1',
+    '-InstallDir "' + ExpandConstant('{app}') +
+      '" -PythonInstaller "' +
+      ExpandConstant('{app}\installers\python-installer.exe') + '"',
+    'Installing private Python runtime...'
+  );
+
+  DriverGroups := GetDriverGroups('');
+  RunPowerShellChecked(
+    'Install-Runtime.ps1',
+    '-InstallDir "' + ExpandConstant('{app}') +
+      '" -DriverGroups "' + DriverGroups + '"',
+    'Installing CubOS and CubOS API runtime packages...'
+  );
 end;

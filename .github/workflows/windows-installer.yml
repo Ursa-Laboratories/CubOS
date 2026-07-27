@@ -6,6 +6,7 @@ on:
     paths:
       - ".github/workflows/windows-installer.yml"
       - "deploy/windows/**"
+      - "apps/operator-desktop/**"
       - "apps/operator-web/**"
       - "packages/core/**"
       - "services/api/**"
