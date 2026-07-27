@@ -1,0 +1,35 @@
+{
+  "name": "cubos-operator-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "author": "Ursa Laboratories",
+  "description": "Native Windows desktop shell for the CubOS operator",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "test": "node --test",
+    "pack:win": "electron-builder --win dir --x64"
+  },
+  "devDependencies": {
+    "electron": "43.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.ursalaboratories.cubos",
+    "productName": "CubOS",
+    "asar": true,
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "win": {
+      "target": "dir",
+      "icon": "assets/cubos-icon.png"
+    }
+  }
+}
