@@ -10,6 +10,7 @@ import type {
 import { DirtyMarker, NumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
 import { isFieldEqual } from "./field-utils";
 import ImportFromFile from "./ImportFromFile";
+import { useConfirm } from "../common/useConfirm";
 import * as theme from "../../theme";
 
 interface Props {
@@ -113,6 +114,7 @@ export default function GantryEditor({
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [requestConfirm, confirmDialog] = useConfirm();
   // GRBL lives under a collapsed "Advanced settings" panel. Start it
   // open only when GRBL already has unsaved edits (e.g. coming back to
   // this tab) so hidden changes are never silently buried.
@@ -229,8 +231,14 @@ export default function GantryEditor({
     }
   };
 
-  const handleDiscard = () => {
-    if (!window.confirm("Discard unsaved gantry changes?")) return;
+  const handleDiscard = async () => {
+    const confirmed = await requestConfirm({
+      title: "Discard changes?",
+      message: "Discard unsaved gantry changes?",
+      confirmLabel: "Discard",
+      danger: true,
+    });
+    if (!confirmed) return;
     setConfig(baseline ? structuredClone(baseline.config) : null);
     setSaveError(null);
     onRefresh();
@@ -541,6 +549,7 @@ export default function GantryEditor({
           </div>
         </>
       )}
+      {confirmDialog}
     </div>
   );
 }

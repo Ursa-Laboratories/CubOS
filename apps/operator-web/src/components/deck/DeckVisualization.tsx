@@ -204,7 +204,6 @@ export default function DeckVisualization({
                       width: nestedConfig.width,
                       height: nestedConfig.height,
                       well_depth: nestedConfig.well_depth,
-                      a1: null,
                       calibration: {
                         a1: normalizeCoordinate3D(nestedConfig.calibration.a1),
                         a2: normalizeCoordinate3D(nestedConfig.calibration.a2) ?? { x: 0, y: 0, z: 0 },

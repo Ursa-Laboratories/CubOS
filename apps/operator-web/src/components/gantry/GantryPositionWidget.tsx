@@ -3,6 +3,7 @@ import { gantryApi } from "../../api/client";
 import type { GantryConfig, GantryPosition, GantryResponse, WorkingVolume } from "../../types";
 import * as theme from "../../theme";
 import CalibrationWizard from "./CalibrationWizard";
+import { useConfirm } from "../common/useConfirm";
 
 interface Props {
   position: GantryPosition | null;
@@ -52,6 +53,7 @@ export default function GantryPositionWidget({
   const [grblSettings, setGrblSettings] = useState<Record<string, string> | null>(null);
   const [settingKey, setSettingKey] = useState("$20");
   const [settingValue, setSettingValue] = useState("");
+  const [requestConfirm, confirmDialog] = useConfirm();
   const jogTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const jogRequestCount = useRef(0);
   const predictedJogPosition = useRef<AxisPosition | null>(null);
@@ -215,12 +217,28 @@ export default function GantryPositionWidget({
     if (!gantryFile) return;
     setLoading(true);
     setConnectionError(null);
+    let connectSucceeded = false;
     try {
       await gantryApi.connect(gantryFile);
+      connectSucceeded = true;
     } catch (e) {
       setConnectionError(`Connection failed: ${e}`);
     }
     setLoading(false);
+    // A fresh connection usually follows a power cycle, so the controller
+    // has no reference position until it homes — offer that right away.
+    // Deliberately after the connect request resolves: the prompt's Home
+    // fires without handleHome's `connected` guard, since the polled
+    // position prop may lag the successful connect by a poll interval.
+    if (connectSucceeded && !isRunning) {
+      const confirmed = await requestConfirm({
+        title: "Gantry connected",
+        message: "Home the gantry now? Homing establishes a known reference position and is recommended after connecting.",
+        confirmLabel: "Home now",
+        cancelLabel: "Not now",
+      });
+      if (confirmed) await sendHome();
+    }
   };
 
   const handleDisconnect = async () => {
@@ -302,9 +320,7 @@ export default function GantryPositionWidget({
     await gantryApi.jogCancel();
   });
 
-  const handleHome = async () => {
-    if (!connected || isRunning) return;
-    if (!window.confirm("Confirm you want to go to home?")) return;
+  const sendHome = async () => {
     setHomeBusy(true);
     try {
       await gantryApi.home();
@@ -314,6 +330,17 @@ export default function GantryPositionWidget({
     } finally {
       setHomeBusy(false);
     }
+  };
+
+  const handleHome = async () => {
+    if (!connected || isRunning) return;
+    const confirmed = await requestConfirm({
+      title: "Home gantry",
+      message: "Confirm you want to go to home?",
+      confirmLabel: "Go to home",
+    });
+    if (!confirmed) return;
+    await sendHome();
   };
 
   const handleMoveTo = () => {
@@ -730,6 +757,7 @@ export default function GantryPositionWidget({
       <div style={{ fontSize: 10, color: theme.color.textFaint, marginTop: 8 }}>
         Keyboard: Arrow keys = XY, X/Z keys = Z up/down
       </div>
+      {confirmDialog}
       <CalibrationWizard
         open={calibrationOpen}
         onClose={() => setCalibrationOpen(false)}

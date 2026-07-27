@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { DeckResponse, LabwareConfig, WellPlateConfig, VialConfig, DeckConfig } from "../../types";
 import { CoordinateField, NumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
+import { useConfirm } from "../common/useConfirm";
 import * as theme from "../../theme";
 
 interface Props {
@@ -32,7 +33,6 @@ const EMPTY_WELL_PLATE: WellPlateConfig = {
   length: 127.76,
   width: 85.47,
   height: 14.22,
-  a1: null,
   calibration: {
     a1: { x: 100.0, y: 50.0, z: 20.0 },
     a2: { x: 91.0, y: 50.0, z: 20.0 },
@@ -97,6 +97,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [requestConfirm, confirmDialog] = useConfirm();
 
   useEffect(() => {
     setLabware(labwareFromDeck(deck));
@@ -159,8 +160,14 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
     }
   };
 
-  const handleDiscard = () => {
-    if (!window.confirm("Discard unsaved deck changes?")) return;
+  const handleDiscard = async () => {
+    const confirmed = await requestConfirm({
+      title: "Discard changes?",
+      message: "Discard unsaved deck changes?",
+      confirmLabel: "Discard",
+      danger: true,
+    });
+    if (!confirmed) return;
     setLabware(labwareFromDeck(baseline ?? null));
     setSaveError(null);
     onRefresh();
@@ -229,12 +236,13 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           <p style={hintTextStyle}>Add at least one well plate or vial before saving.</p>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }
 
 function WellPlateFields({ entry, onChange, parentKey }: { entry: WellPlateConfig; onChange: (v: WellPlateConfig) => void; parentKey: string }) {
-  const a1 = entry.calibration.a1 ?? entry.a1 ?? { x: 0, y: 0, z: 0 };
+  const a1 = entry.calibration.a1 ?? { x: 0, y: 0, z: 0 };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <div style={{ display: "flex", gap: 8 }}>

@@ -16,6 +16,7 @@ import type {
 } from "../../types";
 import { CoordinateField, NumberField, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
+import { useConfirm } from "../common/useConfirm";
 import {
   createCompositionRow,
   createSeedRow,
@@ -164,6 +165,7 @@ export default function ProtocolEditor({
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [requestConfirm, confirmDialog] = useConfirm();
 
   const commandsByName = Object.fromEntries(commands.map((c) => [c.name, c]));
   const choices = buildProtocolChoices(deck, gantry, positionRows, instrumentMethods);
@@ -299,8 +301,14 @@ export default function ProtocolEditor({
     }
   };
 
-  const handleDiscard = () => {
-    if (!window.confirm("Discard unsaved protocol changes?")) return;
+  const handleDiscard = async () => {
+    const confirmed = await requestConfirm({
+      title: "Discard changes?",
+      message: "Discard unsaved protocol changes?",
+      confirmLabel: "Discard",
+      danger: true,
+    });
+    if (!confirmed) return;
     setSteps(baseline?.steps ? structuredClone(baseline.steps) : []);
     setPositionRows(positionsToRows(baseline?.positions));
     setSaveError(null);
@@ -812,6 +820,7 @@ export default function ProtocolEditor({
           <p style={{ ...theme.notice.error, margin: "6px 0 0" }}>{runError}</p>
         )}
       </div>
+      {confirmDialog}
     </div>
   );
 }
