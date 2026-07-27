@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -623,156 +623,17 @@ describe("CubOS editor interactions", () => {
     expect(newFileCalls[0][1]?.method).toBe("PUT");
   });
 
-  it("opens the gantry calibration wizard from the control panel", async () => {
-    const user = userEvent.setup();
-    const state = createState();
-    const fetchMock = installFetchMock(state);
-    renderApp();
-    await waitForSettingsLoad();
-
-    await importConfig(user, "Import gantry config", "cubos.yaml");
-    await user.click(await screen.findByRole("button", { name: "Calibrate" }));
-
-    expect(screen.getByRole("dialog", { name: "Gantry calibration" })).toBeInTheDocument();
-    expect(screen.getByText(/single-instrument deck origin/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /XY origin/ })).not.toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    expect(await screen.findByRole("button", { name: "Home gantry" })).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: "Home gantry" }));
-
-    const blockHeight = await screen.findByLabelText("Reference height (mm)");
-    expect(blockHeight).toHaveValue("35");
-    expect(blockHeight).toBeEnabled();
-    await user.clear(blockHeight);
-    await user.type(blockHeight, "36.25");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    const setOrigin = await screen.findByRole("button", { name: "Set origin and continue" });
-    expect(setOrigin).toBeInTheDocument();
-    await waitFor(() => expect(setOrigin).toBeEnabled());
-    expect(screen.queryByRole("button", { name: /Set XY origin/ })).not.toBeInTheDocument();
-    expect(screen.queryByText("XY origin")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Set Z reference/ })).not.toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/calibration/prepare-origin",
-      expect.objectContaining({ method: "POST" }),
-    );
-
-    await user.click(setOrigin);
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/work-coordinates",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ x: 0, y: 0, z: 36.25 }),
-      }),
-    ));
-    expect(await screen.findByText("Origin set. Ready to measure and save.")).toBeInTheDocument();
-    expect(screen.queryByText(/Program GRBL soft-limit travel spans/)).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
-
-    await user.click(within(screen.getByRole("dialog", { name: "Gantry calibration" })).getByRole("button", { name: "Save" }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/calibration/finalize-origin",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          home_z: 80,
-          block_touch_z: 0,
-          block_height: 36.25,
-          factory_z_travel: 80,
-        }),
-      }),
-    ));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/cubos.yaml",
-      expect.objectContaining({ method: "PUT" }),
-    ));
-    expect(state.gantries["cubos.yaml"]?.config.working_volume.z_max).toBe(80);
-    expect(state.gantries["cubos.yaml"]?.config.grbl_settings?.max_travel_z).toBe(90);
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Gantry calibration" })).not.toBeInTheDocument());
-  });
-
-  it("shows an error when block height is empty and Continue is clicked", async () => {
+  it("does not expose a gantry calibration entry point", async () => {
     const user = userEvent.setup();
     installFetchMock(createState());
     renderApp();
     await waitForSettingsLoad();
 
     await importConfig(user, "Import gantry config", "cubos.yaml");
-    await user.click(await screen.findByRole("button", { name: "Calibrate" }));
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Home gantry" }));
 
-    const blockHeight = await screen.findByLabelText("Reference height (mm)");
-    await user.clear(blockHeight);
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    expect(await screen.findByText("Enter a calibration reference height before continuing.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Set origin and continue" })).not.toBeInTheDocument();
-  });
-
-  it("shows an error when block height is zero or negative and Continue is clicked", async () => {
-    const user = userEvent.setup();
-    installFetchMock(createState());
-    renderApp();
-    await waitForSettingsLoad();
-
-    await importConfig(user, "Import gantry config", "cubos.yaml");
-    await user.click(await screen.findByRole("button", { name: "Calibrate" }));
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Home gantry" }));
-
-    const blockHeight = await screen.findByLabelText("Reference height (mm)");
-    await user.clear(blockHeight);
-    await user.type(blockHeight, "0");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-
-    expect(await screen.findByText("Calibration reference height must be greater than 0.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Set origin and continue" })).not.toBeInTheDocument();
-  });
-
-  it("reconnects after saving calibrated output to a different gantry filename", async () => {
-    const user = userEvent.setup();
-    const state = createState();
-    const fetchMock = installFetchMock(state);
-    renderApp();
-    await waitForSettingsLoad();
-
-    await importConfig(user, "Import gantry config", "cubos.yaml");
-    await user.click(await screen.findByRole("button", { name: "Calibrate" }));
-
-    const outputYaml = screen.getByLabelText("Output YAML");
-    await user.clear(outputYaml);
-    await user.type(outputYaml, "calibrated.yaml");
-    await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Home gantry" }));
-    await user.click(await screen.findByRole("button", { name: "Continue" }));
-    const setOrigin = await screen.findByRole("button", { name: "Set origin and continue" });
-    await waitFor(() => expect(setOrigin).toBeEnabled());
-    await user.click(setOrigin);
-    expect(await screen.findByText("Origin set. Ready to measure and save.")).toBeInTheDocument();
-    await user.click(within(screen.getByRole("dialog", { name: "Gantry calibration" })).getByRole("button", { name: "Save" }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/calibrated.yaml",
-      expect.objectContaining({ method: "PUT" }),
-    ));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/disconnect",
-      expect.objectContaining({ method: "POST" }),
-    ));
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/connect",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ filename: "calibrated.yaml" }),
-      }),
-    ));
+    // The calibration wizard rewrites soft limits and the work origin;
+    // its entry point was removed from the operator UI (2026-07-27).
+    expect(screen.queryByRole("button", { name: "Calibrate" })).not.toBeInTheDocument();
   });
 
   it("loads and saves a protocol config across tab switches", async () => {

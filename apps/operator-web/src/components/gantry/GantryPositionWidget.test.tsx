@@ -797,11 +797,7 @@ describe("GantryPositionWidget manual move safety", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("does not keyboard-jog while the calibration wizard is open", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn();
-    vi.stubGlobal("fetch", fetchMock);
-
+  it("does not render a Calibrate entry point", () => {
     render(
       <GantryPositionWidget
         position={position()}
@@ -812,12 +808,7 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
-    await user.click(screen.getByRole("button", { name: "Calibrate" }));
-    expect(screen.getByRole("dialog", { name: "Gantry calibration" })).toBeInTheDocument();
-
-    fireEvent.keyDown(window, { key: "ArrowRight" });
-
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: "Calibrate" })).not.toBeInTheDocument();
   });
 
   it("renders jog command errors inline", async () => {
