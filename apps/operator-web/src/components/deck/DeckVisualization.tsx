@@ -111,13 +111,16 @@ export default function DeckVisualization({
   const isBedMode = yAxisMotion === "bed";
 
   // In bed mode, compute SVG pixel offset for the deck based on gantry Y.
-  // The bed moves opposite to the head: when gantry reports Y=50, the bed
-  // has shifted 50mm from its home, so we translate the deck group.
+  // The head is pinned at deck-frame Y=0 (bottom of the frame) and the deck
+  // slides instead: when WPos reports Y=50 the head is over deck point
+  // y=50, so the deck must shift down-screen (+sy) by 50mm-worth of pixels
+  // to bring that point under the fixed marker — matching the physical bed
+  // moving toward the operator on a Y+ command.
   let deckTranslateY = 0;
   if (isBedMode && gantryPosition?.connected) {
     const gantryY = gantryPosition.work_y ?? gantryPosition.y ?? 0;
     const viewport = getSvgViewport(SVG_W, SVG_H, visualXRange, visualYRange);
-    deckTranslateY = -gantryY * viewport.scale;
+    deckTranslateY = gantryY * viewport.scale;
   }
 
   // In bed mode, the gantry marker only moves in X (Y is fixed at 0).

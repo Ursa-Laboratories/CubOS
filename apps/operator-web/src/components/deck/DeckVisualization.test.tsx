@@ -230,6 +230,44 @@ describe("DeckVisualization", () => {
     expect(screen.getByText("350")).toBeInTheDocument();
   });
 
+  // Regression: bed mode used to translate the deck by -gantryY, moving it
+  // up-screen. The head marker is pinned at deck-frame Y=0 (bottom of the
+  // frame), so when WPos.y=50 the deck must shift down-screen (+sy) to put
+  // deck point y=50 under the fixed marker — the sign was inverted.
+  it("shifts the deck down-screen as gantry Y increases in bed mode", () => {
+    const { container } = render(
+      <DeckVisualization
+        deck={{ filename: "empty.yaml", labware: [] }}
+        instruments={null}
+        gantryPosition={{
+          connected: true,
+          status: "Idle",
+          x: 0,
+          y: 50,
+          z: 0,
+          work_x: 0,
+          work_y: 50,
+          work_z: 0,
+          calibration_active: false,
+        }}
+        machineXRange={[0, 300]}
+        machineYRange={[0, 200]}
+        yAxisMotion="bed"
+      />,
+    );
+
+    expect(screen.getByText("bed moves Y")).toBeInTheDocument();
+    const deckGroup = container.querySelector("g[transform]");
+    expect(deckGroup).not.toBeNull();
+    const match = /translate\(0,\s*(-?[\d.]+)\)/.exec(deckGroup!.getAttribute("transform")!);
+    expect(match).not.toBeNull();
+    const translateY = Number(match![1]);
+    // Visual bounds pad [0,300]x[0,200] to [-10,310]x[-10,210]; the 420px-high
+    // SVG letterboxes to scale = (420 - 40) / 220 px/mm.
+    const expectedScale = (420 - 2 * 20) / 220;
+    expect(translateY).toBeCloseTo(50 * expectedScale, 3);
+  });
+
   it("renders holder labware with current CubOS dimension keys without NaN attributes", () => {
     const currentDeck: DeckResponse = {
       filename: "legacy_holder.yaml",
