@@ -873,4 +873,80 @@ describe("GantryPositionWidget manual move safety", () => {
       expect.objectContaining({ method: "POST" }),
     ));
   });
+
+  // Regression: Number("") is 0, so blank Move To fields used to pass the
+  // finite-number check and command a silent move to 0 on every blank axis
+  // (e.g. a Z plunge to deck level with only X filled in).
+  it("rejects a move when all coordinate fields are blank", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Go" }));
+
+    expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a move when one axis is left blank instead of treating it as 0", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("X (mm)"), "100");
+    await user.type(screen.getByLabelText("Y (mm)"), "100");
+    await user.click(screen.getByRole("button", { name: "Go" }));
+
+    expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still sends an explicit all-zero move", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("X (mm)"), "0");
+    await user.type(screen.getByLabelText("Y (mm)"), "0");
+    await user.type(screen.getByLabelText("Z (mm)"), "0");
+    await user.click(screen.getByRole("button", { name: "Go" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/move-to",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ x: 0, y: 0, z: 0 }),
+      }),
+    ));
+  });
 });

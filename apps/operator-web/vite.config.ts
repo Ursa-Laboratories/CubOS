@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config'
+import { configDefaults, defineConfig } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 const DEV_PORT = 5173
@@ -37,5 +37,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
+    // Playwright owns tests/e2e (run via `npm run test:e2e`); vitest must
+    // not pick those specs up.
+    exclude: [...configDefaults.exclude, 'tests/e2e/**'],
   },
 })

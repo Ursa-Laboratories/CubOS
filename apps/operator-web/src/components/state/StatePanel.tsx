@@ -35,10 +35,13 @@ interface ResolveFormState {
 
 export default function StatePanel() {
   const fluidStates = useFluidStates();
-  const [explicitSelectedId, setExplicitSelectedId] = useState<number | null>(null);
-  // Default to the most-recently-created state once the list loads, until
-  // the operator explicitly picks a different one.
-  const selectedId = explicitSelectedId ?? fluidStates.data?.[0]?.id ?? null;
+  // undefined = no explicit choice yet (fall back to the newest state once
+  // the list loads); null = the operator explicitly picked "no state", which
+  // must stick instead of snapping back to the fallback.
+  const [explicitSelectedId, setExplicitSelectedId] = useState<number | null | undefined>(undefined);
+  const selectedId = explicitSelectedId === undefined
+    ? fluidStates.data?.[0]?.id ?? null
+    : explicitSelectedId;
 
   const detail = useFluidState(selectedId);
   const tips = useTipState(selectedId);
