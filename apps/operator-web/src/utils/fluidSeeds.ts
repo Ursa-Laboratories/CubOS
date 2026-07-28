@@ -131,10 +131,21 @@ export function validateSeedRows(seeds: FluidSeedRow[]): string[] {
     const activeComposition = row.composition.filter(isActiveCompositionRow);
     let componentTotal = 0;
     let componentValid = true;
+    const seenComponents = new Set<string>();
     for (const component of activeComposition) {
-      if (component.component.trim() === "") {
+      const componentName = component.component.trim();
+      if (componentName === "") {
         errors.push(`${rowRef} has a composition amount with no component name.`);
         componentValid = false;
+      } else if (seenComponents.has(componentName)) {
+        // The payload is a map keyed by component name, so a duplicate row
+        // would silently overwrite the earlier one and the server would then
+        // reject the submit on a composition-sum mismatch this validator
+        // claimed was fine.
+        errors.push(`${rowRef} lists component "${componentName}" more than once.`);
+        componentValid = false;
+      } else {
+        seenComponents.add(componentName);
       }
       const amount = parseNumber(component.volume);
       if (amount === null) {

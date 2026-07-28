@@ -222,7 +222,7 @@ export default function GantryPositionWidget({
       await gantryApi.connect(gantryFile);
       connectSucceeded = true;
     } catch (e) {
-      setConnectionError(`Connection failed: ${e}`);
+      setConnectionError(`Connection failed: ${errorMessage(e)}`);
     }
     setLoading(false);
     // A fresh connection usually follows a power cycle, so the controller
@@ -346,10 +346,12 @@ export default function GantryPositionWidget({
   const handleMoveTo = () => {
     if (!connected || isRunning) return;
     setMoveError(null);
-    const x = Number(moveX);
-    const y = Number(moveY);
-    const z = Number(moveZ);
-    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) {
+    // Blank fields must not silently mean 0 — Number("") is 0, and a
+    // half-filled form would command an unintended move on the blank axes.
+    const x = parseAxisTarget(moveX);
+    const y = parseAxisTarget(moveY);
+    const z = parseAxisTarget(moveZ);
+    if (x === null || y === null || z === null) {
       setMoveError("Enter valid X, Y, and Z coordinates.");
       return;
     }
@@ -809,6 +811,13 @@ function isInsideWorkingVolume(position: AxisPosition, volume: WorkingVolume): b
 function parsePositiveStep(value: string): number | null {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseAxisTarget(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed === "") return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 function errorMessage(error: unknown): string {
