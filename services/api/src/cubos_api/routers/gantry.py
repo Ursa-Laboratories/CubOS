@@ -574,6 +574,15 @@ def reset_and_unlock() -> GantryPosition:
         raise _session_http_exception(exc, default_action="Reset and unlock") from exc
 
 
+@router.post("/resume")
+def resume() -> GantryPosition:
+    session = _require_session()
+    try:
+        return _position_response(session.resume(), session=session)
+    except Exception as exc:
+        raise _session_http_exception(exc, default_action="Resume") from exc
+
+
 @router.post("/feed-hold")
 def feed_hold() -> GantryPosition:
     session = _require_session()

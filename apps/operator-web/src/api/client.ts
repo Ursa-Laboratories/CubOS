@@ -187,6 +187,10 @@ export const gantryApi = {
     request<import("../types").GantryPosition>("/gantry/reset-unlock", {
       method: "POST",
     }),
+  resume: () =>
+    request<import("../types").GantryPosition>("/gantry/resume", {
+      method: "POST",
+    }),
   feedHold: () =>
     request<import("../types").GantryPosition>("/gantry/feed-hold", {
       method: "POST",

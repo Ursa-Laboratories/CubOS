@@ -9,7 +9,7 @@ from typing import Any, Dict, TYPE_CHECKING
 from ..errors import ProtocolExecutionError
 from ..measurements import normalize_measurement
 from ..registry import protocol_command
-from ..scan_args import normalize_scan_arguments
+from ..scan_args import normalize_scan_arguments, surface_detection_enabled
 from ._dispatch import inject_runtime_args
 from ._fluid_contents import (
     contents_for_target,
@@ -79,16 +79,22 @@ def measure(
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
 
-    if (
-        indentation_limit_height is not None
-        and indentation_limit_height > measurement_height
-    ):
-        raise ProtocolExecutionError(
-            f"measure: indentation_limit_height ({indentation_limit_height}) "
-            f"is above measurement_height ({measurement_height}). The "
-            "deepest descent plane must be at or below the action plane "
-            "in +Z-up."
-        )
+    detect_surface = surface_detection_enabled(normalized.method_kwargs)
+    if indentation_limit_height is not None:
+        if detect_surface and indentation_limit_height > 0:
+            raise ProtocolExecutionError(
+                "measure: indentation_limit_height "
+                f"({indentation_limit_height}) must be at or below 0 when "
+                "detect_surface is enabled — it is anchored to the detected "
+                "sample surface (negative = into the sample)."
+            )
+        if not detect_surface and indentation_limit_height > measurement_height:
+            raise ProtocolExecutionError(
+                f"measure: indentation_limit_height ({indentation_limit_height}) "
+                f"is above measurement_height ({measurement_height}). The "
+                "deepest descent plane must be at or below the action plane "
+                "in +Z-up."
+            )
 
     # Durable state is authoritative for a tracked run. Resolve and snapshot
     # it before any movement or instrument call so corrupt, missing, or

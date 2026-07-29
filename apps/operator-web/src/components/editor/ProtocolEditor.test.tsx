@@ -274,6 +274,86 @@ describe("ProtocolEditor", () => {
     expect(props.onLocalChange).toHaveBeenCalled();
   });
 
+  it("shows surface detection params and enables them with detect surface", async () => {
+    const user = userEvent.setup();
+    const props = renderProtocol({ steps: [] });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Add step" }), "scan");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    // Keep the parameters visible so operators can discover them, but do not
+    // allow editing until surface detection is enabled.
+    expect(await screen.findByLabelText("Detect surface")).toHaveValue("false");
+    expect(screen.getByLabelText("Surface search step (mm)")).toHaveValue("0.5");
+    expect(screen.getByLabelText("Surface force threshold (N)")).toHaveValue("0.01");
+    expect(screen.getByLabelText("Surface search max travel (mm)")).toHaveValue("10");
+    expect(screen.getByLabelText("Surface search step (mm)")).toBeDisabled();
+    expect(screen.getByLabelText("Surface force threshold (N)")).toBeDisabled();
+    expect(screen.getByLabelText("Surface search max travel (mm)")).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText("Detect surface"), "true");
+
+    expect(screen.getByLabelText("Surface search step (mm)")).toBeEnabled();
+    expect(screen.getByLabelText("Surface force threshold (N)")).toBeEnabled();
+    expect(screen.getByLabelText("Surface search max travel (mm)")).toBeEnabled();
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        args: expect.objectContaining({
+          method_kwargs: expect.objectContaining({
+            detect_surface: true,
+            surface_search_step: 0.5,
+            surface_force_threshold: 0.01,
+            surface_search_max_travel: 10,
+          }),
+        }),
+      }),
+    ]);
+  });
+
+  it("strips surface detection params when detect surface is disabled", async () => {
+    const user = userEvent.setup();
+    const props = renderProtocol({
+      steps: [
+        {
+          command: "scan",
+          args: {
+            plate: "plate_1",
+            instrument: "asmi",
+            method: "indentation",
+            measurement_height: -1,
+            interwell_scan_height: 8,
+            indentation_limit_height: -1,
+            method_kwargs: {
+              step_size: 0.02,
+              force_limit: 10,
+              detect_surface: true,
+              surface_search_step: 0.5,
+              surface_force_threshold: 0.01,
+              surface_search_max_travel: 8,
+            },
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByLabelText("Detect surface")).toHaveValue("true");
+    await user.selectOptions(screen.getByLabelText("Detect surface"), "false");
+
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        args: expect.objectContaining({
+          method_kwargs: {
+            step_size: 0.02,
+            force_limit: 10,
+          },
+        }),
+      }),
+    ]);
+    expect(screen.getByLabelText("Surface search step (mm)")).toBeDisabled();
+    expect(screen.getByLabelText("Surface force threshold (N)")).toBeDisabled();
+    expect(screen.getByLabelText("Surface search max travel (mm)")).toBeDisabled();
+  });
+
   it("uses the CubOS-provided instrument method map before the fallback map", async () => {
     const user = userEvent.setup();
     renderProtocol({

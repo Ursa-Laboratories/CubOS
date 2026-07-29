@@ -151,6 +151,54 @@ class TestNormalizeMeasurement:
         assert measurement.metadata["z_target_mm"] == pytest.approx(-80.0)
         assert measurement.metadata["force_limit_n"] == pytest.approx(10.0)
 
+    def test_normalize_asmi_indentation_with_surface_detection(self):
+        raw_result = {
+            "measurements": [
+                {"timestamp": 1.0, "z_mm": 6.5, "raw_force_n": 0.10, "corrected_force_n": 0.01, "direction": "down"},
+            ],
+            "baseline_avg": 0.09,
+            "baseline_std": 0.001,
+            "force_exceeded": False,
+            "data_points": 1,
+            "detect_surface": True,
+            "surface_z_mm": 7.0,
+            "surface_trigger_force_n": 0.02,
+            "surface_search_step_mm": 0.5,
+            "surface_force_threshold_n": 0.01,
+        }
+
+        measurement = normalize_measurement(
+            instrument_name="asmi",
+            method_name="indentation",
+            raw_result=raw_result,
+        )
+
+        assert measurement.metadata["detect_surface"] is True
+        assert measurement.metadata["surface_z_mm"] == pytest.approx(7.0)
+        assert measurement.metadata["surface_trigger_force_n"] == pytest.approx(0.02)
+        assert measurement.metadata["surface_search_step_mm"] == pytest.approx(0.5)
+        assert measurement.metadata["surface_force_threshold_n"] == pytest.approx(0.01)
+
+    def test_normalize_asmi_without_surface_detection_omits_surface_keys(self):
+        raw_result = {
+            "measurements": [
+                {"timestamp": 1.0, "z_mm": -73.01, "raw_force_n": 0.10, "corrected_force_n": 0.01, "direction": "down"},
+            ],
+            "baseline_avg": 0.09,
+            "baseline_std": 0.001,
+            "force_exceeded": False,
+            "data_points": 1,
+        }
+
+        measurement = normalize_measurement(
+            instrument_name="asmi",
+            method_name="indentation",
+            raw_result=raw_result,
+        )
+
+        assert "surface_z_mm" not in measurement.metadata
+        assert "detect_surface" not in measurement.metadata
+
     def test_normalize_asmi_requires_sample_metadata(self):
         raw_result = {
             "measurements": [

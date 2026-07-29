@@ -110,6 +110,9 @@ class FakeGantry:
     def reset_and_unlock(self):
         self.calls.append(("reset_and_unlock", None))
 
+    def resume(self):
+        self.calls.append(("resume", None))
+
     def enforce_work_position_reporting(self):
         self.calls.append(("enforce_work_position_reporting", None))
 
@@ -337,6 +340,7 @@ def test_simple_locked_wrappers_call_gantry_and_return_position(tmp_path):
     assert session.home().connected
     assert session.unlock().connected
     assert session.reset_and_unlock().connected
+    assert session.resume().connected
     assert session.feed_hold().connected
     assert session.jog_cancel().connected
     assert session.set_work_coordinates(x=1.0, y=None, z=2.0).connected
@@ -344,6 +348,7 @@ def test_simple_locked_wrappers_call_gantry_and_return_position(tmp_path):
     assert ("home", None) in fake.calls
     assert ("unlock", None) in fake.calls
     assert ("reset_and_unlock", None) in fake.calls
+    assert ("resume", None) in fake.calls
     assert ("stop", None) in fake.calls
     assert ("jog_cancel", None) in fake.calls
     assert ("set_work_coordinates", {"x": 1.0, "y": None, "z": 2.0}) in fake.calls

@@ -275,6 +275,12 @@ class GantrySession:
             gantry.reset_and_unlock()
         return self.position()
 
+    def resume(self) -> GantryPositionSnapshot:
+        """Resume a feed-held controller after an explicit operator action."""
+        with self._locked_gantry() as gantry:
+            gantry.resume()
+        return self.position()
+
     def feed_hold(self) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
             gantry.stop()

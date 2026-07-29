@@ -397,6 +397,62 @@ class TestScanCommand:
             assert r["indentation_limit_height"] == -5.0
             assert r["well_z"] == HEIGHT_MM
 
+    def test_detect_surface_limit_not_compared_to_measurement_height(self):
+        """With detect_surface the limit is anchored to the detected
+        surface, so a limit above measurement_height (different frames)
+        must not be rejected."""
+        from cubos.protocol_engine.commands.scan import scan
+
+        class _DetectSensor(_FakeSensor):
+            def indentation(
+                self,
+                *,
+                measurement_height: float,
+                indentation_limit_height: float,
+                well_z: float,
+                gantry=None,
+                detect_surface: bool = False,
+            ) -> dict:
+                self.call_count += 1
+                return {
+                    "measurement_height": measurement_height,
+                    "indentation_limit_height": indentation_limit_height,
+                    "well_z": well_z,
+                    "detect_surface": detect_surface,
+                }
+
+        sensor = _DetectSensor(
+            name="sensor", offset_x=0.0, offset_y=0.0, depth=0.0,
+        )
+        ctx = _mock_context(sensor=sensor)
+        ctx.gantry.controller = object()
+
+        results = scan(
+            ctx, plate="plate_1", instrument="uvvis", method="indentation",
+            measurement_height=-2.0,
+            interwell_scan_height=SAFE_APPROACH,
+            indentation_limit_height=-1.0,
+            method_kwargs={"detect_surface": True},
+        )
+
+        for r in results.values():
+            assert r["detect_surface"] is True
+            assert r["indentation_limit_height"] == -1.0
+
+    def test_detect_surface_rejects_positive_limit(self):
+        from cubos.protocol_engine.commands.scan import scan
+
+        ctx = _mock_context()
+
+        with pytest.raises(ProtocolExecutionError, match="detect_surface"):
+            scan(
+                ctx, plate="plate_1", instrument="uvvis", method="indentation",
+                measurement_height=MEASUREMENT,
+                interwell_scan_height=SAFE_APPROACH,
+                indentation_limit_height=0.5,
+                method_kwargs={"detect_surface": True},
+            )
+
     def test_legacy_z_limit_rejected_at_runtime(self):
         from cubos.protocol_engine.commands.scan import scan
 

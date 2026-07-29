@@ -1110,6 +1110,30 @@ function MethodOptionsField({
   if (!asmiIndentation) return null;
   const options = isRecord(value) ? value : {};
   const update = (key: string, nextValue: unknown) => onChange({ ...options, [key]: nextValue });
+  const detectSurface = Boolean(options.detect_surface ?? false);
+  const setDetectSurface = (enabled: boolean) => {
+    if (enabled) {
+      onChange({
+        ...options,
+        detect_surface: true,
+        surface_search_step: Number(options.surface_search_step ?? 0.5),
+        surface_force_threshold: Number(options.surface_force_threshold ?? 0.01),
+        surface_search_max_travel: Number(options.surface_search_max_travel ?? 10),
+      });
+      return;
+    }
+    // Strip all surface keys so disabled steps round-trip to the same
+    // YAML they had before the feature was toggled on.
+    const surfaceKeys = [
+      "detect_surface",
+      "surface_search_step",
+      "surface_force_threshold",
+      "surface_search_max_travel",
+    ];
+    onChange(Object.fromEntries(
+      Object.entries(options).filter(([key]) => !surfaceKeys.includes(key)),
+    ));
+  };
   return (
     <div style={methodOptionsStyle}>
       <div style={methodOptionsTitleStyle}>ASMI indentation options</div>
@@ -1143,6 +1167,43 @@ function MethodOptionsField({
           options={["false", "true"]}
           onChange={(v) => update("measure_with_return", v === "true")}
         />
+        <SmartSelectField
+          id={`${idPrefix}-detect-surface`}
+          name={`${namePrefix}_detect_surface`}
+          label="Detect surface"
+          value={String(detectSurface)}
+          options={["false", "true"]}
+          onChange={(v) => setDetectSurface(v === "true")}
+        />
+        <NumberField
+          id={`${idPrefix}-surface-search-step`}
+          name={`${namePrefix}_surface_search_step`}
+          label="Surface search step (mm)"
+          value={Number(options.surface_search_step ?? 0.5)}
+          onChange={(v) => update("surface_search_step", v)}
+          disabled={!detectSurface}
+        />
+        <NumberField
+          id={`${idPrefix}-surface-force-threshold`}
+          name={`${namePrefix}_surface_force_threshold`}
+          label="Surface force threshold (N)"
+          value={Number(options.surface_force_threshold ?? 0.01)}
+          onChange={(v) => update("surface_force_threshold", v)}
+          disabled={!detectSurface}
+        />
+        <NumberField
+          id={`${idPrefix}-surface-search-max-travel`}
+          name={`${namePrefix}_surface_search_max_travel`}
+          label="Surface search max travel (mm)"
+          value={Number(options.surface_search_max_travel ?? 10)}
+          onChange={(v) => update("surface_search_max_travel", v)}
+          disabled={!detectSurface}
+        />
+      </div>
+      <div style={methodOptionsHintStyle}>
+        {detectSurface
+          ? "Indentation limit height is measured from the detected surface (must be 0 or below)."
+          : "Enable Detect surface to configure the surface-search parameters."}
       </div>
     </div>
   );
@@ -1195,6 +1256,12 @@ const methodOptionsGridStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
   gap: 8,
+};
+
+const methodOptionsHintStyle: React.CSSProperties = {
+  color: theme.color.accentText,
+  fontSize: 11,
+  marginTop: 8,
 };
 
 const namedPositionsStyle: React.CSSProperties = {

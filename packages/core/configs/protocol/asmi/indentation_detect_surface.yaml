@@ -1,0 +1,47 @@
+# ASMI indentation with sensor-based surface detection.
+#
+# Same frame conventions as `indentation.yaml` (+Z up, heights are
+# labware-relative offsets above the well's calibrated surface Z), with
+# one difference: `detect_surface: true` re-anchors
+# `indentation_limit_height` to the sample surface the force sensor
+# finds at runtime, so the indentation depth is consistent regardless of
+# fill level. The probe approaches to `measurement_height`, coarse-steps
+# down at `surface_search_step` until the baseline-corrected force
+# changes by more than `surface_force_threshold` (N), backs off one
+# search step, and runs the fine-step indentation from there. If no
+# surface is found within `surface_search_max_travel` mm the well is
+# aborted with an error instead of descending further.
+
+positions:
+  park_position: [360.0, 250.0, 85.0]
+
+protocol:
+  - home:
+
+  - scan:
+      plate: plate
+      instrument: asmi
+      method: indentation
+      # Start the search just below the well rim; the sample surface may
+      # be several mm further down (e.g. a partially filled well or vial).
+      measurement_height: -1.0
+      interwell_scan_height: 8.0
+      # Surface-relative: indent 1 mm into the sample wherever the
+      # detected surface is. Must be <= 0 in detect mode.
+      indentation_limit_height: -1.0
+      method_kwargs:
+        detect_surface: true
+        surface_search_step: 0.5     # mm per coarse search step
+        surface_force_threshold: 0.01  # N (10 mN) change that marks the surface
+        surface_search_max_travel: 8.0 # mm search window below measurement_height
+        step_size: 0.02              # fine step for the measurement itself
+        force_limit: 10.0
+        baseline_samples: 10
+        measure_with_return: false
+
+  - move:
+      instrument: asmi
+      position: park_position
+      travel_z: 85.0
+
+  - home:

@@ -61,6 +61,20 @@ _LEGACY_KWARG_HINTS = {
 }
 
 
+def surface_detection_enabled(
+    method_kwargs: Mapping[str, Any] | None,
+) -> bool:
+    """True when ``method_kwargs`` opts into ASMI surface detection.
+
+    With ``detect_surface`` enabled, ``indentation_limit_height`` is
+    anchored to the sensor-detected sample surface instead of the
+    calibrated well surface, so commands and validators must not compare
+    it against ``measurement_height`` (different frames) and instead
+    require it to be at or below zero.
+    """
+    return bool((method_kwargs or {}).get("detect_surface"))
+
+
 def normalize_scan_arguments(
     *,
     method_kwargs: Mapping[str, Any] | None = None,

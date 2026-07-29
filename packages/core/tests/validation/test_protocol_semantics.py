@@ -261,6 +261,96 @@ def test_indentation_limit_height_above_measurement_violates():
     )
 
 
+def test_detect_surface_limit_is_surface_relative_not_compared_to_measurement():
+    """With detect_surface the limit is anchored to the detected surface,
+    so a value above measurement_height (different frame) is legal."""
+    instrumented_gantry, deck = _board_and_deck()
+    gantry = _gantry_config(z_max=100.0)
+    protocol = _protocol(_scan_args(
+        measurement_height=-1.0, indentation_limit_height=-0.5,
+        method_kwargs={"step_size": 0.01, "detect_surface": True},
+    ))
+
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
+
+
+def test_detect_surface_positive_limit_violates():
+    instrumented_gantry, deck = _board_and_deck()
+    gantry = _gantry_config(z_max=100.0)
+    protocol = _protocol(_scan_args(
+        measurement_height=-1.0, indentation_limit_height=0.5,
+        method_kwargs={"step_size": 0.01, "detect_surface": True},
+    ))
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
+
+    assert any(
+        "indentation_limit_height" in v.message and "detect_surface" in v.message
+        for v in violations
+    )
+
+
+def test_detect_surface_worst_case_depth_below_z_min_violates():
+    """Detect mode bounds the worst case: surface found at the bottom of
+    the search window, indentation continuing below it. ref_z=14.10,
+    measurement_height=-1.0, default max travel 10.0, limit=-4.0 →
+    deepest 14.10-1-10-4 = -0.9 < z_min=0."""
+    instrumented_gantry, deck = _board_and_deck()
+    gantry = _gantry_config(z_max=100.0)
+
+    without_detect = _protocol(_scan_args(
+        measurement_height=-1.0, indentation_limit_height=-4.0,
+    ))
+    assert validate_protocol_semantics(
+        without_detect, instrumented_gantry, deck, gantry,
+    ) == []
+
+    with_detect = _protocol(_scan_args(
+        measurement_height=-1.0, indentation_limit_height=-4.0,
+        method_kwargs={"step_size": 0.01, "detect_surface": True},
+    ))
+    violations = validate_protocol_semantics(
+        with_detect, instrumented_gantry, deck, gantry,
+    )
+    assert any("indentation deepest" in v.message for v in violations)
+
+
+def test_detect_surface_explicit_max_travel_drives_worst_case_depth():
+    """A short explicit search window keeps the worst case above z_min."""
+    instrumented_gantry, deck = _board_and_deck()
+    gantry = _gantry_config(z_max=100.0)
+    protocol = _protocol(_scan_args(
+        measurement_height=-1.0, indentation_limit_height=-4.0,
+        method_kwargs={
+            "step_size": 0.01,
+            "detect_surface": True,
+            "surface_search_max_travel": 5.0,
+        },
+    ))
+
+    assert validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry) == []
+
+
+@pytest.mark.parametrize("field", [
+    "surface_search_step",
+    "surface_force_threshold",
+    "surface_search_max_travel",
+])
+def test_detect_surface_non_positive_search_params_violate(field):
+    instrumented_gantry, deck = _board_and_deck()
+    gantry = _gantry_config(z_max=100.0)
+    protocol = _protocol(_scan_args(
+        measurement_height=-1.0, indentation_limit_height=-1.0,
+        method_kwargs={"step_size": 0.01, "detect_surface": True, field: 0.0},
+    ))
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, gantry)
+
+    assert any(
+        field in v.message and "positive" in v.message for v in violations
+    )
+
+
 def test_scan_safe_approach_below_measurement_violates():
     instrumented_gantry, deck = _board_and_deck()
     gantry = _gantry_config()
