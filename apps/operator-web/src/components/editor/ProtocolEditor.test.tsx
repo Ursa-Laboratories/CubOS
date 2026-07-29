@@ -275,6 +275,78 @@ describe("ProtocolEditor", () => {
     expect(props.onLocalChange).toHaveBeenCalled();
   });
 
+  it("reveals surface detection params when detect surface is enabled", async () => {
+    const user = userEvent.setup();
+    const props = renderProtocol({ steps: [] });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Add step" }), "scan");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    // Off by default: the search params stay hidden.
+    expect(await screen.findByLabelText("Detect surface")).toHaveValue("false");
+    expect(screen.queryByLabelText("Surface search step (mm)")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Detect surface"), "true");
+
+    expect(screen.getByLabelText("Surface search step (mm)")).toHaveValue("0.5");
+    expect(screen.getByLabelText("Surface force threshold (N)")).toHaveValue("0.01");
+    expect(screen.getByLabelText("Surface search max travel (mm)")).toHaveValue("10");
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        args: expect.objectContaining({
+          method_kwargs: expect.objectContaining({
+            detect_surface: true,
+            surface_search_step: 0.5,
+            surface_force_threshold: 0.01,
+            surface_search_max_travel: 10,
+          }),
+        }),
+      }),
+    ]);
+  });
+
+  it("strips surface detection params when detect surface is disabled", async () => {
+    const user = userEvent.setup();
+    const props = renderProtocol({
+      steps: [
+        {
+          command: "scan",
+          args: {
+            plate: "plate_1",
+            instrument: "asmi",
+            method: "indentation",
+            measurement_height: -1,
+            interwell_scan_height: 8,
+            indentation_limit_height: -1,
+            method_kwargs: {
+              step_size: 0.02,
+              force_limit: 10,
+              detect_surface: true,
+              surface_search_step: 0.5,
+              surface_force_threshold: 0.01,
+              surface_search_max_travel: 8,
+            },
+          },
+        },
+      ],
+    });
+
+    expect(screen.getByLabelText("Detect surface")).toHaveValue("true");
+    await user.selectOptions(screen.getByLabelText("Detect surface"), "false");
+
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        args: expect.objectContaining({
+          method_kwargs: {
+            step_size: 0.02,
+            force_limit: 10,
+          },
+        }),
+      }),
+    ]);
+    expect(screen.queryByLabelText("Surface search step (mm)")).not.toBeInTheDocument();
+  });
+
   it("uses the CubOS-provided instrument method map before the fallback map", async () => {
     const user = userEvent.setup();
     renderProtocol({
