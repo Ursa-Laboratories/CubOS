@@ -138,6 +138,66 @@ describe("GantryPositionWidget manual move safety", () => {
 
     expect(await screen.findByText(/Connection failed/)).toHaveTextContent("serial port unavailable");
     expect(screen.getByRole("button", { name: "Connect" })).toBeEnabled();
+    // A failed connect must not offer to home.
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("prompts to home after a successful connect and homes on accept", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position({ connected: false })}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    const dialog = await screen.findByRole("alertdialog", { name: "Gantry connected" });
+    expect(dialog).toHaveTextContent("Home the gantry now?");
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Home now" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("does not home when the post-connect prompt is declined", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position({ connected: false })}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+    await user.click(await screen.findByRole("button", { name: "Not now" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("reads GRBL settings and displays them in numeric setting order", async () => {
@@ -289,7 +349,6 @@ describe("GantryPositionWidget manual move safety", () => {
 
   it("confirms and sends home", async () => {
     const user = userEvent.setup();
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const fetchMock = vi.fn(async () =>
       jsonResponse(position({ x: 300, y: 200, z: 80 })),
     );
@@ -307,12 +366,47 @@ describe("GantryPositionWidget manual move safety", () => {
 
     await user.click(screen.getByRole("button", { name: "Home" }));
 
-    expect(confirmSpy).toHaveBeenCalledWith("Confirm you want to go to home?");
-    expect(fetchMock).toHaveBeenCalledWith(
+    // Homing is gated on the in-app confirm dialog (window.confirm is
+    // silently auto-dismissed in embedded browser panes).
+    const dialog = await screen.findByRole("alertdialog", { name: "Home gantry" });
+    expect(dialog).toHaveTextContent("Confirm you want to go to home?");
+    expect(fetchMock).not.toHaveBeenCalledWith(
       "/api/v1/gantry/home",
       expect.objectContaining({ method: "POST" }),
     );
-    confirmSpy.mockRestore();
+
+    await user.click(screen.getByRole("button", { name: "Go to home" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    ));
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+  });
+
+  it("does not home when the confirm dialog is cancelled", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse(position()));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Home" }));
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/gantry/home",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("renders incoming move errors as dismissible command errors", async () => {
@@ -777,6 +871,82 @@ describe("GantryPositionWidget manual move safety", () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/gantry/calibration/restore-soft-limits",
       expect.objectContaining({ method: "POST" }),
+    ));
+  });
+
+  // Regression: Number("") is 0, so blank Move To fields used to pass the
+  // finite-number check and command a silent move to 0 on every blank axis
+  // (e.g. a Z plunge to deck level with only X filled in).
+  it("rejects a move when all coordinate fields are blank", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Go" }));
+
+    expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a move when one axis is left blank instead of treating it as 0", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("X (mm)"), "100");
+    await user.type(screen.getByLabelText("Y (mm)"), "100");
+    await user.click(screen.getByRole("button", { name: "Go" }));
+
+    expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("still sends an explicit all-zero move", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.type(screen.getByLabelText("X (mm)"), "0");
+    await user.type(screen.getByLabelText("Y (mm)"), "0");
+    await user.type(screen.getByLabelText("Z (mm)"), "0");
+    await user.click(screen.getByRole("button", { name: "Go" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/move-to",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ x: 0, y: 0, z: 0 }),
+      }),
     ));
   });
 });

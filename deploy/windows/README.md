@@ -3,7 +3,7 @@
 This directory builds a self-contained Windows operator installer from the
 CubOS monorepo. It bundles an app-local Python 3.11 runtime, an offline
 wheelhouse containing `cubos` and `cubos-api`, compiled operator web assets,
-generic config seeds, and support scripts.
+an Electron desktop shell, generic config seeds, and support scripts.
 
 The operator machine does not need Python, Node.js, Git, or internet access.
 
@@ -12,7 +12,8 @@ The operator machine does not need Python, Node.js, Git, or internet access.
 - Windows x64
 - Git
 - Python 3.11
-- Node.js/npm compatible with `apps/operator-web/package-lock.json`
+- Node.js/npm compatible with the lockfiles under `apps/operator-web` and
+  `apps/operator-desktop`
 - Inno Setup 6
 - Internet access while building dependencies
 
@@ -48,19 +49,23 @@ is built from the checked-out commit.
 - Data: `%LOCALAPPDATA%\UrsaLabs\CubOS\data\panda_data.db`
 - Logs: `%LOCALAPPDATA%\UrsaLabs\CubOS\logs`
 
-The installer creates shortcuts for `Start CubOS`, configs, logs, and diagnostic
-export. `Start CubOS` launches `python -m cubos_api` at `127.0.0.1:8742` and
-opens the operator web application.
+The installer creates a Start menu shortcut and, by default, a desktop shortcut
+for `CubOS.exe`, plus shortcuts for configs, logs, and diagnostic export. The
+desktop application owns the hidden API process, waits for it to become ready,
+and displays the operator interface in a native application window. Closing
+the window shuts down the API process. No terminal or browser window is shown.
 
 ## Validation checklist
 
 1. Build on the Windows GitHub Actions runner or a clean Windows packaging host.
 2. Install on a clean VM without Python, Node.js, or Git on `PATH`.
-3. Confirm `http://127.0.0.1:8742/api/v1/health` and the operator web load.
+3. Start CubOS from its desktop icon and confirm one native application window
+   opens without a terminal or browser window.
 4. Confirm the private venv imports `cubos` and `cubos_api`.
 5. Confirm generic config seeds are copied on first launch.
 6. If ASMI support was selected, confirm `godirect` imports.
-7. Export diagnostics and inspect the archive.
+7. Close CubOS and confirm its hidden Python child process exits.
+8. Export diagnostics and inspect the archive.
 
 UI-only validation must not connect hardware. Connect, home, jog, calibration,
 and protocol runs require a separate operator-led hardware test.

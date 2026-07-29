@@ -236,4 +236,23 @@ describe("StatePanel", () => {
 
     expect(await screen.findByText(/No fluid state selected/)).toBeInTheDocument();
   });
+
+  // Regression: the placeholder option used to snap straight back to the
+  // auto-selected newest state because "no explicit choice" and "explicitly
+  // none" shared the same null sentinel.
+  it("keeps an explicit 'no state' selection instead of snapping back to the newest state", async () => {
+    installFetchMock({ reconciliation: { fluid_state_id: 1, items: [] } });
+    const user = userEvent.setup();
+    renderPanel();
+
+    // The newest state auto-selects once the list loads.
+    expect((await screen.findAllByText("source")).length).toBeGreaterThanOrEqual(1);
+    const select = screen.getByLabelText("Fluid state") as HTMLSelectElement;
+    expect(select.value).toBe("1");
+
+    await user.selectOptions(select, "");
+
+    expect(await screen.findByText(/No fluid state selected/)).toBeInTheDocument();
+    expect(select.value).toBe("");
+  });
 });

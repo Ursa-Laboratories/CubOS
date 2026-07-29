@@ -111,6 +111,33 @@ describe("validateSeedRows", () => {
     expect(errors.some((e) => /more than one row/i.test(e))).toBe(true);
   });
 
+  // Regression: buildSeedFluids keys the payload by component name, so a
+  // duplicate row silently overwrites the earlier one. Validation used to
+  // sum both rows and pass ("water 50" + "water 50" = volume 100), while
+  // the actual payload ({water: 50}) failed on the server — exactly the
+  // 4xx this validator exists to prevent.
+  it("flags a component listed more than once in a row", () => {
+    const errors = validateSeedRows([
+      seedRow({
+        container: "s1",
+        volume: "100",
+        composition: [compRow("water", "50"), compRow("water", "50")],
+      }),
+    ]);
+    expect(errors.some((e) => /more than once/i.test(e))).toBe(true);
+  });
+
+  it("detects duplicate component names after trimming whitespace", () => {
+    const errors = validateSeedRows([
+      seedRow({
+        container: "s1",
+        volume: "100",
+        composition: [compRow("water", "50"), compRow(" water ", "50")],
+      }),
+    ]);
+    expect(errors.some((e) => /more than once/i.test(e))).toBe(true);
+  });
+
   it("tolerates float noise in the composition sum", () => {
     const errors = validateSeedRows([
       seedRow({
