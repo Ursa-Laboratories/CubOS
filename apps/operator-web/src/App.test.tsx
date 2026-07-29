@@ -31,6 +31,7 @@ type FetchMockOptions = {
   calibrationWarning?: string | null;
   fluidStates?: FluidStateSummary[];
   runsSubmit?: (body: Record<string, unknown> | null) => Response | Promise<Response>;
+  browse?: () => Response | Promise<Response>;
 };
 
 function createState(): ApiState {
@@ -187,6 +188,7 @@ function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
       return jsonResponse({ config_dir: "/mock/CubOS/configs" });
     }
     if (path === "/api/v1/settings/browse" && method === "POST") {
+      if (options.browse) return options.browse();
       return jsonResponse({ config_dir: "/mock/CubOS/selected-configs" });
     }
     if (path === "/api/v1/settings" && method === "PUT") {
@@ -463,6 +465,50 @@ describe("CubOS editor interactions", () => {
     await user.click(screen.getByRole("button", { name: "Browse" }));
 
     await waitFor(() => expect(screen.getByDisplayValue("/mock/CubOS/selected-configs")).toBeInTheDocument());
+  });
+
+  it("falls back to in-app path entry when the native picker cannot open", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      browse: () => new Response(
+        JSON.stringify({ detail: "Directory picker failed: no display" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ),
+    });
+    renderApp();
+    await waitForSettingsLoad();
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+
+    const dialog = await screen.findByRole("dialog", { name: "Select config directory" });
+    expect(dialog).toBeInTheDocument();
+    const pathInput = screen.getByLabelText("Config directory path");
+    // Prefilled with the current directory for editing in place.
+    expect(pathInput).toHaveValue("/mock/CubOS/configs");
+
+    await user.clear(pathInput);
+    await user.type(pathInput, "/mock/CubOS/typed-configs");
+    await user.click(screen.getByRole("button", { name: "Use Directory" }));
+
+    await waitFor(() => expect(screen.getByDisplayValue("/mock/CubOS/typed-configs")).toBeInTheDocument());
+    expect(screen.queryByRole("dialog", { name: "Select config directory" })).not.toBeInTheDocument();
+  });
+
+  it("keeps a cancelled native picker silent", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      browse: () => new Response(
+        JSON.stringify({ detail: "No directory selected" }),
+        { status: 400, headers: { "Content-Type": "application/json" } },
+      ),
+    });
+    renderApp();
+    await waitForSettingsLoad();
+
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+
+    expect(screen.queryByRole("dialog", { name: "Select config directory" })).not.toBeInTheDocument();
+    expect(screen.getByDisplayValue("/mock/CubOS/configs")).toBeInTheDocument();
   });
 
   it("clears loaded config selections when the config directory changes", async () => {

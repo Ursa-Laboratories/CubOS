@@ -10,6 +10,7 @@ import ProtocolEditor from "./components/editor/ProtocolEditor";
 import DataOutputPanel from "./components/data/DataOutputPanel";
 import StatePanel from "./components/state/StatePanel";
 import { useConfirm } from "./components/common/useConfirm";
+import { ConfigDirDialog } from "./components/common/ConfigDirDialog";
 import { settingsApi, deckApi, protocolApi, gantryApi, runsApi } from "./api/client";
 import { useDeckConfigs, useDeck, useSaveDeck } from "./hooks/useDeck";
 import {
@@ -98,6 +99,7 @@ export default function App() {
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseDialog, setBrowseDialog] = useState<{ path: string; error: string | null } | null>(null);
 
   const [deckFile, setDeckFile] = useState<string | null>(null);
   const [gantryFile, setGantryFile] = useState<string | null>(null);
@@ -129,38 +131,69 @@ export default function App() {
       .catch((err) => console.error("Failed to load settings:", err));
   }, []);
 
+  const applyConfigDir = async (selectedPath: string): Promise<boolean> => {
+    if (
+      selectedPath !== configDir
+      && !(await confirmDiscard(
+        unsavedConfigs.length > 0,
+        "Discard unsaved config changes and switch config directory?",
+      ))
+    ) {
+      return false;
+    }
+    const savedSettings = await settingsApi.update(selectedPath);
+    const nextConfigDir = configDirFromSettings(savedSettings);
+    setConfigDir(nextConfigDir);
+    if (nextConfigDir !== configDir) {
+      setDeckFile(null);
+      setGantryFile(null);
+      setProtocolFile(null);
+      setValidationResult(null);
+      setImportError(null);
+    }
+    refreshAll();
+    return true;
+  };
+
   const handleBrowse = async () => {
     setBrowseLoading(true);
     try {
       const browseResult = await settingsApi.browse();
       const selectedPath = configDirFromSettings(browseResult);
-      if (
-        selectedPath !== configDir
-        && !(await confirmDiscard(
-          unsavedConfigs.length > 0,
-          "Discard unsaved config changes and switch config directory?",
-        ))
-      ) {
-        return;
+      try {
+        await applyConfigDir(selectedPath);
+      } catch (err) {
+        // The picked directory was rejected (e.g. removed since picking);
+        // reopen the choice in the in-app dialog with the error visible.
+        setBrowseDialog({
+          path: selectedPath,
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
-      const savedSettings = await settingsApi.update(selectedPath);
-      const nextConfigDir = configDirFromSettings(savedSettings);
-      setConfigDir(nextConfigDir);
-      if (nextConfigDir !== configDir) {
-        setDeckFile(null);
-        setGantryFile(null);
-        setProtocolFile(null);
-        setValidationResult(null);
-        setImportError(null);
-      }
-      refreshAll();
     } catch (err) {
-      // Distinguish cancellation (no selected path) from a real API failure.
-      if (err instanceof Error && err.message !== "cancelled") {
-        console.error("Browse/settings update failed:", err);
+      // The native picker reports a deliberate cancel as "No directory
+      // selected"; leave those silent. Every other failure means no picker
+      // could open at all (headless appliance, remote session, missing
+      // tkinter), so fall back to in-app path entry instead of doing
+      // nothing.
+      const message = err instanceof Error ? err.message : String(err);
+      if (message !== "No directory selected" && message !== "cancelled") {
+        setBrowseDialog({ path: configDir ?? "", error: null });
       }
     } finally {
       setBrowseLoading(false);
+    }
+  };
+
+  const submitBrowseDialog = async (path: string) => {
+    try {
+      await applyConfigDir(path);
+      setBrowseDialog(null);
+    } catch (err) {
+      setBrowseDialog({
+        path,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 
@@ -809,6 +842,14 @@ export default function App() {
   return (
     <>
       <AppLayout header={headerBar} left={left} topRight={topRight} bottomRight={bottomRight} />
+      {browseDialog && (
+        <ConfigDirDialog
+          initialPath={browseDialog.path}
+          error={browseDialog.error}
+          onSubmit={submitBrowseDialog}
+          onCancel={() => setBrowseDialog(null)}
+        />
+      )}
       {confirmDialog}
     </>
   );
