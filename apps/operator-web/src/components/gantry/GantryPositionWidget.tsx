@@ -63,6 +63,7 @@ export default function GantryPositionWidget({
   const connected = configSelected && (position?.connected ?? false);
   const status = position?.status ?? "Not connected";
   const isAlarm = status.toLowerCase().includes("alarm");
+  const isHold = status.toLowerCase().startsWith("hold");
   const isMoving = status === "Run" || status === "Jog";
   const calibrationInterrupted = connected && !calibrationOpen && (position?.calibration_active ?? false);
 
@@ -316,6 +317,10 @@ export default function GantryPositionWidget({
     await gantryApi.feedHold();
   });
 
+  const resume = () => runAdvancedAction("Resume sent; verify Idle before homing.", async () => {
+    await gantryApi.resume();
+  });
+
   const cancelJog = () => runAdvancedAction("Jog cancel sent.", async () => {
     await gantryApi.jogCancel();
   });
@@ -389,9 +394,9 @@ export default function GantryPositionWidget({
   const xyBelowMin = parsedXYStep != null && parsedXYStep < MIN_STEP;
   const zBelowMin = parsedZStep != null && parsedZStep < MIN_STEP;
   const stepInvalid = parsedXYStep == null || parsedZStep == null;
-  const homeDisabled = !connected || jogBusy || homeBusy || isRunning;
+  const homeDisabled = !connected || isHold || jogBusy || homeBusy || isRunning;
   const jogDisabled = homeDisabled || stepInvalid;
-  const moveDisabled = !connected || isMoving || isRunning;
+  const moveDisabled = !connected || isHold || isMoving || isRunning;
   const advancedDisabled = !connected || advancedBusy || isRunning;
   const canCalibrate = !!gantry;
   const canOpenCalibration = canCalibrate && !isRunning;
@@ -462,6 +467,32 @@ export default function GantryPositionWidget({
             }}
           >
             Unlock ($X)
+          </button>
+        </div>
+      )}
+
+      {isHold && connected && (
+        <div style={{
+          ...theme.notice.warning,
+          marginBottom: 12,
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+        }}>
+          <span style={{ color: theme.color.warningText, fontWeight: 700, fontSize: 13 }}>HOLD</span>
+          <span style={{ color: theme.color.warningText, fontSize: 11 }}>
+            Feed hold is active — Home and manual motion are blocked. Resume only when the motion path is clear.
+          </span>
+          <button
+            onClick={resume}
+            disabled={advancedDisabled}
+            style={{
+              ...theme.btn.secondary,
+              ...theme.btnSmall,
+              marginLeft: "auto",
+            }}
+          >
+            Resume
           </button>
         </div>
       )}
@@ -722,6 +753,9 @@ export default function GantryPositionWidget({
             </button>
             <button onClick={feedHold} disabled={advancedDisabled} style={buttonStateStyle(warnBtnStyle, advancedDisabled)}>
               Feed Hold
+            </button>
+            <button onClick={resume} disabled={advancedDisabled} style={buttonStateStyle(btnStyle, advancedDisabled)}>
+              Resume
             </button>
             <button onClick={cancelJog} disabled={advancedDisabled} style={buttonStateStyle(btnStyle, advancedDisabled)}>
               Cancel Jog

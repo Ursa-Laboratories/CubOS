@@ -319,9 +319,39 @@ describe("GantryPositionWidget manual move safety", () => {
     expect(await screen.findByText("Feed hold sent.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/gantry/feed-hold", expect.objectContaining({ method: "POST" }));
 
+    await user.click(screen.getByRole("button", { name: "Resume" }));
+    expect(await screen.findByText("Resume sent; verify Idle before homing.")).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/gantry/resume", expect.objectContaining({ method: "POST" }));
+
     await user.click(screen.getByRole("button", { name: "Cancel Jog" }));
     expect(await screen.findByText("Jog cancel sent.")).toBeInTheDocument();
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/gantry/jog-cancel", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("blocks Home during feed hold and shows explicit recovery guidance", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse(position({ status: "Idle" })));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position({ status: "Hold:0" })}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Home" })).toBeDisabled();
+    expect(screen.getByText(/Feed hold is active/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Resume" }));
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/resume",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("shows disconnect failures and returns the Disconnect button to ready state", async () => {

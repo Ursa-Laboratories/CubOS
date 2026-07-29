@@ -533,6 +533,12 @@ class Mill:
                 self.homed = True
                 break
 
+            if "hold" in status.lower():
+                raise StatusReturnError(
+                    "Homing paused by feed hold "
+                    f"({status}). Resume or reset/unlock before retrying."
+                )
+
             if "alarm" in status.lower():
                 self.logger.warning("Homing failed, trying again...")
                 self.clear_buffers()

@@ -53,11 +53,12 @@ interface NumberFieldProps {
   onChange: (v: number) => void;
   step?: number;
   required?: boolean;
+  disabled?: boolean;
   /** If set, renders an amber "*" next to the label when true. */
   dirty?: boolean;
 }
 
-export function NumberField({ id, name, label, value, onChange, required, dirty }: NumberFieldProps) {
+export function NumberField({ id, name, label, value, onChange, required, disabled, dirty }: NumberFieldProps) {
   const normalizedValue = typeof value === "number" && Number.isFinite(value) ? value : NaN;
   const [state, setState] = useState({ raw: formatNumberInput(normalizedValue), value: normalizedValue });
   if (!Object.is(normalizedValue, state.value)) {
@@ -79,6 +80,7 @@ export function NumberField({ id, name, label, value, onChange, required, dirty 
         type="text"
         inputMode="decimal"
         value={raw}
+        disabled={disabled}
         onChange={(e) => {
           setRaw(e.target.value);
           const n = tryParse(e.target.value);

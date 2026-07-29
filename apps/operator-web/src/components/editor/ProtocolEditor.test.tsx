@@ -274,22 +274,28 @@ describe("ProtocolEditor", () => {
     expect(props.onLocalChange).toHaveBeenCalled();
   });
 
-  it("reveals surface detection params when detect surface is enabled", async () => {
+  it("shows surface detection params and enables them with detect surface", async () => {
     const user = userEvent.setup();
     const props = renderProtocol({ steps: [] });
 
     await user.selectOptions(screen.getByRole("combobox", { name: "Add step" }), "scan");
     await user.click(screen.getByRole("button", { name: "Add" }));
 
-    // Off by default: the search params stay hidden.
+    // Keep the parameters visible so operators can discover them, but do not
+    // allow editing until surface detection is enabled.
     expect(await screen.findByLabelText("Detect surface")).toHaveValue("false");
-    expect(screen.queryByLabelText("Surface search step (mm)")).not.toBeInTheDocument();
-
-    await user.selectOptions(screen.getByLabelText("Detect surface"), "true");
-
     expect(screen.getByLabelText("Surface search step (mm)")).toHaveValue("0.5");
     expect(screen.getByLabelText("Surface force threshold (N)")).toHaveValue("0.01");
     expect(screen.getByLabelText("Surface search max travel (mm)")).toHaveValue("10");
+    expect(screen.getByLabelText("Surface search step (mm)")).toBeDisabled();
+    expect(screen.getByLabelText("Surface force threshold (N)")).toBeDisabled();
+    expect(screen.getByLabelText("Surface search max travel (mm)")).toBeDisabled();
+
+    await user.selectOptions(screen.getByLabelText("Detect surface"), "true");
+
+    expect(screen.getByLabelText("Surface search step (mm)")).toBeEnabled();
+    expect(screen.getByLabelText("Surface force threshold (N)")).toBeEnabled();
+    expect(screen.getByLabelText("Surface search max travel (mm)")).toBeEnabled();
     expect(props.onLocalChange).toHaveBeenLastCalledWith([
       expect.objectContaining({
         args: expect.objectContaining({
@@ -343,7 +349,9 @@ describe("ProtocolEditor", () => {
         }),
       }),
     ]);
-    expect(screen.queryByLabelText("Surface search step (mm)")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Surface search step (mm)")).toBeDisabled();
+    expect(screen.getByLabelText("Surface force threshold (N)")).toBeDisabled();
+    expect(screen.getByLabelText("Surface search max travel (mm)")).toBeDisabled();
   });
 
   it("uses the CubOS-provided instrument method map before the fallback map", async () => {

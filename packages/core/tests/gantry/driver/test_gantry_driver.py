@@ -695,6 +695,28 @@ class TestCNCDriverLogic(unittest.TestCase):
             mill.home(timeout=1)
 
     @patch('cubos.gantry.gantry_driver.driver.time.sleep')
+    @patch('cubos.gantry.gantry_driver.driver.time.time', return_value=0.0)
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_home_raises_immediately_on_feed_hold(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_time, mock_sleep,
+    ):
+        mill = Mill()
+        mill.execute_command = MagicMock()
+        mill.current_status = MagicMock(
+            return_value="<Hold:0|WPos:0,0,0|FS:0,0>"
+        )
+
+        with self.assertRaisesRegex(
+            StatusReturnError,
+            "Homing paused by feed hold",
+        ):
+            mill.home(timeout=90)
+
+        mill.current_status.assert_called_once()
+
+    @patch('cubos.gantry.gantry_driver.driver.time.sleep')
     @patch('cubos.gantry.gantry_driver.driver.time.time', side_effect=[0.0, 0.2, 0.4])
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
     @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
