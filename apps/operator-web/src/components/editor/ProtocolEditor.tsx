@@ -14,7 +14,7 @@ import type {
   ProtocolRunResponse,
   InstrumentMeasurementMethods,
 } from "../../types";
-import { CoordinateField, NumberField, TextField, UnsavedNotice } from "./fields";
+import { CoordinateField, NumberField, OptionalNumberField, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
 import { useConfirm } from "../common/useConfirm";
 import {
@@ -204,7 +204,14 @@ export default function ProtocolEditor({
 
   const updateStepArg = (i: number, argName: string, value: unknown) => {
     const next = [...steps];
-    const updatedArgs = { ...next[i].args, [argName]: value };
+    const updatedArgs = { ...next[i].args };
+    if (value === null) {
+      // Optional field cleared by the operator: omit the argument rather
+      // than saving an empty string or a stale number.
+      delete updatedArgs[argName];
+    } else {
+      updatedArgs[argName] = value;
+    }
     if (argName === "instrument") {
       const methods = measurementMethodsForInstrument(String(value), choices);
       if (methods.length > 0 && !methods.includes(String(updatedArgs.method ?? ""))) {
@@ -512,6 +519,18 @@ export default function ProtocolEditor({
                     );
                   }
                   if (isNumericType(arg.type)) {
+                    if (!arg.required) {
+                      return (
+                        <OptionalNumberField
+                          key={arg.name}
+                          id={`step-${i}-${arg.name}`}
+                          name={`step_${i}_${arg.name}`}
+                          label={argLabel(arg.name)}
+                          value={typeof val === "number" ? val : null}
+                          onChange={(v) => updateStepArg(i, arg.name, v)}
+                        />
+                      );
+                    }
                     return (
                       <NumberField
                         key={arg.name}
