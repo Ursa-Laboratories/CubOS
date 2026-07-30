@@ -204,7 +204,12 @@ export default function ProtocolEditor({
 
   const updateStepArg = (i: number, argName: string, value: unknown) => {
     const next = [...steps];
-    const updatedArgs = { ...next[i].args, [argName]: value };
+    const updatedArgs = { ...next[i].args };
+    if (value === undefined) {
+      delete updatedArgs[argName];
+    } else {
+      updatedArgs[argName] = value;
+    }
     if (argName === "instrument") {
       const methods = measurementMethodsForInstrument(String(value), choices);
       if (methods.length > 0 && !methods.includes(String(updatedArgs.method ?? ""))) {
@@ -518,8 +523,9 @@ export default function ProtocolEditor({
                         id={`step-${i}-${arg.name}`}
                         name={`step_${i}_${arg.name}`}
                         label={argLabel(arg.name)}
-                        value={Number(val ?? 0)}
+                        value={arg.required ? Number(val ?? 0) : val === undefined || val === null ? undefined : Number(val)}
                         onChange={(v) => updateStepArg(i, arg.name, v)}
+                        onClear={arg.required ? undefined : () => updateStepArg(i, arg.name, undefined)}
                         required={arg.required}
                       />
                     );

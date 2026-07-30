@@ -354,6 +354,30 @@ describe("ProtocolEditor", () => {
     expect(screen.getByLabelText("Surface search max travel (mm)")).toBeDisabled();
   });
 
+  it("omits indentation_limit_height instead of serializing a blank string when cleared", async () => {
+    const user = userEvent.setup();
+    const props = renderProtocol({ steps: [] });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Add step" }), "measure");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    const limitHeightField = await screen.findByLabelText("Indentation limit height");
+    await user.clear(limitHeightField);
+    await user.type(limitHeightField, "-1");
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({
+        args: expect.objectContaining({ indentation_limit_height: -1 }),
+      }),
+    ]);
+
+    await user.clear(limitHeightField);
+    await user.tab();
+
+    const lastCallArgs = props.onLocalChange.mock.calls.at(-1)?.[0][0].args;
+    expect(lastCallArgs).not.toHaveProperty("indentation_limit_height");
+    expect(limitHeightField).toHaveValue("");
+  });
+
   it("uses the CubOS-provided instrument method map before the fallback map", async () => {
     const user = userEvent.setup();
     renderProtocol({

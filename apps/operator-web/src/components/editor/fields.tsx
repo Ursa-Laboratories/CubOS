@@ -51,6 +51,10 @@ interface NumberFieldProps {
   label: string;
   value: number | null | undefined;
   onChange: (v: number) => void;
+  /** Called on blur when the field was left blank. Only meaningful for
+   * optional fields — pass this to let the operator omit the value
+   * entirely instead of reverting to the last committed number. */
+  onClear?: () => void;
   step?: number;
   required?: boolean;
   disabled?: boolean;
@@ -58,7 +62,7 @@ interface NumberFieldProps {
   dirty?: boolean;
 }
 
-export function NumberField({ id, name, label, value, onChange, required, disabled, dirty }: NumberFieldProps) {
+export function NumberField({ id, name, label, value, onChange, onClear, required, disabled, dirty }: NumberFieldProps) {
   const normalizedValue = typeof value === "number" && Number.isFinite(value) ? value : NaN;
   const [state, setState] = useState({ raw: formatNumberInput(normalizedValue), value: normalizedValue });
   if (!Object.is(normalizedValue, state.value)) {
@@ -86,7 +90,13 @@ export function NumberField({ id, name, label, value, onChange, required, disabl
           const n = tryParse(e.target.value);
           if (n !== null) onChange(n);
         }}
-        onBlur={() => setRaw(formatNumberInput(normalizedValue))}
+        onBlur={() => {
+          if (onClear && raw.trim() === "") {
+            onClear();
+            return;
+          }
+          setRaw(formatNumberInput(normalizedValue));
+        }}
         style={inputStyle}
       />
     </label>
