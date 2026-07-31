@@ -7,6 +7,7 @@ nav:
   - Home: index.md
   - Set Up and Use CubOS:
     - Getting Started: getting-started.md
+    - Use the Operator UI: operator-ui.md
     - Gantry Bring-Up: admin/gantry-bring-up.md
     - Set Up Gantry YAML: gantry-setup.md
     - Calibrate Gantry: calibration.md
