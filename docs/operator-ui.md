@@ -30,6 +30,41 @@ the UI reads and saves your gantry, deck, and protocol files. Click
 **Browse** to point it at a different folder — for example a USB stick or a
 shared drive with your lab's configs.
 
+### Running on a Raspberry Pi? Forward the port over SSH
+
+When CubOS runs on a Raspberry Pi (or any other machine without a monitor),
+the Operator UI is only reachable *on that machine* — for safety, the app
+only accepts local connections out of the box. The easiest way to use it
+from your own laptop is an SSH tunnel: one command that securely forwards
+the Pi's port 8742 to your laptop.
+
+In a terminal on your laptop (macOS/Linux Terminal, or PowerShell on
+Windows 10+), run:
+
+```bash
+ssh -L 8742:127.0.0.1:8742 <user>@<pi-address>
+```
+
+Replace `<user>@<pi-address>` with your Pi's login — for example
+`ssh -L 8742:127.0.0.1:8742 cub@cub.local` — and enter the Pi's password
+when asked.
+
+Then open `http://127.0.0.1:8742` in the browser **on your laptop**. The UI
+behaves exactly as if you were sitting at the Pi, jog buttons and all.
+
+Two things to remember:
+
+- **Keep the SSH window open.** Closing it closes the tunnel, and the
+  browser tab will stop responding — the gantry itself is unaffected.
+- If the app isn't already running on the Pi, start it inside that same
+  SSH session first: `python -m cubos_api` (it stays local-only; the
+  tunnel is what makes it reachable from your laptop).
+
+!!! note
+    Prefer the tunnel over exposing the app on the network. It needs no
+    configuration changes on the Pi, and only someone who can log in over
+    SSH can reach the controls.
+
 ## The Four Views
 
 The buttons in the top bar switch between four views. You will spend most of
