@@ -7,15 +7,17 @@ one protocol file.
 ## Setup Path
 
 1. Install CubOS.
-2. If you are building your own machine, complete
+2. Prefer working in a browser over a terminal? Most of the steps below can
+   also be done point-and-click in the [Operator UI](operator-ui.md).
+3. If you are building your own machine, complete
    [Gantry Bring-Up](admin/gantry-bring-up.md).
-3. Create your gantry YAML from the right seed config and define your
+4. Create your gantry YAML from the right seed config and define your
    mounted instruments with [Set Up Gantry YAML](gantry-setup.md).
-4. Calibrate the gantry with [Calibrate Gantry](calibration.md).
-5. Place labware and define deck YAML with [Set Up Deck and Labware](deck.md).
-6. Validate and run a protocol with
+5. Calibrate the gantry with [Calibrate Gantry](calibration.md).
+6. Place labware and define deck YAML with [Set Up Deck and Labware](deck.md).
+7. Validate and run a protocol with
    [Run a Protocol with YAML](protocol-yaml.md).
-7. If something goes wrong along the way, see
+8. If something goes wrong along the way, see
    [Troubleshooting & Recovery](troubleshooting.md).
 
 ## Prerequisites
