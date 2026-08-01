@@ -104,7 +104,15 @@ the version numbers shown in the notice.
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -e "packages/core[dev]"
+python -m pip install -e services/api
 ```
+
+The first install is the CubOS runtime (`cubos`); the second is the
+`cubos_api` server that powers the [Operator UI](operator-ui.md). If you
+plan to work only from the terminal with YAML files, the `services/api`
+install is optional — but it is required before `python -m cubos_api` will
+work. Note that `services/api` needs Python 3.11+ (the core package alone
+works on 3.10).
 
 ### Instrument extras
 
