@@ -18,6 +18,18 @@ machine itself).
 
 To start it yourself on the computer connected to the gantry:
 
+!!! note "Prerequisite"
+    The UI server is a separate package from the CubOS core. If you haven't
+    yet, install it into the same virtual environment (from the repository
+    root, with the venv activated):
+
+    ```bash
+    python -m pip install -e services/api
+    ```
+
+    Otherwise `python -m cubos_api` fails with `No module named cubos_api`.
+    It requires Python 3.11+.
+
 ```bash
 python -m cubos_api
 ```
