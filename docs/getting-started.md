@@ -114,6 +114,31 @@ install is optional — but it is required before `python -m cubos_api` will
 work. Note that `services/api` needs Python 3.11+ (the core package alone
 works on 3.10).
 
+### Build the Operator UI (browser app)
+
+The `cubos_api` server serves the Operator UI's compiled web assets from
+`apps/operator-web/dist/`. That folder is not checked into the repository —
+build it once with Node.js:
+
+1. Install [Node.js 20 LTS or newer](https://nodejs.org) (it includes
+   `npm`).
+2. From the repository root:
+
+   ```bash
+   cd apps/operator-web
+   npm ci
+   npm run build
+   cd ../..
+   ```
+
+Skip this if you work only from the terminal. If you start
+`python -m cubos_api` without building, the server still runs (the HTTP API
+works), but it logs `compiled web assets were not found` and the browser
+shows **404 Not Found** at `http://127.0.0.1:8742`. After building, start
+`python -m cubos_api` again — the server only looks for the assets at
+startup. Re-run `npm run build` whenever you pull changes that touch
+`apps/operator-web/`.
+
 ### Instrument extras
 
 Instrument vendor SDKs are optional — install only the extras for hardware

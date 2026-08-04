@@ -30,6 +30,25 @@ To start it yourself on the computer connected to the gantry:
     Otherwise `python -m cubos_api` fails with `No module named cubos_api`.
     It requires Python 3.11+.
 
+!!! note "Prerequisite: build the web app once"
+    The browser interface is compiled from `apps/operator-web/`. If the
+    server starts but logs `compiled web assets were not found` and the
+    browser shows **404 Not Found**, install
+    [Node.js 20 LTS or newer](https://nodejs.org) and build it (from the
+    repository root):
+
+    ```bash
+    cd apps/operator-web
+    npm ci
+    npm run build
+    cd ../..
+    ```
+
+    Then start `python -m cubos_api` again — it only picks up the compiled
+    assets at startup. See
+    [Build the Operator UI](getting-started.md#build-the-operator-ui-browser-app)
+    for details.
+
 ```bash
 python -m cubos_api
 ```
