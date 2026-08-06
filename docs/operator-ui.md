@@ -49,6 +49,11 @@ To start it yourself on the computer connected to the gantry:
     [Build the Operator UI](getting-started.md#build-the-operator-ui-browser-app)
     for details.
 
+With the virtual environment active — in every new terminal, re-run the
+[activation command](getting-started.md#installation) for your platform
+(e.g. `source .venv/bin/activate`) — start the server from the repository
+root:
+
 ```bash
 python -m cubos_api
 ```
@@ -88,8 +93,9 @@ Two things to remember:
 - **Keep the SSH window open.** Closing it closes the tunnel, and the
   browser tab will stop responding — the gantry itself is unaffected.
 - If the app isn't already running on the Pi, start it inside that same
-  SSH session first: `python -m cubos_api` (it stays local-only; the
-  tunnel is what makes it reachable from your laptop).
+  SSH session first — activate the venv, then `python -m cubos_api` (it
+  stays local-only; the tunnel is what makes it reachable from your
+  laptop).
 
 !!! note
     Prefer the tunnel over exposing the app on the network. It needs no
