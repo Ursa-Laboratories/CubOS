@@ -290,6 +290,100 @@ describe("GantryPositionWidget manual move safety", () => {
     );
   });
 
+  it("offers Pull off limit after a jog and posts limit recovery", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const widget = (pos: GantryPosition) => (
+      <GantryPositionWidget
+        position={pos}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />
+    );
+    const { rerender } = render(widget(position()));
+
+    fireEvent.mouseDown(screen.getByTitle("X+"));
+    fireEvent.mouseUp(screen.getByTitle("X+"));
+
+    rerender(widget(position({ status: "ALARM:1" })));
+
+    fireEvent.click(screen.getByRole("button", { name: "Pull off limit" }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/gantry/calibration/recover-limit",
+        expect.objectContaining({
+          method: "POST",
+          body: JSON.stringify({ x: 0.5, y: 0, z: 0 }),
+        }),
+      );
+    });
+  });
+
+  it("hides Pull off limit when no jog direction is known", () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position({ status: "ALARM:1" })}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Pull off limit" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Unlock ($X)" })).toBeInTheDocument();
+  });
+
+  it("paces held jog repeats to the segment execution time", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      if (requestPath(input) === "/api/v1/gantry/jog-cancel") {
+        return jsonResponse(position());
+      }
+      return jsonResponse({ status: "ok" });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    const jogCalls = () =>
+      fetchMock.mock.calls.filter(([input]) => requestPath(input) === "/api/v1/gantry/jog");
+
+    // A 20 mm step at the 2000 mm/min jog feed takes 600 ms to execute, so
+    // held repeats pace to 0.8x that (480 ms), not the 150 ms UI tick —
+    // otherwise GRBL queues a backlog that keeps moving after release.
+    fireEvent.change(screen.getByLabelText("XY mm"), { target: { value: "20" } });
+    fireEvent.mouseDown(screen.getByTitle("X+"));
+
+    await vi.advanceTimersByTimeAsync(400);
+    expect(jogCalls()).toHaveLength(1);
+
+    await vi.advanceTimersByTimeAsync(200);
+    expect(jogCalls()).toHaveLength(2);
+
+    fireEvent.mouseUp(screen.getByTitle("X+"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(
+      fetchMock.mock.calls.some(([input]) => requestPath(input) === "/api/v1/gantry/jog-cancel"),
+    ).toBe(true);
+    vi.useRealTimers();
+  });
+
   it("runs advanced machine commands and shows success messages", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () => jsonResponse(position()));

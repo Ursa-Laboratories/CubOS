@@ -10,6 +10,7 @@ import {
   getFactoryZTravel,
   type ZCalibrationResult,
 } from "./calibrationMath";
+import { createJogPacer, jogPaceMs } from "./jogPacing";
 
 interface Props {
   open: boolean;
@@ -43,7 +44,6 @@ type PendingZReference = {
   lowestInstrument: string;
 };
 
-const JOG_INTERVAL_MS = 150;
 const MIN_STEP = 0.001;
 const NON_CONTACT_TYPES = new Set(["camera"]);
 
@@ -81,7 +81,8 @@ export default function CalibrationWizard({
   const [referenceInstrument, setReferenceInstrument] = useState("");
   const [lowestInstrument, setLowestInstrument] = useState("");
   const [resolvedAlarmStatus, setResolvedAlarmStatus] = useState<string | null>(null);
-  const jogTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const jogHeld = useRef<JogDelta | null>(null);
+  const jogPumpActive = useRef(false);
   const jogRequestCount = useRef(0);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -177,17 +178,20 @@ export default function CalibrationWizard({
     }
   }, [step]);
 
+  const jogPacer = useRef(createJogPacer()).current;
+
   const stopJog = useCallback(() => {
-    const shouldCancelJog = jogTimer.current !== null && jogRequestCount.current > 1;
-    if (jogTimer.current) {
-      clearInterval(jogTimer.current);
-      jogTimer.current = null;
-    }
-    if (shouldCancelJog) {
+    if (jogHeld.current === null) return;
+    jogHeld.current = null;
+    // A single click lets its full step finish (predictable stepping); a
+    // held jog cancels so motion stops at release instead of running out
+    // whatever GRBL has queued.
+    if (jogRequestCount.current > 1) {
       gantryApi.jogCancel().catch(() => undefined);
     }
     jogRequestCount.current = 0;
-  }, []);
+    jogPacer.wake();
+  }, [jogPacer]);
 
   const rememberJogDelta = useCallback((delta: JogDelta) => {
     if (!isZeroDelta(delta)) {
@@ -701,28 +705,62 @@ export default function CalibrationWizard({
     onClose();
   });
 
-  const jog = useCallback((x: number, y: number, z: number) => {
-    if (!connected || busy || alarmRecoveryMessage || recoveryInProgress.current) return;
+  const jog = useCallback(async (x: number, y: number, z: number): Promise<boolean> => {
+    if (!connected || busy || alarmRecoveryMessage || recoveryInProgress.current) return false;
     rememberJogDelta({ x, y, z });
     jogRequestCount.current += 1;
-    gantryApi.jog(x, y, z).catch((err) => {
+    try {
+      await gantryApi.jog(x, y, z);
+      return true;
+    } catch (err) {
       if (looksLikeAlarm(errorMessage(err))) {
         void recoverFromLimitAlarm({ x, y, z }, err);
       } else {
         reportError(err);
       }
-    });
+      return false;
+    }
   }, [alarmRecoveryMessage, busy, connected, recoverFromLimitAlarm, rememberJogDelta, reportError]);
+
+  // The held-jog pump reads jog through a ref so an in-flight hold always
+  // uses the latest guards (alarm/busy state) instead of a stale closure.
+  const jogRef = useRef(jog);
+  useEffect(() => {
+    jogRef.current = jog;
+  }, [jog]);
 
   const startJog = (x: number, y: number, z: number) => {
     if (busy || alarmRecoveryMessage || recoveryInProgress.current) return;
-    if (jogTimer.current) {
-      stopJog();
-    } else {
+    jogHeld.current = { x, y, z };
+    if (!jogPumpActive.current) {
       jogRequestCount.current = 0;
     }
-    jog(x, y, z);
-    jogTimer.current = setInterval(() => jog(x, y, z), JOG_INTERVAL_MS);
+    // The first jog of a press always sends immediately — a distinct click
+    // must never wait behind a previous press's pacing.
+    const first = jogRef.current(x, y, z);
+    if (jogPumpActive.current) return;
+    jogPumpActive.current = true;
+    const pump = async () => {
+      try {
+        let ok = await first;
+        while (ok && jogHeld.current) {
+          // Held repeats stay one-in-flight and paced to the segment's
+          // execution time (see jogPacing.ts) — soft limits are off during
+          // calibration, so an unbounded jog backlog here runs the gantry
+          // into the hard-limit switches.
+          await jogPacer.sleep(jogPaceMs(x, y, z));
+          const delta = jogHeld.current;
+          if (!delta) break;
+          ok = await jogRef.current(delta.x, delta.y, delta.z);
+        }
+        if (!ok) {
+          jogHeld.current = null;
+        }
+      } finally {
+        jogPumpActive.current = false;
+      }
+    };
+    void pump();
   };
 
   const parsedXyStep = parsePositiveStep(xyStep);
@@ -798,6 +836,13 @@ export default function CalibrationWizard({
                 >
                   Unlock alarm
                 </button>
+              </div>
+            )}
+            {!alarmRecoveryMessage && connected && (
+              <div style={softLimitNoticeStyle}>
+                <strong>Soft limits are off during calibration</strong> — the gantry will
+                not stop itself at travel bounds. Jog with small steps near the edges of
+                travel; if a limit switch trips, CubOS attempts an automatic pull-off.
               </div>
             )}
             {error && <div style={errorStyle}>{error}</div>}
@@ -1635,6 +1680,12 @@ const alarmStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
   flexWrap: "wrap",
+};
+
+const softLimitNoticeStyle: React.CSSProperties = {
+  ...theme.notice.warning,
+  fontSize: 11,
+  marginBottom: 10,
 };
 
 const alarmTitleStyle: React.CSSProperties = {

@@ -76,6 +76,22 @@ describe("CalibrationWizard alarm recovery", () => {
     vi.unstubAllGlobals();
   });
 
+  it("warns that soft limits are off during calibration", () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(position())));
+
+    render(
+      <CalibrationWizard
+        open
+        onClose={() => undefined}
+        gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
+        position={position()}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    expect(screen.getByText(/Soft limits are off during calibration/)).toBeInTheDocument();
+  });
+
   it("automatically recovers and locks controls when Z jog hits a limit", async () => {
     const user = userEvent.setup();
     const recovery = deferredResponse();

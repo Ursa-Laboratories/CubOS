@@ -12,6 +12,9 @@ this:
 - **During calibration jogging**, a hard-limit trip triggers a soft reset,
   `$X` unlock, and a small pull-off opposite the jog that caused it (see
   [Calibration: Jog Controls](calibration.md#jog-controls)).
+- **In the Operator UI**, the alarm banner offers **Pull off limit**, which
+  runs that same soft-reset + unlock + pull-off sequence opposite the last
+  jog direction.
 - **At the start of a protocol run**, if the gantry is already in alarm,
   CubOS unlocks it before proceeding and raises an error if it can't get a
   clean status afterward.
@@ -32,6 +35,34 @@ can still consider itself positioned correctly when it isn't.
     anything that assumes a known position. This includes: any hard-limit
     trip, a controller power cycle, or a manual `$X` unlock. Do not resume a
     protocol or continue calibration on unverified position.
+
+## Stuck on a Limit Switch
+
+If the gantry stops with an axis pressing a limit switch — a jog overran
+into the hard limit, or the machine was powered off in that position — it
+can look bricked: GRBL boots in alarm, refuses to home (homing would drive
+further into the switch), and rejects jogs.
+
+First choice: in the Operator UI, click **Pull off limit** in the alarm
+banner. It soft-resets, unlocks, and backs the gantry off opposite the last
+jog direction, then you can re-home.
+
+If the UI can't help (e.g. the controller was power-cycled, so CubOS no
+longer knows which direction caused it), recover manually over a serial
+terminal or the UI's **Advanced** panel:
+
+1. **Unlock:** send `$X` to clear the boot alarm.
+2. **Jog off the switch** a few millimeters in the direction *away* from
+   it, using small steps (e.g. `$J=G91 X-5 F500` for a tripped X-max
+   switch).
+3. If the jog is rejected (`error:15`, jog target exceeds travel), the
+   controller's soft limits are checking against an unhomed position.
+   Temporarily disable them with `$20=0`, jog off the switch, then
+   **re-enable them with `$20=1`** — do not leave soft limits off.
+4. **Re-home** with `$H` once no switch is pressed.
+
+Do not run protocols or continue calibration until homing succeeds — see
+the warning above about trusting position after an alarm.
 
 ## After a Physical Crash
 

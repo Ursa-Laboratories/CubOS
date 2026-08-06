@@ -116,6 +116,7 @@ class GantrySession:
         self._calibration_restore_soft_limits = False
         self._calibration_jog_bypass_working_volume = False
         self._move_error: str | None = None
+        self._jog_cancel_generation = 0
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     @property
@@ -300,12 +301,19 @@ class GantrySession:
             raise
 
     def jog_cancel(self) -> GantryPositionSnapshot:
+        self._jog_cancel_generation += 1
         with self._locked_gantry() as gantry:
             gantry.jog_cancel()
         return self.position()
 
     def jog_cancel_interrupt(self) -> None:
-        """Cancel an active jog without waiting for the operation lock."""
+        """Cancel an active jog without waiting for the operation lock.
+
+        Also bumps the cancel generation so jog requests already queued on
+        the operation lock are dropped instead of restarting motion after
+        the cancel (GRBL 0x85 only flushes what is already in its planner).
+        """
+        self._jog_cancel_generation += 1
         self._require_connected().jog_cancel()
 
     def read_grbl_settings(self) -> dict[str, str]:
@@ -347,7 +355,13 @@ class GantrySession:
         self._require_connected()
         if x == 0 and y == 0 and z == 0:
             return
+        generation = self._jog_cancel_generation
         with self._lock:
+            if generation != self._jog_cancel_generation:
+                # A jog cancel arrived while this request waited on the
+                # operation lock. Sending the jog now would restart motion
+                # the operator just stopped, so drop it.
+                return
             self._validate_jog_target_locked(x=x, y=y, z=z)
             try:
                 self._require_connected().jog(x=x, y=y, z=z, feed_rate=feed_rate)

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -512,6 +514,49 @@ def test_interrupt_helpers_require_connection():
         session.feed_hold_interrupt()
     with pytest.raises(GantryNotConnectedError):
         session.jog_cancel_interrupt()
+
+
+def test_jog_queued_behind_cancel_is_dropped(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    jog_done = threading.Event()
+
+    def queued_jog():
+        session.jog(x=1.0)
+        jog_done.set()
+
+    # Hold the operation lock so the jog request blocks after snapshotting
+    # its cancel generation — the same interleaving as a jog request queued
+    # behind a held-jog burst on the API server when the cancel arrives.
+    session._lock.acquire()
+    try:
+        worker = threading.Thread(target=queued_jog, daemon=True)
+        worker.start()
+        time.sleep(0.1)
+        session.jog_cancel_interrupt()
+    finally:
+        session._lock.release()
+    assert jog_done.wait(timeout=2.0)
+
+    assert ("jog_cancel", None) in fake.calls
+    assert not any(name == "jog" for name, _ in fake.calls)
+
+    # A fresh jog issued after the cancel proceeds normally.
+    session.jog(x=1.0)
+    assert any(name == "jog" for name, _ in fake.calls)
+
+
+def test_locked_jog_cancel_also_drops_queued_jogs(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    generation = session._jog_cancel_generation
+    session.jog_cancel()
+    assert session._jog_cancel_generation == generation + 1
+    assert ("jog_cancel", None) in fake.calls
 
 
 def test_jog_zero_delta_is_noop_and_alarm_is_wrapped(tmp_path):

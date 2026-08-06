@@ -3,6 +3,7 @@ import { gantryApi } from "../../api/client";
 import type { GantryConfig, GantryPosition, GantryResponse, WorkingVolume } from "../../types";
 import * as theme from "../../theme";
 import CalibrationWizard from "./CalibrationWizard";
+import { createJogPacer, jogPaceMs } from "./jogPacing";
 import { useConfirm } from "../common/useConfirm";
 
 interface Props {
@@ -14,7 +15,6 @@ interface Props {
   onSaveCalibrated: (filename: string, config: GantryConfig) => Promise<void>;
 }
 
-const JOG_INTERVAL_MS = 150;
 const MIN_STEP = 0.001;
 
 type AxisPosition = {
@@ -50,12 +50,15 @@ export default function GantryPositionWidget({
   const [advancedMessage, setAdvancedMessage] = useState<string | null>(null);
   const [advancedError, setAdvancedError] = useState<string | null>(null);
   const [restoreBusy, setRestoreBusy] = useState(false);
+  const [pullOffBusy, setPullOffBusy] = useState(false);
   const [grblSettings, setGrblSettings] = useState<Record<string, string> | null>(null);
   const [settingKey, setSettingKey] = useState("$20");
   const [settingValue, setSettingValue] = useState("");
   const [requestConfirm, confirmDialog] = useConfirm();
-  const jogTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const jogHeld = useRef<AxisPosition | null>(null);
+  const jogPumpActive = useRef(false);
   const jogRequestCount = useRef(0);
+  const lastJogDelta = useRef<AxisPosition | null>(null);
   const predictedJogPosition = useRef<AxisPosition | null>(null);
   const limitHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -68,7 +71,7 @@ export default function GantryPositionWidget({
   const calibrationInterrupted = connected && !calibrationOpen && (position?.calibration_active ?? false);
 
   useEffect(() => {
-    if (jogTimer.current) return;
+    if (jogHeld.current || jogPumpActive.current) return;
     predictedJogPosition.current = currentWorkPosition(position);
   }, [position]);
 
@@ -92,7 +95,7 @@ export default function GantryPositionWidget({
     limitHintTimer.current = setTimeout(() => setLimitHint(null), 1800);
   }, []);
 
-  const jog = useCallback((x: number, y: number, z: number): boolean => {
+  const jog = useCallback(async (x: number, y: number, z: number): Promise<boolean> => {
     if (!connected || isRunning || jogBusy || homeBusy) return false;
     if (workingVolume) {
       const base = predictedJogPosition.current ?? currentWorkPosition(position);
@@ -106,39 +109,67 @@ export default function GantryPositionWidget({
       }
     }
     jogRequestCount.current += 1;
-    gantryApi.jog(x, y, z)
-      .then(() => {
-        setLastCommandError(null);
-      })
-      .catch((e) => setLastCommandError(errorMessage(e)));
-    return true;
+    lastJogDelta.current = { x, y, z };
+    try {
+      await gantryApi.jog(x, y, z);
+      setLastCommandError(null);
+      return true;
+    } catch (e) {
+      setLastCommandError(errorMessage(e));
+      return false;
+    }
   }, [connected, homeBusy, isRunning, jogBusy, position, showLimitHint, workingVolume]);
 
+  // The held-jog pump reads jog through a ref so an in-flight hold always
+  // uses the latest guards (connected/busy state) instead of a stale closure.
+  const jogRef = useRef(jog);
+  useEffect(() => {
+    jogRef.current = jog;
+  }, [jog]);
+
+  const jogPacer = useRef(createJogPacer()).current;
+
   const stopJog = useCallback(() => {
-    const shouldCancelJog = jogTimer.current !== null && jogRequestCount.current > 1;
-    if (jogTimer.current) {
-      clearInterval(jogTimer.current);
-      jogTimer.current = null;
-    }
-    if (shouldCancelJog) {
+    if (jogHeld.current === null) return;
+    jogHeld.current = null;
+    // A single click lets its full step finish (predictable stepping); a
+    // held jog cancels so motion stops at release instead of running out
+    // whatever GRBL has queued.
+    if (jogRequestCount.current > 1) {
       gantryApi.jogCancel().catch(() => undefined);
     }
     jogRequestCount.current = 0;
-  }, []);
+    jogPacer.wake();
+  }, [jogPacer]);
 
   const startJog = useCallback((x: number, y: number, z: number) => {
-    if (jogTimer.current) {
-      stopJog();
-    } else {
+    jogHeld.current = { x, y, z };
+    if (!jogPumpActive.current) {
       jogRequestCount.current = 0;
     }
-    if (!jog(x, y, z)) return;
-    jogTimer.current = setInterval(() => {
-      if (!jog(x, y, z)) {
-        stopJog();
+    // The first jog of a press always sends immediately — a distinct click
+    // must never wait behind a previous press's pacing.
+    const first = jogRef.current(x, y, z);
+    if (jogPumpActive.current) return;
+    jogPumpActive.current = true;
+    const pump = async () => {
+      try {
+        let ok = await first;
+        while (ok && jogHeld.current) {
+          await jogPacer.sleep(jogPaceMs(x, y, z));
+          const delta = jogHeld.current;
+          if (!delta) break;
+          ok = await jogRef.current(delta.x, delta.y, delta.z);
+        }
+        if (!ok) {
+          jogHeld.current = null;
+        }
+      } finally {
+        jogPumpActive.current = false;
       }
-    }, JOG_INTERVAL_MS);
-  }, [jog, stopJog]);
+    };
+    void pump();
+  }, [jogPacer]);
 
   // Clean up on unmount
   useEffect(() => () => stopJog(), [stopJog]);
@@ -263,6 +294,21 @@ export default function GantryPositionWidget({
       setLastCommandError(errorMessage(e));
     } finally {
       setJogBusy(false);
+    }
+  };
+
+  const handlePullOff = async () => {
+    const delta = lastJogDelta.current;
+    if (!connected || !delta || pullOffBusy || isRunning) return;
+    stopJog();
+    setPullOffBusy(true);
+    try {
+      await gantryApi.recoverCalibrationLimit({ x: delta.x, y: delta.y, z: delta.z });
+      setLastCommandError(null);
+    } catch (e) {
+      setLastCommandError(errorMessage(e));
+    } finally {
+      setPullOffBusy(false);
     }
   };
 
@@ -455,15 +501,30 @@ export default function GantryPositionWidget({
         }}>
           <span style={{ color: theme.color.danger, fontWeight: 700, fontSize: 13 }}>ALARM</span>
           <span style={{ color: theme.color.dangerText, fontSize: 11 }}>
-            {status} — Unlock to clear, then jog back to safety.
+            {status} — {lastJogDelta.current
+              ? "Pull off backs away from the limit switch automatically, or Unlock to clear and jog back manually."
+              : "Unlock to clear, then jog back to safety."}
           </span>
+          {lastJogDelta.current && (
+            <button
+              onClick={handlePullOff}
+              disabled={pullOffBusy || jogBusy || isRunning}
+              style={{
+                ...theme.btn.danger,
+                ...theme.btnSmall,
+                marginLeft: "auto",
+              }}
+            >
+              {pullOffBusy ? "Pulling off..." : "Pull off limit"}
+            </button>
+          )}
           <button
             onClick={handleUnlock}
-            disabled={jogBusy || isRunning}
+            disabled={jogBusy || pullOffBusy || isRunning}
             style={{
               ...theme.btn.danger,
               ...theme.btnSmall,
-              marginLeft: "auto",
+              marginLeft: lastJogDelta.current ? undefined : "auto",
             }}
           >
             Unlock ($X)
