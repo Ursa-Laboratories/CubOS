@@ -2,13 +2,14 @@ import type { ReactNode } from "react";
 import { card, chrome, color } from "../../theme";
 
 interface Props {
+  banner?: ReactNode;
   header: ReactNode;
   left: ReactNode;
   topRight: ReactNode;
   bottomRight: ReactNode;
 }
 
-export default function AppLayout({ header, left, topRight, bottomRight }: Props) {
+export default function AppLayout({ banner, header, left, topRight, bottomRight }: Props) {
   return (
     <div
       style={{
@@ -18,6 +19,7 @@ export default function AppLayout({ header, left, topRight, bottomRight }: Props
         background: color.canvas,
       }}
     >
+      {banner}
       <header
         style={{
           flex: "0 0 auto",

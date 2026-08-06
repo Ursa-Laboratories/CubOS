@@ -126,6 +126,11 @@ class RunManager:
             self.store.append_event(record.run_id, state="failed", message=record.error)
             self.store.write(record)
 
+    @property
+    def active_run_id(self) -> str | None:
+        with self._lock:
+            return self._active_run_id
+
     def submit(self, submission: RunSubmission) -> RunRecord:
         run_id = submission.run_id or uuid.uuid4().hex
         with self._lock:

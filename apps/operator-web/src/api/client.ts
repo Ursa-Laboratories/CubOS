@@ -4,6 +4,16 @@ export type SettingsResponse = {
   config_dir: string;
 };
 
+export type UpdateStatus = {
+  current_sha: string;
+  latest_sha: string;
+  commits_behind: number;
+  update_available: boolean;
+  checked_at: number;
+  summary: string[];
+  error: string | null;
+};
+
 class ApiError extends Error {
   status: number;
 
@@ -316,6 +326,17 @@ export const settingsApi = {
     request<SettingsResponse>("/settings/browse", {
       method: "POST",
     }),
+};
+
+export const systemApi = {
+  getUpdateStatus: (refresh = false) =>
+    request<UpdateStatus>(`/system/update${refresh ? "?refresh=true" : ""}`),
+  applyUpdate: () =>
+    request<{ status: string; target_sha: string }>("/system/update/apply", {
+      method: "POST",
+      body: JSON.stringify({}),
+    }),
+  health: () => request<{ status: string }>("/health"),
 };
 
 // Result data
