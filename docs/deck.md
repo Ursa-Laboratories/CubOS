@@ -235,9 +235,13 @@ dimensions:
 
 - `calibration.a1.z` is the plate surface or vial-rim reference used by
   protocol commands.
-- Plate `length`, `width`, `height`, and `well_depth` are optional physical
-  metadata. Plate height is not used as a motion Z value, and the current plate
-  bounding box carries the XY footprint rather than an outer Z height.
+- Plate `length`, `width`, `height`, `well_depth`, and `well_geometry` are
+  optional physical metadata. Plate height is not used as a motion Z value, and
+  the current plate bounding box carries the XY footprint rather than an outer Z
+  height. If `well_geometry` is omitted, the plate's well cross-section is
+  simply unspecified: the plate remains fully addressable, and existing deck
+  files load unchanged. Consumers that need an area or a usable radius must
+  handle the unset case.
 - Vial `height` and `diameter` are optional physical metadata. If they are
   omitted, the vial remains fully addressable and its outer bounding-box fields
   remain unset. Existing direct and holder-nested vials that specify these
@@ -245,6 +249,50 @@ dimensions:
 - Legacy holder definitions retain their fixture geometry and seat/surface
   offsets. Those offsets continue to determine nested labware Z for existing
   deck files.
+
+### Per-Well Lateral Geometry
+
+`well_geometry` describes the lateral cross-section of a single well. It is a
+tagged union: `shape` selects the variant and determines which dimension fields
+are required, so a partially specified well is rejected at load time rather than
+silently accepted.
+
+`shape: circular` takes an inner `diameter`:
+
+```yaml
+well_geometry:
+  shape: circular
+  diameter: 6.86
+  bottom: flat
+```
+
+`shape: rectangular` takes inner `x_dimension` and `y_dimension` (use equal
+values for square wells):
+
+```yaml
+well_geometry:
+  shape: rectangular
+  x_dimension: 8.0
+  y_dimension: 4.0
+  bottom: v
+```
+
+All dimensions are inner measurements in millimeters and must be positive.
+`bottom` is the well bottom profile — one of `flat` (default), `round`, or `v`.
+
+The same block is accepted on a top-level plate and on a plate nested inside a
+holder.
+
+Rather than branching on `shape`, read the derived accessors, which return
+`None` when `well_geometry` is omitted:
+
+| Accessor | Meaning |
+| --- | --- |
+| `well_cross_section_area_mm2` | Well cross-section area in mm². |
+| `well_inscribed_radius_mm` | Largest radius from the well center that stays inside the wall. For rectangular wells this is bounded by the narrower side. |
+
+Adding a new well shape later is additive: it extends the union without
+changing plates or consumers that already use these accessors.
 
 7. **Validate before running hardware.**
 

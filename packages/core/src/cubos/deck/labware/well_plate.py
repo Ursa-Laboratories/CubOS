@@ -4,7 +4,7 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from .labware import BoundingBoxGeometry, Coordinate3D, Labware
+from .labware import BoundingBoxGeometry, Coordinate3D, Labware, WellGeometry
 
 
 class WellPlate(Labware):
@@ -42,6 +42,15 @@ class WellPlate(Labware):
             "millimeters depending on well-bottom geometry and skirt thickness. "
             "External analysis consumers use it to compute the sample-floor Z "
             "from the deck-frame rim Z."
+        ),
+    )
+    well_geometry: Optional[WellGeometry] = Field(
+        None,
+        description=(
+            "Optional per-well lateral geometry (shape, inner dimensions, "
+            "bottom profile). Omitted means the well cross-section is "
+            "unspecified: the plate stays fully addressable, and consumers "
+            "needing an area or usable radius must handle None."
         ),
     )
     rows: int = Field(
@@ -135,6 +144,15 @@ class WellPlate(Labware):
             width=self.width,
         )
         return self
+
+    @property
+    def well_cross_section_area_mm2(self) -> float | None:
+        """Well cross-section in mm^2, or None when geometry is unspecified."""
+        return self.well_geometry.cross_section_area_mm2 if self.well_geometry else None
+
+    @property
+    def well_inscribed_radius_mm(self) -> float | None:
+        return self.well_geometry.inscribed_radius_mm if self.well_geometry else None
 
     def get_location(self, location_id: str | None = None) -> Coordinate3D:
         if location_id is None:

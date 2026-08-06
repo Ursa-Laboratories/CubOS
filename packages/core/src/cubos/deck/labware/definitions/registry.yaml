@@ -18,7 +18,7 @@ labware:
     config: ursa_vial_holder/9VialHolder.yaml
 
   ursa_9_vial_grid:
-    module: deck.labware.vial_grid
+    module: cubos.deck.labware.vial_grid
     class_name: VialGrid
     config: ursa_9_vial_grid/9VialGrid.yaml
 
@@ -51,3 +51,8 @@ labware:
     module: cubos.deck.labware.well_plate
     class_name: WellPlate
     config: sbs_96_wellplate/SBS96WellPlate.yaml
+
+  corning_3526_24_wellplate:
+    module: cubos.deck.labware.well_plate
+    class_name: WellPlate
+    config: corning_3526_24_wellplate/Corning3526_24WellPlate.yaml

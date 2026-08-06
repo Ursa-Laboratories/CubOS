@@ -1,0 +1,34 @@
+# WellPlate (cubos.deck.labware.well_plate.WellPlate) — 24-well flat-bottom
+# microplate with per-well lateral geometry.
+#
+# Footprint and well positions follow ANSI SLAS 1-2004 / 4-2004: 127.76 ×
+# 85.47 mm, 4 rows × 6 columns on a 19.3 mm pitch, A1 anchored 15.13 mm x /
+# 13.67 mm y from the plate corner.
+#
+# NOTE: SLAS standardizes the footprint and well *positions*, not well
+# diameter or depth — those are vendor-specific. Verify `well_geometry.diameter`
+# and `well_depth` against your plate's drawing before running hardware.
+#
+# `calibration` below is anchored at plate origin; override `calibration.a1`
+# and `calibration.a2` in your deck YAML with real deck coordinates.
+
+type: well_plate
+name: corning_3526_24_wellplate
+model_name: corning_3526
+rows: 4
+columns: 6
+length: 127.76
+width: 85.47
+height: 20.02          # OUTER plate height (rim → underside)
+well_depth: 17.4       # INSIDE depth (rim → inside floor where sample sits)
+well_geometry:
+  shape: circular
+  diameter: 15.6       # well INNER diameter — vendor drawing, verify
+  bottom: flat
+calibration:
+  a1: { x: 15.13, y: 13.67 }
+  a2: { x: 34.43, y: 13.67 }   # a1.x + x_offset
+x_offset: 19.3
+y_offset: 19.3
+capacity_ul: 3400.0
+working_volume_ul: 1900.0
