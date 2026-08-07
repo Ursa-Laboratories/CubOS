@@ -543,7 +543,14 @@ class GantrySession:
                         })
                         working_volume.setdefault("x_min", 0.0)
                         working_volume.setdefault("y_min", 0.0)
-                        working_volume.setdefault("z_min", 0.0)
+                        z_cal = result.get("z_calibration") or {}
+                        if "z_min" in z_cal:
+                            # Unreachable-deck-bottom case: the calibrated
+                            # floor is above deck Z0 (tall block / hanging
+                            # tip) and must be persisted, not defaulted.
+                            working_volume["z_min"] = float(z_cal["z_min"])
+                        else:
+                            working_volume.setdefault("z_min", 0.0)
                         self._connected_gantry_config["working_volume"] = (
                             working_volume
                         )
