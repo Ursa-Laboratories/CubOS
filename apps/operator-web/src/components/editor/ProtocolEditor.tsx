@@ -475,7 +475,7 @@ export default function ProtocolEditor({
             </div>
 
             {cmd ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={stepArgsGridStyle}>
                 {cmd.args.map((arg) => {
                   if (isHiddenArgForStep(arg.name, step.args, choices)) {
                     return null;
@@ -1237,12 +1237,25 @@ const toolbarLabelStyle: React.CSSProperties = {
   ...theme.sectionLabel,
 };
 
+// Step args fill left-to-right in columns (same auto-fit pattern as the
+// ASMI indentation options) so a step card stays one or two rows tall
+// instead of stacking every parameter full-width.
+const stepArgsGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 8,
+  alignItems: "end",
+};
+
 const methodOptionsStyle: React.CSSProperties = {
   border: `1px solid ${theme.color.accentTintBorder}`,
   background: theme.color.accentTint,
   borderRadius: theme.radius.md,
   padding: 10,
   marginTop: 4,
+  // Spans the step-args grid so the tinted panel stays a full-width
+  // block below the main parameters.
+  gridColumn: "1 / -1",
 };
 
 const methodOptionsTitleStyle: React.CSSProperties = {
