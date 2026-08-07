@@ -114,6 +114,15 @@ install is optional — but it is required before `python -m cubos_api` will
 work. Note that `services/api` needs Python 3.11+ (the core package alone
 works on 3.10).
 
+!!! note "Every new terminal: activate the venv first"
+    Everything above installs into `.venv`, so `python -m cubos_api` — and
+    every other `python -m cubos...` command in these docs — only works
+    while the virtual environment is active. Activation does not persist:
+    each new terminal window starts without it. If a command fails with
+    `No module named cubos_api` (or `No module named cubos`), re-run the
+    activation command for your platform from
+    [Installation](#installation) above — you never need to reinstall.
+
 ### Build the Operator UI (browser app)
 
 The `cubos_api` server serves the Operator UI's compiled web assets from
@@ -138,6 +147,18 @@ shows **404 Not Found** at `http://127.0.0.1:8742`. After building, start
 `python -m cubos_api` again — the server only looks for the assets at
 startup. Re-run `npm run build` whenever you pull changes that touch
 `apps/operator-web/`.
+
+### Start the Operator UI
+
+With the virtual environment active, run from the repository root:
+
+```bash
+python -m cubos_api
+```
+
+Your browser opens at `http://127.0.0.1:8742` after a moment; leave the
+terminal running. See [Use the Operator UI](operator-ui.md) for connecting
+to the gantry and everything else you can do from the browser.
 
 ### Instrument extras
 
