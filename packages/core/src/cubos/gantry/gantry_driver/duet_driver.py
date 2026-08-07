@@ -588,6 +588,58 @@ class DuetDriver:
         """No-op: RRF work offsets are read directly from the object model."""
         return
 
+    def read_soft_limits(self) -> bool:
+        """Return whether RRF axis-limit enforcement (M564 S1) is active."""
+        return bool(self._query_object_model("move.limitAxes"))
+
+    def set_soft_limits(self, enabled: bool) -> None:
+        """Enable/disable RRF axis-limit enforcement (M564).
+
+        Runtime-volatile: the board reverts to config.g's M564 on reboot,
+        which ships S1 H1 — so a reboot fails safe (limits back on).
+        """
+        self.execute_command("M564 S1" if enabled else "M564 S0")
+
+    def read_work_offsets(self) -> dict:
+        """Return the effective workplace offsets (machine − user) per axis."""
+        axes = self._query_axes()
+        offsets = {}
+        for axis in axes:
+            letter = str(axis.get("letter", "")).lower()
+            if letter in ("x", "y", "z"):
+                offsets[letter] = round(
+                    float(axis["machinePosition"]) - float(axis["userPosition"]),
+                    3,
+                )
+        if set(offsets) != {"x", "y", "z"}:
+            raise StatusReturnError(f"Malformed move.axes offsets reply: {axes!r}")
+        return offsets
+
+    def apply_work_offsets(self, x: float, y: float, z: float) -> None:
+        """Set the G54 origin offsets directly (G10 L2, machine frame).
+
+        RRF does not persist workplace offsets across reboots, so calibrated
+        offsets live in the gantry YAML and are re-applied at connect.
+        """
+        self.execute_command(f"G10 L2 P1 X{x:.3f} Y{y:.3f} Z{z:.3f}")
+
+    def read_axis_extents(self) -> dict:
+        """Return machine-frame axis (min, max) tuples from the object model."""
+        axes = self._query_axes()
+        extents = {}
+        for axis in axes:
+            letter = str(axis.get("letter", "")).lower()
+            if letter in ("x", "y", "z"):
+                try:
+                    extents[letter] = (float(axis["min"]), float(axis["max"]))
+                except (KeyError, TypeError, ValueError) as exc:
+                    raise StatusReturnError(
+                        f"Malformed move.axes extents reply: {axes!r}"
+                    ) from exc
+        if set(extents) != {"x", "y", "z"}:
+            raise StatusReturnError(f"Malformed move.axes extents reply: {axes!r}")
+        return extents
+
     def read_grbl_settings(self) -> dict:
         """Return an empty dict — RRF has no GRBL ``$`` settings.
 

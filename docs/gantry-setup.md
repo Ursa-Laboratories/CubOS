@@ -45,8 +45,12 @@ optional root-level `firmware:` field:
   `config.g` (version-controlled under `packages/core/configs/duet/`),
   so a Duet gantry YAML must **not** contain a `grbl_settings:` block;
   the schema rejects the combination. Runtime GRBL-settings reads return
-  empty and writes are refused; calibration flows that program `$`
-  settings are not yet supported on Duet machines.
+  empty and writes are refused. Deck-origin calibration is supported: the
+  machine envelope stays fixed in `config.g`, and the calibrated deck
+  frame is carried by G54 work offsets. RepRapFirmware does not persist
+  those offsets across reboots, so calibration stores them in
+  `duet_settings.work_offsets` and CubOS re-applies them on every
+  connect.
 
 The machine frame contract is identical for both firmwares: reported
 positions match the configured `origin_policy` frame with no sign flips in

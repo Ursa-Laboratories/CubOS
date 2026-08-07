@@ -95,6 +95,7 @@ class GantryConfig:
     calibration_block_height_mm: Optional[float] = None
     safe_z: Optional[float] = None
     expected_grbl_settings: Optional[Dict[str, float]] = field(default=None)
+    duet_settings: Optional[Dict[str, Any]] = field(default=None)
     instruments: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:

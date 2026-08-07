@@ -410,6 +410,13 @@ class GantrySession:
         tolerance_mm: float = 0.25,
     ) -> None:
         with self._locked_gantry() as gantry:
+            if self._connected_firmware_locked() == "duet":
+                raise GantrySessionError(
+                    "Standalone soft-limit programming is not supported on "
+                    "Duet/RepRapFirmware — the machine envelope lives in the "
+                    "board's config.g. Run deck-origin calibration "
+                    "(finalize_calibration_origin) instead."
+                )
             configured_hard_limits = (
                 hard_limits
                 if hard_limits is not None
@@ -520,24 +527,60 @@ class GantrySession:
                 self._calibration_restore_soft_limits = False
                 self._calibration_jog_bypass_working_volume = False
                 if self._connected_gantry_config is not None:
-                    grbl_settings = dict(
-                        self._connected_gantry_config.get("grbl_settings") or {}
-                    )
-                    grbl_settings.update({
-                        "soft_limits": True,
-                        "homing_enable": True,
-                        "max_travel_x": max_travel["x"],
-                        "max_travel_y": max_travel["y"],
-                        "max_travel_z": max_travel["z"],
-                        "status_report": 0,
-                    })
-                    if homing_pull_off_mm is not None:
-                        grbl_settings["homing_pull_off"] = homing_pull_off_mm
-                    self._connected_gantry_config["grbl_settings"] = grbl_settings
-                    self._calibration_warning = self._calibration_mismatch_warning(
-                        gantry,
-                        self._connected_gantry_config,
-                    )
+                    if self._connected_firmware_locked() == "duet":
+                        # Duet: the machine envelope stays fixed in config.g;
+                        # calibration is carried by G54 offsets (volatile on
+                        # the controller) plus the measured usable volume.
+                        # Persist both so connect can re-apply the offsets.
+                        working_volume = dict(
+                            self._connected_gantry_config.get("working_volume")
+                            or {}
+                        )
+                        working_volume.update({
+                            "x_max": measured_volume["x"],
+                            "y_max": measured_volume["y"],
+                            "z_max": measured_volume["z"],
+                        })
+                        working_volume.setdefault("x_min", 0.0)
+                        working_volume.setdefault("y_min", 0.0)
+                        working_volume.setdefault("z_min", 0.0)
+                        self._connected_gantry_config["working_volume"] = (
+                            working_volume
+                        )
+                        work_offsets = result.get("work_offsets")
+                        if work_offsets is not None:
+                            duet_settings = dict(
+                                self._connected_gantry_config.get("duet_settings")
+                                or {}
+                            )
+                            duet_settings["work_offsets"] = {
+                                "x": float(work_offsets["x"]),
+                                "y": float(work_offsets["y"]),
+                                "z": float(work_offsets["z"]),
+                            }
+                            self._connected_gantry_config["duet_settings"] = (
+                                duet_settings
+                            )
+                        self._calibration_warning = None
+                    else:
+                        grbl_settings = dict(
+                            self._connected_gantry_config.get("grbl_settings") or {}
+                        )
+                        grbl_settings.update({
+                            "soft_limits": True,
+                            "homing_enable": True,
+                            "max_travel_x": max_travel["x"],
+                            "max_travel_y": max_travel["y"],
+                            "max_travel_z": max_travel["z"],
+                            "status_report": 0,
+                        })
+                        if homing_pull_off_mm is not None:
+                            grbl_settings["homing_pull_off"] = homing_pull_off_mm
+                        self._connected_gantry_config["grbl_settings"] = grbl_settings
+                        self._calibration_warning = self._calibration_mismatch_warning(
+                            gantry,
+                            self._connected_gantry_config,
+                        )
                 self._last_position = GantryPositionSnapshot(
                     x=position["x"],
                     y=position["y"],
@@ -888,9 +931,20 @@ class GantrySession:
             f"last status: {last_status}"
         )
 
+    def _connected_firmware_locked(self) -> str:
+        """Return the connected config's firmware selector ('grbl' default)."""
+        if self._connected_gantry_config is None:
+            return "grbl"
+        return str(self._connected_gantry_config.get("firmware") or "grbl")
+
     def _apply_calibration_grbl_baseline_locked(self) -> tuple[float, float | None]:
         status_report = 0.0
         homing_pull_off = self._connected_grbl_setting_locked("homing_pull_off")
+        if self._connected_firmware_locked() == "duet":
+            # No $-settings on RepRapFirmware: status reporting is always
+            # object-model based and pull-off is anchored by the board's
+            # homing files. Nothing to program.
+            return status_report, homing_pull_off
         gantry = self._require_connected()
         gantry.set_grbl_setting("$10", status_report)
         if homing_pull_off is not None:

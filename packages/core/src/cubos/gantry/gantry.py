@@ -116,6 +116,7 @@ class Gantry:
             self._mill.connect(port=port)
             self._validate_grbl_settings()
             self._check_alarm_state()
+            self._apply_configured_work_offsets()
         except MillConnectionError as exc:
             self.logger.error("Error connecting to gantry: %s", exc)
             raise
@@ -550,7 +551,15 @@ class Gantry:
         self._mill.set_grbl_setting(code, format_setting_value(value))
 
     def soft_limits_enabled(self) -> bool | None:
-        """Return whether GRBL soft limits are enabled, if readable."""
+        """Return whether controller soft limits are enabled, if readable.
+
+        GRBL reads ``$20``; Duet reads ``move.limitAxes`` (M564 state).
+        """
+        if self._offline:
+            return None
+        assert self._mill is not None
+        if self._configured_firmware() is FirmwareType.DUET:
+            return bool(self._mill.read_soft_limits())
         settings = self.read_grbl_settings()
         raw = settings.get("$20", settings.get("20"))
         if raw is None:
@@ -561,11 +570,63 @@ class Gantry:
             return None
 
     def set_soft_limits_enabled(self, enabled: bool) -> None:
-        """Enable or disable GRBL soft limits through Gantry semantics."""
+        """Enable or disable controller soft limits through Gantry semantics."""
+        if self._offline:
+            return
+        assert self._mill is not None
+        if self._configured_firmware() is FirmwareType.DUET:
+            self._mill.set_soft_limits(bool(enabled))
+            return
         self.set_grbl_setting("$20", 1 if enabled else 0)
 
+    def get_work_offsets(self) -> Dict[str, float] | None:
+        """Return effective workplace offsets on drivers that expose them."""
+        if self._offline:
+            return None
+        assert self._mill is not None
+        if self._configured_firmware() is FirmwareType.DUET:
+            return dict(self._mill.read_work_offsets())
+        return None
+
+    def _apply_configured_work_offsets(self) -> None:
+        """Re-apply calibrated work offsets stored in the config (Duet only).
+
+        RRF does not persist workplace offsets across reboots the way GRBL
+        persists G54 in EEPROM, so a calibrated Duet machine stores its
+        offsets in ``duet_settings.work_offsets`` and they are re-applied
+        on every connect.
+        """
+        if self._offline:
+            return
+        assert self._mill is not None
+        if self._configured_firmware() is not FirmwareType.DUET:
+            return
+        offsets = None
+        if isinstance(self.config, dict):
+            duet_settings = self.config.get("duet_settings") or {}
+            if isinstance(duet_settings, dict):
+                offsets = duet_settings.get("work_offsets")
+        else:
+            duet_settings = getattr(self.config, "duet_settings", None) or {}
+            if isinstance(duet_settings, dict):
+                offsets = duet_settings.get("work_offsets")
+        if not offsets:
+            return
+        self._mill.apply_work_offsets(
+            x=float(offsets["x"]), y=float(offsets["y"]), z=float(offsets["z"])
+        )
+        self.logger.info("Applied configured work offsets: %s", offsets)
+
     def homing_pull_off_mm(self) -> float:
-        """Return GRBL $27 homing pull-off in millimeters."""
+        """Return the homing pull-off reserve in millimeters.
+
+        GRBL reads live ``$27``. On Duet the pull-off reserve is anchored
+        outside the coordinate frame by the board's homing files (the
+        backed-off position IS the axis maximum), so the usable-frame
+        reserve is structurally zero.
+        """
+        if self._configured_firmware() is FirmwareType.DUET:
+            return 0.0
         if self._offline:
             settings = {}
             if isinstance(self.config, dict):
@@ -626,6 +687,14 @@ class Gantry:
                 "Cannot configure soft limits with non-positive travel spans: "
                 + ", ".join(invalid)
             )
+        if self._configured_firmware() is FirmwareType.DUET:
+            self._verify_duet_spans_within_envelope(
+                max_travel_x=max_travel_x,
+                max_travel_y=max_travel_y,
+                max_travel_z=max_travel_z,
+                tolerance_mm=tolerance_mm,
+            )
+            return
         expected_reporting: Dict[str, Any] = {}
         if status_report is not None:
             expected_reporting["$10"] = validate_status_report(status_report)
@@ -696,6 +765,48 @@ class Gantry:
                 "GRBL soft-limit settings did not verify: " + "; ".join(misses)
             )
 
+    def _verify_duet_spans_within_envelope(
+        self,
+        *,
+        max_travel_x: float,
+        max_travel_y: float,
+        max_travel_z: float,
+        tolerance_mm: float,
+    ) -> None:
+        """Duet analogue of programming $130-132: verify, don't write.
+
+        The machine envelope on a Duet is fixed by the board's config.g
+        (M208 + homing anchors) and is not runtime-programmable through
+        calibration. Calibrated usable spans must therefore fit inside it;
+        limit enforcement (M564 S1) is switched back on rather than
+        reprogrammed.
+        """
+        if self._offline:
+            return
+        assert self._mill is not None
+        extents = self._mill.read_axis_extents()
+        requested = {"x": max_travel_x, "y": max_travel_y, "z": max_travel_z}
+        misses = []
+        for axis, span in requested.items():
+            lo, hi = extents[axis]
+            machine_span = hi - lo
+            if float(span) > machine_span + tolerance_mm:
+                misses.append(
+                    f"{axis}: calibrated span {float(span):g} exceeds machine "
+                    f"envelope {machine_span:g} (config.g M208)"
+                )
+        if misses:
+            raise MillConnectionError(
+                "Calibrated spans do not fit the Duet machine envelope: "
+                + "; ".join(misses)
+            )
+        self._mill.set_soft_limits(True)
+        if not self._mill.read_soft_limits():
+            raise MillConnectionError(
+                "Duet limit enforcement (M564 S1) did not verify after "
+                "calibration."
+            )
+
     def finalize_deck_origin_calibration(
         self,
         *,
@@ -737,10 +848,13 @@ class Gantry:
                 homing_pull_off_mm = self.homing_pull_off_mm()
             else:
                 homing_pull_off_mm = validate_homing_pull_off_mm(configured_pull_off)
-            if status_report is not None:
-                self.set_grbl_setting("$10", validate_status_report(status_report))
-            if configured_pull_off is not None:
-                self.set_grbl_setting("$27", homing_pull_off_mm)
+            if self._configured_firmware() is not FirmwareType.DUET:
+                if status_report is not None:
+                    self.set_grbl_setting(
+                        "$10", validate_status_report(status_report)
+                    )
+                if configured_pull_off is not None:
+                    self.set_grbl_setting("$27", homing_pull_off_mm)
 
         if self._offline:
             measured = dict(self._offline_coords)
@@ -825,13 +939,20 @@ class Gantry:
         )
         final_position = self.get_coordinates()
 
-        return {
+        result = {
             "measured_volume": measured_volume,
             "z_calibration": z_calibration.as_dict(),
             "max_travel": max_travel,
             "homing_pull_off_mm": homing_pull_off_mm,
             "position": final_position,
         }
+        work_offsets = self.get_work_offsets()
+        if work_offsets is not None:
+            # Duet: offsets are volatile on the controller; the session
+            # persists them into duet_settings.work_offsets for re-apply
+            # at every connect.
+            result["work_offsets"] = work_offsets
+        return result
 
     def _extract_status(self) -> str:
         """Extract the GRBL state word from the last raw status string."""

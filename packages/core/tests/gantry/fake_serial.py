@@ -171,7 +171,7 @@ class FakeDuetSerial:
         self.timeout = timeout
         self.is_open = is_open
         self.status = status
-        self.position = list(position)
+        self.position = list(position)  # MACHINE frame
         self.homed = [homed, homed, homed]
         self.homed_position = homed_position
         self.moves_to_idle_after = moves_to_idle_after
@@ -179,6 +179,10 @@ class FakeDuetSerial:
         self.move_error = move_error
         self.identity = identity
         self.relative_mode = False
+        self.work_offsets = [0.0, 0.0, 0.0]  # G54: user = machine - offset
+        self.limit_axes = True               # M564 S state
+        self.axis_minima = (0.0, 0.0, 0.0)
+        self.axis_maxima = (400.0, 300.0, 110.0)
         self.writes: list[bytes] = []
         self._rx: deque[bytes] = deque()
 
@@ -246,7 +250,9 @@ class FakeDuetSerial:
                 "letter": letters[i],
                 "homed": self.homed[i],
                 "machinePosition": self.position[i],
-                "userPosition": self.position[i],
+                "userPosition": self.position[i] - self.work_offsets[i],
+                "min": self.axis_minima[i],
+                "max": self.axis_maxima[i],
             }
             for i in range(3)
         ]
@@ -260,9 +266,24 @@ class FakeDuetSerial:
                 if self.relative_mode:
                     self.position[index] += value
                 else:
-                    self.position[index] = value
+                    # Absolute targets are in the active workplace frame.
+                    self.position[index] = value + self.work_offsets[index]
         if any(letter in words for letter in axis_index):
             self._busy_polls_left = self.moves_to_idle_after
+
+    def _apply_g10(self, command: str) -> None:
+        words = dict(_AXIS_WORD_RE.findall(command.upper()))
+        axis_index = {"X": 0, "Y": 1, "Z": 2}
+        is_l20 = "L20" in command.upper()
+        for letter, index in axis_index.items():
+            if letter in words:
+                value = float(words[letter])
+                if is_l20:
+                    # G10 L20: current pose reads as the given value.
+                    self.work_offsets[index] = self.position[index] - value
+                else:
+                    # G10 L2: offset set directly.
+                    self.work_offsets[index] = value
 
     def write(self, data: bytes) -> int:
         self.writes.append(data)
@@ -291,13 +312,22 @@ class FakeDuetSerial:
         elif command == "G91":
             self.relative_mode = True
             self.queue_line("ok")
-        elif command.startswith(("G1", "G01", "G0 ", "G00")):
+        elif command.startswith("G10"):
+            self._apply_g10(command)
+            self.queue_line("ok")
+        elif command.startswith(("G1 ", "G01 ", "G0 ", "G00 ")) or command in ("G1", "G01"):
             if self.move_error:
                 self.queue_line(self.move_error)
                 self.queue_line("ok")
             else:
                 self._apply_move(command)
                 self.queue_line("ok")
+        elif command.startswith("M564"):
+            if "S0" in command:
+                self.limit_axes = False
+            elif "S1" in command:
+                self.limit_axes = True
+            self.queue_line("ok")
         elif command == "M112":
             self.status = "halted"
             self.homed = [False, False, False]
@@ -320,7 +350,7 @@ class FakeDuetSerial:
         elif key == "move.axes":
             result = self._axes_payload()
         elif key == "move.limitAxes":
-            result = True
+            result = self.limit_axes
         else:
             result = None
         self.queue_line(json.dumps({"key": key, "flags": "", "result": result}))

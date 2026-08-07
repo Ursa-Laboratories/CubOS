@@ -132,3 +132,30 @@ def test_yaml_rejects_unknown_firmware(tmp_path):
     path = _write_yaml(tmp_path, firmware_line="firmware: klipper")
     with pytest.raises(Exception):
         load_gantry_from_yaml(path)
+
+
+def test_yaml_duet_settings_roundtrip(tmp_path):
+    path = _write_yaml(
+        tmp_path,
+        firmware_line="firmware: duet",
+        extra=(
+            "duet_settings:\n"
+            "  work_offsets:\n"
+            "    x: 8.0\n"
+            "    y: 6.0\n"
+            "    z: 3.0"
+        ),
+    )
+    config = load_gantry_from_yaml(path)
+    assert config.duet_settings == {
+        "work_offsets": {"x": 8.0, "y": 6.0, "z": 3.0}
+    }
+
+
+def test_yaml_rejects_duet_settings_on_grbl_firmware(tmp_path):
+    path = _write_yaml(
+        tmp_path,
+        extra="duet_settings:\n  work_offsets:\n    x: 0.0\n    y: 0.0\n    z: 0.0",
+    )
+    with pytest.raises(Exception, match="duet_settings requires firmware"):
+        load_gantry_from_yaml(path)
