@@ -9,19 +9,32 @@ const MAX_HEALTH_POLLS = (5 * 60 * 1000) / HEALTH_INTERVAL_MS;
 const SLOW_UPDATE_MESSAGE =
   "Update taking longer than expected — check journalctl -u cubos-update";
 
+function httpStatusOf(caught: unknown): number | undefined {
+  if (caught && typeof caught === "object" && "status" in caught) {
+    const status = (caught as { status: unknown }).status;
+    if (typeof status === "number") return status;
+  }
+  return undefined;
+}
+
 type RequestConfirm = (request: string | ConfirmOptions) => Promise<boolean>;
 
 interface Props {
   requestConfirm: RequestConfirm;
+  reloadPage?: () => void;
 }
 
-export function UpdateBanner({ requestConfirm }: Props) {
+export function UpdateBanner({
+  requestConfirm,
+  reloadPage = () => window.location.reload(),
+}: Props) {
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [updating, setUpdating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const healthTimer = useRef<number | null>(null);
   const healthPolls = useRef(0);
   const serviceWentDown = useRef(false);
+  const targetSha = useRef<string | null>(null);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -58,12 +71,24 @@ export function UpdateBanner({ requestConfirm }: Props) {
       return;
     }
     try {
-      await systemApi.health();
-      if (serviceWentDown.current) {
-        window.location.reload();
+      const next = await systemApi.getUpdateStatus();
+      // Reload once the service reports the target revision. A restart can be
+      // faster than the poll interval, so the down→up transition alone is not
+      // a reliable completion signal; it still catches rollbacks, where the
+      // service bounced but the revision never changed.
+      if (
+        (targetSha.current !== null && next.current_sha === targetSha.current) ||
+        serviceWentDown.current
+      ) {
+        reloadPage();
         return;
       }
-    } catch {
+    } catch (caught: unknown) {
+      if (httpStatusOf(caught) === 404) {
+        // Restarted onto a revision that predates this endpoint.
+        reloadPage();
+        return;
+      }
       serviceWentDown.current = true;
     }
     scheduleHealthPoll();
@@ -80,9 +105,10 @@ export function UpdateBanner({ requestConfirm }: Props) {
 
     setError(null);
     try {
-      await systemApi.applyUpdate();
+      const applied = await systemApi.applyUpdate();
       if (!mounted.current) return;
       setUpdating(true);
+      targetSha.current = applied.target_sha;
       healthPolls.current = 0;
       serviceWentDown.current = false;
       void pollHealth();

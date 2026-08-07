@@ -60,7 +60,6 @@ describe("UpdateBanner", () => {
       status: "updating",
       target_sha: update.latest_sha,
     });
-    vi.mocked(systemApi.health).mockResolvedValue({ status: "ok" });
     render(<UpdateBanner requestConfirm={requestConfirm} />);
 
     await user.click(await screen.findByRole("button", { name: "Update & restart" }));
@@ -73,6 +72,50 @@ describe("UpdateBanner", () => {
     });
     await waitFor(() => expect(systemApi.applyUpdate).toHaveBeenCalledOnce());
     expect(await screen.findByText("Updating…")).toBeInTheDocument();
+  });
+
+  it("reloads once the service reports the target revision", async () => {
+    const user = userEvent.setup();
+    const reloadPage = vi.fn();
+    vi.mocked(systemApi.getUpdateStatus)
+      .mockResolvedValueOnce(update)
+      .mockResolvedValue({ ...update, current_sha: update.latest_sha });
+    vi.mocked(systemApi.applyUpdate).mockResolvedValue({
+      status: "updating",
+      target_sha: update.latest_sha,
+    });
+    render(
+      <UpdateBanner
+        requestConfirm={vi.fn().mockResolvedValue(true)}
+        reloadPage={reloadPage}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Update & restart" }));
+
+    await waitFor(() => expect(reloadPage).toHaveBeenCalled());
+  });
+
+  it("reloads when the restarted service predates the update endpoint", async () => {
+    const user = userEvent.setup();
+    const reloadPage = vi.fn();
+    vi.mocked(systemApi.getUpdateStatus)
+      .mockResolvedValueOnce(update)
+      .mockRejectedValue(Object.assign(new Error("Not Found"), { status: 404 }));
+    vi.mocked(systemApi.applyUpdate).mockResolvedValue({
+      status: "updating",
+      target_sha: update.latest_sha,
+    });
+    render(
+      <UpdateBanner
+        requestConfirm={vi.fn().mockResolvedValue(true)}
+        reloadPage={reloadPage}
+      />,
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Update & restart" }));
+
+    await waitFor(() => expect(reloadPage).toHaveBeenCalled());
   });
 
   it("renders an apply error inline", async () => {
