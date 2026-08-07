@@ -14,7 +14,9 @@ from .coordinate_translator import (
     translate_status_string,
 )
 from .grbl_settings import format_setting_value, normalize_expected_grbl_settings
+from .gantry_config import FirmwareType
 from .gantry_driver.driver import DEFAULT_FEED_RATE, Mill
+from .gantry_driver.duet_driver import DuetDriver
 from .errors import (
     CommandExecutionError,
     LocationNotFound,
@@ -52,9 +54,33 @@ class Gantry:
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self._offline = offline
         self._offline_coords = {"x": 0.0, "y": 0.0, "z": 0.0}
-        self._mill: Mill | None = None if offline else Mill()
+        self._mill: Mill | DuetDriver | None = (
+            None if offline else self._create_driver()
+        )
         self._expected_grbl_settings_override: Dict[str, float] | None = None
         self._expected_grbl_settings_source: str | None = None
+
+    def _configured_firmware(self) -> FirmwareType:
+        """Return the firmware selector from config (dict or dataclass)."""
+        raw: Any = None
+        if isinstance(self.config, dict):
+            raw = self.config.get("firmware")
+        else:
+            raw = getattr(self.config, "firmware", None)
+        if raw is None:
+            return FirmwareType.GRBL
+        try:
+            return FirmwareType(raw)
+        except ValueError:
+            raise ValueError(f"Unsupported firmware {raw!r}.") from None
+
+    def _create_driver(self) -> "Mill | DuetDriver":
+        """Instantiate the low-level driver selected by configured firmware."""
+        firmware = self._configured_firmware()
+        if firmware is FirmwareType.DUET:
+            self.logger.info("Using DuetDriver (RepRapFirmware) motion driver")
+            return DuetDriver()
+        return Mill()
 
     @property
     def factory_z_travel_mm(self) -> Optional[float]:

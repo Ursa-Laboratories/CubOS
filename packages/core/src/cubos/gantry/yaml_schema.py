@@ -68,11 +68,21 @@ class GantryYamlSchema(BaseModel):
 
     serial_port: str
     gantry_type: Literal["cub", "cub_xl"]
+    firmware: Literal["grbl", "duet"] = "grbl"
     cnc: CncYaml
     working_volume: WorkingVolumeYaml
     origin_policy: Literal["deck_origin", "home_origin"] = "deck_origin"
     grbl_settings: Optional[GrblSettingsYaml] = None
     instruments: Dict[str, InstrumentYamlEntry] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_grbl_settings_match_firmware(self) -> "GantryYamlSchema":
+        if self.firmware == "duet" and self.grbl_settings is not None:
+            raise ValueError(
+                "grbl_settings cannot be used with firmware: duet — Duet "
+                "motion configuration lives in the board's config.g."
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_factory_z_travel_covers_working_z_span(self) -> "GantryYamlSchema":
