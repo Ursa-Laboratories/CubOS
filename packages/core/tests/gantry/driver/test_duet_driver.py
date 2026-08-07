@@ -214,26 +214,29 @@ def test_move_to_rejects_non_finite_targets(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_jog_when_homed_uses_soft_limited_relative_move(tmp_path):
+def test_jog_when_homed_emits_absolute_soft_limited_move(tmp_path):
     fake = FakeDuetSerial(position=(10.0, 0.0, 0.0), homed=True)
     driver = make_driver(tmp_path, fake)
     driver.homed = True
     driver.jog(x=5.0, feed_rate=600)
 
     commands = sent_commands(fake)
-    assert "M120" in commands and "M121" in commands
     move = next(cmd for cmd in commands if cmd.startswith("G1 "))
     assert "H2" not in move
+    assert "X15.000" in move
+    # No modal switching: a dead jog can never leave the parser in G91.
+    assert "G91" not in commands and "M120" not in commands
     assert fake.position[0] == 15.0
 
 
 def test_jog_when_unhomed_uses_h2(tmp_path):
-    fake = FakeDuetSerial()
+    fake = FakeDuetSerial(position=(0.0, 0.0, 5.0))
     driver = make_driver(tmp_path, fake)
     driver.homed = False
     driver.jog(z=-2.0)
     move = next(cmd for cmd in sent_commands(fake) if cmd.startswith("G1"))
     assert "H2" in move
+    assert "Z3.000" in move
 
 
 def test_jog_error_raises(tmp_path):

@@ -610,42 +610,50 @@ class DuetDriver:
 
     def jog(self, x: float = 0, y: float = 0, z: float = 0,
             feed_rate: float = DEFAULT_FEED_RATE) -> None:
-        """Send a relative jog move.
+        """Jog by a relative offset, emitted as one absolute ``G1``.
 
-        When homed, a soft-limited relative ``G1`` is used. When not homed
-        (e.g. during limit recovery after a reset), ``G1 H2`` is used —
-        RRF's unhomed individual-motor move, the analogue of GRBL allowing
-        ``$J`` jogs in pre-home states. Jogs are non-blocking: RRF buffers
-        the move and acknowledges immediately.
+        The target is computed from the current object-model position, so
+        the controller's modal state is never switched to relative — a jog
+        that dies mid-sequence can therefore never leave the parser in G91
+        (the real-motion hazard the GRBL driver's enforce_wpos_mode
+        docstring warns about). Consequence: overlapping jogs anchor to
+        the position read at send time; CubOS jogs are discrete, so this
+        matches GRBL ``$J`` behavior in practice.
+
+        When homed, the move is soft-limited. When not homed (e.g. during
+        limit recovery after a reset), ``G1 H2`` is used — RRF's unhomed
+        individual-motor move; the frame is zeroed after reset, so the
+        computed absolute target is the pure displacement. Jogs are
+        non-blocking: RRF buffers the move and acknowledges immediately.
         """
         self._require_open_serial()
+        if x == 0 and y == 0 and z == 0:
+            return
+        try:
+            current = self._read_position_once()
+        except (StatusReturnError, MillConnectionError) as exc:
+            raise CommandExecutionError(
+                f"Jog failed: could not read current position ({exc})"
+            ) from exc
         parts = []
         if x != 0:
-            parts.append(f"X{x:.3f}")
+            parts.append(f"X{current.x + x:.3f}")
         if y != 0:
-            parts.append(f"Y{y:.3f}")
+            parts.append(f"Y{current.y + y:.3f}")
         if z != 0:
-            parts.append(f"Z{z:.3f}")
-        if not parts:
-            return
+            parts.append(f"Z{current.z + z:.3f}")
         move_flag = "" if self.homed else " H2"
-        commands = [
-            "M120",             # push motion state
-            "G91",
-            f"G1{move_flag} {' '.join(parts)} F{feed_rate}",
-            "M121",             # pop motion state (restores G90)
-        ]
-        for cmd in commands:
-            self.logger.debug("Jog command: %s", cmd)
-            self._write_line(cmd)
-            try:
-                reply = self._read_reply(timeout=2.0)
-            except StatusReturnError as exc:
-                raise CommandExecutionError(f"Jog failed: {exc}") from exc
-            errors = [line for line in reply if line.lower().startswith("error")]
-            if errors:
-                self.logger.error("Jog error: %s", errors)
-                raise CommandExecutionError(f"Jog failed: {'; '.join(errors)}")
+        cmd = f"G1{move_flag} {' '.join(parts)} F{feed_rate}"
+        self.logger.debug("Jog command: %s", cmd)
+        self._write_line(cmd)
+        try:
+            reply = self._read_reply(timeout=2.0)
+        except StatusReturnError as exc:
+            raise CommandExecutionError(f"Jog failed: {exc}") from exc
+        errors = [line for line in reply if line.lower().startswith("error")]
+        if errors:
+            self.logger.error("Jog error: %s", errors)
+            raise CommandExecutionError(f"Jog failed: {'; '.join(errors)}")
 
     def jog_cancel(self) -> None:
         """No-op: RRF has no jog-cancel for buffered moves.
