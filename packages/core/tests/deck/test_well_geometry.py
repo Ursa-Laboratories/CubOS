@@ -320,33 +320,33 @@ def test_deck_yaml_rejects_invalid_nested_well_geometry():
         _load_deck_yaml(yaml_str)
 
 
-# ─── load_name expansion of the new definition ───────────────────────────────
+# ─── load_name expansion carries well geometry ───────────────────────────────
 
 
-CORNING_LOAD_NAME_YAML = """
+SBS96_LOAD_NAME_YAML = """
 labware:
   plate_1:
-    load_name: corning_3526_24_wellplate
+    load_name: sbs_96_wellplate
     calibration:
       a1: { x: -17.88, y: -42.23, z: -20.0 }
-      a2: { x: 1.42, y: -42.23, z: -20.0 }
+      a2: { x: -8.88, y: -42.23, z: -20.0 }
 """
 
 
-def test_corning_3526_load_name_expands_to_expected_geometry():
-    plate = _load_deck_yaml(CORNING_LOAD_NAME_YAML)["plate_1"]
+def test_sbs_96_load_name_expands_to_expected_geometry():
+    plate = _load_deck_yaml(SBS96_LOAD_NAME_YAML)["plate_1"]
 
     assert isinstance(plate, WellPlate)
-    assert plate.model_name == "corning_3526"
-    assert plate.rows == 4
-    assert plate.columns == 6
-    assert len(plate.wells) == 24
-    assert plate.well_depth == pytest.approx(17.4)
+    assert plate.model_name == "sbs_96_wellplate"
+    assert plate.rows == 8
+    assert plate.columns == 12
+    assert len(plate.wells) == 96
+    assert plate.well_depth == pytest.approx(10.67)
     assert isinstance(plate.well_geometry, CircularWellGeometry)
-    assert plate.well_geometry.diameter == pytest.approx(15.6)
+    assert plate.well_geometry.diameter == pytest.approx(6.86)
     assert plate.well_geometry.bottom == "flat"
-    assert plate.well_cross_section_area_mm2 == pytest.approx(math.pi * 7.8**2)
-    assert plate.well_inscribed_radius_mm == pytest.approx(7.8)
+    assert plate.well_cross_section_area_mm2 == pytest.approx(math.pi * 3.43**2)
+    assert plate.well_inscribed_radius_mm == pytest.approx(3.43)
 
 
 # ─── Fluid-state layout export ───────────────────────────────────────────────

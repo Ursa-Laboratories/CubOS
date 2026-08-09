@@ -51,8 +51,3 @@ labware:
     module: cubos.deck.labware.well_plate
     class_name: WellPlate
     config: sbs_96_wellplate/SBS96WellPlate.yaml
-
-  corning_3526_24_wellplate:
-    module: cubos.deck.labware.well_plate
-    class_name: WellPlate
-    config: corning_3526_24_wellplate/Corning3526_24WellPlate.yaml
