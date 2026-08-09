@@ -7,15 +7,17 @@ one protocol file.
 ## Setup Path
 
 1. Install CubOS.
-2. If you are building your own machine, complete
+2. Prefer working in a browser over a terminal? Most of the steps below can
+   also be done point-and-click in the [Operator UI](operator-ui.md).
+3. If you are building your own machine, complete
    [Gantry Bring-Up](admin/gantry-bring-up.md).
-3. Create your gantry YAML from the right seed config and define your
+4. Create your gantry YAML from the right seed config and define your
    mounted instruments with [Set Up Gantry YAML](gantry-setup.md).
-4. Calibrate the gantry with [Calibrate Gantry](calibration.md).
-5. Place labware and define deck YAML with [Set Up Deck and Labware](deck.md).
-6. Validate and run a protocol with
+5. Calibrate the gantry with [Calibrate Gantry](calibration.md).
+6. Place labware and define deck YAML with [Set Up Deck and Labware](deck.md).
+7. Validate and run a protocol with
    [Run a Protocol with YAML](protocol-yaml.md).
-7. If something goes wrong along the way, see
+8. If something goes wrong along the way, see
    [Troubleshooting & Recovery](troubleshooting.md).
 
 ## Prerequisites
@@ -102,7 +104,61 @@ the version numbers shown in the notice.
 ```bash
 python -m pip install --upgrade pip
 python -m pip install -e "packages/core[dev]"
+python -m pip install -e services/api
 ```
+
+The first install is the CubOS runtime (`cubos`); the second is the
+`cubos_api` server that powers the [Operator UI](operator-ui.md). If you
+plan to work only from the terminal with YAML files, the `services/api`
+install is optional — but it is required before `python -m cubos_api` will
+work. Note that `services/api` needs Python 3.11+ (the core package alone
+works on 3.10).
+
+!!! note "Every new terminal: activate the venv first"
+    Everything above installs into `.venv`, so `python -m cubos_api` — and
+    every other `python -m cubos...` command in these docs — only works
+    while the virtual environment is active. Activation does not persist:
+    each new terminal window starts without it. If a command fails with
+    `No module named cubos_api` (or `No module named cubos`), re-run the
+    activation command for your platform from
+    [Installation](#installation) above — you never need to reinstall.
+
+### Build the Operator UI (browser app)
+
+The `cubos_api` server serves the Operator UI's compiled web assets from
+`apps/operator-web/dist/`. That folder is not checked into the repository —
+build it once with Node.js:
+
+1. Install [Node.js 20 LTS or newer](https://nodejs.org) (it includes
+   `npm`).
+2. From the repository root:
+
+   ```bash
+   cd apps/operator-web
+   npm ci
+   npm run build
+   cd ../..
+   ```
+
+Skip this if you work only from the terminal. If you start
+`python -m cubos_api` without building, the server still runs (the HTTP API
+works), but it logs `compiled web assets were not found` and the browser
+shows **404 Not Found** at `http://127.0.0.1:8742`. After building, start
+`python -m cubos_api` again — the server only looks for the assets at
+startup. Re-run `npm run build` whenever you pull changes that touch
+`apps/operator-web/`.
+
+### Start the Operator UI
+
+With the virtual environment active, run from the repository root:
+
+```bash
+python -m cubos_api
+```
+
+Your browser opens at `http://127.0.0.1:8742` after a moment; leave the
+terminal running. See [Use the Operator UI](operator-ui.md) for connecting
+to the gantry and everything else you can do from the browser.
 
 ### Instrument extras
 

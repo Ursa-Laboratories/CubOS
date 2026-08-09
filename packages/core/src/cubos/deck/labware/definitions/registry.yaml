@@ -18,7 +18,7 @@ labware:
     config: ursa_vial_holder/9VialHolder.yaml
 
   ursa_9_vial_grid:
-    module: deck.labware.vial_grid
+    module: cubos.deck.labware.vial_grid
     class_name: VialGrid
     config: ursa_9_vial_grid/9VialGrid.yaml
 
