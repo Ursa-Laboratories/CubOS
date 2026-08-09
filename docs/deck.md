@@ -22,7 +22,10 @@ Use this guide when labware is moved, recalibrated, or replaced.
 4. **Jog to the labware calibration points.**
 
     Use CubOS, UGS, or another G-code controller to jog the instrument to the
-    physical points that define the labware position.
+    physical points that define the labware position. The easiest way is the
+    [Operator UI](operator-ui.md#define-deck-positions-with-the-gantry),
+    which shows the live position while you jog and lets you type it
+    straight into the deck editor instead of editing YAML.
 
     For a 96-well plate, jog to A1 and record the displayed position. Then jog
     to A2 and record the displayed position.
@@ -232,9 +235,12 @@ dimensions:
 
 - `calibration.a1.z` is the plate surface or vial-rim reference used by
   protocol commands.
-- Plate `length`, `width`, `height`, and `well_depth` are optional physical
-  metadata. Plate height is not used as a motion Z value, and the current plate
-  bounding box carries the XY footprint rather than an outer Z height.
+- Plate `length`, `width`, `height`, `well_depth`, and `well_attributes` are
+  optional physical metadata. Plate height is not used as a motion Z value, and
+  the current plate bounding box carries the XY footprint rather than an outer Z
+  height. If `well_attributes` is omitted it defaults to empty: the plate
+  remains fully addressable, and existing deck files load unchanged. Consumers
+  that need a particular attribute must handle its absence.
 - Vial `height` and `diameter` are optional physical metadata. If they are
   omitted, the vial remains fully addressable and its outer bounding-box fields
   remain unset. Existing direct and holder-nested vials that specify these
@@ -242,6 +248,36 @@ dimensions:
 - Legacy holder definitions retain their fixture geometry and seat/surface
   offsets. Those offsets continue to determine nested labware Z for existing
   deck files.
+
+### Per-Well Attributes
+
+`well_attributes` is an open mapping of per-well physical facts. It exists so a
+plate can record whatever its drawing specifies without a schema change:
+
+```yaml
+well_attributes:
+  diameter: 6.86
+  bottom: flat
+```
+
+Values may be numbers, strings, or booleans. No key is required and none is
+reserved — CubOS does not interpret the contents, and no motion, calibration,
+or protocol behavior reads them. A plate that omits the block entirely gets an
+empty mapping.
+
+Because the mapping is open, a misspelled key is stored rather than rejected.
+That is the deliberate trade for not having to change the schema for every new
+measurement; treat the keys as a convention between whoever writes the
+definition and whoever consumes it. `diameter` in millimeters is the
+established key — the fluid-state layout payload reads it, and
+`sbs_96_wellplate` supplies it.
+
+The same block is accepted on a top-level plate and on a plate nested inside a
+holder.
+
+For arithmetic, read numeric attributes through `WellPlate.well_attribute_float(key)`,
+which returns `None` when the key is absent or its value is not a number,
+rather than indexing `well_attributes` directly.
 
 7. **Validate before running hardware.**
 

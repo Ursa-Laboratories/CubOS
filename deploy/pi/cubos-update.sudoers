@@ -1,0 +1,2 @@
+cub ALL=(root) NOPASSWD: /usr/bin/systemd-run --uid=cub --unit=cubos-update --collect /home/cub/CubOS/deploy/pi/update.sh *
+cub ALL=(root) NOPASSWD: /usr/bin/systemctl restart cubos

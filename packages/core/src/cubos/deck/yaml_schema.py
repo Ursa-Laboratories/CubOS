@@ -8,6 +8,7 @@ from typing import Annotated, Dict, List, Literal, Mapping, Optional, Type, Unio
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from .labware.container_role import KNOWN_CONTAINER_ROLES
+from .labware.labware import WellAttributeValue
 
 
 def _validate_optional_role(value: Optional[str]) -> Optional[str]:
@@ -54,6 +55,9 @@ class WellPlateYamlEntry(BaseModel):
     # geometry and skirt thickness. External analysis consumers compute the
     # sample-floor Z as the deck-frame rim Z minus this depth.
     well_depth: Optional[float] = Field(default=None, gt=0)
+    # Optional per-well lateral geometry; omitting it leaves the well
+    # cross-section unspecified and the plate fully addressable.
+    well_attributes: Dict[str, WellAttributeValue] = Field(default_factory=dict)
     calibration: _YamlCalibrationPoints
     x_offset: float = Field(..., gt=0)
     y_offset: float = Field(..., gt=0)
@@ -261,6 +265,10 @@ class NestedWellPlateYamlEntry(BaseModel):
     width: Optional[float] = Field(default=None, gt=0)
     height: Optional[float] = Field(default=None, gt=0)
     well_depth: Optional[float] = Field(default=None, gt=0)
+    # Mirrors WellPlateYamlEntry — this model sets `extra="forbid"`
+    # independently, so a plate nested inside a holder would otherwise be
+    # unable to declare `well_attributes` at all.
+    well_attributes: Dict[str, WellAttributeValue] = Field(default_factory=dict)
     calibration: _YamlCalibrationPoints
     x_offset: float = Field(..., gt=0)
     y_offset: float = Field(..., gt=0)
