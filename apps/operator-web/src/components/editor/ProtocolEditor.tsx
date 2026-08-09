@@ -1175,30 +1175,31 @@ function MethodOptionsField({
           options={["false", "true"]}
           onChange={(v) => setDetectSurface(v === "true")}
         />
-        <NumberField
-          id={`${idPrefix}-surface-search-step`}
-          name={`${namePrefix}_surface_search_step`}
-          label="Surface search step (mm)"
-          value={Number(options.surface_search_step ?? 0.5)}
-          onChange={(v) => update("surface_search_step", v)}
-          disabled={!detectSurface}
-        />
-        <NumberField
-          id={`${idPrefix}-surface-force-threshold`}
-          name={`${namePrefix}_surface_force_threshold`}
-          label="Surface force threshold (N)"
-          value={Number(options.surface_force_threshold ?? 0.01)}
-          onChange={(v) => update("surface_force_threshold", v)}
-          disabled={!detectSurface}
-        />
-        <NumberField
-          id={`${idPrefix}-surface-search-max-travel`}
-          name={`${namePrefix}_surface_search_max_travel`}
-          label="Surface search max travel (mm)"
-          value={Number(options.surface_search_max_travel ?? 10)}
-          onChange={(v) => update("surface_search_max_travel", v)}
-          disabled={!detectSurface}
-        />
+        {detectSurface && (
+          <>
+            <NumberField
+              id={`${idPrefix}-surface-search-step`}
+              name={`${namePrefix}_surface_search_step`}
+              label="Surface search step (mm)"
+              value={Number(options.surface_search_step ?? 0.5)}
+              onChange={(v) => update("surface_search_step", v)}
+            />
+            <NumberField
+              id={`${idPrefix}-surface-force-threshold`}
+              name={`${namePrefix}_surface_force_threshold`}
+              label="Surface force threshold (N)"
+              value={Number(options.surface_force_threshold ?? 0.01)}
+              onChange={(v) => update("surface_force_threshold", v)}
+            />
+            <NumberField
+              id={`${idPrefix}-surface-search-max-travel`}
+              name={`${namePrefix}_surface_search_max_travel`}
+              label="Surface search max travel (mm)"
+              value={Number(options.surface_search_max_travel ?? 10)}
+              onChange={(v) => update("surface_search_max_travel", v)}
+            />
+          </>
+        )}
       </div>
       <div style={methodOptionsHintStyle}>
         {detectSurface
