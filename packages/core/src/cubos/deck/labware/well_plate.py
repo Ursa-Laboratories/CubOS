@@ -4,7 +4,7 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from .labware import BoundingBoxGeometry, Coordinate3D, Labware, WellGeometry
+from .labware import BoundingBoxGeometry, Coordinate3D, Labware, WellAttributeValue
 
 
 class WellPlate(Labware):
@@ -44,13 +44,15 @@ class WellPlate(Labware):
             "from the deck-frame rim Z."
         ),
     )
-    well_geometry: Optional[WellGeometry] = Field(
-        None,
+    well_attributes: Dict[str, WellAttributeValue] = Field(
+        default_factory=dict,
         description=(
-            "Optional per-well lateral geometry (shape, inner dimensions, "
-            "bottom profile). Omitted means the well cross-section is "
-            "unspecified: the plate stays fully addressable, and consumers "
-            "needing an area or usable radius must handle None."
+            "Free-form per-well physical attributes, e.g. "
+            "``{diameter: 6.86, bottom: flat}``. Open by design: record "
+            "whatever a plate's drawing specifies without a schema change. "
+            "CubOS does not interpret these -- no key is required, and no "
+            "motion or protocol behavior reads them. Consumers look up the "
+            "keys they need and must handle absence."
         ),
     )
     rows: int = Field(
@@ -145,14 +147,17 @@ class WellPlate(Labware):
         )
         return self
 
-    @property
-    def well_cross_section_area_mm2(self) -> float | None:
-        """Well cross-section in mm^2, or None when geometry is unspecified."""
-        return self.well_geometry.cross_section_area_mm2 if self.well_geometry else None
+    def well_attribute_float(self, key: str) -> float | None:
+        """Return a numeric well attribute, or None if absent or non-numeric.
 
-    @property
-    def well_inscribed_radius_mm(self) -> float | None:
-        return self.well_geometry.inscribed_radius_mm if self.well_geometry else None
+        The attribute bag is open, so a value may be missing or carry a
+        non-numeric type. Callers doing arithmetic go through this rather
+        than indexing ``well_attributes`` directly.
+        """
+        value = self.well_attributes.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
 
     def get_location(self, location_id: str | None = None) -> Coordinate3D:
         if location_id is None:

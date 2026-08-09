@@ -20,7 +20,6 @@ from typing import Any, Iterator, Mapping, Optional, TypedDict
 import yaml
 
 from cubos.deck.deck import Deck, DeckLabwareTarget
-from cubos.deck.labware.labware import CircularWellGeometry
 from cubos.deck.labware.vial import Vial
 from cubos.deck.labware.vial_grid import VialGrid
 from cubos.deck.labware.well_plate import WellPlate
@@ -1071,15 +1070,11 @@ def _layout_entry(
             "width": _optional_float(labware.width),
             "height": _optional_float(labware.height),
             "well_depth": _optional_float(labware.well_depth),
-            # Only circular wells have a meaningful diameter. Rectangular
-            # wells stay None here rather than gaining new keys: this payload
-            # is a cross-repo contract consumed by Zoo, so extending its shape
-            # is a separate decision for when a consumer actually needs it.
-            "diameter": _optional_float(
-                labware.well_geometry.diameter
-                if isinstance(labware.well_geometry, CircularWellGeometry)
-                else None
-            ),
+            # Read out of the open attribute bag, staying None when the
+            # plate does not record a diameter. This payload is a cross-repo
+            # contract consumed by Zoo, so no new keys are introduced
+            # alongside the populated one.
+            "diameter": labware.well_attribute_float("diameter"),
         }
         capacity_ul = float(labware.capacity_ul)
         working_volume_ul = float(labware.working_volume_ul)
