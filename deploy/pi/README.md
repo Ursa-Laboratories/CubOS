@@ -9,8 +9,14 @@ execute with elevated privileges. Root is borrowed only for the single
 The script checks out the requested revision,
 reinstalls the editable CubOS packages, rebuilds the Operator UI when needed,
 restarts CubOS, and verifies API health. A failed install, build, restart, or
-health check rolls the checkout and Python packages back to the previous
-revision.
+health check rolls the checkout, Python packages, and (when it changed)
+Operator UI bundle back to the previous revision, then re-verifies health.
+
+Updater exit codes, visible in the journal: `0` update succeeded, `1` update
+failed and rollback succeeded, `2` rollback failed (manual recovery required),
+`3` another update already holds the lock, `64` usage error. A lock in the
+repo (`.cubos-update.lock`) serializes updates; a lock left by a dead process
+is reclaimed automatically.
 
 ## Assumptions
 
