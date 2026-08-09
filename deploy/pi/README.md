@@ -2,7 +2,11 @@
 
 The Operator UI checks `origin/main` for new CubOS revisions. When an operator
 chooses **Update & restart**, the API launches `update.sh` as a detached
-`cubos-update` systemd unit. The script checks out the requested revision,
+`cubos-update` systemd unit running as the service user (`cub`), never as
+root — repo code (git checkout, pip build hooks, npm scripts) must not
+execute with elevated privileges. Root is borrowed only for the single
+`systemctl restart cubos` command via its own sudoers entry.
+The script checks out the requested revision,
 reinstalls the editable CubOS packages, rebuilds the Operator UI when needed,
 restarts CubOS, and verifies API health. A failed install, build, restart, or
 health check rolls the checkout and Python packages back to the previous
@@ -44,7 +48,9 @@ CUBOS_UPDATE_SERVICE=cubos
 For a non-default script invocation, `update.sh` also accepts
 `CUBOS_REPO`, `CUBOS_VENV`, `CUBOS_SERVICE`, and `CUBOS_HEALTH_URL`. Update the
 absolute paths and service name in `cubos-update.sudoers` as well; sudo command
-matching is exact. Validate the edited file with `visudo` before installing it.
+matching is exact. The `--uid=cub` value must name the account the CubOS
+service runs as (the API passes its own user). Validate the edited file with
+`visudo` before installing it.
 
 After changing the API service environment, reload systemd and restart CubOS:
 

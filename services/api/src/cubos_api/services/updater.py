@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import getpass
 import os
 import shutil
 import subprocess
@@ -159,10 +160,15 @@ def apply_update(target_sha: str) -> None:
 
     try:
         if shutil.which("systemd-run"):
+            # Run the updater as the service user, never as root: repo code
+            # (pip/npm build hooks) must not execute with elevated privileges.
+            # Root is only borrowed inside the script for the single
+            # "systemctl restart" command via its own sudoers entry.
             subprocess.run(
                 [
                     "sudo",
                     "systemd-run",
+                    f"--uid={getpass.getuser()}",
                     "--unit=cubos-update",
                     "--collect",
                     str(script),

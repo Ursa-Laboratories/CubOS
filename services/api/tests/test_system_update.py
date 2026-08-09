@@ -194,6 +194,36 @@ def test_apply_update_returns_503_when_script_is_missing(monkeypatch):
     assert response.json() == {"detail": "update script not found"}
 
 
+def test_systemd_launch_runs_updater_as_service_user(monkeypatch, tmp_path):
+    """The transient unit must never run repo code as root."""
+    script = tmp_path / "update.sh"
+    script.write_text("#!/bin/bash\n")
+    settings = get_settings()
+    monkeypatch.setattr(settings, "update_script", script)
+    monkeypatch.setattr(updater.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(updater.getpass, "getuser", lambda: "cub")
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        updater.subprocess,
+        "run",
+        lambda command, **kwargs: commands.append(command),
+    )
+
+    updater.apply_update(LATEST_SHA)
+
+    assert commands == [
+        [
+            "sudo",
+            "systemd-run",
+            "--uid=cub",
+            "--unit=cubos-update",
+            "--collect",
+            str(script),
+            LATEST_SHA,
+        ]
+    ]
+
+
 def test_run_manager_exposes_active_run_id():
     manager = get_run_manager()
     assert manager.active_run_id is None
