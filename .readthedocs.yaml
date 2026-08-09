@@ -11,6 +11,6 @@ mkdocs:
 python:
   install:
     - method: pip
-      path: .
+      path: packages/core
       extra_requirements:
         - docs
