@@ -750,7 +750,7 @@ export default function CalibrationWizard({
           <div>
             <h2 style={{ margin: 0, fontSize: 18, color: theme.color.ink, letterSpacing: "-0.01em" }}>Calibrate gantry</h2>
             <div style={{ marginTop: 3, fontSize: 12, color: theme.color.textMuted }}>
-              {filename || "No file selected"} · {isMulti ? "multi-instrument board" : originPolicy === "home_origin" ? "single-instrument home origin" : "single-instrument deck origin"}
+              {filename || "No file selected"} · {isMulti ? "multi-instrument board" : instruments.length === 0 ? "no instruments configured" : originPolicy === "home_origin" ? "single-instrument home origin" : "single-instrument deck origin"}
             </div>
           </div>
           <div style={headerActionsStyle}>
@@ -813,6 +813,11 @@ export default function CalibrationWizard({
                   <Readout label="Instruments" value={String(instruments.length)} />
                   <Readout label="Current WPos" value={current ? `${current.x.toFixed(3)}, ${current.y.toFixed(3)}, ${current.z.toFixed(3)}` : "Unavailable"} />
                 </div>
+                {instruments.length === 0 && (
+                  <div style={noInstrumentsStyle}>
+                    Add and save at least one mounted instrument in the Gantry configuration before calibrating.
+                  </div>
+                )}
                 <div style={fieldRowStyle}>
                   <label style={fieldStyle}>
                     <span style={labelStyle}>Output YAML</span>
@@ -1651,6 +1656,11 @@ const alarmButtonStyle: React.CSSProperties = {
 
 const noteStyle: React.CSSProperties = {
   ...theme.notice.info,
+  marginBottom: 10,
+};
+
+const noInstrumentsStyle: React.CSSProperties = {
+  ...theme.notice.warning,
   marginBottom: 10,
 };
 
