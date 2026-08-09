@@ -341,6 +341,93 @@ describe("GantryPositionWidget manual move safety", () => {
     expect(screen.getByRole("button", { name: "Unlock ($X)" })).toBeInTheDocument();
   });
 
+  it("hides Pull off limit for non-limit alarms even with a known jog direction", () => {
+    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const widget = (pos: GantryPosition) => (
+      <GantryPositionWidget
+        position={pos}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />
+    );
+    const { rerender } = render(widget(position()));
+
+    fireEvent.mouseDown(screen.getByTitle("X+"));
+    fireEvent.mouseUp(screen.getByTitle("X+"));
+
+    // ALARM:3 is abort-during-cycle (e-stop / reset) — the gantry is not on
+    // a limit switch, so an automatic 5 mm pull-off move must not be offered.
+    rerender(widget(position({ status: "ALARM:3" })));
+
+    expect(screen.queryByRole("button", { name: "Pull off limit" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Unlock ($X)" })).toBeInTheDocument();
+  });
+
+  it("re-paces to the new segment on a direction change mid-hold", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(
+      async (input) => {
+        if (requestPath(input) === "/api/v1/gantry/jog-cancel") {
+          return jsonResponse(position());
+        }
+        return jsonResponse({ status: "ok" });
+      },
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={workingVolume}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    const jogBodies = () =>
+      fetchMock.mock.calls
+        .filter(([input]) => requestPath(input) === "/api/v1/gantry/jog")
+        .map(([, init]) => JSON.parse(String(init?.body)));
+
+    // Hold Z at the default 0.5 mm step (150 ms pace), then press X with a
+    // 20 mm step (480 ms pace) without releasing. The repeats must follow
+    // the 20 mm segment's pace — 20 mm jogs fired at the 0.5 mm cadence is
+    // exactly the backlog overrun this pacing exists to prevent.
+    fireEvent.change(screen.getByLabelText("XY mm"), { target: { value: "20" } });
+    fireEvent.mouseDown(screen.getByTitle("Z+"));
+
+    await vi.advanceTimersByTimeAsync(100);
+    expect(jogBodies()).toEqual([{ x: 0, y: 0, z: 0.5 }]);
+
+    fireEvent.mouseDown(screen.getByTitle("X+"));
+    await vi.advanceTimersByTimeAsync(10);
+    expect(jogBodies()).toEqual([
+      { x: 0, y: 0, z: 0.5 },
+      { x: 20, y: 0, z: 0 },
+    ]);
+
+    // Well past the old 150 ms cadence but before the 20 mm pace elapses:
+    // no further sends.
+    await vi.advanceTimersByTimeAsync(440);
+    expect(jogBodies()).toHaveLength(2);
+
+    // After the 20 mm pace (480 ms from its send) the next repeat fires.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(jogBodies()).toHaveLength(3);
+
+    fireEvent.mouseUp(screen.getByTitle("X+"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(
+      fetchMock.mock.calls.some(([input]) => requestPath(input) === "/api/v1/gantry/jog-cancel"),
+    ).toBe(true);
+    vi.useRealTimers();
+  });
+
   it("paces held jog repeats to the segment execution time", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(async (input: string | URL | Request) => {

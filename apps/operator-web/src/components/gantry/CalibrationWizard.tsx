@@ -731,26 +731,39 @@ export default function CalibrationWizard({
 
   const startJog = (x: number, y: number, z: number) => {
     if (busy || alarmRecoveryMessage || recoveryInProgress.current) return;
+    const heldBefore = jogHeld.current !== null;
     jogHeld.current = { x, y, z };
+    if (heldBefore && jogPumpActive.current) {
+      // Direction change mid-hold: hand the new delta to the pump instead
+      // of firing immediately — an immediate send would repeat at the
+      // previous segment's pace, and with soft limits off during
+      // calibration that backlog runs the gantry into the hard-limit
+      // switches. wake() cuts the remaining sleep so the new direction
+      // still starts promptly.
+      jogPacer.wake();
+      return;
+    }
     if (!jogPumpActive.current) {
       jogRequestCount.current = 0;
     }
-    // The first jog of a press always sends immediately — a distinct click
+    // The first jog of a distinct press always sends immediately — a click
     // must never wait behind a previous press's pacing.
     const first = jogRef.current(x, y, z);
     if (jogPumpActive.current) return;
     jogPumpActive.current = true;
     const pump = async () => {
       try {
+        let sent = { x, y, z };
         let ok = await first;
         while (ok && jogHeld.current) {
-          // Held repeats stay one-in-flight and paced to the segment's
-          // execution time (see jogPacing.ts) — soft limits are off during
-          // calibration, so an unbounded jog backlog here runs the gantry
-          // into the hard-limit switches.
-          await jogPacer.sleep(jogPaceMs(x, y, z));
+          // Held repeats stay one-in-flight, paced by the segment actually
+          // sent last (the held delta can change mid-hold) — soft limits
+          // are off during calibration, so an unbounded jog backlog here
+          // runs the gantry into the hard-limit switches.
+          await jogPacer.sleep(jogPaceMs(sent.x, sent.y, sent.z));
           const delta = jogHeld.current;
           if (!delta) break;
+          sent = delta;
           ok = await jogRef.current(delta.x, delta.y, delta.z);
         }
         if (!ok) {

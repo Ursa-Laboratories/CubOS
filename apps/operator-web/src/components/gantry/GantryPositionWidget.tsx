@@ -66,6 +66,7 @@ export default function GantryPositionWidget({
   const connected = configSelected && (position?.connected ?? false);
   const status = position?.status ?? "Not connected";
   const isAlarm = status.toLowerCase().includes("alarm");
+  const isLimitAlarm = isAlarm && looksLikeLimitAlarm(status);
   const isHold = status.toLowerCase().startsWith("hold");
   const isMoving = status === "Run" || status === "Jog";
   const calibrationInterrupted = connected && !calibrationOpen && (position?.calibration_active ?? false);
@@ -143,22 +144,38 @@ export default function GantryPositionWidget({
   }, [jogPacer]);
 
   const startJog = useCallback((x: number, y: number, z: number) => {
+    const heldBefore = jogHeld.current !== null;
     jogHeld.current = { x, y, z };
+    if (heldBefore && jogPumpActive.current) {
+      // Direction change mid-hold (multi-key / multi-touch): hand the new
+      // delta to the pump instead of firing immediately — an immediate send
+      // would repeat at the previous segment's pace, and a larger step at a
+      // smaller step's cadence re-creates exactly the backlog this pacing
+      // exists to prevent. wake() cuts the remaining sleep so the new
+      // direction still starts promptly.
+      jogPacer.wake();
+      return;
+    }
     if (!jogPumpActive.current) {
       jogRequestCount.current = 0;
     }
-    // The first jog of a press always sends immediately — a distinct click
+    // The first jog of a distinct press always sends immediately — a click
     // must never wait behind a previous press's pacing.
     const first = jogRef.current(x, y, z);
     if (jogPumpActive.current) return;
     jogPumpActive.current = true;
     const pump = async () => {
       try {
+        let sent = { x, y, z };
         let ok = await first;
         while (ok && jogHeld.current) {
-          await jogPacer.sleep(jogPaceMs(x, y, z));
+          // Pace by the segment actually sent last — the held delta can
+          // change mid-hold, and repeats must never outpace the execution
+          // time of the segment they follow.
+          await jogPacer.sleep(jogPaceMs(sent.x, sent.y, sent.z));
           const delta = jogHeld.current;
           if (!delta) break;
+          sent = delta;
           ok = await jogRef.current(delta.x, delta.y, delta.z);
         }
         if (!ok) {
@@ -299,7 +316,7 @@ export default function GantryPositionWidget({
 
   const handlePullOff = async () => {
     const delta = lastJogDelta.current;
-    if (!connected || !delta || pullOffBusy || isRunning) return;
+    if (!connected || !delta || !isLimitAlarm || pullOffBusy || isRunning) return;
     stopJog();
     setPullOffBusy(true);
     try {
@@ -501,11 +518,11 @@ export default function GantryPositionWidget({
         }}>
           <span style={{ color: theme.color.danger, fontWeight: 700, fontSize: 13 }}>ALARM</span>
           <span style={{ color: theme.color.dangerText, fontSize: 11 }}>
-            {status} — {lastJogDelta.current
+            {status} — {isLimitAlarm && lastJogDelta.current
               ? "Pull off backs away from the limit switch automatically, or Unlock to clear and jog back manually."
               : "Unlock to clear, then jog back to safety."}
           </span>
-          {lastJogDelta.current && (
+          {isLimitAlarm && lastJogDelta.current && (
             <button
               onClick={handlePullOff}
               disabled={pullOffBusy || jogBusy || isRunning}
@@ -524,7 +541,7 @@ export default function GantryPositionWidget({
             style={{
               ...theme.btn.danger,
               ...theme.btnSmall,
-              marginLeft: lastJogDelta.current ? undefined : "auto",
+              marginLeft: isLimitAlarm && lastJogDelta.current ? undefined : "auto",
             }}
           >
             Unlock ($X)
@@ -913,6 +930,17 @@ function parseAxisTarget(value: string): number | null {
   if (trimmed === "") return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+// Only GRBL limit trips warrant an automatic pull-off move: ALARM:1 (hard
+// limit) and ALARM:2 (soft limit), or a status carrying "limit" / an active
+// limit pin report ("Pn:"). Other alarms — abort during cycle (E-stop /
+// reset, ALARM:3), probe failures, homing failures — do not mean the gantry
+// is sitting on a switch, and blindly jogging 5 mm in response to them is
+// the wrong reflex.
+function looksLikeLimitAlarm(status: string): boolean {
+  const lower = status.toLowerCase();
+  return /alarm:\s*[12]\b/.test(lower) || lower.includes("limit") || lower.includes("pn:");
 }
 
 function errorMessage(error: unknown): string {
