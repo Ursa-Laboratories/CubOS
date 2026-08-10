@@ -210,6 +210,20 @@ class _SoftLimitAwareFakeGantry(_FakeGantry):
         self.soft_limits_are_enabled = enabled
 
 
+class _BothLimitsAwareFakeGantry(_SoftLimitAwareFakeGantry):
+    def __init__(self, config: dict):
+        super().__init__(config)
+        self.hard_limits_are_enabled = False
+
+    def hard_limits_enabled(self) -> bool | None:
+        self.calls.append(("hard_limits_enabled",))
+        return self.hard_limits_are_enabled
+
+    def set_hard_limits_enabled(self, enabled: bool) -> None:
+        self.calls.append(("set_hard_limits_enabled", enabled))
+        self.hard_limits_are_enabled = enabled
+
+
 class _SoftLimitRejectingFakeGantry(_FakeGantry):
     def __init__(self, config: dict):
         super().__init__(config)
@@ -804,6 +818,52 @@ def test_run_calibration_temporarily_disables_stale_soft_limits(tmp_path):
     )
     assert any("Temporarily disabling GRBL soft limits" in m for m in messages)
     assert any("Restoring GRBL soft limits" in m for m in messages)
+
+
+def test_run_calibration_enables_hard_limits_for_origin_jog(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+    messages: list[str] = []
+
+    result = run_calibration(
+        path,
+        output=messages.append,
+        gantry_factory=_BothLimitsAwareFakeGantry,
+        key_reader=_key_reader([("\r", 1)]),
+        stdin_flusher=lambda: None,
+    )
+
+    assert isinstance(result, DeckOriginCalibrationResult)
+    calls = _BothLimitsAwareFakeGantry.instance.calls
+    enable_call = ("set_hard_limits_enabled", True)
+    revert_call = ("set_hard_limits_enabled", False)
+    assert enable_call in calls
+    assert revert_call in calls
+    assert calls.index(enable_call) < calls.index(revert_call)
+    # Soft limits come back on before the hard-limit backstop is dropped.
+    assert calls.index(("set_soft_limits_enabled", True)) < calls.index(revert_call)
+    assert any("Enabling GRBL hard limits" in m for m in messages)
+    assert any("Restoring pre-calibration GRBL hard limits" in m for m in messages)
+
+
+def test_run_calibration_leaves_hard_limits_alone_when_already_on(tmp_path):
+    path = _write_gantry(tmp_path / "gantry.yaml")
+
+    class _HardLimitsOnFakeGantry(_BothLimitsAwareFakeGantry):
+        def __init__(self, config: dict):
+            super().__init__(config)
+            self.hard_limits_are_enabled = True
+
+    result = run_calibration(
+        path,
+        output=lambda _message: None,
+        gantry_factory=_HardLimitsOnFakeGantry,
+        key_reader=_key_reader([("\r", 1)]),
+        stdin_flusher=lambda: None,
+    )
+
+    assert isinstance(result, DeckOriginCalibrationResult)
+    calls = _HardLimitsOnFakeGantry.instance.calls
+    assert not any(call[0] == "set_hard_limits_enabled" for call in calls)
 
 
 def test_run_calibration_continues_after_error_15_jog_rejection(tmp_path):

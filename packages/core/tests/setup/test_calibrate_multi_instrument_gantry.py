@@ -247,6 +247,7 @@ class _SoftLimitEnabledFakeGantry(_FakeGantry):
     def __init__(self, config: dict):
         super().__init__(config)
         self.soft_limits_are_enabled = True
+        self.hard_limits_are_enabled = False
 
     def soft_limits_enabled(self) -> bool | None:
         self.calls.append(("soft_limits_enabled",))
@@ -255,6 +256,14 @@ class _SoftLimitEnabledFakeGantry(_FakeGantry):
     def set_soft_limits_enabled(self, enabled: bool) -> None:
         self.calls.append(("set_soft_limits_enabled", enabled))
         self.soft_limits_are_enabled = enabled
+
+    def hard_limits_enabled(self) -> bool | None:
+        self.calls.append(("hard_limits_enabled",))
+        return self.hard_limits_are_enabled
+
+    def set_hard_limits_enabled(self, enabled: bool) -> None:
+        self.calls.append(("set_hard_limits_enabled", enabled))
+        self.hard_limits_are_enabled = enabled
 
 
 class _SoftLimitProgrammingFailsFakeGantry(_FakeGantry):
@@ -440,6 +449,15 @@ def test_multi_instrument_calibration_disables_stale_soft_limits_during_jogs(tmp
         calls.index(("set_work_coordinates", 0.0, 0.0, None)),
     )
     assert any("Temporarily disabling GRBL soft limits" in m for m in messages)
+    # Hard limits are enforced for the same window and reverted after the
+    # soft limits come back on.
+    enable_hard = ("set_hard_limits_enabled", True)
+    revert_hard = ("set_hard_limits_enabled", False)
+    assert enable_hard in calls
+    assert revert_hard in calls
+    assert calls.index(enable_hard) < calls.index(revert_hard)
+    assert calls.index(restore_call) < calls.index(revert_hard)
+    assert any("Enabling GRBL hard limits" in m for m in messages)
 
 
 def test_multi_instrument_calibration_accepts_block_height_for_z_reference(tmp_path):
