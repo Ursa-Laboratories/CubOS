@@ -311,21 +311,26 @@ export default function CalibrationWizard({
   const reset = async () => {
     if (busy) return;
     stopJog();
+    let restoreError: string | null = null;
     if (connected) {
       try {
         await gantryApi.restoreCalibrationSoftLimits();
       } catch (err) {
-        setError(
-          `Failed to restore soft limits: ${err instanceof Error ? err.message : String(err)}. Reconnect before running protocols.`,
-        );
-        return;
+        restoreError = `Failed to restore soft limits: ${err instanceof Error ? err.message : String(err)}. Reconnect before running protocols.`;
       }
     }
+    // Reset even when the restore failed (e.g. the serial link died after
+    // a limit crash) — refusing traps the operator in a wizard whose every
+    // exit needs a controller round-trip. The session still tracks the
+    // un-restored state and the gantry widget's CALIBRATION INTERRUPTED
+    // banner offers the retry.
     resetFlow();
+    if (restoreError) {
+      setError(restoreError);
+    }
   };
 
   const close = async () => {
-    if (busy) return;
     stopJog();
     if (!connected) {
       onClose();
@@ -333,11 +338,11 @@ export default function CalibrationWizard({
     }
     try {
       await gantryApi.restoreCalibrationSoftLimits();
-    } catch (err) {
-      setError(
-        `Failed to restore soft limits: ${err instanceof Error ? err.message : String(err)}. Reconnect before running protocols.`,
-      );
-      return;
+    } catch {
+      // Closing must never be gated on a controller round-trip. If the
+      // restore failed, calibration_active stays true on the session and
+      // the gantry widget's CALIBRATION INTERRUPTED banner takes over
+      // until soft limits are actually restored.
     }
     onClose();
   };
@@ -814,8 +819,7 @@ export default function CalibrationWizard({
             </button>
             <button
               onClick={close}
-              disabled={busy}
-              style={buttonStateStyle(closeButtonStyle, busy)}
+              style={closeButtonStyle}
               aria-label="Close calibration"
             >
               ×
