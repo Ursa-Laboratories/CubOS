@@ -592,7 +592,7 @@ describe("CubOS editor interactions", () => {
     await waitFor(() => expect(screen.getByDisplayValue("Renamed Plate")).toBeInTheDocument());
   });
 
-  it("imports a deck config into panda-deck.yaml", async () => {
+  it("imports a deck config into cub_deck.yaml", async () => {
     const user = userEvent.setup();
     const state = createState();
     installFetchMock(state);
@@ -603,9 +603,9 @@ describe("CubOS editor interactions", () => {
     await importConfig(user, "Import deck config", "deck.yaml");
 
     expect(await screen.findByDisplayValue("Deck Plate")).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByPlaceholderText("panda-deck.yaml")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByPlaceholderText("cub_deck.yaml")).toBeInTheDocument());
     expect(
-      state.decks["panda-deck.yaml"]?.labware.map(({ key, config }) => ({ key, config })),
+      state.decks["cub_deck.yaml"]?.labware.map(({ key, config }) => ({ key, config })),
     ).toEqual(
       state.decks["deck.yaml"]?.labware.map(({ key, config }) => ({ key, config })),
     );
@@ -904,7 +904,7 @@ describe("CubOS editor interactions", () => {
         method: "POST",
         body: JSON.stringify({
           gantry_file: "cubos.yaml",
-          deck_file: "panda-deck.yaml",
+          deck_file: "cub_deck.yaml",
           protocol_file: "move.yaml",
         }),
       }),
@@ -1087,7 +1087,7 @@ describe("CubOS editor interactions", () => {
         method: "POST",
         body: JSON.stringify({
           gantry_file: "cubos.yaml",
-          deck_file: "panda-deck.yaml",
+          deck_file: "cub_deck.yaml",
           protocol_file: "move.yaml",
         }),
       }),
@@ -1308,7 +1308,7 @@ describe("CubOS editor interactions", () => {
 
     // Cancelling the confirm keeps the edits and the current file.
     await importConfig(user, "Import deck config", "deck2.yaml");
-    expect(await screen.findByRole("alertdialog")).toHaveTextContent("panda-deck.yaml");
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("cub_deck.yaml");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByDisplayValue("Edited Plate")).toBeInTheDocument();
 
@@ -1473,7 +1473,7 @@ describe("CubOS editor interactions", () => {
     const [, submitInit] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/runs")!;
     expect(JSON.parse(String(submitInit?.body))).toMatchObject({
       gantry_file: "cubos.yaml",
-      deck_file: "panda-deck.yaml",
+      deck_file: "cub_deck.yaml",
       protocol_file: "move.yaml",
       state: { fluid_state_id: 5 },
     });
@@ -1548,7 +1548,7 @@ describe("CubOS editor interactions", () => {
     ));
     const [, submitInit] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/runs")!;
     expect(JSON.parse(String(submitInit?.body))).toMatchObject({
-      deck_file: "panda-deck.yaml",
+      deck_file: "cub_deck.yaml",
       protocol_file: "move.yaml",
       state: {
         initial_state: {
