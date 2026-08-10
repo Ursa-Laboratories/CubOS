@@ -114,6 +114,7 @@ class GantrySession:
         self._connected_gantry_config: dict[str, Any] | None = None
         self._connected_gantry_filename: str | None = None
         self._calibration_restore_soft_limits = False
+        self._calibration_restore_hard_limits = False
         self._calibration_jog_bypass_working_volume = False
         self._move_error: str | None = None
         self._jog_cancel_generation = 0
@@ -137,6 +138,7 @@ class GantrySession:
         return bool(
             self._calibration_jog_bypass_working_volume
             or self._calibration_restore_soft_limits
+            or self._calibration_restore_hard_limits
         )
 
     @property
@@ -185,6 +187,7 @@ class GantrySession:
             self._gantry = staged
             self._calibration_warning = calibration_warning
             self._calibration_restore_soft_limits = False
+            self._calibration_restore_hard_limits = False
             self._calibration_jog_bypass_working_volume = False
             self._connected_gantry_config = copy.deepcopy(config)
             self._connected_gantry_filename = filename
@@ -439,6 +442,9 @@ class GantrySession:
                 tolerance_mm=tolerance_mm,
             )
             self._calibration_restore_soft_limits = False
+            self._restore_calibration_hard_limits_if_needed_locked(
+                keep_if_configured=True
+            )
             self._calibration_jog_bypass_working_volume = False
             if self._connected_gantry_config is not None:
                 grbl_settings = dict(
@@ -466,6 +472,16 @@ class GantrySession:
     def prepare_calibration_origin(self) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
             self._apply_calibration_grbl_baseline_locked()
+            # Hard limits ($21) are the only motion backstop while soft
+            # limits are disabled below, and hobby controllers ship with
+            # them off — without this, a jog past a travel end grinds and
+            # silently skips steps, corrupting the calibration being taken.
+            # Enforced for the calibration window only; finalize/abort
+            # restore the prior value (finalize keeps $21=1 when the gantry
+            # YAML configures hard_limits).
+            if gantry.hard_limits_enabled() is False:
+                gantry.set_hard_limits_enabled(True)
+                self._calibration_restore_hard_limits = True
             gantry.home()
             gantry.enforce_work_position_reporting()
             gantry.activate_work_coordinate_system("G54")
@@ -490,6 +506,7 @@ class GantrySession:
     def restore_calibration_soft_limits(self) -> GantryPositionSnapshot:
         with self._locked_gantry():
             self._restore_calibration_soft_limits_if_needed_locked()
+            self._restore_calibration_hard_limits_if_needed_locked()
             self._calibration_jog_bypass_working_volume = False
         return self.position()
 
@@ -532,6 +549,9 @@ class GantrySession:
                 if homing_pull_off_mm is not None:
                     homing_pull_off_mm = float(homing_pull_off_mm)
                 self._calibration_restore_soft_limits = False
+                self._restore_calibration_hard_limits_if_needed_locked(
+                    keep_if_configured=True
+                )
                 self._calibration_jog_bypass_working_volume = False
                 if self._connected_gantry_config is not None:
                     grbl_settings = dict(
@@ -687,6 +707,7 @@ class GantrySession:
         self._connected_gantry_config = None
         self._connected_gantry_filename = None
         self._calibration_restore_soft_limits = False
+        self._calibration_restore_hard_limits = False
         self._calibration_jog_bypass_working_volume = False
         self._move_error = None
 
@@ -922,6 +943,34 @@ class GantrySession:
             raise GantrySessionError(
                 "Soft-limit restore did not verify $20=1 on the controller."
             )
+
+    def _restore_calibration_hard_limits_if_needed_locked(
+        self,
+        *,
+        keep_if_configured: bool = False,
+    ) -> None:
+        """Undo the calibration-window $21=1 enforcement.
+
+        Only runs when prepare actually flipped $21 on (the flag). With
+        ``keep_if_configured`` (the finalize path), a gantry YAML that
+        configures ``hard_limits`` keeps $21=1 permanently instead of
+        reverting. A failed revert is logged, not raised — the machine is
+        left in the safer state.
+        """
+        if self._gantry is None or not self._calibration_restore_hard_limits:
+            return
+        if keep_if_configured and self._connected_grbl_setting_locked("hard_limits"):
+            self._calibration_restore_hard_limits = False
+            return
+        try:
+            self._gantry.set_hard_limits_enabled(False)
+        except Exception as exc:
+            self.logger.warning(
+                "Could not restore pre-calibration $21=0 (hard limits stay "
+                "enabled): %s",
+                exc,
+            )
+        self._calibration_restore_hard_limits = False
 
     def _attempt_soft_limit_restore_after_calibration_failure_locked(
         self,

@@ -853,9 +853,10 @@ export default function CalibrationWizard({
             )}
             {!alarmRecoveryMessage && connected && (
               <div style={softLimitNoticeStyle}>
-                <strong>Soft limits are off during calibration</strong> — the gantry will
-                not stop itself at travel bounds. Jog with small steps near the edges of
-                travel; if a limit switch trips, CubOS attempts an automatic pull-off.
+                <strong>Soft limits are off during calibration</strong> — only the
+                physical limit switches will stop the gantry (CubOS enables GRBL hard
+                limits for this window). Jog with small steps near the edges of travel;
+                a tripped switch halts motion and CubOS attempts an automatic pull-off.
               </div>
             )}
             {error && <div style={errorStyle}>{error}</div>}

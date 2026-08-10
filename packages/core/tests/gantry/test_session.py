@@ -131,6 +131,14 @@ class FakeGantry:
     def set_soft_limits_enabled(self, enabled):
         self.calls.append(("set_soft_limits_enabled", enabled))
 
+    def hard_limits_enabled(self):
+        self.calls.append(("hard_limits_enabled", None))
+        return float(self.grbl_settings.get("$21", "0")) != 0.0
+
+    def set_hard_limits_enabled(self, enabled):
+        self.calls.append(("set_hard_limits_enabled", enabled))
+        self.grbl_settings["$21"] = "1" if enabled else "0"
+
     def set_grbl_setting(self, setting, value):
         self.calls.append(("set_grbl_setting", (setting, value)))
 
@@ -479,6 +487,82 @@ def test_calibration_prepare_disables_and_restore_reenables_soft_limits(tmp_path
     assert ("home", None) in fake.calls
     assert ("set_soft_limits_enabled", False) in fake.calls
     assert ("set_soft_limits_enabled", True) in fake.calls
+
+
+def test_calibration_prepare_enforces_hard_limits_and_restore_reverts(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    assert fake.grbl_settings["$21"] == "0"
+
+    session.prepare_calibration_origin()
+    assert ("set_hard_limits_enabled", True) in fake.calls
+    assert fake.grbl_settings["$21"] == "1"
+    assert session.calibration_active
+
+    session.restore_calibration_soft_limits()
+    assert ("set_hard_limits_enabled", False) in fake.calls
+    assert fake.grbl_settings["$21"] == "0"
+    assert not session.calibration_active
+
+
+def test_calibration_prepare_leaves_hard_limits_alone_when_already_on(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.grbl_settings["$21"] = "1"
+
+    session.prepare_calibration_origin()
+    session.restore_calibration_soft_limits()
+
+    # $21 was already enabled: never written, and never reverted.
+    assert not any(name == "set_hard_limits_enabled" for name, _ in fake.calls)
+    assert fake.grbl_settings["$21"] == "1"
+
+
+def test_finalize_reverts_calibration_hard_limits_unless_configured(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    session.prepare_calibration_origin()
+    assert fake.grbl_settings["$21"] == "1"
+    session.finalize_calibration_origin(
+        home_z=80.0,
+        block_touch_z=10.0,
+        block_height=5.0,
+        factory_z_travel=90.0,
+    )
+
+    # The fixture YAML sets hard_limits: false, so the calibration-window
+    # enforcement is reverted once calibrated soft limits are in place.
+    assert ("set_hard_limits_enabled", False) in fake.calls
+    assert fake.grbl_settings["$21"] == "0"
+    assert not session.calibration_active
+
+
+def test_finalize_keeps_hard_limits_when_yaml_configures_them(tmp_path):
+    gantry_path = tmp_path / "gantry.yaml"
+    gantry_path.write_text(
+        GANTRY_YAML.replace("hard_limits: false", "hard_limits: true"),
+        encoding="utf-8",
+    )
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(gantry_path, filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    session.prepare_calibration_origin()
+    session.finalize_calibration_origin(
+        home_z=80.0,
+        block_touch_z=10.0,
+        block_height=5.0,
+        factory_z_travel=90.0,
+    )
+
+    assert ("set_hard_limits_enabled", True) in fake.calls
+    assert ("set_hard_limits_enabled", False) not in fake.calls
+    assert fake.grbl_settings["$21"] == "1"
+    assert not session.calibration_active
 
 
 def test_feed_hold_interrupt_does_not_wait_for_operation_lock(tmp_path):

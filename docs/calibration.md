@@ -128,9 +128,15 @@ chosen flow before it connects to hardware.
 Calibration measures the machine's real travel, so the stored GRBL soft
 limits (`$20`) cannot be trusted yet — CubOS disables them when calibration
 starts and re-programs them from the measured spans when it finishes (or
-restores them if you abort). **While calibrating, the gantry will not stop
-itself at travel bounds**; the only backstop is the physical limit
-switches. Jog with small steps as you approach the edges of travel.
+restores them if you abort). **While calibrating, the only backstop is the
+physical limit switches** — so CubOS also enables GRBL hard limits (`$21`)
+for the calibration window, even on controllers that normally run with
+them off. Without that, a jog past a travel end grinds against the frame
+and silently skips steps, corrupting the calibration being taken. When
+calibration finishes or is aborted, `$21` is restored to its prior value —
+unless the gantry YAML's `grbl_settings` sets `hard_limits: true`, in
+which case it stays enabled. Jog with small steps as you approach the
+edges of travel.
 
 If a jog does trip a hard-limit switch, CubOS soft-resets, unlocks GRBL,
 and attempts a small pull-off opposite the failed jog direction. If
