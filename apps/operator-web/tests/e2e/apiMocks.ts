@@ -167,9 +167,9 @@ export async function installApiMocks(
     if (path === "/deck/asmi_deck.yaml") {
       return json({ filename: "asmi_deck.yaml", labware: DECK_LABWARE });
     }
-    if (path === "/deck/panda-deck.yaml") {
+    if (path === "/deck/cub_deck.yaml") {
       // Serves both the import-flow PUT and subsequent reloads.
-      return json({ filename: "panda-deck.yaml", labware: DECK_LABWARE });
+      return json({ filename: "cub_deck.yaml", labware: DECK_LABWARE });
     }
     if (path === "/deck/preview-wells" && method === "POST") {
       return json(DECK_LABWARE[0].wells);

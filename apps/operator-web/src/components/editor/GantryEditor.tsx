@@ -87,7 +87,7 @@ const INSTRUMENT_COLORS: Record<string, string> = {
   uv_curing: theme.categorical.blue,
 };
 
-/** Section heading inside a config card (Connection, Working Volume, …). */
+/** Section heading inside a config card (Gantry Type, Instruments, Connection, …). */
 const sectionTitleStyle: React.CSSProperties = {
   ...theme.panelTitle,
   fontSize: 13,
@@ -254,77 +254,20 @@ export default function GantryEditor({
       {config && (
         <>
           <div style={cardStyle}>
-            <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Connection</h4>
-            <TextField
-              id="gantry-serial-port"
-              name="serial_port"
-              label="Serial port"
-              value={config.serial_port}
-              onChange={(v) => commit({ ...config, serial_port: v })}
-              dirty={d.serial_port}
+            <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Gantry Type</h4>
+            <SelectField
+              id="gantry-type"
+              name="gantry_type"
+              label="Gantry type"
+              value={config.gantry_type}
+              options={[
+                { value: "cub", label: "Cub" },
+                { value: "cub_xl", label: "Cub XL" },
+              ]}
+              onChange={(v) => commit({ ...config, gantry_type: v as "cub" | "cub_xl" })}
+              dirty={d.gantry_type}
+              required
             />
-            <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <SelectField
-                id="gantry-type"
-                name="gantry_type"
-                label="Gantry type"
-                value={config.gantry_type}
-                options={[
-                  { value: "cub", label: "Cub" },
-                  { value: "cub_xl", label: "Cub XL" },
-                ]}
-                onChange={(v) => commit({ ...config, gantry_type: v as "cub" | "cub_xl" })}
-                dirty={d.gantry_type}
-                required
-              />
-              <SelectField
-                id="gantry-y-axis-motion"
-                name="y_axis_motion"
-                label="Y-axis motion"
-                value={config.cnc.y_axis_motion ?? "head"}
-                options={Y_AXIS_MOTION_OPTIONS.map((s) => ({ value: s, label: s === "head" ? "Head moves" : "Bed moves" }))}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, y_axis_motion: v as "head" | "bed" } })}
-                dirty={d.y_axis_motion}
-              />
-              <NumberField
-                id="gantry-factory-z-travel"
-                name="factory_z_travel_mm"
-                label="Factory Z travel"
-                value={config.cnc.factory_z_travel_mm}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, factory_z_travel_mm: v } })}
-                dirty={d.factory_z_travel_mm}
-                required
-              />
-              <NumberField
-                id="gantry-calibration-block-height"
-                name="calibration_block_height_mm"
-                label="Block height"
-                value={Number(config.cnc.calibration_block_height_mm ?? 0)}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, calibration_block_height_mm: v } })}
-                dirty={d.calibration_block_height_mm}
-                required
-              />
-              <NumberField
-                id="gantry-safe-z"
-                name="safe_z"
-                label="Safe Z"
-                value={Number(config.cnc.safe_z ?? config.working_volume.z_max)}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, safe_z: v } })}
-                dirty={d.safe_z}
-              />
-            </div>
-          </div>
-
-          <div style={cardStyle}>
-            <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Working Volume</h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <NumberField id="wv-xmin" name="x_min" label="X min" value={config.working_volume.x_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, x_min: v } })} dirty={d.x_min} />
-              <NumberField id="wv-xmax" name="x_max" label="X max" value={config.working_volume.x_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, x_max: v } })} dirty={d.x_max} />
-              <NumberField id="wv-ymin" name="y_min" label="Y min" value={config.working_volume.y_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, y_min: v } })} dirty={d.y_min} />
-              <NumberField id="wv-ymax" name="y_max" label="Y max" value={config.working_volume.y_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, y_max: v } })} dirty={d.y_max} />
-              <NumberField id="wv-zmin" name="z_min" label="Z min" value={config.working_volume.z_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, z_min: v } })} dirty={d.z_min} />
-              <NumberField id="wv-zmax" name="z_max" label="Z max" value={config.working_volume.z_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, z_max: v } })} dirty={d.z_max} />
-            </div>
           </div>
 
           <div style={cardStyle}>
@@ -474,6 +417,67 @@ export default function GantryEditor({
                 </div>
               );
             })}
+          </div>
+
+          <div style={cardStyle}>
+            <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Connection</h4>
+            <TextField
+              id="gantry-serial-port"
+              name="serial_port"
+              label="Serial port"
+              value={config.serial_port}
+              onChange={(v) => commit({ ...config, serial_port: v })}
+              dirty={d.serial_port}
+            />
+            <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <SelectField
+                id="gantry-y-axis-motion"
+                name="y_axis_motion"
+                label="Y-axis motion"
+                value={config.cnc.y_axis_motion ?? "head"}
+                options={Y_AXIS_MOTION_OPTIONS.map((s) => ({ value: s, label: s === "head" ? "Head moves" : "Bed moves" }))}
+                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, y_axis_motion: v as "head" | "bed" } })}
+                dirty={d.y_axis_motion}
+              />
+              <NumberField
+                id="gantry-factory-z-travel"
+                name="factory_z_travel_mm"
+                label="Factory Z travel"
+                value={config.cnc.factory_z_travel_mm}
+                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, factory_z_travel_mm: v } })}
+                dirty={d.factory_z_travel_mm}
+                required
+              />
+              <NumberField
+                id="gantry-calibration-block-height"
+                name="calibration_block_height_mm"
+                label="Block height"
+                value={Number(config.cnc.calibration_block_height_mm ?? 0)}
+                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, calibration_block_height_mm: v } })}
+                dirty={d.calibration_block_height_mm}
+                required
+              />
+              <NumberField
+                id="gantry-safe-z"
+                name="safe_z"
+                label="Safe Z"
+                value={Number(config.cnc.safe_z ?? config.working_volume.z_max)}
+                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, safe_z: v } })}
+                dirty={d.safe_z}
+              />
+            </div>
+          </div>
+
+          <div style={cardStyle}>
+            <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Working Volume</h4>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <NumberField id="wv-xmin" name="x_min" label="X min" value={config.working_volume.x_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, x_min: v } })} dirty={d.x_min} />
+              <NumberField id="wv-xmax" name="x_max" label="X max" value={config.working_volume.x_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, x_max: v } })} dirty={d.x_max} />
+              <NumberField id="wv-ymin" name="y_min" label="Y min" value={config.working_volume.y_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, y_min: v } })} dirty={d.y_min} />
+              <NumberField id="wv-ymax" name="y_max" label="Y max" value={config.working_volume.y_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, y_max: v } })} dirty={d.y_max} />
+              <NumberField id="wv-zmin" name="z_min" label="Z min" value={config.working_volume.z_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, z_min: v } })} dirty={d.z_min} />
+              <NumberField id="wv-zmax" name="z_max" label="Z max" value={config.working_volume.z_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, z_max: v } })} dirty={d.z_max} />
+            </div>
           </div>
 
           <div style={cardStyle}>
@@ -753,7 +757,7 @@ function OptionalBooleanField({
   );
 }
 
-/** Muted section group (Connection, Working Volume, Instruments, Advanced). */
+/** Muted section group (Gantry Type, Instruments, Connection, Working Volume, Advanced). */
 const cardStyle: React.CSSProperties = {
   background: theme.color.surfaceMuted,
   border: `1px solid ${theme.color.border}`,

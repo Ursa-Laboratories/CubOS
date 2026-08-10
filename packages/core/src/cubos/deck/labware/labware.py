@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from typing import Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -35,6 +36,12 @@ class BoundingBoxGeometry(BaseModel):
         if value is not None and value <= 0:
             raise ValueError(f"{info.field_name} must be positive.")
         return value
+
+
+# Scalar types permitted as a well-attribute value. Deliberately flat: an
+# attribute bag is for recording measured physical facts (`diameter: 6.86`,
+# `bottom: flat`), not for nesting further structure.
+WellAttributeValue = Union[float, int, str, bool]
 
 
 class Labware(BaseModel):

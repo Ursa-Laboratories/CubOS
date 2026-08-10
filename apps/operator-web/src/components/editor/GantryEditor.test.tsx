@@ -131,6 +131,28 @@ describe("GantryEditor", () => {
     expect(screen.getByLabelText("Label")).toHaveValue("x");
   });
 
+  it("renders section headings in order: Gantry Type, Instruments, Connection, Working Volume", () => {
+    renderGantry();
+    const headings = screen.getAllByRole("heading", { level: 4 });
+    const sectionNames = headings
+      .map((h) => h.textContent)
+      .filter((text): text is string =>
+        text === "Gantry Type" || text === "Instruments" || text === "Connection" || text === "Working Volume",
+      );
+    expect(sectionNames).toEqual(["Gantry Type", "Instruments", "Connection", "Working Volume"]);
+  });
+
+  it("puts the gantry type field in its own section, not under Connection", () => {
+    renderGantry();
+    const gantryTypeSection = screen.getByLabelText(/Gantry type/).closest("div");
+    expect(gantryTypeSection).toHaveTextContent("Gantry Type");
+    expect(gantryTypeSection).not.toHaveTextContent("Connection");
+
+    const serialPortSection = screen.getByLabelText("Serial port").closest("div");
+    expect(serialPortSection).toHaveTextContent("Connection");
+    expect(serialPortSection).not.toHaveTextContent("Gantry Type");
+  });
+
   it("keeps GRBL under the Advanced settings expander", async () => {
     const user = userEvent.setup();
     renderGantry();

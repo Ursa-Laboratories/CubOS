@@ -11,6 +11,7 @@ import DataOutputPanel from "./components/data/DataOutputPanel";
 import StatePanel from "./components/state/StatePanel";
 import { useConfirm } from "./components/common/useConfirm";
 import { ConfigDirDialog } from "./components/common/ConfigDirDialog";
+import { UpdateBanner } from "./components/common/UpdateBanner";
 import { settingsApi, deckApi, protocolApi, gantryApi, runsApi } from "./api/client";
 import { useDeckConfigs, useDeck, useSaveDeck } from "./hooks/useDeck";
 import {
@@ -90,7 +91,7 @@ function errorHasStatus(error: unknown, status: number): boolean {
   );
 }
 
-const WORKING_DECK_FILENAME = "panda-deck.yaml";
+const WORKING_DECK_FILENAME = "cub_deck.yaml";
 
 export default function App() {
   const qc = useQueryClient();
@@ -841,7 +842,13 @@ export default function App() {
 
   return (
     <>
-      <AppLayout header={headerBar} left={left} topRight={topRight} bottomRight={bottomRight} />
+      <AppLayout
+        banner={<UpdateBanner requestConfirm={requestConfirm} />}
+        header={headerBar}
+        left={left}
+        topRight={topRight}
+        bottomRight={bottomRight}
+      />
       {browseDialog && (
         <ConfigDirDialog
           initialPath={browseDialog.path}

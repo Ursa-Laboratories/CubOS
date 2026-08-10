@@ -4,7 +4,7 @@ from typing import Dict, List, Literal, Optional
 
 from pydantic import ConfigDict, Field, field_validator, model_validator
 
-from .labware import BoundingBoxGeometry, Coordinate3D, Labware
+from .labware import BoundingBoxGeometry, Coordinate3D, Labware, WellAttributeValue
 
 
 class WellPlate(Labware):
@@ -42,6 +42,17 @@ class WellPlate(Labware):
             "millimeters depending on well-bottom geometry and skirt thickness. "
             "External analysis consumers use it to compute the sample-floor Z "
             "from the deck-frame rim Z."
+        ),
+    )
+    well_attributes: Dict[str, WellAttributeValue] = Field(
+        default_factory=dict,
+        description=(
+            "Free-form per-well physical attributes, e.g. "
+            "``{diameter: 6.86, bottom: flat}``. Open by design: record "
+            "whatever a plate's drawing specifies without a schema change. "
+            "CubOS does not interpret these -- no key is required, and no "
+            "motion or protocol behavior reads them. Consumers look up the "
+            "keys they need and must handle absence."
         ),
     )
     rows: int = Field(
@@ -135,6 +146,18 @@ class WellPlate(Labware):
             width=self.width,
         )
         return self
+
+    def well_attribute_float(self, key: str) -> float | None:
+        """Return a numeric well attribute, or None if absent or non-numeric.
+
+        The attribute bag is open, so a value may be missing or carry a
+        non-numeric type. Callers doing arithmetic go through this rather
+        than indexing ``well_attributes`` directly.
+        """
+        value = self.well_attributes.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return None
+        return float(value)
 
     def get_location(self, location_id: str | None = None) -> Coordinate3D:
         if location_id is None:
