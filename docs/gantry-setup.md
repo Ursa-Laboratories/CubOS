@@ -30,6 +30,34 @@ If no seed has your instrument, copy any seed for your machine and swap the
 CUB config on a CUB XL (or vice versa) has the wrong travel limits and can
 crash the gantry into the frame.
 
+## Controller Firmware (`firmware:`)
+
+CubOS drives two motion-controller firmware families, selected by the
+optional root-level `firmware:` field:
+
+- `firmware: grbl` (default, may be omitted) — classic GRBL 1.1 boards.
+  The `grbl_settings:` block declares the expected controller `$` settings
+  and is validated against the live controller at connect.
+- `firmware: duet` — Duet 3 boards running RepRapFirmware 3.5+ over USB
+  serial (e.g. `bear_den_duet.yaml`, a ProVerXL 4030 V2 converted to a
+  Duet 3 MB6XD). Motion configuration — axis directions, steps/mm, soft
+  limits, homing behavior, pull-off reserve — lives in the board's own
+  `config.g` (version-controlled under `packages/core/configs/duet/`),
+  so a Duet gantry YAML must **not** contain a `grbl_settings:` block;
+  the schema rejects the combination. Runtime GRBL-settings reads return
+  empty and writes are refused. Deck-origin calibration is supported: the
+  machine envelope stays fixed in `config.g`, and the calibrated deck
+  frame is carried by G54 work offsets. RepRapFirmware does not persist
+  those offsets across reboots, so calibration stores them in
+  `duet_settings.work_offsets` and CubOS re-applies them on every
+  connect.
+
+The machine frame contract is identical for both firmwares: reported
+positions match the configured `origin_policy` frame with no sign flips in
+host code. On Duet, the board's `config.g` establishes that frame directly
+(M208 limits equal the usable spans; homing anchors the backed-off position
+to the axis maxima).
+
 ## Define Instruments
 
 Instruments live under `instruments:` in the gantry YAML. The map key is the

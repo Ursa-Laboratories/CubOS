@@ -25,7 +25,8 @@ machine with homed WPos `Z=91` and `$27=10` should save
 
 ```text
 packages/core/configs/
-  gantry/     # Machine envelope, GRBL expectations, mounted instruments
+  gantry/     # Machine envelope, controller expectations, mounted instruments
+  duet/       # RepRapFirmware config.g/homing files for Duet-based machines
   deck/       # Labware placement and calibration
   protocol/   # Ordered protocol steps grouped by instrument/workflow
     asmi/

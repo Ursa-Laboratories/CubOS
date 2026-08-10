@@ -11,6 +11,7 @@ from cubos.yaml_utils import load_yaml_file
 
 from .errors import GantryLoaderError
 from .gantry_config import (
+    FirmwareType,
     GantryConfig,
     GantryType,
     OriginPolicy,
@@ -36,8 +37,9 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
         elif "extra_forbidden" in error_type or "Extra inputs are not permitted" in detail:
             guidance = (
                 "Remove unknown YAML fields; only 'serial_port', 'cnc', "
-                "'gantry_type', 'working_volume', 'origin_policy', "
-                "'grbl_settings', and 'instruments' are allowed at root."
+                "'gantry_type', 'firmware', 'working_volume', 'origin_policy', "
+                "'grbl_settings', 'duet_settings', and 'instruments' are "
+                "allowed at root."
             )
         else:
             guidance = "Review the YAML values against the gantry schema."
@@ -87,6 +89,7 @@ def load_gantry_from_yaml(path: str | Path) -> GantryConfig:
     return GantryConfig(
         serial_port=schema.serial_port,
         gantry_type=GantryType(schema.gantry_type),
+        firmware=FirmwareType(schema.firmware),
         factory_z_travel_mm=schema.cnc.factory_z_travel_mm,
         calibration_block_height_mm=schema.cnc.calibration_block_height_mm,
         safe_z=schema.safe_z,
@@ -101,6 +104,11 @@ def load_gantry_from_yaml(path: str | Path) -> GantryConfig:
         y_axis_motion=YAxisMotion(schema.cnc.y_axis_motion),
         origin_policy=OriginPolicy(schema.origin_policy),
         expected_grbl_settings=expected_grbl,
+        duet_settings=(
+            schema.duet_settings.model_dump(exclude_none=True)
+            if schema.duet_settings is not None
+            else None
+        ),
         instruments=instruments,
     )
 

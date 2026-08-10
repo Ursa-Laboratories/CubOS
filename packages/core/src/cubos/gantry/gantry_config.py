@@ -21,6 +21,19 @@ class GantryType(str, Enum):
     CUB_XL = "cub_xl"
 
 
+class FirmwareType(str, Enum):
+    """Motion-controller firmware families CubOS can drive.
+
+    ``GRBL`` (default): classic GRBL 1.1 over serial (``$`` settings,
+    ``?`` realtime status, ``$H`` homing).
+    ``DUET``: Duet 3 boards running RepRapFirmware 3.5+ over USB serial
+    (``ok`` line protocol, ``M409`` object-model status, ``G28`` homing).
+    """
+
+    GRBL = "grbl"
+    DUET = "duet"
+
+
 class OriginPolicy(str, Enum):
     """Which physical corner WPos zero is calibrated to.
 
@@ -76,11 +89,13 @@ class GantryConfig:
     gantry_type: GantryType
     factory_z_travel_mm: float
     working_volume: WorkingVolume
+    firmware: FirmwareType = FirmwareType.GRBL
     y_axis_motion: YAxisMotion = YAxisMotion.HEAD
     origin_policy: OriginPolicy = OriginPolicy.DECK_ORIGIN
     calibration_block_height_mm: Optional[float] = None
     safe_z: Optional[float] = None
     expected_grbl_settings: Optional[Dict[str, float]] = field(default=None)
+    duet_settings: Optional[Dict[str, Any]] = field(default=None)
     instruments: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
@@ -89,6 +104,12 @@ class GantryConfig:
         except ValueError as exc:
             raise ValueError(
                 f"Unsupported gantry_type {self.gantry_type!r}."
+            ) from exc
+        try:
+            object.__setattr__(self, "firmware", FirmwareType(self.firmware))
+        except ValueError as exc:
+            raise ValueError(
+                f"Unsupported firmware {self.firmware!r}."
             ) from exc
         try:
             object.__setattr__(

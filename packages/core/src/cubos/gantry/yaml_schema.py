@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from cubos.instruments.yaml_schema import InstrumentYamlEntry
 
+from .duet_settings import DuetSettingsYaml
 from .grbl_settings import GrblSettingsYaml
 
 
@@ -68,11 +69,26 @@ class GantryYamlSchema(BaseModel):
 
     serial_port: str
     gantry_type: Literal["cub", "cub_xl"]
+    firmware: Literal["grbl", "duet"] = "grbl"
     cnc: CncYaml
     working_volume: WorkingVolumeYaml
     origin_policy: Literal["deck_origin", "home_origin"] = "deck_origin"
     grbl_settings: Optional[GrblSettingsYaml] = None
+    duet_settings: Optional[DuetSettingsYaml] = None
     instruments: Dict[str, InstrumentYamlEntry] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_settings_match_firmware(self) -> "GantryYamlSchema":
+        if self.firmware == "duet" and self.grbl_settings is not None:
+            raise ValueError(
+                "grbl_settings cannot be used with firmware: duet — Duet "
+                "motion configuration lives in the board's config.g."
+            )
+        if self.firmware != "duet" and self.duet_settings is not None:
+            raise ValueError(
+                "duet_settings requires firmware: duet."
+            )
+        return self
 
     @model_validator(mode="after")
     def _validate_factory_z_travel_covers_working_z_span(self) -> "GantryYamlSchema":

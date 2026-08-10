@@ -1,0 +1,33 @@
+# bear-den Genmitsu ProVerXL 4030 V2 retrofitted with a Duet 3 MB6XD
+# (RepRapFirmware 3.6.1). Motion configuration — axis directions, steps/mm,
+# soft limits, homing to the back-right-top corner — lives in the board's
+# config.g (see configs/duet/proverxl_4030v2/), not in runtime-writable
+# settings, so there is no grbl_settings block.
+#
+# Deck-origin calibrated 2026-08-07 with the 35 mm block and an ASMI tip
+# (force-monitored touch at 127 mN): G54 offsets below anchor the deck
+# frame against the config.g machine frame and are re-applied by CubOS at
+# every connect (RRF does not persist workplace offsets across reboots).
+# The deck bottom is unreachable through the tip+block geometry, hence the
+# calibrated z_min of 29.23.
+serial_port: "/dev/serial/by-id/usb-Duet_3D_Duet-if00"
+gantry_type: cub_xl
+firmware: duet
+cnc:
+  factory_z_travel_mm: 110.0
+  calibration_block_height_mm: 35.0
+  y_axis_motion: head
+  safe_z: 135.0
+working_volume:
+  x_min: 0.0
+  x_max: 385.0
+  y_min: 0.0
+  y_max: 300.0
+  z_min: 29.23
+  z_max: 139.23
+duet_settings:
+  work_offsets:
+    x: 15.0
+    y: 0.0
+    z: -29.23
+instruments: {}
