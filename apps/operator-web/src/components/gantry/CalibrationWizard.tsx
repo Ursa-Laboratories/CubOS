@@ -239,8 +239,12 @@ export default function CalibrationWizard({
     } catch (recoveryErr) {
       const recoveryMessage = recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr);
       setResolvedAlarmStatus(null);
+      // A lost serial link needs a power-cycle, not an E-stop — tell the
+      // operator the actionable step instead of the generic lockout text.
       setAlarmPrompt(
-        "Limit recovery did not clear the switch. Controls stay locked; use E-stop/controller reset before continuing.",
+        /connection lost/i.test(recoveryMessage)
+          ? recoveryMessage
+          : "Limit recovery did not clear the switch. Controls stay locked; use E-stop/controller reset before continuing.",
       );
       setError(`Limit recovery failed after jog error (${message}): ${recoveryMessage}`);
     } finally {

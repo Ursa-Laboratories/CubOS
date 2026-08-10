@@ -64,6 +64,22 @@ terminal or the UI's **Advanced** panel:
 Do not run protocols or continue calibration until homing succeeds — see
 the warning above about trusting position after an alarm.
 
+## Controller Drops Off USB at a Limit Trip
+
+Some controller boards brown out their USB bridge when a hard-limit trip
+halts the steppers — the board reboots and re-enumerates on the bus, and
+every command afterward times out on the stale connection ("Unlock ($X)
+timed out waiting for ok", position reads failing).
+
+CubOS limit recovery detects this and automatically re-opens the serial
+port (retrying for a few seconds while the device re-enumerates), then
+resumes the unlock and pull-off. If the reconnect fails — the board did
+not come back on its own — the UI reports **"Controller connection
+lost"**: power-cycle the controller, re-seat the USB cable at both ends,
+then **Disconnect** and **Connect** again. Consider strain-relieving the
+USB cable and checking the controller's power supply if this happens
+repeatedly.
+
 ## After a Physical Crash
 
 1. **Stop.** Release the jog control immediately (or send `Q`/abort in the
