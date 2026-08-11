@@ -538,6 +538,21 @@ class Gantry:
         """Enable or disable GRBL soft limits through Gantry semantics."""
         self.set_grbl_setting("$20", 1 if enabled else 0)
 
+    def hard_limits_enabled(self) -> bool | None:
+        """Return whether GRBL hard limits ($21) are enabled, if readable."""
+        settings = self.read_grbl_settings()
+        raw = settings.get("$21", settings.get("21"))
+        if raw is None:
+            return None
+        try:
+            return float(raw) != 0.0
+        except (TypeError, ValueError):
+            return None
+
+    def set_hard_limits_enabled(self, enabled: bool) -> None:
+        """Enable or disable GRBL hard limits through Gantry semantics."""
+        self.set_grbl_setting("$21", 1 if enabled else 0)
+
     def homing_pull_off_mm(self) -> float:
         """Return GRBL $27 homing pull-off in millimeters."""
         if self._offline:

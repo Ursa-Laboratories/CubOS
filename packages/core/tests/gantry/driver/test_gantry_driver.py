@@ -315,6 +315,21 @@ class TestCNCDriverLogic(unittest.TestCase):
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
     @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_seed_wco_polls_status_until_wco_reported(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial(
+            chunks=["<Idle|WPos:1.0,2.0,3.0|WCO:4.0,5.0,6.0>\r\n"]
+        )
+        mill.seed_wco()
+        self.assertIn(b"?", mill.ser_mill.writes)
+        self.assertIsNotNone(mill._wco)
+
+    @patch('cubos.gantry.gantry_driver.driver.time.sleep')
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
     def test_seed_wco_and_mpos_coordinate_conversion(
         self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
     ):

@@ -16,6 +16,7 @@ grbl_settings:
   dir_invert_mask: 1
   status_report: 0
   soft_limits: true
+  hard_limits: true
   homing_enable: true
   homing_dir_mask: 0
   steps_per_mm_x: 400.0
