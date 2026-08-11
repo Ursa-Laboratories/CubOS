@@ -45,8 +45,8 @@ CREATE TABLE IF NOT EXISTS fluid_state_sessions (
     deck_snapshot_json TEXT    NOT NULL,
     layout_json        TEXT    NOT NULL,
     label              TEXT,
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     board_config    TEXT,
     gantry_config   TEXT,
     protocol_config TEXT,
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     status          TEXT    NOT NULL DEFAULT 'running',
     finished_at     TEXT,
     fluid_state_id  INTEGER REFERENCES fluid_state_sessions(id)
@@ -69,7 +69,7 @@ CREATE TABLE IF NOT EXISTS experiments (
     labware_name TEXT    NOT NULL,
     well_id      TEXT,
     contents     TEXT,
-    created_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+    created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS uvvis_measurements (
@@ -78,7 +78,7 @@ CREATE TABLE IF NOT EXISTS uvvis_measurements (
     wavelengths       TEXT    NOT NULL,
     intensities       TEXT    NOT NULL,
     integration_time_s REAL   NOT NULL,
-    timestamp         TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS filmetrics_measurements (
@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS filmetrics_measurements (
     experiment_id   INTEGER NOT NULL REFERENCES experiments(id),
     thickness_nm    REAL,
     goodness_of_fit REAL,
-    timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS uv_curing_measurements (
@@ -95,14 +95,14 @@ CREATE TABLE IF NOT EXISTS uv_curing_measurements (
     intensity_percent REAL    NOT NULL,
     exposure_time_s   REAL    NOT NULL,
     cure_timestamp_s  REAL    NOT NULL,
-    timestamp         TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS camera_measurements (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     experiment_id INTEGER NOT NULL REFERENCES experiments(id),
     image_path    TEXT    NOT NULL,
-    timestamp     TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS asmi_measurements (
@@ -120,7 +120,7 @@ CREATE TABLE IF NOT EXISTS asmi_measurements (
     step_size_mm    REAL,
     z_target_mm     REAL,
     force_limit_n   REAL,
-    timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS potentiostat_measurements (
@@ -144,7 +144,7 @@ CREATE TABLE IF NOT EXISTS potentiostat_measurements (
     stopped_at        TEXT,
     aborted           INTEGER,
     stop_reason       TEXT,
-    timestamp         TEXT    NOT NULL DEFAULT (datetime('now'))
+    timestamp         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
 );
 
 CREATE TABLE IF NOT EXISTS labware (
@@ -157,7 +157,7 @@ CREATE TABLE IF NOT EXISTS labware (
     working_volume_ul REAL    NOT NULL,
     current_volume_ul REAL    NOT NULL DEFAULT 0.0,
     contents          TEXT,
-    updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     UNIQUE(campaign_id, labware_key, well_id)
 );
 
@@ -176,8 +176,8 @@ CREATE TABLE IF NOT EXISTS fluid_containers (
     current_volume_ul  REAL    NOT NULL DEFAULT 0.0 CHECK (current_volume_ul >= 0),
     composition_json   TEXT    NOT NULL DEFAULT '{}',
     version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     UNIQUE(fluid_state_id, labware_key, location_id)
 );
 
@@ -209,8 +209,8 @@ CREATE TABLE IF NOT EXISTS fluid_operations (
                                     ),
     campaign_id              INTEGER REFERENCES campaigns(id),
     detail                   TEXT,
-    created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     applied_at               TEXT
 );
 
@@ -231,8 +231,8 @@ CREATE TABLE IF NOT EXISTS tip_containers (
                                    )
                                ),
     version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     UNIQUE(fluid_state_id, rack_key, slot_id)
 );
 
@@ -260,8 +260,8 @@ CREATE TABLE IF NOT EXISTS tip_operations (
                                     ),
     campaign_id              INTEGER REFERENCES campaigns(id),
     detail                   TEXT,
-    created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     applied_at               TEXT
 );
 
@@ -283,8 +283,8 @@ CREATE TABLE IF NOT EXISTS cap_containers (
                                    )
                                ),
     version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-    created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     UNIQUE(fluid_state_id, labware_key, location_id)
 );
 
@@ -311,8 +311,8 @@ CREATE TABLE IF NOT EXISTS cap_operations (
                                     ),
     campaign_id              INTEGER REFERENCES campaigns(id),
     detail                   TEXT,
-    created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+    created_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     applied_at               TEXT
 );
 
@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS pipette_attachment (
     contents_known_empty  INTEGER NOT NULL DEFAULT 1,
     attachment_uncertain  INTEGER NOT NULL DEFAULT 0,
     version               INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-    updated_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at            TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     UNIQUE(fluid_state_id, pipette_key)
 );
 """
@@ -457,8 +457,8 @@ class DataStore:
                                                 ),
                 campaign_id              INTEGER REFERENCES campaigns(id),
                 detail                   TEXT,
-                created_at               TEXT    NOT NULL DEFAULT (datetime('now')),
-                updated_at               TEXT    NOT NULL DEFAULT (datetime('now')),
+                created_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                updated_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
                 applied_at               TEXT
             );
             INSERT INTO fluid_operations_new (
@@ -546,7 +546,7 @@ class DataStore:
                 step_size_mm    REAL,
                 z_target_mm     REAL,
                 force_limit_n   REAL,
-                timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
+                timestamp       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
             );
             INSERT INTO asmi_measurements_new (
                 id, experiment_id, sample_timestamps, z_positions, raw_forces,
