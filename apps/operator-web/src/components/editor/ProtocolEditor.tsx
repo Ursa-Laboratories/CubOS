@@ -475,7 +475,7 @@ export default function ProtocolEditor({
             </div>
 
             {cmd ? (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+              <div style={stepArgsGridStyle}>
                 {cmd.args.map((arg) => {
                   if (isHiddenArgForStep(arg.name, step.args, choices)) {
                     return null;
@@ -1175,30 +1175,31 @@ function MethodOptionsField({
           options={["false", "true"]}
           onChange={(v) => setDetectSurface(v === "true")}
         />
-        <NumberField
-          id={`${idPrefix}-surface-search-step`}
-          name={`${namePrefix}_surface_search_step`}
-          label="Surface search step (mm)"
-          value={Number(options.surface_search_step ?? 0.5)}
-          onChange={(v) => update("surface_search_step", v)}
-          disabled={!detectSurface}
-        />
-        <NumberField
-          id={`${idPrefix}-surface-force-threshold`}
-          name={`${namePrefix}_surface_force_threshold`}
-          label="Surface force threshold (N)"
-          value={Number(options.surface_force_threshold ?? 0.01)}
-          onChange={(v) => update("surface_force_threshold", v)}
-          disabled={!detectSurface}
-        />
-        <NumberField
-          id={`${idPrefix}-surface-search-max-travel`}
-          name={`${namePrefix}_surface_search_max_travel`}
-          label="Surface search max travel (mm)"
-          value={Number(options.surface_search_max_travel ?? 10)}
-          onChange={(v) => update("surface_search_max_travel", v)}
-          disabled={!detectSurface}
-        />
+        {detectSurface && (
+          <>
+            <NumberField
+              id={`${idPrefix}-surface-search-step`}
+              name={`${namePrefix}_surface_search_step`}
+              label="Surface search step (mm)"
+              value={Number(options.surface_search_step ?? 0.5)}
+              onChange={(v) => update("surface_search_step", v)}
+            />
+            <NumberField
+              id={`${idPrefix}-surface-force-threshold`}
+              name={`${namePrefix}_surface_force_threshold`}
+              label="Surface force threshold (N)"
+              value={Number(options.surface_force_threshold ?? 0.01)}
+              onChange={(v) => update("surface_force_threshold", v)}
+            />
+            <NumberField
+              id={`${idPrefix}-surface-search-max-travel`}
+              name={`${namePrefix}_surface_search_max_travel`}
+              label="Surface search max travel (mm)"
+              value={Number(options.surface_search_max_travel ?? 10)}
+              onChange={(v) => update("surface_search_max_travel", v)}
+            />
+          </>
+        )}
       </div>
       <div style={methodOptionsHintStyle}>
         {detectSurface
@@ -1237,12 +1238,25 @@ const toolbarLabelStyle: React.CSSProperties = {
   ...theme.sectionLabel,
 };
 
+// Step args fill left-to-right in columns (same auto-fit pattern as the
+// ASMI indentation options) so a step card stays one or two rows tall
+// instead of stacking every parameter full-width.
+const stepArgsGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
+  gap: 8,
+  alignItems: "end",
+};
+
 const methodOptionsStyle: React.CSSProperties = {
   border: `1px solid ${theme.color.accentTintBorder}`,
   background: theme.color.accentTint,
   borderRadius: theme.radius.md,
   padding: 10,
   marginTop: 4,
+  // Spans the step-args grid so the tinted panel stays a full-width
+  // block below the main parameters.
+  gridColumn: "1 / -1",
 };
 
 const methodOptionsTitleStyle: React.CSSProperties = {

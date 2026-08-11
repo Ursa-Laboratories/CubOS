@@ -67,6 +67,10 @@ class CubOSSettings(BaseSettings):
     allowed_instruments: List[str] = Field(default_factory=list)
     expected_gantry_sha256: str | None = None
     expected_deck_sha256: str | None = None
+    update_branch: str = "main"
+    update_repo_dir: Path | None = None
+    update_script: Path | None = None
+    update_service: str = "cubos"
     # Extra Host/Origin values accepted by the Origin/Host-checking middleware,
     # on top of the configured host:port and localhost/127.0.0.1 equivalents.
     # Production should leave this empty; tests add "testserver" (the Host

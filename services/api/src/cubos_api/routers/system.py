@@ -8,11 +8,13 @@ from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Dict, List
 
-from fastapi import APIRouter, Response
+from fastapi import APIRouter, HTTPException, Response
 from cubos.instruments.registry import get_supported_types, get_supported_vendors
 from pydantic import BaseModel
 from cubos.protocol_engine.registry import CommandRegistry
 from cubos_api.config import get_settings
+from cubos_api.services import updater
+from cubos_api.services.run_manager import get_run_manager
 
 # Register CubOS protocol commands without connecting to hardware.
 import cubos.protocol_engine.commands  # noqa: F401
@@ -49,6 +51,25 @@ class CapabilitiesResponse(BaseModel):
     api_version: str
     commands: List[str]
     instruments: Dict[str, List[str]]
+
+
+class UpdateStatusResponse(BaseModel):
+    current_sha: str
+    latest_sha: str
+    commits_behind: int
+    update_available: bool
+    checked_at: float
+    summary: List[str]
+    error: str | None
+
+
+class ApplyUpdateRequest(BaseModel):
+    force: bool = False
+
+
+class ApplyUpdateResponse(BaseModel):
+    status: str
+    target_sha: str
 
 
 def _distribution_version(distribution: str) -> str:
@@ -121,3 +142,37 @@ def get_capabilities() -> CapabilitiesResponse:
         commands=CommandRegistry.instance().command_names,
         instruments=instruments,
     )
+
+
+@router.get("/system/update", response_model=UpdateStatusResponse)
+def get_update_status(refresh: bool = False) -> UpdateStatusResponse:
+    """Check the configured upstream branch for a newer appliance revision."""
+    status = updater.check_for_update(refresh=refresh)
+    return UpdateStatusResponse(**status.model_dump())
+
+
+@router.post(
+    "/system/update/apply",
+    response_model=ApplyUpdateResponse,
+    status_code=202,
+)
+def apply_system_update(body: ApplyUpdateRequest) -> ApplyUpdateResponse:
+    """Launch a detached appliance update when no protocol run is active."""
+    active_run_id = get_run_manager().active_run_id
+    if active_run_id is not None:
+        raise HTTPException(
+            409,
+            f"cannot update while run {active_run_id} is active",
+        )
+
+    status = updater.check_for_update()
+    if status.error is not None:
+        raise HTTPException(503, status.error)
+    if not status.update_available and not body.force:
+        raise HTTPException(409, "already up to date")
+
+    try:
+        updater.apply_update(status.latest_sha)
+    except updater.UpdateLaunchError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return ApplyUpdateResponse(status="updating", target_sha=status.latest_sha)

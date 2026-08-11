@@ -1070,7 +1070,11 @@ def _layout_entry(
             "width": _optional_float(labware.width),
             "height": _optional_float(labware.height),
             "well_depth": _optional_float(labware.well_depth),
-            "diameter": None,
+            # Read out of the open attribute bag, staying None when the
+            # plate does not record a diameter. This payload is a cross-repo
+            # contract consumed by Zoo, so no new keys are introduced
+            # alongside the populated one.
+            "diameter": labware.well_attribute_float("diameter"),
         }
         capacity_ul = float(labware.capacity_ul)
         working_volume_ul = float(labware.working_volume_ul)

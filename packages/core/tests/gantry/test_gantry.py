@@ -387,6 +387,8 @@ class TestGantry(unittest.TestCase):
         self.assertFalse(gantry.hard_limits_enabled())
         mock_mill.read_grbl_settings.return_value = {}
         self.assertIsNone(gantry.hard_limits_enabled())
+        mock_mill.read_grbl_settings.return_value = {"$21": "not-a-number"}
+        self.assertIsNone(gantry.hard_limits_enabled())
 
     @patch("cubos.gantry.gantry.Mill")
     def test_set_hard_limits_enabled_delegates_to_grbl_setting(self, mock_mill_cls):

@@ -139,6 +139,9 @@ class FakeGantry:
         self.calls.append(("set_hard_limits_enabled", enabled))
         self.grbl_settings["$21"] = "1" if enabled else "0"
 
+    def configure_soft_limits_from_spans(self, **kwargs):
+        self.calls.append(("configure_soft_limits_from_spans", kwargs))
+
     def set_grbl_setting(self, setting, value):
         self.calls.append(("set_grbl_setting", (setting, value)))
 
@@ -518,6 +521,45 @@ def test_calibration_prepare_leaves_hard_limits_alone_when_already_on(tmp_path):
     # $21 was already enabled: never written, and never reverted.
     assert not any(name == "set_hard_limits_enabled" for name, _ in fake.calls)
     assert fake.grbl_settings["$21"] == "1"
+
+
+def test_configure_soft_limits_reverts_calibration_hard_limits(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    session.prepare_calibration_origin()
+    assert fake.grbl_settings["$21"] == "1"
+    session.configure_soft_limits(
+        max_travel_x=310.0,
+        max_travel_y=210.0,
+        max_travel_z=90.0,
+    )
+
+    # The fixture YAML sets hard_limits: false, so the manual span-programming
+    # path also reverts the calibration-window enforcement.
+    assert ("set_hard_limits_enabled", False) in fake.calls
+    assert fake.grbl_settings["$21"] == "0"
+
+
+def test_hard_limit_restore_failure_warns_and_clears_flag(tmp_path):
+    class FailingHardRestoreGantry(FakeGantry):
+        def set_hard_limits_enabled(self, enabled):
+            super().set_hard_limits_enabled(enabled)
+            if not enabled:
+                raise RuntimeError("serial died mid-restore")
+
+    session = GantrySession(
+        gantry_factory=FailingHardRestoreGantry, sleep=lambda _seconds: None
+    )
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    session.prepare_calibration_origin()
+    # A failed $21 revert must not raise — the machine is left in the safer
+    # state — and must not leave the flag set (no retry loop).
+    session.restore_calibration_soft_limits()
+    assert session._calibration_restore_hard_limits is False
+    assert not session.calibration_active
 
 
 def test_finalize_reverts_calibration_hard_limits_unless_configured(tmp_path):
