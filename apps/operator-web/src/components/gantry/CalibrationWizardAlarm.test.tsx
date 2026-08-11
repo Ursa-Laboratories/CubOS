@@ -112,9 +112,12 @@ describe("CalibrationWizard alarm recovery", () => {
     const zDown = await advanceToOriginJog(user);
     await user.click(zDown);
 
-    expect(
-      await screen.findByText(/Power-cycle the controller, re-seat the USB cable/),
-    ).toBeInTheDocument();
+    // The recovery failure surfaces on both the primary "GANTRY ALARM" banner
+    // and the secondary generic error line, so a bare findByText on this
+    // substring matches two elements. Scope to the alarm banner, which is
+    // the actionable instruction this test is actually about.
+    const alarmBanner = (await screen.findByText("GANTRY ALARM")).closest("div");
+    expect(alarmBanner).toHaveTextContent(/Power-cycle the controller, re-seat the USB cable/);
   });
 
   it("closes even when restoring soft limits fails (dead controller link)", async () => {
