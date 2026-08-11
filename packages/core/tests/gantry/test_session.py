@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -128,6 +130,17 @@ class FakeGantry:
 
     def set_soft_limits_enabled(self, enabled):
         self.calls.append(("set_soft_limits_enabled", enabled))
+
+    def hard_limits_enabled(self):
+        self.calls.append(("hard_limits_enabled", None))
+        return float(self.grbl_settings.get("$21", "0")) != 0.0
+
+    def set_hard_limits_enabled(self, enabled):
+        self.calls.append(("set_hard_limits_enabled", enabled))
+        self.grbl_settings["$21"] = "1" if enabled else "0"
+
+    def configure_soft_limits_from_spans(self, **kwargs):
+        self.calls.append(("configure_soft_limits_from_spans", kwargs))
 
     def set_grbl_setting(self, setting, value):
         self.calls.append(("set_grbl_setting", (setting, value)))
@@ -479,6 +492,121 @@ def test_calibration_prepare_disables_and_restore_reenables_soft_limits(tmp_path
     assert ("set_soft_limits_enabled", True) in fake.calls
 
 
+def test_calibration_prepare_enforces_hard_limits_and_restore_reverts(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    assert fake.grbl_settings["$21"] == "0"
+
+    session.prepare_calibration_origin()
+    assert ("set_hard_limits_enabled", True) in fake.calls
+    assert fake.grbl_settings["$21"] == "1"
+    assert session.calibration_active
+
+    session.restore_calibration_soft_limits()
+    assert ("set_hard_limits_enabled", False) in fake.calls
+    assert fake.grbl_settings["$21"] == "0"
+    assert not session.calibration_active
+
+
+def test_calibration_prepare_leaves_hard_limits_alone_when_already_on(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.grbl_settings["$21"] = "1"
+
+    session.prepare_calibration_origin()
+    session.restore_calibration_soft_limits()
+
+    # $21 was already enabled: never written, and never reverted.
+    assert not any(name == "set_hard_limits_enabled" for name, _ in fake.calls)
+    assert fake.grbl_settings["$21"] == "1"
+
+
+def test_configure_soft_limits_reverts_calibration_hard_limits(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    session.prepare_calibration_origin()
+    assert fake.grbl_settings["$21"] == "1"
+    session.configure_soft_limits(
+        max_travel_x=310.0,
+        max_travel_y=210.0,
+        max_travel_z=90.0,
+    )
+
+    # The fixture YAML sets hard_limits: false, so the manual span-programming
+    # path also reverts the calibration-window enforcement.
+    assert ("set_hard_limits_enabled", False) in fake.calls
+    assert fake.grbl_settings["$21"] == "0"
+
+
+def test_hard_limit_restore_failure_warns_and_clears_flag(tmp_path):
+    class FailingHardRestoreGantry(FakeGantry):
+        def set_hard_limits_enabled(self, enabled):
+            super().set_hard_limits_enabled(enabled)
+            if not enabled:
+                raise RuntimeError("serial died mid-restore")
+
+    session = GantrySession(
+        gantry_factory=FailingHardRestoreGantry, sleep=lambda _seconds: None
+    )
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    session.prepare_calibration_origin()
+    # A failed $21 revert must not raise — the machine is left in the safer
+    # state — and must not leave the flag set (no retry loop).
+    session.restore_calibration_soft_limits()
+    assert session._calibration_restore_hard_limits is False
+    assert not session.calibration_active
+
+
+def test_finalize_reverts_calibration_hard_limits_unless_configured(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    session.prepare_calibration_origin()
+    assert fake.grbl_settings["$21"] == "1"
+    session.finalize_calibration_origin(
+        home_z=80.0,
+        block_touch_z=10.0,
+        block_height=5.0,
+        factory_z_travel=90.0,
+    )
+
+    # The fixture YAML sets hard_limits: false, so the calibration-window
+    # enforcement is reverted once calibrated soft limits are in place.
+    assert ("set_hard_limits_enabled", False) in fake.calls
+    assert fake.grbl_settings["$21"] == "0"
+    assert not session.calibration_active
+
+
+def test_finalize_keeps_hard_limits_when_yaml_configures_them(tmp_path):
+    gantry_path = tmp_path / "gantry.yaml"
+    gantry_path.write_text(
+        GANTRY_YAML.replace("hard_limits: false", "hard_limits: true"),
+        encoding="utf-8",
+    )
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(gantry_path, filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    session.prepare_calibration_origin()
+    session.finalize_calibration_origin(
+        home_z=80.0,
+        block_touch_z=10.0,
+        block_height=5.0,
+        factory_z_travel=90.0,
+    )
+
+    assert ("set_hard_limits_enabled", True) in fake.calls
+    assert ("set_hard_limits_enabled", False) not in fake.calls
+    assert fake.grbl_settings["$21"] == "1"
+    assert not session.calibration_active
+
+
 def test_feed_hold_interrupt_does_not_wait_for_operation_lock(tmp_path):
     session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
     session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
@@ -512,6 +640,49 @@ def test_interrupt_helpers_require_connection():
         session.feed_hold_interrupt()
     with pytest.raises(GantryNotConnectedError):
         session.jog_cancel_interrupt()
+
+
+def test_jog_queued_behind_cancel_is_dropped(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    jog_done = threading.Event()
+
+    def queued_jog():
+        session.jog(x=1.0)
+        jog_done.set()
+
+    # Hold the operation lock so the jog request blocks after snapshotting
+    # its cancel generation — the same interleaving as a jog request queued
+    # behind a held-jog burst on the API server when the cancel arrives.
+    session._lock.acquire()
+    try:
+        worker = threading.Thread(target=queued_jog, daemon=True)
+        worker.start()
+        time.sleep(0.1)
+        session.jog_cancel_interrupt()
+    finally:
+        session._lock.release()
+    assert jog_done.wait(timeout=2.0)
+
+    assert ("jog_cancel", None) in fake.calls
+    assert not any(name == "jog" for name, _ in fake.calls)
+
+    # A fresh jog issued after the cancel proceeds normally.
+    session.jog(x=1.0)
+    assert any(name == "jog" for name, _ in fake.calls)
+
+
+def test_locked_jog_cancel_also_drops_queued_jogs(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    generation = session._jog_cancel_generation
+    session.jog_cancel()
+    assert session._jog_cancel_generation == generation + 1
+    assert ("jog_cancel", None) in fake.calls
 
 
 def test_jog_zero_delta_is_noop_and_alarm_is_wrapped(tmp_path):

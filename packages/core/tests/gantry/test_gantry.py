@@ -380,6 +380,24 @@ class TestGantry(unittest.TestCase):
         mock_mill.set_grbl_setting.assert_called_once_with("20", "0")
 
     @patch("cubos.gantry.gantry.Mill")
+    def test_hard_limits_enabled_reads_dollar21(self, mock_mill_cls):
+        mock_mill = mock_mill_cls.return_value
+        mock_mill.read_grbl_settings.return_value = {"$21": "0"}
+        gantry = Gantry(config=self.config)
+        self.assertFalse(gantry.hard_limits_enabled())
+        mock_mill.read_grbl_settings.return_value = {}
+        self.assertIsNone(gantry.hard_limits_enabled())
+        mock_mill.read_grbl_settings.return_value = {"$21": "not-a-number"}
+        self.assertIsNone(gantry.hard_limits_enabled())
+
+    @patch("cubos.gantry.gantry.Mill")
+    def test_set_hard_limits_enabled_delegates_to_grbl_setting(self, mock_mill_cls):
+        mock_mill = mock_mill_cls.return_value
+        gantry = Gantry(config=self.config)
+        gantry.set_hard_limits_enabled(True)
+        mock_mill.set_grbl_setting.assert_called_once_with("21", "1")
+
+    @patch("cubos.gantry.gantry.Mill")
     def test_configure_soft_limits_writes_and_verifies_settings(self, mock_mill_cls):
         mock_mill = mock_mill_cls.return_value
         mock_mill.read_grbl_settings.return_value = {

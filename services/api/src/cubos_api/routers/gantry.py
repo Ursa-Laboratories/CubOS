@@ -596,7 +596,12 @@ def feed_hold() -> GantryPosition:
 def jog_cancel() -> GantryPosition:
     session = _require_session()
     try:
-        return _position_response(session.jog_cancel(), session=session)
+        # Realtime cancel (0x85) without waiting on the operation lock:
+        # during a held jog the lock is contended by queued jog requests,
+        # and a cancel that waits its turn arrives after the motion it was
+        # meant to stop. position() is non-blocking (cache fallback).
+        session.jog_cancel_interrupt()
+        return _position_response(session.position(), session=session)
     except Exception as exc:
         raise _session_http_exception(exc, default_action="Jog cancel") from exc
 
