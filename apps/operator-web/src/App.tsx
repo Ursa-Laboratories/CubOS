@@ -91,7 +91,7 @@ function errorHasStatus(error: unknown, status: number): boolean {
   );
 }
 
-const WORKING_DECK_FILENAME = "panda-deck.yaml";
+const WORKING_DECK_FILENAME = "cub_deck.yaml";
 
 export default function App() {
   const qc = useQueryClient();

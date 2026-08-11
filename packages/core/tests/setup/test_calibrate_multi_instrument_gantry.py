@@ -247,6 +247,7 @@ class _SoftLimitEnabledFakeGantry(_FakeGantry):
     def __init__(self, config: dict):
         super().__init__(config)
         self.soft_limits_are_enabled = True
+        self.hard_limits_are_enabled = False
 
     def soft_limits_enabled(self) -> bool | None:
         self.calls.append(("soft_limits_enabled",))
@@ -255,6 +256,14 @@ class _SoftLimitEnabledFakeGantry(_FakeGantry):
     def set_soft_limits_enabled(self, enabled: bool) -> None:
         self.calls.append(("set_soft_limits_enabled", enabled))
         self.soft_limits_are_enabled = enabled
+
+    def hard_limits_enabled(self) -> bool | None:
+        self.calls.append(("hard_limits_enabled",))
+        return self.hard_limits_are_enabled
+
+    def set_hard_limits_enabled(self, enabled: bool) -> None:
+        self.calls.append(("set_hard_limits_enabled", enabled))
+        self.hard_limits_are_enabled = enabled
 
 
 class _SoftLimitProgrammingFailsFakeGantry(_FakeGantry):
@@ -440,6 +449,53 @@ def test_multi_instrument_calibration_disables_stale_soft_limits_during_jogs(tmp
         calls.index(("set_work_coordinates", 0.0, 0.0, None)),
     )
     assert any("Temporarily disabling GRBL soft limits" in m for m in messages)
+    # Hard limits are enforced for the same window and reverted after the
+    # soft limits come back on.
+    enable_hard = ("set_hard_limits_enabled", True)
+    revert_hard = ("set_hard_limits_enabled", False)
+    assert enable_hard in calls
+    assert revert_hard in calls
+    assert calls.index(enable_hard) < calls.index(revert_hard)
+    assert calls.index(restore_call) < calls.index(revert_hard)
+    assert any("Enabling GRBL hard limits" in m for m in messages)
+
+
+def test_multi_outer_finally_reverts_hard_limits_when_soft_restore_fails(tmp_path):
+    from cubos.gantry.gantry_driver.exceptions import MillConnectionError
+
+    path = _write_multi_gantry(tmp_path / "gantry.yaml")
+
+    class SoftRestoreFailsFakeGantry(_SoftLimitEnabledFakeGantry):
+        def set_soft_limits_enabled(self, enabled: bool) -> None:
+            super().set_soft_limits_enabled(enabled)
+            if enabled:
+                raise MillConnectionError("link died during soft-limit restore")
+
+    with pytest.raises(MillConnectionError):
+        run_multi_instrument_calibration(
+            path,
+            reference_instrument="left_probe",
+            lowest_instrument="left_probe",
+            instruments_to_calibrate=("left_probe",),
+            skip_soft_limit_config=True,
+            output=lambda _message: None,
+            input_reader=lambda _prompt: "12.5",
+            gantry_factory=SoftRestoreFailsFakeGantry,
+            key_reader=_key_reader(
+                [
+                    ("\r", 1),
+                    ("Z", 1),
+                    ("\r", 1),
+                    ("\r", 1),
+                ]
+            ),
+            stdin_flusher=lambda: None,
+        )
+
+    # The inline cleanup died at the soft-limit restore; the outer safety
+    # net must still drop $21 back to its prior state.
+    calls = SoftRestoreFailsFakeGantry.instance.calls
+    assert ("set_hard_limits_enabled", False) in calls
 
 
 def test_multi_instrument_calibration_accepts_block_height_for_z_reference(tmp_path):

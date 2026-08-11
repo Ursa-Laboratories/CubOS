@@ -123,6 +123,27 @@ The script asks before overwriting the input file. To write a calibrated copy:
 The preflight shows the input file, output file, detected instruments, and the
 chosen flow before it connects to hardware.
 
+## Soft Limits Are Off During Calibration
+
+Calibration measures the machine's real travel, so the stored GRBL soft
+limits (`$20`) cannot be trusted yet — CubOS disables them when calibration
+starts and re-programs them from the measured spans when it finishes (or
+restores them if you abort). **While calibrating, the only backstop is the
+physical limit switches** — so CubOS also enables GRBL hard limits (`$21`)
+for the calibration window, even on controllers that normally run with
+them off. Without that, a jog past a travel end grinds against the frame
+and silently skips steps, corrupting the calibration being taken. When
+calibration finishes or is aborted, `$21` is restored to its prior value —
+unless the gantry YAML's `grbl_settings` sets `hard_limits: true`, in
+which case it stays enabled. Jog with small steps as you approach the
+edges of travel.
+
+If a jog does trip a hard-limit switch, CubOS soft-resets, unlocks GRBL,
+and attempts a small pull-off opposite the failed jog direction. If
+recovery fails, or the machine ends up stuck on a switch after a power
+cycle, see
+[Stuck on a Limit Switch](troubleshooting.md#stuck-on-a-limit-switch).
+
 ## Jog Controls
 
 During calibration:
@@ -142,8 +163,8 @@ During calibration:
     at 25 mm or larger step sizes. Press Space to cancel an active jog.
 
 If a jog trips a hard limit, CubOS soft-resets, unlocks GRBL, and attempts a
-small pull-off opposite the failed jog direction. Stop and reset the controller
-if recovery fails.
+small pull-off opposite the failed jog direction. If recovery fails, stop and
+follow [Stuck on a Limit Switch](troubleshooting.md#stuck-on-a-limit-switch).
 
 ## Single-Instrument Calibration
 

@@ -15,6 +15,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Optional, Tuple
@@ -64,6 +65,23 @@ class Mill:
         self.config = {}
         self._init_state()
         self.ser_mill: serial.Serial = None
+        self._write_lock = threading.Lock()
+
+    def _write_serial(self, data: bytes) -> None:
+        """Write bytes to the controller under the write lock.
+
+        Realtime characters (``?``, ``!``, ``~``, jog cancel ``0x85``, soft
+        reset ``0x18``) are sent from threads that deliberately do not hold
+        the session operation lock, so two threads can reach the serial port
+        at once. GRBL itself strips realtime characters out of the stream
+        wherever they appear — even mid-line — but pyserial makes no
+        thread-safety guarantee for concurrent ``write()`` calls. This lock
+        makes each write atomic at the port. It only serializes the write
+        syscall, never a command/response cycle, so realtime characters
+        still bypass waiting on in-flight commands.
+        """
+        with self._write_lock:
+            self.ser_mill.write(data)
 
     def _init_state(self):
         """Initialize state attributes for a fresh, unconnected mill."""
@@ -239,7 +257,7 @@ class Mill:
         # everything except $X and $H while in alarm state.
         initial_status = ""
         for _ in range(3):
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.2)
             initial_status = self._read_serial()
             if initial_status:
@@ -364,11 +382,11 @@ class Mill:
             self.command_logger.debug("%s", command)
 
             if command == "$$":
-                self.ser_mill.write(str(command).encode(encoding="ascii") + b"\n")
+                self._write_serial(str(command).encode(encoding="ascii") + b"\n")
                 return self._collect_grbl_settings_response()
 
             for attempt in range(ERROR_22_MAX_RETRIES + 1):
-                self.ser_mill.write(str(command).encode(encoding="ascii") + b"\n")
+                self._write_serial(str(command).encode(encoding="ascii") + b"\n")
                 mill_response = self._read_serial().lower()
                 if not command.startswith("$"):
                     mill_response = self._wait_until_idle(
@@ -409,7 +427,7 @@ class Mill:
     def stop(self):
         """Send GRBL feed hold and verify the controller entered Hold."""
         self.feed_hold_realtime()
-        self.ser_mill.write(b"?")
+        self._write_serial(b"?")
         time.sleep(0.05)
         status = self._read_serial()
         if "hold" not in status.lower():
@@ -418,12 +436,12 @@ class Mill:
     def feed_hold_realtime(self) -> None:
         """Send GRBL realtime feed hold without line protocol or reads."""
         self._require_open_serial()
-        self.ser_mill.write(b"!")
+        self._write_serial(b"!")
 
     def resume(self) -> None:
         """Resume a feed-held GRBL controller with realtime cycle start."""
         self._require_open_serial()
-        self.ser_mill.write(b"~")
+        self._write_serial(b"~")
 
     def jog(self, x: float = 0, y: float = 0, z: float = 0,
             feed_rate: float = DEFAULT_FEED_RATE) -> None:
@@ -450,7 +468,7 @@ class Mill:
             return
         cmd = f"$J=G91 {' '.join(parts)} F{feed_rate}"
         self.logger.debug("Jog command: %s", cmd)
-        self.ser_mill.write((cmd + "\n").encode("ascii"))
+        self._write_serial((cmd + "\n").encode("ascii"))
         response = self._read_serial().lower()
         if (
             "error" in response
@@ -467,13 +485,13 @@ class Mill:
     def jog_cancel(self) -> None:
         """Cancel any in-progress jog motion immediately."""
         self._require_open_serial()
-        self.ser_mill.write(b"\x85")
+        self._write_serial(b"\x85")
 
     def unlock(self):
         """Unlock the mill by sending $X directly over serial."""
         self._require_open_serial()
         self.logger.info("Sending unlock ($X)")
-        self.ser_mill.write(b"$X\n")
+        self._write_serial(b"$X\n")
         deadline = time.time() + 2
         while time.time() < deadline:
             line = self.ser_mill.readline().decode("ascii", errors="replace").strip()
@@ -492,7 +510,7 @@ class Mill:
         """Soft reset the mill (GRBL Ctrl-X / 0x18)."""
         self._require_open_serial()
         self.logger.info("Sending soft reset (0x18)")
-        self.ser_mill.write(b"\x18")
+        self._write_serial(b"\x18")
         time.sleep(1.0)
         while self.ser_mill.in_waiting:
             line = self.ser_mill.readline().decode("ascii", errors="replace").strip()
@@ -581,7 +599,7 @@ class Mill:
         status = self._read_serial()
 
         while status.strip().lower() in ["", "ok"] and attempt_limit > 0:
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.05)
             status = self._read_serial()
             attempt_limit -= 1
@@ -675,7 +693,7 @@ class Mill:
         """
         self._require_open_serial()
         for _ in range(15):
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.15)
             status = self._read_serial()
             match = wco_pattern.search(status)
@@ -706,7 +724,7 @@ class Mill:
         if not self.is_connected():
             return ""
         try:
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.1)
             raw = ""
             for _ in range(5):
@@ -776,7 +794,7 @@ class Mill:
         max_attempts = 4
         status = ""
         for attempt in range(max_attempts):
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.05)
             status = self._read_serial()
             # Skim past stale acknowledgments ("ok") and blank reads that
