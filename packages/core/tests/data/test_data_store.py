@@ -7,7 +7,7 @@ import logging
 import sqlite3
 import threading
 from pathlib import Path
-
+import re
 import pytest
 
 from cubos.data.data_store import DATA_DB_PATH_ENV, DataStore, default_database_path
@@ -391,6 +391,29 @@ class TestExperimentCRUD:
         assert parsed[0]["source_name"] == "vial_1"
         store.close()
 
+    def test_created_at_is_iso8601_utc(self):
+        store = _make_store()
+
+        cid = store.create_campaign(description="test")
+
+        eid = store.create_experiment(
+            campaign_id=cid,
+            labware_name="plate_1",
+            well_id="A1",
+            contents_json="[]",
+        )
+
+        row = store._conn.execute(
+            "SELECT created_at FROM experiments WHERE id = ?",
+            (eid,),
+        ).fetchone()
+
+        assert re.fullmatch(
+            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
+            row[0],
+        )
+
+        store.close()
 
 # ─── UVVis measurement logging ───────────────────────────────────────────────
 
