@@ -289,7 +289,7 @@ export default function GantryEditor({
   return (
     <div>
       <div style={configPickerRowStyle}>
-        <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import gantry config" />
+        <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import gantry config" selectedFile={selectedFile} />
         {!config && <button onClick={startNew} style={newConfigBtnStyle}>+ New config</button>}
       </div>
 
