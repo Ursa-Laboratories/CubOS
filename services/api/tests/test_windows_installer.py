@@ -127,7 +127,11 @@ def test_windows_installer_packages_native_desktop_app() -> None:
     assert desktop_package["build"]["win"]["target"] == "dir"
 
 
-def test_windows_installer_offers_asmi_as_optional_public_driver() -> None:
+def test_windows_installer_installs_all_bundled_public_drivers_by_default() -> None:
+    """The installer used to gate each public driver group (e.g. ASMI) behind
+    its own wizard checkbox. It now installs every requirements\\drivers\\*.txt
+    file unconditionally -- no per-driver opt-in/out -- so there is nothing
+    left to select and the ASMI-specific task/Pascal-script plumbing is gone."""
     iss = (WINDOWS_INSTALLER / "CubOS.iss").read_text()
     build_script = (WINDOWS_INSTALLER / "build-installer.ps1").read_text()
     install_runtime = (WINDOWS_INSTALLER / "scripts" / "Install-Runtime.ps1").read_text()
@@ -136,27 +140,30 @@ def test_windows_installer_offers_asmi_as_optional_public_driver() -> None:
         WINDOWS_INSTALLER / "requirements" / "drivers" / "asmi.txt"
     ).read_text()
 
-    assert "ASMI Go Direct driver support" in iss
-    asmi_task_line = next(line for line in iss.splitlines() if 'Name: "asmi"' in line)
-    assert "unchecked" not in asmi_task_line.lower()
-
-    # Inno Setup task hierarchy is positional: a task at indent level N becomes
-    # a child of the nearest preceding level-(N-1) task. Any backslash in a
-    # [Tasks] name would (re-)introduce accidental parenting like the ASMI
-    # default-selection bug this suite is guarding against.
+    # Only the desktop-shortcut task remains -- no per-driver checkbox.
     tasks_section = _extract_ini_section(iss, "Tasks")
     assert tasks_section
     task_names = re.findall(r'Name:\s*"([^"]+)"', tasks_section)
-    assert task_names
-    assert all("\\" not in name for name in task_names)
+    assert task_names == ["desktopicon"]
+    assert "asmi" not in iss.lower()
+    assert "GetDriverGroups" not in iss
+    assert "WizardIsTaskSelected" not in iss
+    assert "-DriverGroups" not in iss
 
-    assert "GetDriverGroups" in iss
-    assert "WizardIsTaskSelected('asmi')" in iss
+    # Install-Runtime.ps1 enumerates requirements\drivers\*.txt itself and
+    # installs every one it finds, instead of being told which to install.
+    assert "Get-ChildItem -Path $DriverRequirementsDir" in install_runtime
+    assert "$SelectedDriverGroups" in install_runtime
     assert "godirect" not in runtime_requirements.lower()
     assert "godirect>=1.2.1" in asmi_requirements
     assert "$DriverRequirementsDir" in build_script
     assert "requirements\\drivers" in build_script
-    assert "$SelectedDriverGroups" in install_runtime
+
+    # Drivers that aren't plain pip packages (e.g. uvvis) still need a pointer
+    # to manual configuration, since they're never in requirements\drivers\.
+    assert "TODO" in install_runtime
+    assert "uvvis" in install_runtime.lower()
+    assert "instruments/README.md" in install_runtime
 
 
 def _requirement_name(spec: str) -> str:
