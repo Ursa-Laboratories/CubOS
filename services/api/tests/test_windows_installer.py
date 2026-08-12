@@ -2,6 +2,7 @@ import json
 import re
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 import tomllib
 
@@ -153,6 +154,7 @@ def test_windows_installer_installs_all_bundled_public_drivers_by_default() -> N
     # Install-Runtime.ps1 enumerates requirements\drivers\*.txt itself and
     # installs every one it finds, instead of being told which to install.
     assert "Get-ChildItem -Path $DriverRequirementsDir" in install_runtime
+    assert '-Filter "*.txt"' in install_runtime
     assert "$SelectedDriverGroups" in install_runtime
     assert "godirect" not in runtime_requirements.lower()
     assert "godirect>=1.2.1" in asmi_requirements
@@ -164,6 +166,44 @@ def test_windows_installer_installs_all_bundled_public_drivers_by_default() -> N
     assert "TODO" in install_runtime
     assert "uvvis" in install_runtime.lower()
     assert "instruments/README.md" in install_runtime
+
+
+@pytest.mark.skipif(
+    shutil.which("pwsh") is None, reason="pwsh is not available on PATH"
+)
+def test_windows_runtime_installs_every_driver_requirements_file() -> None:
+    """Execution-level guard for the 'install everything, no opt-in checkbox'
+    behavior: the static source-text assertions above can't tell whether
+    Install-Runtime.ps1's driver enumeration actually picks up every
+    requirements\\drivers\\*.txt file it finds (vs., say, only the first one,
+    or skipping non-.txt files incorrectly). This extracts the real
+    $SelectedDriverGroups construction out of the script and runs it against
+    a synthetic drivers directory."""
+    install_runtime = (WINDOWS_INSTALLER / "scripts" / "Install-Runtime.ps1").read_text()
+    match = re.search(r"\$SelectedDriverGroups = @\(.*?\n\)", install_runtime, re.DOTALL)
+    assert match, "could not find the $SelectedDriverGroups construction in Install-Runtime.ps1"
+    selection_snippet = match.group(0)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        drivers_dir = Path(tmp) / "requirements" / "drivers"
+        drivers_dir.mkdir(parents=True)
+        (drivers_dir / "asmi.txt").write_text("godirect>=1.2.1\n")
+        (drivers_dir / "widgetcam.txt").write_text("widgetcam-sdk>=2.0\n")
+        (drivers_dir / "README.md").write_text("not a requirements file\n")
+
+        escaped_dir = str(drivers_dir).replace("'", "''")
+        probe = (
+            f"$DriverRequirementsDir = '{escaped_dir}'; "
+            f"{selection_snippet}; "
+            "$SelectedDriverGroups -join ','"
+        )
+        result = subprocess.run(
+            ["pwsh", "-NoProfile", "-NonInteractive", "-Command", probe],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stderr or result.stdout
+        assert result.stdout.strip() == "asmi,widgetcam"
 
 
 def _requirement_name(spec: str) -> str:
