@@ -213,18 +213,8 @@ $Requirements = Join-Path $InstallDir "requirements\runtime-requirements.txt"
 $DriverRequirementsDir = Join-Path $InstallDir "requirements\drivers"
 $Marker = Join-Path $InstallDir "runtime-installed.txt"
 
-# Every public, pip-installable driver requirements file under
-# requirements\drivers\*.txt is installed unconditionally -- there is no
-# per-driver opt-in/out task in the installer wizard anymore, so this list
-# is simply "everything CubOS ships with".
-#
-# TODO: this only covers drivers that are plain pip packages listed here.
-# Instruments with proprietary, non-pip drivers (e.g. the uvvis Thorlabs
-# camera driver, which loads a vendor DLL via ctypes) are not installed by
-# this installer and need separate configuration -- see the "External
-# proprietary drivers" section of packages/core/src/cubos/instruments/README.md
-# (register a `cubos.instrument_registries` entry point, or point
-# CUBOS_INSTRUMENT_REGISTRY_PATHS at an overlay registry YAML).
+# TODO: non-pip drivers (e.g. uvvis) aren't covered here -- see
+# packages/core/src/cubos/instruments/README.md "External proprietary drivers".
 $SelectedDriverGroups = @(
     if (Test-Path $DriverRequirementsDir) {
         Get-ChildItem -Path $DriverRequirementsDir -Filter "*.txt" |

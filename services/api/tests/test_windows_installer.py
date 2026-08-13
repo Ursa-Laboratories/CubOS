@@ -129,10 +129,7 @@ def test_windows_installer_packages_native_desktop_app() -> None:
 
 
 def test_windows_installer_installs_all_bundled_public_drivers_by_default() -> None:
-    """The installer used to gate each public driver group (e.g. ASMI) behind
-    its own wizard checkbox. It now installs every requirements\\drivers\\*.txt
-    file unconditionally -- no per-driver opt-in/out -- so there is nothing
-    left to select and the ASMI-specific task/Pascal-script plumbing is gone."""
+    """No per-driver checkbox; Install-Runtime.ps1 installs every driver file it finds."""
     iss = (WINDOWS_INSTALLER / "CubOS.iss").read_text()
     build_script = (WINDOWS_INSTALLER / "build-installer.ps1").read_text()
     install_runtime = (WINDOWS_INSTALLER / "scripts" / "Install-Runtime.ps1").read_text()
@@ -141,7 +138,6 @@ def test_windows_installer_installs_all_bundled_public_drivers_by_default() -> N
         WINDOWS_INSTALLER / "requirements" / "drivers" / "asmi.txt"
     ).read_text()
 
-    # Only the desktop-shortcut task remains -- no per-driver checkbox.
     tasks_section = _extract_ini_section(iss, "Tasks")
     assert tasks_section
     task_names = re.findall(r'Name:\s*"([^"]+)"', tasks_section)
@@ -151,8 +147,6 @@ def test_windows_installer_installs_all_bundled_public_drivers_by_default() -> N
     assert "WizardIsTaskSelected" not in iss
     assert "-DriverGroups" not in iss
 
-    # Install-Runtime.ps1 enumerates requirements\drivers\*.txt itself and
-    # installs every one it finds, instead of being told which to install.
     assert "Get-ChildItem -Path $DriverRequirementsDir" in install_runtime
     assert '-Filter "*.txt"' in install_runtime
     assert "$SelectedDriverGroups" in install_runtime
@@ -161,8 +155,6 @@ def test_windows_installer_installs_all_bundled_public_drivers_by_default() -> N
     assert "$DriverRequirementsDir" in build_script
     assert "requirements\\drivers" in build_script
 
-    # Drivers that aren't plain pip packages (e.g. uvvis) still need a pointer
-    # to manual configuration, since they're never in requirements\drivers\.
     assert "TODO" in install_runtime
     assert "uvvis" in install_runtime.lower()
     assert "instruments/README.md" in install_runtime
@@ -172,13 +164,7 @@ def test_windows_installer_installs_all_bundled_public_drivers_by_default() -> N
     shutil.which("pwsh") is None, reason="pwsh is not available on PATH"
 )
 def test_windows_runtime_installs_every_driver_requirements_file() -> None:
-    """Execution-level guard for the 'install everything, no opt-in checkbox'
-    behavior: the static source-text assertions above can't tell whether
-    Install-Runtime.ps1's driver enumeration actually picks up every
-    requirements\\drivers\\*.txt file it finds (vs., say, only the first one,
-    or skipping non-.txt files incorrectly). This extracts the real
-    $SelectedDriverGroups construction out of the script and runs it against
-    a synthetic drivers directory."""
+    """Runs the real $SelectedDriverGroups snippet against a synthetic drivers directory."""
     install_runtime = (WINDOWS_INSTALLER / "scripts" / "Install-Runtime.ps1").read_text()
     match = re.search(r"\$SelectedDriverGroups = @\(.*?\n\)", install_runtime, re.DOTALL)
     assert match, "could not find the $SelectedDriverGroups construction in Install-Runtime.ps1"
