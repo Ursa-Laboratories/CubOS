@@ -23,6 +23,7 @@ import {
   useInstrumentSchemas,
   useInstrumentMethods,
 } from "./hooks/useGantryPosition";
+import RunPanel from "./components/run/RunPanel";
 import { useProtocolCommands, useProtocolConfigs, useProtocol, useSaveProtocol, useValidateProtocolSetup, useRunStatus } from "./hooks/useProtocol";
 import { useExperimentData } from "./hooks/useExperimentData";
 import { useFluidStates } from "./hooks/useFluidState";
@@ -437,30 +438,11 @@ export default function App() {
     setRunError(null);
     qc.setQueryData(["protocol", "run-status"], { active: true, protocol_file: protocolFile });
 
-    if (!state) {
-      // No state choice was made: byte-identical to the pre-Feature-07
-      // stateless flow, through the legacy synchronous endpoint.
-      try {
-        const result = await protocolApi.run({
-          gantry_file: gantryFile,
-          deck_file: deckFile,
-          protocol_file: protocolFile,
-        });
-        setRunResult(result);
-        qc.invalidateQueries({ queryKey: ["data", "campaigns"] });
-      } catch (err: unknown) {
-        setRunError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setIsRunning(false);
-        setIsCancelingRun(false);
-        qc.invalidateQueries({ queryKey: ["protocol", "run-status"] });
-      }
-      return;
-    }
-
-    // A fluid-state choice was made: only the versioned /api/v1/runs
-    // resource accepts state selection (the legacy endpoint structurally
-    // cannot), so submission and polling go through it instead.
+    // Every run goes through the versioned /api/v1/runs resource, including
+    // stateless ones (`state` omitted). It is the only path that yields a
+    // run_id and an event stream, which the step view needs; the legacy
+    // synchronous endpoint remains available to API clients but is no longer
+    // used here.
     const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setActiveRunId(runId);
     try {
@@ -469,7 +451,7 @@ export default function App() {
         gantry_file: gantryFile,
         deck_file: deckFile,
         protocol_file: protocolFile,
-        state,
+        ...(state ? { state } : {}),
       });
       const finalRecord = RUN_TERMINAL_STATES.has(submitted.state)
         ? submitted
@@ -486,7 +468,8 @@ export default function App() {
     } finally {
       setIsRunning(false);
       setIsCancelingRun(false);
-      setActiveRunId(null);
+      // activeRunId is intentionally NOT cleared: the finished run's step
+      // list stays on screen until the next run replaces it.
       qc.invalidateQueries({ queryKey: ["protocol", "run-status"] });
     }
   };
@@ -773,6 +756,15 @@ export default function App() {
             onFluidStateChoiceChange={setFluidStateChoice}
             availableFluidStates={fluidStates.data ?? []}
           />
+          {activeRunId && (
+            <div style={{ marginTop: 12 }}>
+              <RunPanel
+                runId={activeRunId}
+                onCancel={handleCancelRun}
+                isCancelling={isCancelingRun}
+              />
+            </div>
+          )}
         </>
           )}
         </>
