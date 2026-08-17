@@ -1134,6 +1134,9 @@ describe("CubOS editor interactions", () => {
       deck_file: "cub_deck.yaml",
       protocol_file: "move.yaml",
     });
+    // Submitting enters the Run view; the workflow footer's result readout
+    // lives back on the Workflow tab.
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
     expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Last Campaign")).toHaveValue("#456");
   });
@@ -1166,9 +1169,12 @@ describe("CubOS editor interactions", () => {
     await importConfig(user, "Import protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
-    // Surfaced twice by design: the workflow footer and the run step panel.
-    expect(await screen.findAllByText("Gantry lost connection")).not.toHaveLength(0);
+    // The Run view reports the failure where the operator already is.
     expect(await screen.findByRole("alert")).toHaveTextContent("Gantry lost connection");
+    // Submitting enters the Run view; the workflow footer's result readout
+    // lives back on the Workflow tab.
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    expect(await screen.findAllByText("Gantry lost connection")).not.toHaveLength(0);
     await waitFor(() => expect(screen.getByRole("button", { name: "Run Protocol" })).toBeEnabled());
     expect(screen.queryByRole("button", { name: "Running..." })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancelling..." })).not.toBeInTheDocument();
@@ -1206,6 +1212,9 @@ describe("CubOS editor interactions", () => {
     await importConfig(user, "Import protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
+    // Submitting enters the Run view; this test drives the workflow footer's
+    // own Run/Cancel controls, so step back to that tab.
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
     expect(await screen.findByRole("button", { name: "Running..." })).toBeDisabled();
     const cancelButton = await screen.findByRole("button", { name: "Cancel Run" });
     expect(cancelButton).toBeEnabled();
@@ -1226,6 +1235,68 @@ describe("CubOS editor interactions", () => {
 
     expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancelling — waiting for protocol to stop" })).not.toBeInTheDocument();
+  });
+
+  it("enters a Run view on submit, and keeps it reachable afterwards", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      runPlan: (runId: string) => jsonResponse({
+        run_id: runId,
+        steps: [
+          { index: 0, command: "home", summary: "all axes", args: {} },
+          { index: 1, command: "move", summary: "pipette → plate_1.A1", args: {} },
+        ],
+      }),
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+
+    // No run yet: an empty Run view would be a dead tab.
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+
+    await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
+
+    // Submitting switches into the run mode and shows the compiled steps
+    // alongside the live gantry readout.
+    const runRegion = await screen.findByRole("region", { name: "Run progress" });
+    expect(runRegion).toBeInTheDocument();
+    expect(await screen.findByText("all axes")).toBeInTheDocument();
+    expect(screen.getByText("pipette → plate_1.A1")).toBeInTheDocument();
+
+    // Navigating away and back returns to the same run.
+    await user.click(screen.getByRole("button", { name: "State" }));
+    expect(screen.queryByRole("region", { name: "Run progress" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByRole("region", { name: "Run progress" })).toBeInTheDocument();
+  });
+
+  it("reports the run outcome inside the Run view", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      runPlan: (runId: string) => jsonResponse({
+        run_id: runId,
+        steps: [{ index: 0, command: "home", summary: "all axes", args: {} }],
+      }),
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
+
+    // The operator stays in the Run view when it finishes, so the outcome
+    // has to be reported there and not only in the workflow footer.
+    expect(
+      await screen.findByText(/campaign #456 created/i),
+    ).toBeInTheDocument();
   });
 
   it("shows a protocol-running sidebar banner outside the Protocol tab", async () => {
@@ -1545,6 +1616,9 @@ describe("CubOS editor interactions", () => {
       state: { fluid_state_id: 5 },
     });
 
+    // Submitting enters the Run view; the workflow footer's result readout
+    // lives back on the Workflow tab.
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
     expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
     // The legacy synchronous endpoint is no longer used by the UI at all.
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -1585,6 +1659,7 @@ describe("CubOS editor interactions", () => {
     await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
     expect(await screen.findByText(/deck fingerprint/i)).toBeInTheDocument();
   });
 

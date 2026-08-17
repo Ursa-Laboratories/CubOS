@@ -110,7 +110,16 @@ async function startRun(page: import("@playwright/test").Page) {
   await page.getByRole("button", { name: "Protocol", exact: true }).click();
   await page.getByLabel("Import protocol config").selectOption("indentation.yaml");
   await page.getByRole("button", { name: "Run Protocol" }).click();
+  // Submitting switches the workspace into the Run view.
   await expect(page.getByRole("region", { name: "Run progress" })).toBeVisible();
+  // The persistent right column keeps the live deck view alongside it.
+  await expect(page.getByText("Deck Visualization")).toBeVisible();
+}
+
+/** The whole workspace, so the screenshots show the run view in context. */
+async function captureView(page: import("@playwright/test").Page, name: string) {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}.png` });
 }
 
 test.describe("step-execution view", () => {
@@ -126,9 +135,7 @@ test.describe("step-execution view", () => {
     await expect(page.getByLabel("substep stroke1 running")).toBeVisible();
     await expect(page.getByText("2 / 6 steps")).toBeVisible();
 
-    await page
-      .getByRole("region", { name: "Run progress" })
-      .screenshot({ path: `${SCREENSHOT_DIR}/run-steps-liquid-handling.png` });
+    await captureView(page, "run-view-liquid-handling");
   });
 
   test("distinguishes steps already applied on a previous run", async ({ page }) => {
@@ -145,9 +152,7 @@ test.describe("step-execution view", () => {
     // Steps after the active one were never reached — still pending.
     await expect(page.getByLabel("step 5 drop_tip pending")).toBeVisible();
 
-    await page
-      .getByRole("region", { name: "Run progress" })
-      .screenshot({ path: `${SCREENSHOT_DIR}/run-steps-resumed.png` });
+    await captureView(page, "run-view-resumed");
   });
 
   test("names the failing step and leaves unreached steps pending", async ({ page }) => {
@@ -161,8 +166,6 @@ test.describe("step-execution view", () => {
     // A finished run offers no cancel.
     await expect(page.getByRole("button", { name: "Cancel run" })).toHaveCount(0);
 
-    await page
-      .getByRole("region", { name: "Run progress" })
-      .screenshot({ path: `${SCREENSHOT_DIR}/run-steps-failed.png` });
+    await captureView(page, "run-view-failed");
   });
 });

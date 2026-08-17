@@ -40,7 +40,6 @@ const headerStyle: CSSProperties = {
 };
 
 const listStyle: CSSProperties = {
-  maxHeight: "22rem",
   overflowY: "auto",
   display: "flex",
   flexDirection: "column",
@@ -65,10 +64,34 @@ function statePill(state: RunState): CSSProperties {
   };
 }
 
+interface RunResult {
+  steps_executed?: number;
+  campaign_id?: number;
+}
+
+/** One-line outcome for a finished run, or null while it is still going. */
+function runSummary(state: RunState | undefined, result: unknown): string | null {
+  if (state !== "succeeded") return null;
+  const parts = ["Protocol complete"];
+  const typed = (result ?? {}) as RunResult;
+  if (typeof typed.steps_executed === "number") {
+    parts.push(`${typed.steps_executed} steps executed`);
+  }
+  if (typeof typed.campaign_id === "number") {
+    parts.push(`campaign #${typed.campaign_id} created`);
+  }
+  return `${parts.join(" — ")}.`;
+}
+
 export interface RunPanelProps {
   runId: string;
   onCancel?: () => void;
   isCancelling?: boolean;
+  /**
+   * Fill the available height instead of capping the step list. Set when the
+   * panel owns a whole view rather than sitting inside a scrolling column.
+   */
+  fill?: boolean;
 }
 
 /**
@@ -78,7 +101,12 @@ export interface RunPanelProps {
  * (see `useRunSteps`), so this panel can mount at any point in a run — after a
  * page refresh, or on a run that already finished — and show the same thing.
  */
-export default function RunPanel({ runId, onCancel, isCancelling }: RunPanelProps) {
+export default function RunPanel({
+  runId,
+  onCancel,
+  isCancelling,
+  fill = false,
+}: RunPanelProps) {
   const { steps, counts, record, isTerminal, planError } = useRunSteps(runId);
   const listRef = useRef<HTMLDivElement | null>(null);
   const activeRowRef = useRef<HTMLDivElement | null>(null);
@@ -96,9 +124,13 @@ export default function RunPanel({ runId, onCancel, isCancelling }: RunPanelProp
   }, [active, following]);
 
   const state = record?.state ?? "queued";
+  const summary = runSummary(record?.state, record?.result);
 
   return (
-    <section style={panelStyle} aria-label="Run progress">
+    <section
+      style={fill ? { ...panelStyle, flex: "1 1 auto", minHeight: 0 } : panelStyle}
+      aria-label="Run progress"
+    >
       <div style={headerStyle}>
         <span style={statePill(state)}>{STATE_LABEL[state]}</span>
         <span style={{ ...theme.mono, fontSize: 11, color: theme.color.textMuted }}>
@@ -143,6 +175,15 @@ export default function RunPanel({ runId, onCancel, isCancelling }: RunPanelProp
         </div>
       )}
 
+      {/* A finished run has to report its outcome where the operator is
+          actually looking, not only in the workflow footer they navigated
+          away from. */}
+      {summary && (
+        <div style={{ ...theme.notice.success, fontSize: 12 }} role="status">
+          {summary}
+        </div>
+      )}
+
       {steps.length === 0 && !planError ? (
         <div style={{ fontSize: 12, color: theme.color.textMuted }}>
           Compiling steps…
@@ -150,7 +191,7 @@ export default function RunPanel({ runId, onCancel, isCancelling }: RunPanelProp
       ) : (
         <div
           ref={listRef}
-          style={listStyle}
+          style={fill ? { ...listStyle, flex: "1 1 auto", minHeight: 0 } : { ...listStyle, maxHeight: "22rem" }}
           onWheel={() => setFollowing(false)}
           onTouchMove={() => setFollowing(false)}
           data-testid="step-list"

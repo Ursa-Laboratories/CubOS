@@ -96,7 +96,7 @@ const WORKING_DECK_FILENAME = "cub_deck.yaml";
 
 export default function App() {
   const qc = useQueryClient();
-  const [activeView, setActiveView] = useState<"Workflow" | "Visualize" | "State" | "Results">("Workflow");
+  const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "State" | "Results">("Workflow");
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
@@ -445,6 +445,7 @@ export default function App() {
     // used here.
     const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     setActiveRunId(runId);
+    setActiveView("Run");
     try {
       const submitted = await runsApi.submit({
         run_id: runId,
@@ -517,7 +518,17 @@ export default function App() {
         </div>
       </div>
       <div style={viewToggleStyle} aria-label="Workspace view">
-        {(["Workflow", "Visualize", "State", "Results"] as const).map((view) => (
+        {(
+          [
+            "Workflow",
+            // Only offered once a run exists — an empty run view is a dead
+            // tab, and the run is what the operator navigates back to.
+            ...(activeRunId ? (["Run"] as const) : []),
+            "Visualize",
+            "State",
+            "Results",
+          ] as const
+        ).map((view) => (
           <button
             key={view}
             type="button"
@@ -602,7 +613,13 @@ export default function App() {
   );
 
   const left = (
-    <div>
+    <div
+      style={
+        activeView === "Run"
+          ? { height: "100%", display: "flex", flexDirection: "column" }
+          : undefined
+      }
+    >
       {activeView === "Workflow" && (
         <>
           <EditorTabs
@@ -756,18 +773,21 @@ export default function App() {
             onFluidStateChoiceChange={setFluidStateChoice}
             availableFluidStates={fluidStates.data ?? []}
           />
-          {activeRunId && (
-            <div style={{ marginTop: 12 }}>
-              <RunPanel
-                runId={activeRunId}
-                onCancel={handleCancelRun}
-                isCancelling={isCancelingRun}
-              />
-            </div>
-          )}
         </>
           )}
         </>
+      )}
+      {/* The persistent right column already carries the live deck view and
+          gantry readout, so the run mode only needs to own the left region. */}
+      {activeView === "Run" && activeRunId && (
+        <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex" }}>
+          <RunPanel
+            runId={activeRunId}
+            onCancel={handleCancelRun}
+            isCancelling={isCancelingRun}
+            fill
+          />
+        </div>
       )}
       {activeView === "Visualize" && (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
