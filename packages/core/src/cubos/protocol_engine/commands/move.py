@@ -4,12 +4,13 @@ from typing import Any, TYPE_CHECKING
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
+from . import _summaries
 
 if TYPE_CHECKING:
     from ..runtime import ProtocolContext
 
 
-@protocol_command("move")
+@protocol_command("move", summary=_summaries.move)
 def move(
     context: "ProtocolContext",
     instrument: str,
