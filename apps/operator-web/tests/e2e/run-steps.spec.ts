@@ -43,24 +43,30 @@ const RESUMED_RUN: RunScenario = {
   events: [
     { index: 0, command: "home", outcome: "started" },
     { index: 0, command: "home", outcome: "completed", duration_s: 4.1 },
+    // A skipped command returns normally, so the engine emits `completed`
+    // straight after each `skipped`. Feeding only the skip would let this
+    // scenario pass against a reducer that drops it.
     {
       index: 1,
       command: "pick_up_tip",
       outcome: "skipped",
       reason: "already applied on a previous run",
     },
+    { index: 1, command: "pick_up_tip", outcome: "completed", duration_s: 0.01 },
     {
       index: 2,
       command: "transfer",
       outcome: "skipped",
       reason: "already applied on a previous run",
     },
+    { index: 2, command: "transfer", outcome: "completed", duration_s: 0.01 },
     {
       index: 3,
       command: "transfer",
       outcome: "skipped",
       reason: "already applied on a previous run",
     },
+    { index: 3, command: "transfer", outcome: "completed", duration_s: 0.01 },
     { index: 4, command: "transfer", outcome: "started" },
   ],
   runState: "running",

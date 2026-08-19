@@ -59,6 +59,20 @@ function statusFor(outcome: unknown): StepStatus | null {
 }
 
 /**
+ * Resolve a new status against the one already recorded.
+ *
+ * A skipped command still returns normally, so the engine emits
+ * `step_completed` right after `step_skipped` for the same scope. The skip is
+ * the more specific fact and has to survive that, or a resumed run renders as
+ * though it did the work in this process. A later failure still wins, since
+ * that is a real outcome rather than a bookkeeping artifact.
+ */
+function mergeStatus(current: StepStatus, incoming: StepStatus): StepStatus {
+  if (current === "skipped" && incoming === "done") return current;
+  return incoming;
+}
+
+/**
  * A `skipped` step is not a step that never ran — it is one the durable
  * fluid/tip journal reports as already applied by an earlier run. Callers
  * must keep the two visually distinct, so `reason` is always carried through.
@@ -100,7 +114,7 @@ export function deriveStepViews(plan: PlanStep[], events: RunEvent[]): StepView[
       const segments = data.substep.split(":");
       const existing = substeps.get(key);
       if (existing) {
-        existing.status = status;
+        existing.status = mergeStatus(existing.status, status);
         existing.durationS = durationS ?? existing.durationS;
         existing.error = error ?? existing.error;
         existing.reason = reason ?? existing.reason;
@@ -122,7 +136,7 @@ export function deriveStepViews(plan: PlanStep[], events: RunEvent[]): StepView[
 
     const view = views.get(data.index);
     if (!view) continue;
-    view.status = status;
+    view.status = mergeStatus(view.status, status);
     view.durationS = durationS ?? view.durationS;
     view.error = error ?? view.error;
     view.reason = reason ?? view.reason;

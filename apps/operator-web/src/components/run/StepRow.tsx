@@ -32,9 +32,12 @@ const STATUS_LABEL: Record<StepStatus, string> = {
 function formatDuration(seconds: number | null): string {
   if (seconds === null) return "";
   if (seconds < 1) return `${Math.round(seconds * 1000)} ms`;
-  if (seconds < 60) return `${seconds.toFixed(1)} s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${Math.round(seconds % 60)}s`;
+  // Round once, then split: rounding the remainder independently of the
+  // minutes floor renders 119.6 s as "1m 60s", and 59.95 s as "60.0 s".
+  const tenths = Math.round(seconds * 10) / 10;
+  if (tenths < 60) return `${tenths.toFixed(1)} s`;
+  const total = Math.round(tenths);
+  return `${Math.floor(total / 60)}m ${total % 60}s`;
 }
 
 const rowStyle = (status: StepStatus): CSSProperties => ({

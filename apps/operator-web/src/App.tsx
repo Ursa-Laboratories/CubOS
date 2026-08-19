@@ -444,8 +444,6 @@ export default function App() {
     // synchronous endpoint remains available to API clients but is no longer
     // used here.
     const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setActiveRunId(runId);
-    setActiveView("Run");
     try {
       const submitted = await runsApi.submit({
         run_id: runId,
@@ -454,6 +452,12 @@ export default function App() {
         protocol_file: protocolFile,
         ...(state ? { state } : {}),
       });
+      // Enter the run mode only once the server has accepted the run. A
+      // rejected submission (server busy, policy, deck fingerprint) would
+      // otherwise strand the operator on a Run view whose plan and record
+      // both 404, hiding the actual reason on the tab they just left.
+      setActiveRunId(runId);
+      setActiveView("Run");
       const finalRecord = RUN_TERMINAL_STATES.has(submitted.state)
         ? submitted
         : await pollVersionedRun(runId);
@@ -480,7 +484,11 @@ export default function App() {
     setIsCancelingRun(true);
     setRunError(null);
     try {
-      if (activeRunId) {
+      // `activeRunId` outlives its run so the Run view stays reachable, so it
+      // alone cannot say which run to cancel. `isRunning` is true only while
+      // this tab's own submission is in flight; anything else active is a run
+      // started elsewhere, which the session-wide endpoint below stops.
+      if (activeRunId && isRunning) {
         await runsApi.cancel(activeRunId);
         setRunError("Protocol cancellation requested.");
       } else {

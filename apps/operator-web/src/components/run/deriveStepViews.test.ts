@@ -113,6 +113,47 @@ describe("deriveStepViews", () => {
     expect(steps[3].status).toBe("pending");
   });
 
+  it("keeps a step skipped when the engine reports it completed after", () => {
+    reset();
+    // A skipped command still returns normally, so the engine emits
+    // started -> skipped -> completed for the same index. Verified against
+    // the real engine; the skip has to survive the trailing completion.
+    const steps = deriveStepViews(PLAN, [
+      stepEvent(1, "pick_up_tip", "started"),
+      stepEvent(1, "pick_up_tip", "skipped", {
+        reason: "already applied on a previous run",
+      }),
+      stepEvent(1, "pick_up_tip", "completed", { duration_s: 0.01 }),
+    ]);
+    expect(steps[1].status).toBe("skipped");
+    expect(steps[1].reason).toBe("already applied on a previous run");
+    expect(countSteps(steps).skipped).toBe(1);
+    expect(countSteps(steps).done).toBe(0);
+  });
+
+  it("keeps a skipped substep skipped through its scope completing", () => {
+    reset();
+    const steps = deriveStepViews(PLAN, [
+      stepEvent(2, "transfer", "started"),
+      stepEvent(2, "transfer", "started", { substep: "leg0" }),
+      stepEvent(2, "transfer", "skipped", {
+        substep: "leg0",
+        reason: "already applied on a previous run",
+      }),
+      stepEvent(2, "transfer", "completed", { substep: "leg0", duration_s: 0.01 }),
+    ]);
+    expect(steps[2].substeps[0].status).toBe("skipped");
+  });
+
+  it("still lets a failure override a skip", () => {
+    reset();
+    const steps = deriveStepViews(PLAN, [
+      stepEvent(1, "pick_up_tip", "skipped", { reason: "already applied" }),
+      stepEvent(1, "pick_up_tip", "failed", { error: "boom" }),
+    ]);
+    expect(steps[1].status).toBe("failed");
+  });
+
   it("nests substeps under their parent step with a depth", () => {
     reset();
     const steps = deriveStepViews(PLAN, [
