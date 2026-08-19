@@ -217,20 +217,15 @@ PIPETTE_MODELS: dict[str, PlungerPipetteConfig] = {
 
 
 # ── Sartorius Picus 2 model registry ─────────────────────────────────────────
-# Unlike the Opentrons table above, every figure here is a published vendor
-# specification (Picus 2 product datasheet, rev. 07|2024) rather than a value
-# somebody has to calibrate: the pipette owns its own piston, so there is no
-# CubOS-side plunger geometry to measure. Volumes are per channel.
+# Every figure is a published vendor specification (Picus 2 datasheet, rev.
+# 07|2024), not a calibrated value: the pipette owns its piston, so there is
+# no CubOS-side plunger geometry to measure.
 #
-# Only the two models Ursa runs are registered. The other four single-channel
-# variants are equally published -- 5-120 uL (LH-747041, 0.10), 10-300
-# (LH-747061, 0.20), 100-5,000 (LH-747101, 5.00) and 500-10,000 (LH-747111,
-# 10.00) -- and each is a four-line addition here, no driver change.
-#
-# Multichannel variants are deliberately absent: an 8-channel pipette moves
-# 8x the commanded volume while the deck model records a single well, so
-# registering them would produce silently wrong fluid accounting. See the
-# integration scope's F-11.
+# Only the two models Ursa runs are registered; the other single-channel
+# variants are a four-line addition each, with no driver change. Multichannel
+# variants are deliberately absent -- an 8-channel pipette moves 8x the
+# commanded volume while the deck model records a single well, so registering
+# one would produce silently wrong fluid accounting.
 
 PICUS2_MODELS: dict[str, PipetteConfig] = {
     # LH-747021

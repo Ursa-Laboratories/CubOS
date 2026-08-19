@@ -1,34 +1,22 @@
 """Driver for the Sartorius Picus 2 electronic pipette.
 
-Unlike ``vendors/opentrons.py`` -- which drives a stepper CubOS bolted to the
-plunger of a bare pipette body, and therefore commands *millimetres of travel*
--- the Picus 2 owns its own piston and closed-loop control. Commands are
-volumes in microlitres, and the pipette reports completion rather than
-position. Several ``PipetteInstrument`` obligations are consequently driver
-bookkeeping rather than hardware readback; each is called out below.
+The Picus 2 owns its piston and its own closed-loop control, so commands are
+volumes in microlitres rather than the millimetres of plunger travel
+``vendors/opentrons.py`` sends. The ``PipetteInstrument`` members that report
+plunger position are therefore driver bookkeeping here; each is noted where
+it is defined.
 
 Wire protocol: line-based JSON at 230400 8N1, CRLF-terminated, each frame
-carrying a monotonic sequence number so replies can be correlated::
+numbered so replies can be correlated::
 
     {"no":7,"data":"RUN_ASPIRATE 500 5"}\\r\\n
 
-Every frame is answered with ``ACK <seq>``, ``BEGIN <seq>``, a payload, then
-``END <seq>``. The payload is either a result token (``OK <seq>`` or an error
-code) for commands that only act, or bare data lines for commands that
-report -- a query such as ``GET_NOMINAL_VOLUME`` never sends ``OK`` at all,
-so ``END <seq>`` is the only reliable terminator.
-
-Two consequences, both observed on hardware. Replies for different sequence
-numbers interleave freely, and data lines carry no sequence number of their
-own, so a data line belongs to whichever ``BEGIN`` scope is innermost. And
-with ``AUTO 1`` enabled the pipette also pushes unsolicited JSON events for
-physical button presses, which must not be mistaken for a command's output.
-
-Protocol details were established with the permission of the
-AccelerationConsortium ``cnc-4-science`` maintainers, whose GPL-3.0 driver
-documents the same command set; this implementation is independent CubOS code
-(offline path, BaseInstrument conformance, CubOS exception hierarchy, liquid
-classes). See the integration scope in ``progress/`` for the provenance note.
+A reply is ``ACK``/``BEGIN``/payload/``END``, the envelope tokens tagged with
+the frame number. The payload is a result token (``OK`` or an error code) for
+commands that act, or bare untagged data lines for commands that report -- a
+query such as ``GET_NOMINAL_VOLUME`` never sends ``OK``, so ``END`` is the
+only terminator every command shares. Replies for different frames interleave,
+and with ``AUTO 1`` the pipette also pushes unsolicited JSON button events.
 """
 
 from __future__ import annotations
@@ -64,7 +52,6 @@ from cubos.instruments.pipette.models import (
 _TERMINATOR = b"\r\n"
 _BAUD_RATE = 230400
 
-# Envelope tokens frame a reply but carry no outcome.
 _ENVELOPE_TOKENS = frozenset({"ACK", "BEGIN", "END"})
 
 _RESULT_OK = "OK"
@@ -84,27 +71,22 @@ _RESULT_CODES = frozenset(
     }
 )
 
-# The instrument revoked host control. Never auto-retried: the piston
-# position after an abort is unknown, so recovery has to start from a
-# reconnect (which re-runs RUN_INIT) rather than from a guess.
+# Never auto-retried: the piston position after an abort is unknown, so
+# recovery starts from a reconnect (which re-runs RUN_INIT), not a guess.
 _ABORT_CODE = "MOTOR_CONTROL_ABORTED"
 
-# Piston moves are slow at low speed settings and a full-stroke 10 mL
-# dispense is the worst case. Generous, but bounded.
+# Worst case is a full-stroke 10 mL dispense at the slowest speed setting.
 _MOTION_TIMEOUT = 120.0
 _QUERY_TIMEOUT = 5.0
 
-# The pipette asks for on-screen confirmation before handing motor control to
-# a host. The confirmation is a softkey press, which can be satisfied over the
-# wire; we retry it on a short cadence until the instrument acknowledges.
+# Motor control needs an on-screen confirmation, which is a softkey press and
+# so can be satisfied over the wire; re-sent on a cadence until acknowledged.
 _ARM_TIMEOUT = 30.0
 _ARM_TAP_INTERVAL = 0.4
 _CONFIRM_BUTTON = "TRIGGER_BUTTON_RIGHT"
 
-# `speed` on PipetteInstrument is a normalized 0-100 percentage of the
-# instrument's usable range (see the interface docstring). The Picus takes an
-# integer 1..9, and this map sends the interface default of 50.0 to the
-# vendor's own mid-scale default of 5.
+# PipetteInstrument speed is a normalized 0-100 percentage; the Picus takes an
+# integer 1..9. The interface default of 50.0 maps to the vendor default of 5.
 _SPEED_MIN = 1
 _SPEED_MAX = 9
 
@@ -177,8 +159,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         self._attached_tip_extension = 0.0
         self._initialized = False
         self._motor_control_lost = False
-        # No position readback exists, so loaded volume is tracked here and
-        # reported through AspirateResult/PipetteStatus.
+        # No position readback exists, so loaded volume is tracked here.
         self._loaded_volume_ul = 0.0
 
     # ── Configuration ─────────────────────────────────────────────────────
@@ -240,10 +221,8 @@ class SartoriusPicus2Pipette(PipetteInstrument):
                 f"Cannot open serial port {self._port}: {exc}"
             ) from exc
 
-        # Cleared here, not after the handshake: a reconnect is the documented
-        # recovery from an abort, and `_send` refuses to talk while the flag is
-        # set -- so leaving it until the end would block the very handshake
-        # that recovers the instrument.
+        # Cleared before the handshake, not after: `_send` refuses to talk
+        # while it is set, and a reconnect is the recovery from an abort.
         self._motor_control_lost = False
         try:
             self._serial.reset_input_buffer()
@@ -252,8 +231,6 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             if self._verify_model:
                 self._verify_attached_model()
             self._check_battery()
-            # Establishes a real piston reference, so a reconnect always
-            # starts from a known-empty tip regardless of prior state.
             self._send("RUN_INIT", timeout=_MOTION_TIMEOUT)
         except Exception:
             self._close_serial()
@@ -298,11 +275,10 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     # ── Pipette-specific commands ─────────────────────────────────────────
 
     def home(self) -> None:
-        """Return the piston to its home position.
+        """Return the piston home.
 
-        ``RUN_INIT`` is used once per session to establish the reference;
-        afterwards ``HOME`` is a plain move, so re-homing mid-protocol does
-        not repeat the slower initialization sweep.
+        ``RUN_INIT`` establishes the reference once per session; afterwards
+        ``HOME`` is a plain move that skips the slower initialization sweep.
         """
         if self._offline:
             self._initialized = True
@@ -316,23 +292,17 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         self._loaded_volume_ul = 0.0
 
     def prime(self, speed: float = 50.0) -> None:
-        """No-op: the Picus 2 has no plunger to pre-position.
-
-        On a CubOS-driven plunger, priming parks it mid-travel so a later
-        aspirate has somewhere to go. The Picus manages its own piston
-        reference and takes absolute volumes, so there is nothing to
-        pre-position. Kept as a documented no-op rather than given a
-        plausible-looking fake; ``PipetteStatus.is_primed`` therefore means
-        "initialized" on this vendor.
+        """No-op: the Picus owns its piston reference and takes absolute
+        volumes, so there is nothing to pre-position. ``is_primed`` therefore
+        means "initialized" on this vendor.
         """
         if not self._initialized:
             self.home()
 
     def aspirate(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
         commanded = self._quantize(volume_ul)
-        # Per-stroke bounds are not enough: successive aspirates can each be
-        # legal and still exceed the tip. Hardware answers FULL, but offline
-        # and mock runs are the pre-flight net and have to catch it too.
+        # Successive aspirates can each be in range and still overfill the
+        # tip. Hardware answers FULL; offline and mock runs need this check.
         if self._loaded_volume_ul + commanded > self._config.max_volume:
             raise PipetteCommandError(
                 f"Aspirating {commanded:g} uL would put "
@@ -344,7 +314,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             self._loaded_volume_ul += commanded
             return self._result(commanded)
         self._send(
-            f"RUN_ASPIRATE {self._format_volume(commanded)} {self._speed(speed)}",
+            f"RUN_ASPIRATE {self._format_volume(commanded)} {_speed_index(speed)}",
             timeout=_MOTION_TIMEOUT,
         )
         self._loaded_volume_ul += commanded
@@ -356,7 +326,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             self._loaded_volume_ul = max(0.0, self._loaded_volume_ul - commanded)
             return self._result(commanded)
         self._send(
-            f"RUN_DISPENSE {self._format_volume(commanded)} {self._speed(speed)}",
+            f"RUN_DISPENSE {self._format_volume(commanded)} {_speed_index(speed)}",
             timeout=_MOTION_TIMEOUT,
         )
         self._loaded_volume_ul = max(0.0, self._loaded_volume_ul - commanded)
@@ -369,7 +339,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             return
         self._send(
             f"BLOW_OUT {1 if self._blowout_go_home else 0} "
-            f"{self._speed(speed)} {self._blowout_delay_ms}",
+            f"{_speed_index(speed)} {self._blowout_delay_ms}",
             timeout=_MOTION_TIMEOUT,
         )
         self._loaded_volume_ul = 0.0
@@ -379,11 +349,9 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     ) -> MixResult:
         """Mix by repeated aspirate/dispense.
 
-        The Picus 2 exposes no atomic mix command, so this is a host-side
-        loop. A failure part-way therefore leaves liquid in the tip: the
-        driver attempts to return it before re-raising, and the protocol
-        engine's fluid journal already marks an interrupted mix as needing
-        reconciliation.
+        The Picus 2 has no atomic mix command, so this is a host-side loop.
+        A failure part-way leaves liquid in the tip, which the driver tries
+        to return before re-raising.
         """
         commanded = self._quantize(volume_ul)
         if self._offline:
@@ -402,10 +370,9 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     def pick_up_tip(self, speed: float = 50.0) -> None:
         """Record that a tip was seated.
 
-        Tip pickup is entirely gantry motion on this vendor: the toolhead
-        presses the cone onto the tip. There is no pipette-side command and
-        no tip sensor, so ``has_tip`` is bookkeeping -- the same as the
-        Opentrons driver.
+        Pickup is gantry motion: the toolhead presses the cone onto the tip.
+        There is no pipette-side command and no tip sensor, so ``has_tip`` is
+        bookkeeping.
         """
         if not self._offline and not self._initialized:
             self.home()
@@ -422,10 +389,9 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     def get_status(self) -> PipetteStatus:
         """Return current state.
 
-        ``position_mm`` is always 0.0: the Picus exposes no piston-position
-        query. Read ``loaded_volume_ul`` instead. ``is_homed``/``is_primed``
-        are driver state for the same reason, and both are re-established on
-        connect, which always runs ``RUN_INIT``.
+        ``position_mm`` is always 0.0 -- the Picus exposes no piston-position
+        query, so read ``loaded_volume_ul`` instead. ``is_homed``/``is_primed``
+        are driver state, re-established by the ``RUN_INIT`` in ``connect``.
         """
         return PipetteStatus(
             is_homed=self._initialized,
@@ -461,21 +427,11 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             loaded_volume_ul=self._loaded_volume_ul,
         )
 
-    def _speed(self, speed: float) -> int:
-        """Map the caller's normalized speed onto the Picus 1..9 scale.
-
-        There is deliberately no driver-level default to fall back on: every
-        ``PipetteInstrument`` method declares ``speed: float = 50.0`` and the
-        protocol engine always passes it, so a per-instrument default could
-        never take effect and would only look configurable.
-        """
-        return _speed_index(speed)
-
     def _quantize(self, volume_ul: float) -> float:
         """Round *volume_ul* to the model's settable increment and bounds-check.
 
-        The returned figure is what actually gets commanded, and is reported
-        back on ``AspirateResult.volume_ul`` so callers can see the rounding.
+        The returned figure is what gets commanded, and is reported back on
+        ``AspirateResult.volume_ul`` so callers can see the rounding.
         """
         if (
             isinstance(volume_ul, bool)
@@ -488,7 +444,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         quantized = (
             round(requested / increment) * increment if increment > 0 else requested
         )
-        # Guard against float dust turning 0.29999999 into a visible artifact.
+        # Float dust: 0.1 * 3 must not command 0.30000000000000004.
         quantized = round(quantized, 6)
         if not (self._config.min_volume <= quantized <= self._config.max_volume):
             raise PipetteCommandError(
@@ -501,11 +457,9 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     def _format_volume(self, volume_ul: float) -> str:
         """Render a volume for the wire at the model's resolution.
 
-        Whether the instrument accepts fractional microlitres is unverified
-        (see the integration scope's F-4): models whose increment is a whole
-        microlitre are sent as integers regardless, and
-        ``whole_microlitres_only`` forces that for the rest if bench testing
-        shows fractions are rejected.
+        Models whose increment is a whole microlitre are sent as integers;
+        ``whole_microlitres_only`` forces that for the rest, should a device
+        turn out to reject fractional microlitres.
         """
         increment = self._config.volume_increment_ul
         if self._whole_microlitres_only or increment >= 1.0 or increment <= 0:
@@ -531,16 +485,12 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     def _arm_motor_control(self, mode: int = 2) -> None:
         """Request host motor control and satisfy the on-screen confirmation.
 
-        The instrument will not accept motion commands until a human (or a
-        softkey frame standing in for one) confirms on the device. The
-        confirmation is re-sent on a short cadence until acknowledged, and a
-        timeout raises with the physical action named so an operator at the
-        bench knows what to press.
+        No motion command is accepted until a human -- or a softkey frame
+        standing in for one -- confirms on the device.
         """
         deadline = time.monotonic() + _ARM_TIMEOUT
-        # Under the same lock every other exchange uses: a concurrent caller
-        # reading the port would consume the reply this loop is waiting for
-        # and turn a successful confirmation into a 30s timeout.
+        # Same lock as every other exchange: a concurrent reader would eat the
+        # reply this loop waits for and turn a confirmation into a timeout.
         with self._lock:
             frame_no = next(self._counter)
             self._write(
@@ -574,10 +524,8 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     def _verify_attached_model(self) -> None:
         """Fail closed when the physical device is not the configured model.
 
-        The Opentrons driver cannot do this -- a bare pipette body has no
-        identity to query -- so it is worth spending the round-trip here: a
-        1000 uL config driving a 10 uL pipette would otherwise over-aspirate
-        by 100x on the first command.
+        A 1000 uL config driving a 10 uL pipette would over-aspirate by 100x
+        on the first command.
         """
         nominal = self._send("GET_NOMINAL_VOLUME", timeout=_QUERY_TIMEOUT)
         if not nominal:
@@ -607,11 +555,8 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         return None if not reported else _first_number(reported)
 
     def _check_battery(self) -> None:
-        """Refuse to start below the configured charge floor.
-
-        No other CubOS instrument has a charge state; an overnight campaign
-        that dies mid-transfer is a new failure mode, so this fails closed at
-        connect rather than surprising the operator hours in.
+        """Refuse to start below the configured charge floor, so an overnight
+        campaign cannot die mid-transfer on a flat battery.
         """
         level = self._read_battery()
         if level is None:
@@ -638,18 +583,16 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     def _parse_line(line: str) -> tuple[str, Optional[int], Optional[str]]:
         """Sort one received line into ``(kind, sequence_no, value)``.
 
-        Kinds are ``ack`` / ``begin`` / ``end`` (envelope, carrying the
-        sequence number), ``result`` (a result code plus its sequence number),
-        ``data`` (a bare payload line, which carries no sequence number of its
-        own) and ``ignore`` (blank lines and the unsolicited JSON button
-        events the pipette pushes when ``AUTO 1`` is on).
+        Kinds: ``ack``/``begin``/``end`` and ``result`` carry a sequence
+        number; ``data`` is a bare payload line and carries none; ``ignore``
+        is a blank line or an unsolicited button event.
         """
         stripped = line.strip()
         if not stripped:
             return ("ignore", None, None)
         if stripped.startswith("{"):
-            # Asynchronous notification (e.g. {"button":"RIGHT_PRESSED"}).
-            # Never a command's output, however mid-command it arrives.
+            # Async notification, e.g. {"button":"RIGHT_PRESSED"} -- never a
+            # command's output, however mid-command it arrives.
             return ("ignore", None, None)
         parts = stripped.split()
         head = parts[0]
@@ -700,10 +643,8 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             )
         wait = self._command_timeout if timeout is None else timeout
         responses: list[str] = []
-        # Sequence numbers of BEGIN scopes the pipette has opened and not yet
-        # closed. Data lines carry no number of their own, so one belongs to
-        # whichever scope is innermost -- replies for different commands
-        # interleave freely.
+        # Open BEGIN scopes. Data lines carry no sequence number, so one
+        # belongs to whichever scope is innermost.
         scopes: list[int] = []
 
         with self._lock:
@@ -724,8 +665,8 @@ class SartoriusPicus2Pipette(PipetteInstrument):
                 elif kind == "end":
                     if reply_no in scopes:
                         scopes.remove(reply_no)
-                    # END is the only terminator every command sends: a query
-                    # replies with data lines and no result code at all.
+                    # Only terminator every command sends: a query replies
+                    # with data lines and no result code at all.
                     if reply_no == frame_no:
                         return "\n".join(responses) if responses else None
                 elif kind == "result" and reply_no == frame_no:
@@ -754,10 +695,9 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             self._serial = None
 
 
-# Matches the first number in a reply, tolerating a thousands separator and a
-# trailing unit: "1,000 uL" and "battery 87 %" both yield their figure. Naive
-# whitespace splitting would read "1,000" as 1, which would make the connect-
-# time model check reject a correctly configured 1000 uL pipette.
+# Tolerates a thousands separator and a trailing unit: "1,000 uL" and
+# "battery 87 %". Splitting on whitespace would read "1,000" as 1 and make the
+# connect-time model check reject a correct 1000 uL pipette.
 _NUMBER_RE = re.compile(r"-?\d[\d,]*(?:\.\d+)?")
 
 
