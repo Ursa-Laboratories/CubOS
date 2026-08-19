@@ -5,17 +5,39 @@ from enum import Enum
 class PipetteFamily(Enum):
     OT2 = "OT2"
     FLEX = "FLEX"
+    PICUS2 = "PICUS2"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class PipetteConfig:
-    """Static hardware description for a pipette model."""
+    """What a pipette model can do, independent of how it is actuated.
+
+    Deliberately free of plunger geometry: a vendor whose pipette owns its
+    own piston (Sartorius Picus 2) has volumes and channels but no
+    millimetres. Drivers that *do* push a plunger declare that separately in
+    :class:`PlungerPipetteConfig`.
+
+    ``volume_increment_ul`` is the smallest settable volume step; ``0.0``
+    means continuous (a stepper can stop anywhere).
+    """
 
     name: str
     family: PipetteFamily
     channels: int
     max_volume: float
     min_volume: float
+    volume_increment_ul: float = 0.0
+
+
+@dataclass(frozen=True, kw_only=True)
+class PlungerPipetteConfig(PipetteConfig):
+    """Adds the plunger geometry a CubOS-driven stepper needs.
+
+    These are properties of *our* actuator (an Arduino pushing the plunger of
+    a bare pipette body), not of the pipette model, which is why they live
+    here rather than on :class:`PipetteConfig`.
+    """
+
     zero_position: float
     prime_position: float
     blowout_position: float
@@ -32,6 +54,9 @@ class PipetteStatus:
     max_volume: float
     has_tip: bool
     is_primed: bool
+    # Battery-powered vendors only; None where the instrument is mains- or
+    # host-powered and has no charge state to report.
+    battery_percent: float | None = None
 
     @property
     def is_valid(self) -> bool:
@@ -44,7 +69,10 @@ class AspirateResult:
 
     success: bool
     volume_ul: float
+    # Plunger position. 0.0 on vendors that expose no position readback --
+    # read `loaded_volume_ul` instead, which both kinds of driver can answer.
     position_mm: float
+    loaded_volume_ul: float | None = None
 
 
 @dataclass(frozen=True)
@@ -60,9 +88,9 @@ class MixResult:
 # P300 uses real calibrated values from PANDA-BEAR.
 # Other models have placeholder positions that need hardware calibration.
 
-PIPETTE_MODELS: dict[str, PipetteConfig] = {
+PIPETTE_MODELS: dict[str, PlungerPipetteConfig] = {
     # OT-2 single-channel
-    "p20_single_gen2": PipetteConfig(
+    "p20_single_gen2": PlungerPipetteConfig(
         name="p20_single_gen2",
         family=PipetteFamily.OT2,
         channels=1,
@@ -74,7 +102,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         drop_tip_position=10.0,   # placeholder
         mm_to_ul=0.025,           # placeholder
     ),
-    "p300_single_gen2": PipetteConfig(
+    "p300_single_gen2": PlungerPipetteConfig(
         name="p300_single_gen2",
         family=PipetteFamily.OT2,
         channels=1,
@@ -86,7 +114,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         drop_tip_position=60.0,   # calibrated from PANDA-BEAR
         mm_to_ul=0.1098,          # calibrated from PANDA-BEAR
     ),
-    "p1000_single_gen2": PipetteConfig(
+    "p1000_single_gen2": PlungerPipetteConfig(
         name="p1000_single_gen2",
         family=PipetteFamily.OT2,
         channels=1,
@@ -99,7 +127,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         mm_to_ul=0.55,            # placeholder
     ),
     # OT-2 multi-channel
-    "p20_multi_gen2": PipetteConfig(
+    "p20_multi_gen2": PlungerPipetteConfig(
         name="p20_multi_gen2",
         family=PipetteFamily.OT2,
         channels=8,
@@ -111,7 +139,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         drop_tip_position=10.0,   # placeholder
         mm_to_ul=0.025,           # placeholder
     ),
-    "p300_multi_gen2": PipetteConfig(
+    "p300_multi_gen2": PlungerPipetteConfig(
         name="p300_multi_gen2",
         family=PipetteFamily.OT2,
         channels=8,
@@ -124,7 +152,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         mm_to_ul=0.1098,          # placeholder
     ),
     # Flex single-channel
-    "flex_1channel_50": PipetteConfig(
+    "flex_1channel_50": PlungerPipetteConfig(
         name="flex_1channel_50",
         family=PipetteFamily.FLEX,
         channels=1,
@@ -136,7 +164,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         drop_tip_position=15.0,   # placeholder
         mm_to_ul=0.04,            # placeholder
     ),
-    "flex_1channel_1000": PipetteConfig(
+    "flex_1channel_1000": PlungerPipetteConfig(
         name="flex_1channel_1000",
         family=PipetteFamily.FLEX,
         channels=1,
@@ -149,7 +177,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         mm_to_ul=0.55,            # placeholder
     ),
     # Flex multi-channel
-    "flex_8channel_50": PipetteConfig(
+    "flex_8channel_50": PlungerPipetteConfig(
         name="flex_8channel_50",
         family=PipetteFamily.FLEX,
         channels=8,
@@ -161,7 +189,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         drop_tip_position=15.0,   # placeholder
         mm_to_ul=0.04,            # placeholder
     ),
-    "flex_8channel_1000": PipetteConfig(
+    "flex_8channel_1000": PlungerPipetteConfig(
         name="flex_8channel_1000",
         family=PipetteFamily.FLEX,
         channels=8,
@@ -173,7 +201,7 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         drop_tip_position=65.0,   # placeholder
         mm_to_ul=0.55,            # placeholder
     ),
-    "flex_96channel_1000": PipetteConfig(
+    "flex_96channel_1000": PlungerPipetteConfig(
         name="flex_96channel_1000",
         family=PipetteFamily.FLEX,
         channels=96,
@@ -184,5 +212,43 @@ PIPETTE_MODELS: dict[str, PipetteConfig] = {
         blowout_position=50.0,    # placeholder
         drop_tip_position=65.0,   # placeholder
         mm_to_ul=0.55,            # placeholder
+    ),
+}
+
+
+# ── Sartorius Picus 2 model registry ─────────────────────────────────────────
+# Unlike the Opentrons table above, every figure here is a published vendor
+# specification (Picus 2 product datasheet, rev. 07|2024) rather than a value
+# somebody has to calibrate: the pipette owns its own piston, so there is no
+# CubOS-side plunger geometry to measure. Volumes are per channel.
+#
+# Only the two models Ursa runs are registered. The other four single-channel
+# variants are equally published -- 5-120 uL (LH-747041, 0.10), 10-300
+# (LH-747061, 0.20), 100-5,000 (LH-747101, 5.00) and 500-10,000 (LH-747111,
+# 10.00) -- and each is a four-line addition here, no driver change.
+#
+# Multichannel variants are deliberately absent: an 8-channel pipette moves
+# 8x the commanded volume while the deck model records a single well, so
+# registering them would produce silently wrong fluid accounting. See the
+# integration scope's F-11.
+
+PICUS2_MODELS: dict[str, PipetteConfig] = {
+    # LH-747021
+    "picus2_1ch_10": PipetteConfig(
+        name="picus2_1ch_10",
+        family=PipetteFamily.PICUS2,
+        channels=1,
+        max_volume=10.0,
+        min_volume=0.5,
+        volume_increment_ul=0.01,
+    ),
+    # LH-747081
+    "picus2_1ch_1000": PipetteConfig(
+        name="picus2_1ch_1000",
+        family=PipetteFamily.PICUS2,
+        channels=1,
+        max_volume=1000.0,
+        min_volume=50.0,
+        volume_increment_ul=1.0,
     ),
 }

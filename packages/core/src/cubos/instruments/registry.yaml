@@ -25,6 +25,9 @@ instruments:
       opentrons:
         module: cubos.instruments.pipette.vendors.opentrons
         class_name: OpentronsPipette
+      sartorius:
+        module: cubos.instruments.pipette.vendors.sartorius
+        class_name: SartoriusPicus2Pipette
 
   potentiostat:
     interface: cubos.instruments.potentiostat.interface.PotentiostatInstrument

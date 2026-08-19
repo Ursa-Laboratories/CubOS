@@ -442,7 +442,7 @@ class TestGetSupportedVendors:
         assert get_supported_vendors("mounted_tool") == ["mount_only"]
 
     def test_pipette_vendors(self):
-        assert get_supported_vendors("pipette") == ["opentrons"]
+        assert get_supported_vendors("pipette") == ["opentrons", "sartorius"]
 
     def test_potentiostat_vendors(self):
         assert get_supported_vendors("potentiostat") == ["admiral"]
