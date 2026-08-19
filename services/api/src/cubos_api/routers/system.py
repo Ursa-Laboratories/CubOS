@@ -56,6 +56,8 @@ class CapabilitiesResponse(BaseModel):
 class UpdateStatusResponse(BaseModel):
     current_sha: str
     latest_sha: str
+    current_ref: str | None = None
+    latest_ref: str | None = None
     commits_behind: int
     update_available: bool
     checked_at: float

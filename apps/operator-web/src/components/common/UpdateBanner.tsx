@@ -122,12 +122,14 @@ export function UpdateBanner({
   if (!status?.update_available) return null;
 
   const commitLabel = status.commits_behind === 1 ? "commit" : "commits";
+  const currentLabel = status.current_ref ?? status.current_sha.slice(0, 7);
+  const latestLabel = status.latest_ref ?? status.latest_sha.slice(0, 7);
   return (
     <div role="status" style={bannerStyle}>
       <div style={messageStyle}>
         <span>
-          Update available ({status.current_sha.slice(0, 7)} →{" "}
-          {status.latest_sha.slice(0, 7)}, {status.commits_behind} {commitLabel})
+          Update available ({currentLabel} → {latestLabel}, {status.commits_behind}{" "}
+          {commitLabel})
         </span>
         {error && <span style={errorStyle}>{error}</span>}
       </div>
