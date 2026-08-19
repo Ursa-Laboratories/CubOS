@@ -22,6 +22,7 @@ const COMMANDS: CommandInfo[] = [
       { name: "instrument", type: "str", required: true, default: null },
       { name: "method", type: "str", required: true, default: null },
       { name: "measurement_height", type: "float", required: true, default: null },
+      { name: "indentation_limit_height", type: "float | None", required: false, default: null },
       { name: "method_kwargs", type: "Dict[str, Any] | None", required: false, default: null },
     ],
   },
@@ -431,6 +432,86 @@ describe("ProtocolEditor", () => {
         },
       },
     ]);
+  });
+
+  it("omits indentation_limit_height instead of saving an empty string when cleared, for measure", async () => {
+    const user = userEvent.setup();
+    const props = renderProtocol({
+      steps: [
+        {
+          command: "measure",
+          args: {
+            instrument: "asmi",
+            position: "plate_1.A1",
+            method: "indentation",
+            measurement_height: -1,
+            indentation_limit_height: -5,
+            method_kwargs: { force_limit: 10 },
+          },
+        },
+      ],
+    });
+
+    const field = screen.getByLabelText(/Indentation limit height/);
+    expect(field).toHaveValue("-5");
+    await user.clear(field);
+
+    const calls = vi.mocked(props.onLocalChange!).mock.calls;
+    const lastCall = calls[calls.length - 1][0];
+    expect(lastCall[0].args).not.toHaveProperty("indentation_limit_height");
+  });
+
+  it("omits indentation_limit_height instead of saving an empty string when cleared, for scan", async () => {
+    const user = userEvent.setup();
+    const props = renderProtocol({
+      steps: [
+        {
+          command: "scan",
+          args: {
+            plate: "plate_1",
+            instrument: "asmi",
+            method: "indentation",
+            measurement_height: -1,
+            indentation_limit_height: -5,
+            method_kwargs: { force_limit: 10 },
+          },
+        },
+      ],
+    });
+
+    const field = screen.getByLabelText(/Indentation limit height/);
+    expect(field).toHaveValue("-5");
+    await user.clear(field);
+
+    const calls = vi.mocked(props.onLocalChange!).mock.calls;
+    const lastCall = calls[calls.length - 1][0];
+    expect(lastCall[0].args).not.toHaveProperty("indentation_limit_height");
+  });
+
+  it("saves a newly entered indentation_limit_height as a number", async () => {
+    const user = userEvent.setup();
+    const props = renderProtocol({
+      steps: [
+        {
+          command: "measure",
+          args: {
+            instrument: "asmi",
+            position: "plate_1.A1",
+            method: "indentation",
+            measurement_height: -1,
+            method_kwargs: { force_limit: 10 },
+          },
+        },
+      ],
+    });
+
+    const field = screen.getByLabelText(/Indentation limit height/);
+    expect(field).toHaveValue("");
+    await user.type(field, "-2.5");
+
+    const calls = vi.mocked(props.onLocalChange!).mock.calls;
+    const lastCall = calls[calls.length - 1][0];
+    expect(lastCall[0].args.indentation_limit_height).toBe(-2.5);
   });
 
   it("renames a named position and rewrites the steps that reference it", async () => {
