@@ -208,6 +208,22 @@ class TestVolumeQuantization:
         with pytest.raises(PipetteCommandError, match="outside"):
             pip._quantize(5000.0)
 
+    def test_rejects_an_aspirate_that_would_overfill_the_tip(self):
+        """Per-stroke bounds pass, but the running total must not exceed the tip."""
+        pip = SartoriusPicus2Pipette(pipette_model="picus2_1ch_1000", offline=True)
+        pip.connect()
+        pip.aspirate(600.0)
+        with pytest.raises(PipetteCommandError, match="already loaded"):
+            pip.aspirate(600.0)
+        # Room reappears once some is dispensed.
+        pip.dispense(400.0)
+        assert pip.aspirate(600.0).loaded_volume_ul == 800.0
+
+    def test_a_full_stroke_is_still_allowed(self):
+        pip = SartoriusPicus2Pipette(pipette_model="picus2_1ch_1000", offline=True)
+        pip.connect()
+        assert pip.aspirate(1000.0).loaded_volume_ul == 1000.0
+
     def test_rejects_non_finite(self):
         pip = SartoriusPicus2Pipette(offline=True)
         for bad in (float("nan"), float("inf"), True, "500"):
@@ -320,6 +336,12 @@ class TestCommands:
         assert fake.sent("RUN_DISPENSE") == ["RUN_DISPENSE 200 5"]
         assert result.loaded_volume_ul == 300.0
 
+    def test_speed_always_comes_from_the_caller(self):
+        """There is no per-instrument default that could silently do nothing."""
+        pip, fake = connected()
+        pip.aspirate(500.0, speed=0.0)
+        assert fake.sent("RUN_ASPIRATE") == ["RUN_ASPIRATE 500 1"]
+
     def test_speed_reaches_the_wire(self):
         pip, fake = connected()
         pip.aspirate(500.0, speed=100.0)
@@ -423,6 +445,20 @@ class TestFailures:
         with pytest.raises(PipetteMotorControlError, match="reconnect"):
             pip.dispense(100.0)
         assert pip.health_check() is False
+
+    def test_reconnect_recovers_from_an_abort(self):
+        """The abort message says to reconnect, so reconnecting must work."""
+        pip, _ = connected(script={"RUN_ASPIRATE": ([], "MOTOR_CONTROL_ABORTED")})
+        with pytest.raises(PipetteMotorControlError):
+            pip.aspirate(500.0)
+        pip.disconnect()
+        with patch(
+            "cubos.instruments.pipette.vendors.sartorius.serial.Serial",
+            return_value=FakePicusSerial(),
+        ):
+            pip.connect()
+        assert pip.health_check() is True
+        assert pip.aspirate(500.0).volume_ul == 500.0
 
     def test_timeout_raises(self):
         # Motion commands carry their own generous deadline, so shortening

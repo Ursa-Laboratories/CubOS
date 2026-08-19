@@ -137,7 +137,6 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         port: str = "",
         baud_rate: int = _BAUD_RATE,
         command_timeout: float = 30.0,
-        default_speed: float = 50.0,
         blowout_delay_ms: int = 3000,
         blowout_go_home: bool = True,
         min_battery_percent: float = 20.0,
@@ -165,7 +164,6 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         self._port = port
         self._baud_rate = baud_rate
         self._command_timeout = command_timeout
-        self._default_speed = default_speed
         self._blowout_delay_ms = int(blowout_delay_ms)
         self._blowout_go_home = bool(blowout_go_home)
         self._min_battery_percent = float(min_battery_percent)
@@ -242,6 +240,11 @@ class SartoriusPicus2Pipette(PipetteInstrument):
                 f"Cannot open serial port {self._port}: {exc}"
             ) from exc
 
+        # Cleared here, not after the handshake: a reconnect is the documented
+        # recovery from an abort, and `_send` refuses to talk while the flag is
+        # set -- so leaving it until the end would block the very handshake
+        # that recovers the instrument.
+        self._motor_control_lost = False
         try:
             self._serial.reset_input_buffer()
             self._send("AUTO 1", timeout=_QUERY_TIMEOUT)
@@ -257,7 +260,6 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             raise
 
         self._initialized = True
-        self._motor_control_lost = False
         self._loaded_volume_ul = 0.0
         self.logger.info("Connected to %s on %s", self._config.name, self._port)
 
@@ -328,6 +330,16 @@ class SartoriusPicus2Pipette(PipetteInstrument):
 
     def aspirate(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
         commanded = self._quantize(volume_ul)
+        # Per-stroke bounds are not enough: successive aspirates can each be
+        # legal and still exceed the tip. Hardware answers FULL, but offline
+        # and mock runs are the pre-flight net and have to catch it too.
+        if self._loaded_volume_ul + commanded > self._config.max_volume:
+            raise PipetteCommandError(
+                f"Aspirating {commanded:g} uL would put "
+                f"{self._loaded_volume_ul + commanded:g} uL in a "
+                f"{self._config.max_volume:g} uL pipette "
+                f"({self._loaded_volume_ul:g} uL already loaded)."
+            )
         if self._offline:
             self._loaded_volume_ul += commanded
             return self._result(commanded)
@@ -450,7 +462,14 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         )
 
     def _speed(self, speed: float) -> int:
-        return _speed_index(self._default_speed if speed is None else speed)
+        """Map the caller's normalized speed onto the Picus 1..9 scale.
+
+        There is deliberately no driver-level default to fall back on: every
+        ``PipetteInstrument`` method declares ``speed: float = 50.0`` and the
+        protocol engine always passes it, so a per-instrument default could
+        never take effect and would only look configurable.
+        """
+        return _speed_index(speed)
 
     def _quantize(self, volume_ul: float) -> float:
         """Round *volume_ul* to the model's settable increment and bounds-check.
@@ -519,32 +538,38 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         bench knows what to press.
         """
         deadline = time.monotonic() + _ARM_TIMEOUT
-        frame_no = next(self._counter)
-        self._write(self._frame(frame_no, data=f"ENABLE_MOTOR_CONTROL {int(mode)}"))
-        last_tap = 0.0
-        while True:
-            now = time.monotonic()
-            if now >= deadline:
-                raise PipetteConnectionError(
-                    f"Timed out after {_ARM_TIMEOUT:.0f}s enabling motor control on "
-                    f"{self._port}. Confirm remote control on the pipette screen "
-                    f"(right softkey) and reconnect."
-                )
-            if now - last_tap >= _ARM_TAP_INTERVAL:
-                self._write(
-                    self._frame(next(self._counter), button=_CONFIRM_BUTTON)
-                )
-                last_tap = now
-            line = self._read_line()
-            if line is None:
-                continue
-            kind, reply_no, value = self._parse_line(line)
-            if kind == "result" and reply_no == frame_no:
-                if value != _RESULT_OK:
+        # Under the same lock every other exchange uses: a concurrent caller
+        # reading the port would consume the reply this loop is waiting for
+        # and turn a successful confirmation into a 30s timeout.
+        with self._lock:
+            frame_no = next(self._counter)
+            self._write(
+                self._frame(frame_no, data=f"ENABLE_MOTOR_CONTROL {int(mode)}")
+            )
+            last_tap = 0.0
+            while True:
+                now = time.monotonic()
+                if now >= deadline:
                     raise PipetteConnectionError(
-                        f"Pipette refused motor control: {value}"
+                        f"Timed out after {_ARM_TIMEOUT:.0f}s enabling motor control "
+                        f"on {self._port}. Confirm remote control on the pipette "
+                        f"screen (right softkey) and reconnect."
                     )
-                return
+                if now - last_tap >= _ARM_TAP_INTERVAL:
+                    self._write(
+                        self._frame(next(self._counter), button=_CONFIRM_BUTTON)
+                    )
+                    last_tap = now
+                line = self._read_line()
+                if line is None:
+                    continue
+                kind, reply_no, value = self._parse_line(line)
+                if kind == "result" and reply_no == frame_no:
+                    if value != _RESULT_OK:
+                        raise PipetteConnectionError(
+                            f"Pipette refused motor control: {value}"
+                        )
+                    return
 
     def _verify_attached_model(self) -> None:
         """Fail closed when the physical device is not the configured model.
