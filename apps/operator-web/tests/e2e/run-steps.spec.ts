@@ -4,11 +4,8 @@ import { installApiMocks, type RunScenario } from "./apiMocks";
 /**
  * End-to-end coverage of the step-execution view across three representative
  * workflows. Each scenario freezes one exact moment of a run — the view is a
- * pure function of (plan, events), so there is nothing to race against — and
- * captures a screenshot into `screenshots/` for review.
+ * pure function of (plan, events), so there is nothing to race against.
  */
-
-const SCREENSHOT_DIR = "screenshots";
 
 /** 1 — a liquid-handling run mid-transfer, with compound-command substeps. */
 const LIQUID_HANDLING: RunScenario = {
@@ -96,13 +93,6 @@ const FAILED_RUN: RunScenario = {
 };
 
 async function startRun(page: import("@playwright/test").Page) {
-  // The app derives a run id from Date.now()/Math.random(). Pinning both
-  // keeps the captured screenshots byte-identical between regenerations, so
-  // re-running this spec does not produce a spurious binary diff.
-  await page.addInitScript(() => {
-    Date.now = () => 1_760_000_000_000;
-    Math.random = () => 0.42;
-  });
   await page.goto("/");
   await page.getByLabel("Import gantry config").selectOption("cub.yaml");
   await page.getByRole("button", { name: "Deck", exact: true }).click();
@@ -114,12 +104,6 @@ async function startRun(page: import("@playwright/test").Page) {
   await expect(page.getByRole("region", { name: "Run progress" })).toBeVisible();
   // The persistent right column keeps the live deck view alongside it.
   await expect(page.getByText("Deck Visualization")).toBeVisible();
-}
-
-/** The whole workspace, so the screenshots show the run view in context. */
-async function captureView(page: import("@playwright/test").Page, name: string) {
-  await page.setViewportSize({ width: 1280, height: 720 });
-  await page.screenshot({ path: `${SCREENSHOT_DIR}/${name}.png` });
 }
 
 test.describe("step-execution view", () => {
@@ -134,8 +118,6 @@ test.describe("step-execution view", () => {
     await expect(page.getByLabel("substep stroke0 done")).toBeVisible();
     await expect(page.getByLabel("substep stroke1 running")).toBeVisible();
     await expect(page.getByText("2 / 6 steps")).toBeVisible();
-
-    await captureView(page, "run-view-liquid-handling");
   });
 
   test("distinguishes steps already applied on a previous run", async ({ page }) => {
@@ -151,8 +133,6 @@ test.describe("step-execution view", () => {
     await expect(page.getByText("3 skipped")).toBeVisible();
     // Steps after the active one were never reached — still pending.
     await expect(page.getByLabel("step 5 drop_tip pending")).toBeVisible();
-
-    await captureView(page, "run-view-resumed");
   });
 
   test("names the failing step and leaves unreached steps pending", async ({ page }) => {
@@ -165,7 +145,5 @@ test.describe("step-execution view", () => {
     await expect(page.getByLabel("step 3 drop_tip pending")).toBeVisible();
     // A finished run offers no cancel.
     await expect(page.getByRole("button", { name: "Cancel run" })).toHaveCount(0);
-
-    await captureView(page, "run-view-failed");
   });
 });
