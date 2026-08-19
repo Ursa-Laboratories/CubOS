@@ -58,9 +58,6 @@ def _join(*parts: str) -> str:
     return "   ".join(part for part in parts if part)
 
 
-# ── Motion ───────────────────────────────────────────────────────────────
-
-
 def move(args: Dict[str, Any]) -> str:
     return _join(
         f"{args['instrument']} {ARROW} {_position(args['position'])}",
@@ -69,9 +66,6 @@ def move(args: Dict[str, Any]) -> str:
 
 def home(args: Dict[str, Any]) -> str:
     return "all axes"
-
-
-# ── Measurement ──────────────────────────────────────────────────────────
 
 
 def measure(args: Dict[str, Any]) -> str:
@@ -88,17 +82,11 @@ def scan(args: Dict[str, Any]) -> str:
     )
 
 
-# ── Capper ───────────────────────────────────────────────────────────────
-
-
 def decap(args: Dict[str, Any]) -> str:
     return str(args["vial"])
 
 
 cap = decap
-
-
-# ── Pause ────────────────────────────────────────────────────────────────
 
 
 def pause(args: Dict[str, Any]) -> str:
@@ -109,9 +97,6 @@ def pause(args: Dict[str, Any]) -> str:
 
 def breakpoint_cmd(args: Dict[str, Any]) -> str:
     return str(args.get("message", ""))
-
-
-# ── Pipette ──────────────────────────────────────────────────────────────
 
 
 def aspirate(args: Dict[str, Any]) -> str:

@@ -14,7 +14,6 @@ _FALLBACK_MAX_LEN = 80
 
 
 def _fallback_summary(args: Dict[str, Any]) -> str:
-    """Render *args* generically for commands without a summary formatter."""
     if not args:
         return ""
     rendered = ", ".join(f"{key}={value}" for key, value in args.items())

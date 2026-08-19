@@ -28,7 +28,6 @@ const IDLE_POLLS_BEFORE_BACKOFF = 10;
  */
 interface EventLog {
   events: RunEvent[];
-  /** Consecutive polls that returned nothing new; drives the backoff. */
   quietPolls: number;
   /** True once a poll has run after the run reached a terminal state. */
   sawTerminal: boolean;

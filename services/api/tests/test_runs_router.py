@@ -447,8 +447,6 @@ def test_run_record_fluid_state_link_survives_restart(monkeypatch):
     assert reread.json()["fluid_state_id"] == fluid_state_id
 
 
-# ─── Step events + compiled plan (step-execution UI) ─────────────────────────
-
 STEP_PROTOCOL_YAML = """\
 protocol:
   - home: null

@@ -1,20 +1,5 @@
 import type { PlanStep, RunEvent, StepEventData, StepOutcome } from "../../types";
 
-/**
- * Reduce a run's compiled plan plus its event stream into a renderable step list.
- *
- * This is deliberately a pure function of `(plan, events)` — both of which are
- * fetched from the server by `run_id`. Nothing about which step is running is
- * held in component state, so remounting mid-run (a page refresh, a tab
- * switch) reconstructs exactly the same view. Any run progress that cannot be
- * rebuilt from these two inputs is a bug, not a feature.
- *
- * Forward compatibility: unrecognized event kinds and outcomes are ignored
- * rather than throwing, so a server that starts emitting new event types (an
- * operator-intervention gate, preflight phases) degrades to "not shown here"
- * instead of breaking the run view.
- */
-
 export type StepStatus = "pending" | "active" | "done" | "failed" | "skipped";
 
 export interface SubstepView {
@@ -73,6 +58,19 @@ function mergeStatus(current: StepStatus, incoming: StepStatus): StepStatus {
 }
 
 /**
+ * Reduce a run's compiled plan plus its event stream into a renderable step list.
+ *
+ * Deliberately a pure function of `(plan, events)` — both fetched from the
+ * server by `run_id`. Nothing about which step is running is held in component
+ * state, so remounting mid-run (a page refresh, a tab switch) reconstructs
+ * exactly the same view. Any run progress that cannot be rebuilt from these
+ * two inputs is a bug, not a feature.
+ *
+ * Unrecognized event kinds and outcomes are ignored rather than thrown on, so
+ * a server that starts emitting new event types (an operator-intervention
+ * gate, preflight phases) degrades to "not shown here" instead of breaking the
+ * run view.
+ *
  * A `skipped` step is not a step that never ran — it is one the durable
  * fluid/tip journal reports as already applied by an earlier run. Callers
  * must keep the two visually distinct, so `reason` is always carried through.
@@ -145,7 +143,7 @@ export function deriveStepViews(plan: PlanStep[], events: RunEvent[]): StepView[
   return [...views.values()].sort((a, b) => a.index - b.index);
 }
 
-/** Index of the step to keep in view, or null when nothing is running. */
+/** Index of the step to keep in view: the running one, else the failed one. */
 export function activeStepIndex(steps: StepView[]): number | null {
   const active = steps.find((step) => step.status === "active");
   if (active) return active.index;

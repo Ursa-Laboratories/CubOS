@@ -476,6 +476,10 @@ async function connectGantry(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByRole("button", { name: "Disconnect" });
 }
 
+async function returnToWorkflowTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Workflow" }));
+}
+
 describe("CubOS editor interactions", () => {
   beforeEach(() => {
     installFetchMock(createState());
@@ -1134,9 +1138,7 @@ describe("CubOS editor interactions", () => {
       deck_file: "cub_deck.yaml",
       protocol_file: "move.yaml",
     });
-    // Submitting enters the Run view; the workflow footer's result readout
-    // lives back on the Workflow tab.
-    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await returnToWorkflowTab(user);
     expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
     expect(screen.getByLabelText("Last Campaign")).toHaveValue("#456");
   });
@@ -1171,9 +1173,7 @@ describe("CubOS editor interactions", () => {
 
     // The Run view reports the failure where the operator already is.
     expect(await screen.findByRole("alert")).toHaveTextContent("Gantry lost connection");
-    // Submitting enters the Run view; the workflow footer's result readout
-    // lives back on the Workflow tab.
-    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await returnToWorkflowTab(user);
     expect(await screen.findAllByText("Gantry lost connection")).not.toHaveLength(0);
     await waitFor(() => expect(screen.getByRole("button", { name: "Run Protocol" })).toBeEnabled());
     expect(screen.queryByRole("button", { name: "Running..." })).not.toBeInTheDocument();
@@ -1212,9 +1212,7 @@ describe("CubOS editor interactions", () => {
     await importConfig(user, "Import protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
-    // Submitting enters the Run view; this test drives the workflow footer's
-    // own Run/Cancel controls, so step back to that tab.
-    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await returnToWorkflowTab(user);
     expect(await screen.findByRole("button", { name: "Running..." })).toBeDisabled();
     const cancelButton = await screen.findByRole("button", { name: "Cancel Run" });
     expect(cancelButton).toBeEnabled();
@@ -1616,9 +1614,7 @@ describe("CubOS editor interactions", () => {
       state: { fluid_state_id: 5 },
     });
 
-    // Submitting enters the Run view; the workflow footer's result readout
-    // lives back on the Workflow tab.
-    await user.click(screen.getByRole("button", { name: "Workflow" }));
+    await returnToWorkflowTab(user);
     expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
     // The legacy synchronous endpoint is no longer used by the UI at all.
     expect(fetchMock).not.toHaveBeenCalledWith(

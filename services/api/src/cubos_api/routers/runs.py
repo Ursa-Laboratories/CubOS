@@ -43,7 +43,6 @@ def _describe(registry: CommandRegistry, command: str, args: dict) -> str:
 
 
 def _jsonable_args(args: dict) -> dict:
-    """Coerce compiled args to JSON-safe values for the response body."""
     return {key: _jsonable(value) for key, value in args.items()}
 
 

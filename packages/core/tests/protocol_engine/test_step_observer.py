@@ -61,9 +61,6 @@ def _protocol(*handlers):
     return Protocol(steps=steps)
 
 
-# ─── notify() ────────────────────────────────────────────────────────────────
-
-
 class TestNotify:
 
     def test_none_observer_is_a_noop(self):
@@ -85,9 +82,6 @@ class TestNotify:
         observer.step_completed.assert_called_once_with(
             index=2, command="mix", substep="leg1",
         )
-
-
-# ─── Step lifecycle ──────────────────────────────────────────────────────────
 
 
 class TestStepEvents:
@@ -155,9 +149,6 @@ class TestStepEvents:
         handler.assert_called_once()
 
 
-# ─── The safety guarantee ────────────────────────────────────────────────────
-
-
 class TestObserverCannotBreakRuns:
 
     def test_exploding_observer_does_not_change_results(self):
@@ -182,9 +173,6 @@ class TestObserverCannotBreakRuns:
         assert context.active_substep is None
 
 
-# ─── Scope handling ──────────────────────────────────────────────────────────
-
-
 class TestNotifyStep:
 
     def test_noop_outside_a_step(self):
@@ -203,9 +191,6 @@ class TestNotifyStep:
 
         _protocol(handler).execute(context)
         assert ("step_skipped", 0, "cmd0", "leg2") in observer.calls
-
-
-# ─── Compound-command substeps ───────────────────────────────────────────────
 
 
 class TestSubstepScope:

@@ -199,16 +199,22 @@ describe("deriveStepViews", () => {
 
   it("ignores events it does not understand", () => {
     reset();
+    const unknownEventKind = {
+      ...stepEvent(0, "home", "started"),
+      kind: "operator_gate" as never,
+    };
+    const unknownOutcome = stepEvent(1, "pick_up_tip", "teleported" as StepOutcome);
+    const nonStepPayload = {
+      ...stepEvent(2, "transfer", "started"),
+      data: { nonsense: true },
+    };
+    const indexNotInPlan = stepEvent(99, "ghost", "started");
     const steps = deriveStepViews(PLAN, [
       lifecycleEvent("running", "execution started"),
-      // A future event kind (e.g. an operator gate) must not break the view.
-      { ...stepEvent(0, "home", "started"), kind: "operator_gate" as never },
-      // A step event with an unknown outcome.
-      stepEvent(1, "pick_up_tip", "teleported" as StepOutcome),
-      // A step event whose payload is not step data.
-      { ...stepEvent(2, "transfer", "started"), data: { nonsense: true } },
-      // A step event for an index the plan does not contain.
-      stepEvent(99, "ghost", "started"),
+      unknownEventKind,
+      unknownOutcome,
+      nonStepPayload,
+      indexNotInPlan,
     ]);
     expect(steps.every((step) => step.status === "pending")).toBe(true);
     expect(steps).toHaveLength(4);
