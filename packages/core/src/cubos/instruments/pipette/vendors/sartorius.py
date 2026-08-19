@@ -12,8 +12,17 @@ carrying a monotonic sequence number so replies can be correlated::
 
     {"no":7,"data":"RUN_ASPIRATE 500 5"}\\r\\n
 
-A reply is zero or more envelope tokens (``ACK`` / ``BEGIN`` / ``END``), zero
-or more data lines, then a terminal ``<CODE> <seq>`` result token.
+Every frame is answered with ``ACK <seq>``, ``BEGIN <seq>``, a payload, then
+``END <seq>``. The payload is either a result token (``OK <seq>`` or an error
+code) for commands that only act, or bare data lines for commands that
+report -- a query such as ``GET_NOMINAL_VOLUME`` never sends ``OK`` at all,
+so ``END <seq>`` is the only reliable terminator.
+
+Two consequences, both observed on hardware. Replies for different sequence
+numbers interleave freely, and data lines carry no sequence number of their
+own, so a data line belongs to whichever ``BEGIN`` scope is innermost. And
+with ``AUTO 1`` enabled the pipette also pushes unsolicited JSON events for
+physical button presses, which must not be mistaken for a command's output.
 
 Protocol details were established with the permission of the
 AccelerationConsortium ``cnc-4-science`` maintainers, whose GPL-3.0 driver
@@ -529,8 +538,8 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             line = self._read_line()
             if line is None:
                 continue
-            kind, value = self._classify(line, frame_no)
-            if kind == "result":
+            kind, reply_no, value = self._parse_line(line)
+            if kind == "result" and reply_no == frame_no:
                 if value != _RESULT_OK:
                     raise PipetteConnectionError(
                         f"Pipette refused motor control: {value}"
@@ -601,27 +610,35 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         return json.dumps(payload, separators=(",", ":")).encode("ascii") + _TERMINATOR
 
     @staticmethod
-    def _classify(line: str, expected_no: int) -> tuple[str, Optional[str]]:
-        """Sort one received line into (kind, value)."""
+    def _parse_line(line: str) -> tuple[str, Optional[int], Optional[str]]:
+        """Sort one received line into ``(kind, sequence_no, value)``.
+
+        Kinds are ``ack`` / ``begin`` / ``end`` (envelope, carrying the
+        sequence number), ``result`` (a result code plus its sequence number),
+        ``data`` (a bare payload line, which carries no sequence number of its
+        own) and ``ignore`` (blank lines and the unsolicited JSON button
+        events the pipette pushes when ``AUTO 1`` is on).
+        """
         stripped = line.strip()
         if not stripped:
-            return ("ignore", None)
+            return ("ignore", None, None)
+        if stripped.startswith("{"):
+            # Asynchronous notification (e.g. {"button":"RIGHT_PRESSED"}).
+            # Never a command's output, however mid-command it arrives.
+            return ("ignore", None, None)
         parts = stripped.split()
         head = parts[0]
-        if head in _ENVELOPE_TOKENS:
-            return ("envelope", None)
-        if head in _RESULT_CODES:
-            if len(parts) >= 2:
-                try:
-                    reply_no = int(parts[1])
-                except ValueError:
-                    return ("response", stripped)
-                if reply_no != expected_no:
-                    # A result for an earlier frame; ignore rather than
-                    # mistake it for this command's outcome.
-                    return ("result_other", head)
-            return ("result", head)
-        return ("response", stripped)
+        reply_no: Optional[int] = None
+        if len(parts) >= 2:
+            try:
+                reply_no = int(parts[1])
+            except ValueError:
+                reply_no = None
+        if head in _ENVELOPE_TOKENS and reply_no is not None:
+            return (head.lower(), reply_no, None)
+        if head in _RESULT_CODES and reply_no is not None:
+            return ("result", reply_no, head)
+        return ("data", None, stripped)
 
     def _write(self, frame: bytes) -> None:
         if self._serial is None:
@@ -658,6 +675,11 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             )
         wait = self._command_timeout if timeout is None else timeout
         responses: list[str] = []
+        # Sequence numbers of BEGIN scopes the pipette has opened and not yet
+        # closed. Data lines carry no number of their own, so one belongs to
+        # whichever scope is innermost -- replies for different commands
+        # interleave freely.
+        scopes: list[int] = []
 
         with self._lock:
             frame_no = next(self._counter)
@@ -671,8 +693,17 @@ class SartoriusPicus2Pipette(PipetteInstrument):
                 line = self._read_line()
                 if line is None:
                     continue
-                kind, value = self._classify(line, frame_no)
-                if kind == "result":
+                kind, reply_no, value = self._parse_line(line)
+                if kind == "begin":
+                    scopes.append(reply_no)
+                elif kind == "end":
+                    if reply_no in scopes:
+                        scopes.remove(reply_no)
+                    # END is the only terminator every command sends: a query
+                    # replies with data lines and no result code at all.
+                    if reply_no == frame_no:
+                        return "\n".join(responses) if responses else None
+                elif kind == "result" and reply_no == frame_no:
                     if value == _ABORT_CODE:
                         self._motor_control_lost = True
                         raise PipetteMotorControlError(
@@ -682,8 +713,11 @@ class SartoriusPicus2Pipette(PipetteInstrument):
                         )
                     if value != _RESULT_OK:
                         raise PipetteCommandError(f"{data!r} failed: {value}")
-                    return "\n".join(responses) if responses else None
-                if kind == "response" and value is not None:
+                elif (
+                    kind == "data"
+                    and value is not None
+                    and scopes[-1:] == [frame_no]
+                ):
                     responses.append(value)
 
     def _close_serial(self) -> None:

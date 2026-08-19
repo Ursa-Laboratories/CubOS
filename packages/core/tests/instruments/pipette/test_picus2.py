@@ -55,6 +55,9 @@ class FakePicusSerial:
         if script:
             self._script.update(script)
         self.no_reply = list(no_reply)
+        # Hazards the real pipette exhibits, opt-in per test.
+        self.inject_async = False
+        self.interleave_foreign = False
 
     # -- driver-facing API --------------------------------------------------
 
@@ -67,13 +70,27 @@ class FakePicusSerial:
         self.commands.append(data)
         if any(data.startswith(prefix) for prefix in self.no_reply):
             return
+        no = payload["no"]
         lines, result = self._lookup(data)
-        for line in lines:
-            self._replies.append(f"{line}\r\n".encode())
-        # Real replies are enveloped; including the tokens proves the driver
-        # skips them rather than mistaking one for an outcome.
-        self._replies.append(b"ACK\r\n")
-        self._replies.append(f"{result} {payload['no']}\r\n".encode())
+        # The grammar observed on hardware: every frame is answered with
+        # ACK/BEGIN, then either a result code *or* bare data lines, then END.
+        # A query never sends OK at all, so END is the only terminator.
+        if self.inject_async:
+            self._replies.append(b'{"button":"RIGHT_PRESSED"}\r\n')
+        self._replies.append(f"ACK {no}\r\n".encode())
+        self._replies.append(f"BEGIN {no}\r\n".encode())
+        if self.interleave_foreign:
+            # Another frame's scope opening and closing mid-reply, carrying a
+            # data line that must not be collected as ours.
+            self._replies.append(b"BEGIN 999\r\n")
+            self._replies.append(b"9999\r\n")
+            self._replies.append(b"END 999\r\n")
+        if lines:
+            for line in lines:
+                self._replies.append(f"{line}\r\n".encode())
+        else:
+            self._replies.append(f"{result} {no}\r\n".encode())
+        self._replies.append(f"END {no}\r\n".encode())
 
     def readline(self) -> bytes:
         return self._replies.pop(0) if self._replies else b""
@@ -92,7 +109,9 @@ class FakePicusSerial:
     def _lookup(self, data: str):
         for prefix, reply in self._script.items():
             if data.startswith(prefix):
-                return reply
+                lines, result = reply
+                # An error is reported as a result code, never as data.
+                return ([], result) if result != "OK" else (lines, result)
         return ([], "OK")
 
     def sent(self, prefix: str) -> list[str]:
@@ -607,17 +626,35 @@ class TestRobustness:
         pip._recover_interrupted_mix(0, 3, 50.0)
         assert not fake.sent("BLOW_OUT")
 
-    def test_classify_handles_envelope_blank_and_foreign_replies(self):
-        classify = SartoriusPicus2Pipette._classify
-        assert classify("", 1) == ("ignore", None)
-        assert classify("BEGIN", 1) == ("envelope", None)
-        assert classify("END", 1) == ("envelope", None)
-        assert classify("OK 1", 1) == ("result", "OK")
-        # A result for a different frame must not be read as this one's.
-        assert classify("OK 9", 1) == ("result_other", "OK")
-        assert classify("OK", 1) == ("result", "OK")
-        assert classify("OK notanumber", 1) == ("response", "OK notanumber")
-        assert classify("1.4.2", 1) == ("response", "1.4.2")
+    def test_parse_line_sorts_the_reply_grammar(self):
+        parse = SartoriusPicus2Pipette._parse_line
+        assert parse("") == ("ignore", None, None)
+        assert parse("ACK 5") == ("ack", 5, None)
+        assert parse("BEGIN 5") == ("begin", 5, None)
+        assert parse("END 5") == ("end", 5, None)
+        assert parse("OK 5") == ("result", 5, "OK")
+        assert parse("NOT_ALLOWED 5") == ("result", 5, "NOT_ALLOWED")
+        # Payload lines carry no sequence number of their own.
+        assert parse("1000") == ("data", None, "1000")
+        assert parse("Picus 2 1000uL") == ("data", None, "Picus 2 1000uL")
+        # Unsolicited button events must never be read as a command's output.
+        assert parse('{"button":"RIGHT_PRESSED"}') == ("ignore", None, None)
+
+    def test_query_reply_without_a_result_code_is_read(self):
+        """Observed on hardware: a query answers ACK/BEGIN/data/END, no OK."""
+        pip, _ = connected()
+        assert pip.get_nominal_volume() == "1000"
+
+    def test_async_button_events_do_not_corrupt_a_reply(self):
+        pip, fake = connected()
+        fake.inject_async = True
+        assert pip.get_model() == "Picus 2 1000uL"
+
+    def test_interleaved_replies_are_attributed_by_scope(self):
+        """Replies for different frames interleave; data belongs to its scope."""
+        pip, fake = connected()
+        fake.interleave_foreign = True
+        assert pip.get_serial_number() == "SN-12345"
 
     def test_first_number_parsing(self):
         from cubos.instruments.pipette.vendors.sartorius import _first_number
