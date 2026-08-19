@@ -274,6 +274,12 @@ export const runsApi = {
       body: JSON.stringify(body),
     }),
   get: (runId: string) => request<import("../types").RunRecord>(`/runs/${runId}`),
+  plan: (runId: string) =>
+    request<import("../types").RunPlanResponse>(`/runs/${runId}/plan`),
+  events: (runId: string, after = 0) =>
+    request<import("../types").RunEventsResponse>(
+      `/runs/${runId}/events?after=${after}`,
+    ),
   cancel: (runId: string) =>
     request<import("../types").RunRecord>(`/runs/${runId}/cancel`, {
       method: "POST",
