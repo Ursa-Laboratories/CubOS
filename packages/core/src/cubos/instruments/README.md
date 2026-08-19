@@ -11,7 +11,7 @@ that pair to choose the concrete class.
 | `capper/` | `mock`, `pawduino` | Vial capper/decapper | Electromagnet capture/release + line-break sensor confirm via Arduino serial (Pawduino firmware); `mock` is an offline in-memory simulation |
 | `filmetrics/` | `kla` | F-Series (via FilmetricsTool.exe) | Thin-film thickness measurement via spectral reflectance |
 | `mounted_tool/` | `mount_only` | Mounted non-instrumented tool | Calibration-only stand-in for physical tools without control code |
-| `pipette/` | `opentrons` | OT-2 / Flex pipettes | Pipette control via Arduino serial (Pawduino firmware) |
+| `pipette/` | `opentrons`, `sartorius` | OT-2 / Flex pipettes; Sartorius Picus 2 | `opentrons` drives a CubOS stepper on a bare pipette body via Arduino serial (Pawduino firmware) and commands plunger millimetres; `sartorius` commands microlitres to the pipette's own controller over USB serial |
 | `potentiostat/` | `admiral` | Admiral potentiostat | Squidstat Python SDK |
 | `uv_curing/` | `excelitas` | OmniCure S1500 PRO | UV curing system via RS-232 serial |
 | `uvvis_ccs/` | `thorlabs` | CCS100 / CCS175 / CCS200 | Compact CCD spectrometer for UV-Vis spectroscopy |

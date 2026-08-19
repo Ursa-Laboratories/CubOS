@@ -213,6 +213,14 @@ All pipette commands require an instrument registered under the name `pipette`.
 The `height`/`source_height`/`destination_height` args follow the labware-relative
 height convention.
 
+**`speed` is a normalized 0–100 percentage** of the instrument's usable speed
+range, not a physical unit — each vendor driver maps it onto its own hardware
+scale, so a protocol stays portable. The `sartorius` driver maps the default
+`50.0` onto the pipette's own mid-scale setting. The `opentrons` driver
+currently ignores `speed` and lets its firmware choose a velocity; honoring it
+would change motion on machines already in service, so that remains a
+deliberate follow-up.
+
 #### `pick_up_tip`
 
 Pick up a tip from a tip-rack slot, record its length, and mark the slot consumed.
