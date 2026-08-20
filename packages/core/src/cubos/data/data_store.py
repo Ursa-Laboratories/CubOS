@@ -19,9 +19,9 @@ if TYPE_CHECKING:
 
 DATA_DB_PATH_ENV = "CUBOS_DATA_DB_PATH"
 SQLITE_MEMORY_DATABASE = ":memory:"
-# UTC ISO-8601 (YYYY-MM-DDTHH:MM:SSZ). Must match the column defaults in
-# _SCHEMA_SQL; every SQL statement that writes a timestamp uses this instead
-# of datetime('now'), which emits a timezone-naive format.
+# UTC ISO-8601 (YYYY-MM-DDTHH:MM:SSZ). Used by the _SCHEMA_SQL column
+# defaults and by every SQL statement that writes a timestamp, instead of
+# datetime('now'), which emits a timezone-naive format.
 UTC_NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
 LEGACY_PACKAGE_DATABASE_PATH = Path(__file__).resolve().parent / "databases" / "panda_data.db"
 logger = logging.getLogger(__name__)
@@ -40,17 +40,17 @@ def default_database_path() -> Path:
         return Path(override).expanduser()
     return Path.home() / ".cubos" / "panda_data.db"
 
-_SCHEMA_SQL = """\
+_SCHEMA_SQL = f"""\
 CREATE TABLE IF NOT EXISTS fluid_state_sessions (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     deck_path          TEXT    NOT NULL,
     deck_fingerprint   TEXT    NOT NULL,
-    deck_descriptor_json TEXT  NOT NULL DEFAULT '{}',
+    deck_descriptor_json TEXT  NOT NULL DEFAULT '{{}}',
     deck_snapshot_json TEXT    NOT NULL,
     layout_json        TEXT    NOT NULL,
     label              TEXT,
-    created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    created_at         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
+    updated_at         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
 );
 
 CREATE TABLE IF NOT EXISTS campaigns (
@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS campaigns (
     board_config    TEXT,
     gantry_config   TEXT,
     protocol_config TEXT,
-    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at      TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     status          TEXT    NOT NULL DEFAULT 'running',
     finished_at     TEXT,
     fluid_state_id  INTEGER REFERENCES fluid_state_sessions(id)
@@ -73,7 +73,7 @@ CREATE TABLE IF NOT EXISTS experiments (
     labware_name TEXT    NOT NULL,
     well_id      TEXT,
     contents     TEXT,
-    created_at   TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    created_at   TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
 );
 
 CREATE TABLE IF NOT EXISTS uvvis_measurements (
@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS uvvis_measurements (
     wavelengths       TEXT    NOT NULL,
     intensities       TEXT    NOT NULL,
     integration_time_s REAL   NOT NULL,
-    timestamp         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    timestamp         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
 );
 
 CREATE TABLE IF NOT EXISTS filmetrics_measurements (
@@ -90,7 +90,7 @@ CREATE TABLE IF NOT EXISTS filmetrics_measurements (
     experiment_id   INTEGER NOT NULL REFERENCES experiments(id),
     thickness_nm    REAL,
     goodness_of_fit REAL,
-    timestamp       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    timestamp       TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
 );
 
 CREATE TABLE IF NOT EXISTS uv_curing_measurements (
@@ -99,14 +99,14 @@ CREATE TABLE IF NOT EXISTS uv_curing_measurements (
     intensity_percent REAL    NOT NULL,
     exposure_time_s   REAL    NOT NULL,
     cure_timestamp_s  REAL    NOT NULL,
-    timestamp         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    timestamp         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
 );
 
 CREATE TABLE IF NOT EXISTS camera_measurements (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     experiment_id INTEGER NOT NULL REFERENCES experiments(id),
     image_path    TEXT    NOT NULL,
-    timestamp     TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    timestamp     TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
 );
 
 CREATE TABLE IF NOT EXISTS asmi_measurements (
@@ -124,7 +124,7 @@ CREATE TABLE IF NOT EXISTS asmi_measurements (
     step_size_mm    REAL,
     z_target_mm     REAL,
     force_limit_n   REAL,
-    timestamp       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    timestamp       TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
 );
 
 CREATE TABLE IF NOT EXISTS potentiostat_measurements (
@@ -148,7 +148,7 @@ CREATE TABLE IF NOT EXISTS potentiostat_measurements (
     stopped_at        TEXT,
     aborted           INTEGER,
     stop_reason       TEXT,
-    timestamp         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    timestamp         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
 );
 
 CREATE TABLE IF NOT EXISTS labware (
@@ -161,7 +161,7 @@ CREATE TABLE IF NOT EXISTS labware (
     working_volume_ul REAL    NOT NULL,
     current_volume_ul REAL    NOT NULL DEFAULT 0.0,
     contents          TEXT,
-    updated_at        TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at        TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     UNIQUE(campaign_id, labware_key, well_id)
 );
 
@@ -178,10 +178,10 @@ CREATE TABLE IF NOT EXISTS fluid_containers (
                                       AND working_volume_ul <= capacity_ul
                                   ),
     current_volume_ul  REAL    NOT NULL DEFAULT 0.0 CHECK (current_volume_ul >= 0),
-    composition_json   TEXT    NOT NULL DEFAULT '{}',
+    composition_json   TEXT    NOT NULL DEFAULT '{{}}',
     version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-    created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
+    updated_at         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     UNIQUE(fluid_state_id, labware_key, location_id)
 );
 
@@ -199,7 +199,7 @@ CREATE TABLE IF NOT EXISTS fluid_operations (
     destination_location_id  TEXT    NOT NULL DEFAULT '',
     volume_ul                REAL    NOT NULL CHECK (volume_ul > 0),
     composition_json         TEXT    NOT NULL,
-    parameters_json          TEXT    NOT NULL DEFAULT '{}',
+    parameters_json          TEXT    NOT NULL DEFAULT '{{}}',
     source_version           INTEGER NOT NULL,
     destination_version      INTEGER NOT NULL,
     status                   TEXT    NOT NULL CHECK (
@@ -213,8 +213,8 @@ CREATE TABLE IF NOT EXISTS fluid_operations (
                                     ),
     campaign_id              INTEGER REFERENCES campaigns(id),
     detail                   TEXT,
-    created_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at               TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
+    updated_at               TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     applied_at               TEXT
 );
 
@@ -235,8 +235,8 @@ CREATE TABLE IF NOT EXISTS tip_containers (
                                    )
                                ),
     version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-    created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
+    updated_at         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     UNIQUE(fluid_state_id, rack_key, slot_id)
 );
 
@@ -264,8 +264,8 @@ CREATE TABLE IF NOT EXISTS tip_operations (
                                     ),
     campaign_id              INTEGER REFERENCES campaigns(id),
     detail                   TEXT,
-    created_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at               TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
+    updated_at               TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     applied_at               TEXT
 );
 
@@ -287,8 +287,8 @@ CREATE TABLE IF NOT EXISTS cap_containers (
                                    )
                                ),
     version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-    created_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
+    updated_at         TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     UNIQUE(fluid_state_id, labware_key, location_id)
 );
 
@@ -315,8 +315,8 @@ CREATE TABLE IF NOT EXISTS cap_operations (
                                     ),
     campaign_id              INTEGER REFERENCES campaigns(id),
     detail                   TEXT,
-    created_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-    updated_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    created_at               TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
+    updated_at               TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     applied_at               TEXT
 );
 
@@ -335,7 +335,7 @@ CREATE TABLE IF NOT EXISTS pipette_attachment (
     contents_known_empty  INTEGER NOT NULL DEFAULT 1,
     attachment_uncertain  INTEGER NOT NULL DEFAULT 0,
     version               INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
-    updated_at            TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    updated_at            TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
     UNIQUE(fluid_state_id, pipette_key)
 );
 """
@@ -472,7 +472,7 @@ class DataStore:
 
         try:
             self._conn.executescript(
-                """
+                f"""
             BEGIN IMMEDIATE;
             DROP TABLE IF EXISTS fluid_operations_new;
             CREATE TABLE fluid_operations_new (
@@ -489,7 +489,7 @@ class DataStore:
                 destination_location_id  TEXT    NOT NULL DEFAULT '',
                 volume_ul                REAL    NOT NULL CHECK (volume_ul > 0),
                 composition_json         TEXT    NOT NULL,
-                parameters_json          TEXT    NOT NULL DEFAULT '{}',
+                parameters_json          TEXT    NOT NULL DEFAULT '{{}}',
                 source_version           INTEGER NOT NULL,
                 destination_version      INTEGER NOT NULL,
                 status                   TEXT    NOT NULL CHECK (
@@ -503,8 +503,8 @@ class DataStore:
                                                 ),
                 campaign_id              INTEGER REFERENCES campaigns(id),
                 detail                   TEXT,
-                created_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
-                updated_at               TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+                created_at               TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
+                updated_at               TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL}),
                 applied_at               TEXT
             );
             INSERT INTO fluid_operations_new (
@@ -519,7 +519,7 @@ class DataStore:
                 id, fluid_state_id, operation_key, operation_type,
                 source_labware_key, source_location_id,
                 destination_labware_key, destination_location_id,
-                volume_ul, composition_json, '{}',
+                volume_ul, composition_json, '{{}}',
                 source_version, destination_version, status, campaign_id,
                 detail, created_at, updated_at, applied_at
             FROM fluid_operations;
@@ -576,7 +576,7 @@ class DataStore:
             return
 
         self._conn.executescript(
-            """
+            f"""
             CREATE TABLE asmi_measurements_new (
                 id              INTEGER PRIMARY KEY AUTOINCREMENT,
                 experiment_id   INTEGER NOT NULL REFERENCES experiments(id),
@@ -592,7 +592,7 @@ class DataStore:
                 step_size_mm    REAL,
                 z_target_mm     REAL,
                 force_limit_n   REAL,
-                timestamp       TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+                timestamp       TEXT    NOT NULL DEFAULT ({UTC_NOW_SQL})
             );
             INSERT INTO asmi_measurements_new (
                 id, experiment_id, sample_timestamps, z_positions, raw_forces,
