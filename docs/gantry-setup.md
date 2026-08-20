@@ -221,8 +221,8 @@ instruments:
 **`camera` / `flir`** (or `opencv`) — an acquiring camera for the `capture`
 and `image_well` protocol commands (see [Protocol YAML: Lighting and imaging
 commands](protocol-yaml.md#lighting-and-imaging-commands)). `flir` drives a
-FLIR camera through the proprietary Spinnaker/PySpin SDK (manual install;
-the driver's error message carries the download pointer); `opencv` drives a
+FLIR camera through the proprietary Spinnaker/PySpin SDK (manual install
+from https://www.flir.com/products/spinnaker-sdk/); `opencv` drives a
 plain USB webcam (`camera_id: -1` auto-detects the first responsive index).
 Offline, both write placeholder PNGs so dry runs exercise the full
 capture/persistence path:

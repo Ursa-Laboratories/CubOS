@@ -1,24 +1,12 @@
 """Shared serial transport for the PANDA-family Arduino ("Pawduino").
 
-One physical Arduino serves several instruments on the same firmware and
-wire format (capper electromagnet/line-break, pipette plunger, imaging
-lights): a comma-separated ``"<command_id>,<args...>\n"`` line out, a single
-``"OK:..."`` / ``"ERR:..."``-prefixed line back. Each driver historically
-opened its own ``serial.Serial`` on the port; the second open toggles DTR
-and resets the Arduino mid-session, and interleaved reads steal each
-other's responses. This module makes the port itself the shared resource:
-
-* :meth:`PawduinoLink.acquire` returns one :class:`PawduinoLink` per port
-  string — every driver configured with the same ``port`` gets the same
-  instance.
-* ``connect``/``disconnect`` are refcounted. The first connect pays the
-  one-time open (DTR reset, settle, boot-banner drain); later connects are
-  no-ops, and the port closes only when the last holder disconnects.
-* :meth:`send_command` serializes the write→readline round-trip under one
-  lock, so concurrent drivers get correctly paired responses.
-
-Offline/mock behavior stays in the vendors (they simulate in memory and
-never construct a link); the link only ever represents real hardware.
+One Arduino serves several instruments (capper, pipette, lights) over one
+serial port, and opening the port twice resets the board mid-session. The
+link makes the port the shared resource: one instance per port string,
+refcounted connect/disconnect (only the first open pays the DTR reset and
+boot-banner drain), and one lock per command round-trip so concurrent
+drivers get correctly paired responses. Offline simulation stays in the
+vendors; the link only represents real hardware.
 """
 
 from __future__ import annotations
@@ -60,8 +48,7 @@ class PawduinoLink:
     _registry_lock = threading.Lock()
 
     def __init__(self, port: str, baud_rate: int) -> None:
-        # Not for direct construction — use acquire() so drivers configured
-        # with the same port share one instance.
+        # Use acquire(), not direct construction.
         self._port = port
         self._baud_rate = baud_rate
         self._serial: Optional[serial.Serial] = None
@@ -108,12 +95,7 @@ class PawduinoLink:
         return self._serial is not None and self._serial.is_open
 
     def connect(self, timeout: float = 30.0) -> None:
-        """Open the port on first holder; count subsequent holders.
-
-        Opening resets the Arduino (DTR toggle), so only the first holder
-        pays the settle sleep and boot-banner drain. Raises
-        :class:`PawduinoLinkConnectionError` and counts no holder on failure.
-        """
+        """Open the port on the first holder; later connects just count."""
         with self._lock:
             if self._holders > 0 and self.is_open:
                 self._holders += 1
@@ -164,12 +146,10 @@ class PawduinoLink:
         timeout: float = 30.0,
         expect: Optional[str] = None,
     ) -> str:
-        """Send one command line and return its ``OK:`` response line.
+        """Send one command and return its ``OK:`` response line.
 
-        The full write→readline round-trip runs under the link lock so
-        concurrent drivers on the same board cannot interleave and steal
-        each other's responses. ``expect``, when given, skips ``OK:`` lines
-        not containing it (stale responses from a prior timeout).
+        ``expect`` skips ``OK:`` lines not containing it (stale responses
+        from a prior timeout).
         """
         with self._lock:
             if not self.is_open:

@@ -409,10 +409,9 @@ placeholder PNG so dry runs exercise the full file/persistence path.
 
 #### `image_well`
 
-The packaged well-imaging sequence (ported from PANDA-BEAR's
-`image_well`): travel above the well at `safe_z`, descend to the imaging
-plane, light the well, capture, lights off, retract to `safe_z` — with
-lights-off and the retract guaranteed even on failure.
+The packaged well-imaging sequence: travel above the well at `safe_z`,
+descend to the imaging plane, light the well, capture, lights off, retract
+to `safe_z` — with lights-off and the retract guaranteed even on failure.
 
 - `camera` *(str, required)* — camera instrument.
 - `well` *(str, required)* — deck target of the well to image.
@@ -425,13 +424,13 @@ lights-off and the retract guaranteed even on failure.
 - `mode` *(str, default `standard`)* — `standard` is one shot with white
   lights at 5% (or `brightness`); `curvature` is a contact-angle Z-stack:
   from `image_height` descend `z_step_mm` per plane for `z_steps` planes
-  (defaults 0.2 mm × 11, PANDA's values) with contact lights at 50% (or
-  `brightness`), labeling each image `{label}_z{z}mm_b{brightness}`.
+  (defaults 0.2 mm × 11) with contact lights at 50% (or `brightness`),
+  labeling each image `{label}_z{z}mm_b{brightness}`.
 - `brightness` *(int, optional)* — override the mode's default level.
 
 Capture and lighting failures **log and continue** (an image is never
-worth failing a run over; PANDA parity) and the command returns the list
-of image paths actually saved. Motion failures still fail the run.
+worth failing a run over) and the command returns the list of image paths
+actually saved. Motion failures still fail the run.
 
 ### Compound liquid commands
 

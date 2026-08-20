@@ -84,3 +84,34 @@ class TestRunEndLightsOff:
         )
         gantry.disconnect_instruments()
         assert lights.status().channels == {"white": 0, "contact": 0}
+
+
+class TestSetLightsErrorWrap:
+    def test_all_off_failure_wrapped(self):
+        from cubos.instruments.lighting.exceptions import LightingCommandError
+
+        lights = _lights()
+
+        def failing_all_off():
+            raise LightingCommandError("board gone")
+
+        lights.all_off = failing_all_off
+        with pytest.raises(ProtocolExecutionError, match="board gone"):
+            set_lights(_context({"lights": lights}), instrument="lights",
+                       all_off=True)
+
+
+class TestDisconnectLightsOffFailure:
+    def test_all_off_failure_logged_and_disconnect_proceeds(self):
+        lights = _lights()
+        disconnected = []
+
+        def failing_all_off():
+            raise RuntimeError("dead board")
+
+        lights.all_off = failing_all_off
+        original_disconnect = lights.disconnect
+        lights.disconnect = lambda: disconnected.append(True) or original_disconnect()
+        gantry = InstrumentedGantry(controller=None, instruments={"lights": lights})
+        gantry.disconnect_instruments()
+        assert disconnected == [True]

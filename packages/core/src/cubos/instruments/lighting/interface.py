@@ -1,18 +1,10 @@
 """Generic lighting instrument interface.
 
-Lighting is a non-positional instrument: it illuminates the imaging area but
-is never a motion target, so the standard mount offsets default to zero and
-nothing in the gantry runtime moves "to" it. What it owns is a set of named
-channels (e.g. ``white``, ``contact``) with vendor-declared discrete
-brightness levels.
-
-Sequencing (which lights are on around a camera capture, when they turn
-off) is owned by the protocol-engine commands (``set_lights``,
-``image_well``) — this interface never encodes a use case, and the protocol
-engine never branches on a vendor. As a fail-safe,
+Lighting is non-positional: it owns named channels (e.g. ``white``,
+``contact``) with vendor-declared discrete brightness levels. Sequencing
+belongs to the protocol commands; as a fail-safe,
 ``InstrumentedGantry.disconnect_instruments`` turns every lighting
-instrument off best-effort at the end of every run, so an aborted protocol
-never leaves lights on.
+instrument off at the end of every run.
 """
 
 from __future__ import annotations
@@ -47,12 +39,7 @@ class LightingInstrument(BaseInstrument):
     @property
     @abstractmethod
     def channels(self) -> Mapping[str, Tuple[int, ...]]:
-        """Supported brightness percentages per channel, ascending.
-
-        Levels are the discrete steps the hardware actually supports —
-        ``set_channel`` requires an exact match rather than snapping, so a
-        protocol says what the hardware does.
-        """
+        """Supported brightness percentages per channel, ascending."""
 
     @abstractmethod
     def set_channel(self, channel: str, brightness_pct: int) -> None:

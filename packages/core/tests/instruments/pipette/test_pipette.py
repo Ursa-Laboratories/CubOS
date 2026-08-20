@@ -3,7 +3,6 @@ from unittest.mock import patch, MagicMock, PropertyMock
 
 from cubos.instruments.base_instrument import BaseInstrument, InstrumentError
 from cubos.instruments.pipette.models import (
-    PipetteConfig,
     PipetteFamily,
     PipetteStatus,
     AspirateResult,

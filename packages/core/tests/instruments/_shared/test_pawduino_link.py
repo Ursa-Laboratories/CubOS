@@ -164,3 +164,60 @@ class TestCommands:
             t.join()
         assert results[17] == "OK:reply-to-17"
         assert results[23] == "OK:reply-to-23"
+
+
+class TestErrorPaths:
+    def _connected(self):
+        with patch("cubos.instruments._shared.pawduino_link.serial.Serial") as cls, \
+                patch("cubos.instruments._shared.pawduino_link.time.sleep"):
+            mock_ser = _mock_serial()
+            cls.return_value = mock_ser
+            link = PawduinoLink.acquire("/dev/ttyACM0")
+            link.connect()
+        return link, mock_ser
+
+    def test_port_property(self):
+        assert PawduinoLink.acquire("/dev/ttyACM9").port == "/dev/ttyACM9"
+
+    def test_write_failure_wrapped(self):
+        link, mock_ser = self._connected()
+        mock_ser.write.side_effect = real_serial.SerialException("gone")
+        with pytest.raises(PawduinoLinkCommandError, match="Failed to send"):
+            link.send_command(5)
+
+    def test_read_failure_wrapped(self):
+        link, mock_ser = self._connected()
+        mock_ser.readline.side_effect = real_serial.SerialException("gone")
+        with pytest.raises(PawduinoLinkCommandError, match="read error"):
+            link.send_command(5)
+
+    def test_close_swallows_serial_exception(self):
+        link, mock_ser = self._connected()
+        mock_ser.close.side_effect = real_serial.SerialException("stuck")
+        link.disconnect()
+        assert not link.is_open
+
+    def test_reset_registry_force_closes_open_links(self):
+        link, mock_ser = self._connected()
+        PawduinoLink.reset_registry()
+        mock_ser.close.assert_called_once()
+        assert not link.is_open
+
+    def test_drain_resets_pending_input(self):
+        class Waiting:
+            def __init__(self):
+                self.calls = 0
+
+            def __get__(self, obj, objtype=None):
+                self.calls += 1
+                return 1 if self.calls == 1 else 0
+
+        mock_ser = MagicMock()
+        mock_ser.is_open = True
+        type(mock_ser).in_waiting = Waiting()
+        with patch("cubos.instruments._shared.pawduino_link.serial.Serial") as cls, \
+                patch("cubos.instruments._shared.pawduino_link.time.sleep"):
+            cls.return_value = mock_ser
+            link = PawduinoLink.acquire("/dev/ttyACM0")
+            link.connect()
+        mock_ser.reset_input_buffer.assert_called_once()

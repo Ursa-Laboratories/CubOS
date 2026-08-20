@@ -127,9 +127,7 @@ class OpentronsPipette(PipetteInstrument):
         if self._offline:
             self.logger.info("Pipette connected (offline)")
             return
-        # The capper and imaging lights share this Arduino: the link is one
-        # refcounted serial connection per port (it owns the DTR-reset settle
-        # and boot-banner drain), so only the first holder resets the board.
+        # The capper and lights share this Arduino via one link per port.
         try:
             self._link = PawduinoLink.acquire(self._port, self._baud_rate)
             self._link.connect(timeout=self._command_timeout)

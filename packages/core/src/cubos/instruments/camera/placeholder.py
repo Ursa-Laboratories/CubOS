@@ -1,10 +1,5 @@
-"""Stdlib-only placeholder image for offline camera captures.
-
-Offline dry runs still write a real, decodable PNG so downstream consumers
-(data store rows, exports, the Operator UI preview) exercise the same file
-handling as hardware runs — without requiring numpy/OpenCV/PySpin in the
-core install.
-"""
+"""Stdlib-only placeholder PNG for offline camera captures, so dry runs
+produce real files without numpy/OpenCV/PySpin installed."""
 
 from __future__ import annotations
 

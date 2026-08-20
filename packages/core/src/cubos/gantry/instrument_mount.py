@@ -5,6 +5,7 @@ import math
 from typing import Any, TYPE_CHECKING
 
 from cubos.instruments.base_instrument import BaseInstrument
+from cubos.instruments.lighting.interface import LightingInstrument
 
 if TYPE_CHECKING:
     from cubos.gantry import Gantry
@@ -150,12 +151,9 @@ class InstrumentedGantry:
     def disconnect_instruments(self) -> None:
         """Disconnect all instruments, logging errors without re-raising.
 
-        Lighting instruments are commanded off first, best-effort: every run
-        path (completed or aborted) funnels through here, so a protocol that
-        failed mid-``set_lights`` never leaves lights baking a sample.
+        Lighting is commanded off first, best-effort, so an aborted run
+        never leaves lights on.
         """
-        from cubos.instruments.lighting.interface import LightingInstrument
-
         for name, instrument in self.instruments.items():
             if isinstance(instrument, LightingInstrument):
                 try:

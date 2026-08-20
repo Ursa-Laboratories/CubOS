@@ -1,28 +1,9 @@
-"""Driver for the PANDA-family Arduino ("Pawduino") imaging lights.
+"""Pawduino imaging lights: white and contact (red+blue) channels.
 
-Protocol extracted from PANDA-BEAR's ``panda_lib.hardware.arduino_interface``
-(``PawduinoFunctions``, read-only source — never imported from here). Two
-channels share the board with the capper electromagnet and pipette plunger:
-
-* ``white`` — white ring light used for standard well images. Discrete
-  brightness commands (percent of the firmware's 250-count PWM scale):
-  ``17``=100%, ``18``=50%, ``19``=25%, ``20``=15%, ``21``=10%, ``22``=5%.
-  Off is command ``2`` (``CMD_WHITE_OFF``).
-* ``contact`` — the red+blue contact-angle ("curvature") lights:
-  ``23``=50%, ``24``=30%, ``25``=20%, ``26``=10%, ``27``=5%. Off is
-  command ``4`` (``CMD_CONTACT_OFF``).
-
-The bare full-brightness toggles (``1``/``3``) are deliberately not
-exposed: the discrete table is the whole surface, so protocol YAML always
-names an explicit level.
-
-Serial transport is the shared, refcounted
-:class:`cubos.instruments._shared.pawduino_link.PawduinoLink` — the same
-physical Arduino also serves ``PawduinoCapper`` and ``OpentronsPipette``,
-so this driver must never open the port itself.
-
-Pass ``offline=True`` for dry runs — simulates channel state in memory,
-identically to the other Pawduino vendors.
+Discrete brightness commands — white: 17=100%, 18=50%, 19=25%, 20=15%,
+21=10%, 22=5%, off=2; contact: 23=50%, 24=30%, 25=20%, 26=10%, 27=5%,
+off=4. Uses the shared PawduinoLink (the capper and pipette share this
+board); never opens the port itself. Pass ``offline=True`` for dry runs.
 """
 
 from __future__ import annotations
@@ -85,9 +66,7 @@ class PawduinoLighting(LightingInstrument):
         self._baud_rate = baud_rate
         self._command_timeout = command_timeout
         self._link: Optional[PawduinoLink] = None
-        # Firmware has no light-state readback; shadow it. Reset to all-off
-        # on connect: a board reset (DTR toggle on first open) physically
-        # turns the lights off, so shadow and hardware agree.
+        # No firmware readback for lights; shadow the state in memory.
         self._active: dict[str, int] = {ch: 0 for ch in _CHANNEL_COMMANDS}
 
     # ── BaseInstrument interface ──────────────────────────────────────────
@@ -104,8 +83,7 @@ class PawduinoLighting(LightingInstrument):
             self._link = None
             raise LightingConnectionError(str(exc)) from exc
 
-        # Known state on connect: the board may not have reset (another
-        # holder may already own the link), so command lights off explicitly.
+        # Command lights off explicitly for a known state on connect.
         try:
             self.all_off()
         except (LightingCommandError, LightingTimeoutError) as exc:

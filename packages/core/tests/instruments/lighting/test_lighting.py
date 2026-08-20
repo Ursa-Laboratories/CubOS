@@ -1,14 +1,17 @@
 """Tests for the lighting interface and the Pawduino lighting vendor."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
+import serial as real_serial
 
 from cubos.instruments._shared.pawduino_link import PawduinoLink
 from cubos.instruments.base_instrument import BaseInstrument
 from cubos.instruments.lighting.exceptions import (
     LightingCommandError,
     LightingConfigError,
+    LightingConnectionError,
+    LightingTimeoutError,
 )
 from cubos.instruments.lighting.interface import LightingInstrument
 from cubos.instruments.lighting.vendors.pawduino import PawduinoLighting
@@ -126,3 +129,93 @@ class TestSerialProtocol:
         lights = PawduinoLighting(port="/dev/ttyACM0")
         with pytest.raises(LightingCommandError, match="Not connected"):
             lights.set_channel("white", 50)
+
+
+# --- Lifecycle over the shared link (mocked serial) ---------------------------
+
+
+def _mock_serial(responses=None):
+    mock_ser = MagicMock()
+    mock_ser.is_open = True
+    mock_ser.in_waiting = 0
+    if responses is None:
+        mock_ser.readline.return_value = b"OK:done\n"
+    else:
+        mock_ser.readline.side_effect = [r.encode() for r in responses]
+    return mock_ser
+
+
+class TestLifecycle:
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    def test_connect_forces_known_off_state(self, mock_sleep, mock_serial_cls):
+        mock_ser = _mock_serial()
+        mock_serial_cls.return_value = mock_ser
+        lights = PawduinoLighting(port="/dev/ttyACM0")
+        lights.connect()
+        # Connect commands both channels off explicitly (the board may not
+        # have reset if another holder already owned the link).
+        sent = [call[0][0] for call in mock_ser.write.call_args_list]
+        assert set(sent) == {b"2\n", b"4\n"}
+        assert lights.health_check() is True
+        lights.disconnect()
+        assert lights.health_check() is False
+
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    def test_connect_open_failure(self, mock_sleep, mock_serial_cls):
+        mock_serial_cls.side_effect = real_serial.SerialException("busy")
+        lights = PawduinoLighting(port="/dev/ttyACM0")
+        with pytest.raises(LightingConnectionError, match="Cannot open"):
+            lights.connect()
+        assert lights.health_check() is False
+
+    def test_connect_empty_port_rejected(self):
+        lights = PawduinoLighting(port="")
+        with pytest.raises(LightingConnectionError, match="non-empty"):
+            lights.connect()
+
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    def test_connect_releases_link_when_board_silent(
+        self, mock_sleep, mock_serial_cls,
+    ):
+        mock_ser = _mock_serial([])
+        mock_ser.readline.side_effect = None
+        mock_ser.readline.return_value = b""
+        mock_serial_cls.return_value = mock_ser
+        lights = PawduinoLighting(port="/dev/ttyACM0", command_timeout=0.05)
+        with pytest.raises(LightingConnectionError, match="did not respond"):
+            lights.connect()
+        assert lights._link is None
+        mock_ser.close.assert_called_once()
+
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    def test_disconnect_warns_but_releases_on_lights_off_error(
+        self, mock_sleep, mock_serial_cls,
+    ):
+        # Connect drains two OK responses; the disconnect-time all_off gets
+        # an ERR, which must not prevent the link release.
+        mock_ser = _mock_serial(["OK:off\n", "OK:off\n", "ERR:dead\n"])
+        mock_serial_cls.return_value = mock_ser
+        lights = PawduinoLighting(port="/dev/ttyACM0")
+        lights.connect()
+        lights.disconnect()
+        assert lights._link is None
+        mock_ser.close.assert_called_once()
+
+    def test_timeout_maps_to_lighting_timeout(self):
+        lights, mock_ser = _linked_lights([])
+        mock_ser.readline.side_effect = None
+        mock_ser.readline.return_value = b""
+        lights._command_timeout = 0.05
+        with pytest.raises(LightingTimeoutError):
+            lights.set_channel("white", 50)
+
+    def test_offline_disconnect_resets_shadow(self):
+        lights = _offline_lights()
+        lights.connect()
+        lights.set_channel("white", 25)
+        lights.disconnect()
+        assert lights.status().channels["white"] == 0

@@ -1,14 +1,4 @@
-"""USB webcam camera driver via OpenCV.
-
-Ported from PANDA-BEAR's ``panda_lib.hardware.imaging.open_cv_camera``
-(read-only source — never imported from here): a plain ``cv2.VideoCapture``
-webcam with configurable resolution and PANDA's index auto-scan when no
-``camera_id`` is configured. This is PANDA's fallback camera for benches
-without the FLIR/Spinnaker stack.
-
-``opencv-python`` is an optional dependency (``pip install 'cubos[camera]'``)
-imported lazily; offline construction and dry runs never need it.
-"""
+"""USB webcam camera driver via OpenCV (optional opencv-python dependency)."""
 
 from __future__ import annotations
 
@@ -17,7 +7,6 @@ from typing import Any, Optional
 
 from cubos.instruments.camera.exceptions import (
     CameraCaptureError,
-    CameraConfigError,
     CameraConnectionError,
 )
 from cubos.instruments.camera.interface import CameraInstrument
@@ -26,22 +15,11 @@ from cubos.instruments.camera.placeholder import write_placeholder_png
 _AUTO_DETECT_MAX_INDEX = 10
 
 
-def _import_cv2():
-    try:
-        import cv2  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise CameraConfigError(
-            "The OpenCV camera driver requires opencv-python "
-            "(`pip install 'cubos[camera]'`)."
-        ) from exc
-    return cv2
-
-
 class OpenCVCamera(CameraInstrument):
     """USB webcam driven through ``cv2.VideoCapture``.
 
     ``camera_id`` < 0 (the default) auto-detects the first responsive
-    device index at connect time, matching PANDA's ``detect_camera``.
+    device index at connect time.
     """
 
     def __init__(
@@ -73,7 +51,8 @@ class OpenCVCamera(CameraInstrument):
         if self._offline:
             self.logger.info("OpenCV camera connected (offline)")
             return
-        cv2 = _import_cv2()
+        import cv2
+
         camera_id = self.camera_id
         if camera_id < 0:
             camera_id = self._detect_camera(cv2)
@@ -113,7 +92,8 @@ class OpenCVCamera(CameraInstrument):
             return str(write_placeholder_png(save_path))
         if self._capture is None or not self._capture.isOpened():
             raise CameraCaptureError("Cannot capture image: camera not connected.")
-        cv2 = _import_cv2()
+        import cv2
+
         ok, frame = self._capture.read()
         if not ok:
             raise CameraCaptureError("Failed to capture image from webcam.")

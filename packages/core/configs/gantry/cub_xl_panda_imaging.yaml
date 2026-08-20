@@ -9,8 +9,8 @@
 # `capture` writes placeholder PNGs and `set_lights` simulates in memory.
 # For the real bench, per instrument:
 #   camera: set `offline: false`. Requires the Spinnaker SDK + PySpin wheel
-#           (see PANDA-BEAR src/panda_lib/hardware/imaging/README.md); to use
-#           a plain USB webcam instead, switch `vendor: opencv`.
+#           (https://www.flir.com/products/spinnaker-sdk/); for a plain USB
+#           webcam instead, switch `vendor: opencv`.
 #   lights: set `offline: false` and set `port` to the Pawduino's serial
 #           device (e.g. /dev/ttyACM0). The capper and pipette share this
 #           Arduino — give every Pawduino-backed instrument the SAME port;

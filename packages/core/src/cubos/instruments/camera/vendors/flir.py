@@ -1,62 +1,23 @@
-"""FLIR high-resolution camera driver via Spinnaker/PySpin.
+"""FLIR camera driver via Spinnaker/PySpin, saving frames through OpenCV.
 
-Ported from PANDA-BEAR's ``panda_lib.hardware.imaging.flir_camera``
-(read-only source — never imported from here), including its hard-won
-lifecycle care: PySpin segfaults on double-release, so ``disconnect``
-DeInits/dels/releases each handle defensively and forces a ``gc.collect()``.
-Capture sets the RGB8 pixel format (the camera's built-in color processing)
-and saves through OpenCV, because PySpin's own image writer is unreliable.
-
-The Spinnaker SDK is proprietary (free download from Teledyne FLIR, manual
-install; see PANDA-BEAR ``src/panda_lib/hardware/imaging/README.md``) and
-its Python wheel is not pip-installable, so ``PySpin`` is imported lazily:
-constructing an offline ``FlirCamera`` never needs it, and a non-offline
-construct without the SDK raises a config error naming the install source.
-
-Pass ``offline=True`` for dry runs — writes a real placeholder PNG so
-downstream file handling is exercised without hardware.
+PySpin ships with the Spinnaker SDK (manual install from Teledyne FLIR,
+not pip-installable) and is imported lazily, so offline use never needs it.
 """
 
 from __future__ import annotations
 
+import gc
 from pathlib import Path
 from typing import Any, Optional
 
 from cubos.instruments.camera.exceptions import (
     CameraCaptureError,
-    CameraConfigError,
     CameraConnectionError,
 )
 from cubos.instruments.camera.interface import CameraInstrument
 from cubos.instruments.camera.placeholder import write_placeholder_png
 
 _GRAB_TIMEOUT_MS = 1000
-
-
-def _import_pyspin():
-    try:
-        import PySpin  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise CameraConfigError(
-            "The FLIR camera driver requires the Spinnaker SDK's PySpin "
-            "package, which is proprietary and not pip-installable. Download "
-            "both the Spinnaker SDK and the matching Python wheel from "
-            "https://www.flir.com/products/spinnaker-sdk/ and install the "
-            "wheel into this environment (see PANDA-BEAR "
-            "src/panda_lib/hardware/imaging/README.md)."
-        ) from exc
-    return PySpin
-
-
-def _import_cv2():
-    try:
-        import cv2  # type: ignore[import-not-found]
-    except ImportError as exc:
-        raise CameraConfigError(
-            "The FLIR camera driver saves images through OpenCV; install "
-            "opencv-python (`pip install 'cubos[camera]'`)."
-        ) from exc
-    return cv2
 
 
 class FlirCamera(CameraInstrument):
@@ -87,9 +48,8 @@ class FlirCamera(CameraInstrument):
 
     @staticmethod
     def is_available() -> bool:
-        """True when the PySpin wheel is importable in this environment."""
         try:
-            import PySpin  # type: ignore[import-not-found]  # noqa: F401
+            import PySpin  # noqa: F401
         except ImportError:
             return False
         return True
@@ -101,7 +61,8 @@ class FlirCamera(CameraInstrument):
             self._connected = True
             self.logger.info("FLIR camera connected (offline)")
             return
-        PySpin = _import_pyspin()
+        import PySpin
+
         try:
             self._system = PySpin.System.GetInstance()
             self._camera_list = self._system.GetCameras()
@@ -150,10 +111,11 @@ class FlirCamera(CameraInstrument):
         if not self._connected or self._camera is None:
             raise CameraCaptureError("Cannot capture image: camera not connected.")
 
-        PySpin = _import_pyspin()
-        cv2 = _import_cv2()
+        import cv2
+        import PySpin
+
         try:
-            # Built-in color processing: RGB8 straight off the camera.
+            # Use the camera's built-in RGB8 color processing.
             nodemap = self._camera.GetNodeMap()
             pixel_format = PySpin.CEnumerationPtr(nodemap.GetNode("PixelFormat"))
             if PySpin.IsAvailable(pixel_format) and PySpin.IsWritable(pixel_format):
@@ -196,14 +158,12 @@ class FlirCamera(CameraInstrument):
         """Tear down PySpin handles in strict reverse order.
 
         PySpin segfaults if the system instance is released while camera or
-        list handles are alive, and warns loudly on leaked references — the
-        ``del`` calls and final ``gc.collect()`` are load-bearing.
+        list handles are alive — the ``del`` calls and final ``gc.collect()``
+        are load-bearing.
         """
-        import gc
-
         try:
-            PySpin = _import_pyspin()
-        except CameraConfigError:
+            import PySpin
+        except ImportError:
             return
         if self._camera is not None:
             try:

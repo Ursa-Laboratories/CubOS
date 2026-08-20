@@ -304,3 +304,81 @@ class TestPawduinoCapperSerial:
     def test_parse_line_break_bad_value_raises_sensor_fault(self):
         with pytest.raises(CapperSensorFault):
             PawduinoCapper._parse_line_break_response('OK:{"value1":"bad"}')
+
+
+# --- PawduinoCapper link lifecycle (mocked serial) -------------------------------
+
+
+class TestPawduinoCapperLinkLifecycle:
+    def _make_mock_serial(self, responses):
+        mock_ser = MagicMock()
+        mock_ser.is_open = True
+        mock_ser.in_waiting = 0
+        mock_ser.readline.side_effect = [r.encode() for r in responses]
+        return mock_ser
+
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    def test_disconnect_releases_link(self, mock_sleep, mock_serial_cls):
+        mock_ser = self._make_mock_serial(['OK:{"value1":0}\n'])
+        mock_serial_cls.return_value = mock_ser
+        capper = PawduinoCapper(
+            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+        )
+        capper.connect()
+        capper.disconnect()
+        assert capper._link is None
+        mock_ser.close.assert_called_once()
+        assert capper.health_check() is False
+
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    def test_probe_failure_releases_link(self, mock_sleep, mock_serial_cls):
+        mock_ser = self._make_mock_serial(["ERR:dead\n"])
+        mock_serial_cls.return_value = mock_ser
+        capper = PawduinoCapper(
+            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+        )
+        with pytest.raises(CapperConnectionError, match="did not respond"):
+            capper.connect()
+        assert capper._link is None
+        mock_ser.close.assert_called_once()
+
+    def test_empty_port_rejected(self):
+        capper = PawduinoCapper(
+            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="",
+        )
+        with pytest.raises(CapperConnectionError, match="non-empty"):
+            capper.connect()
+
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    def test_shares_link_with_pipette_on_same_port(
+        self, mock_sleep, mock_serial_cls,
+    ):
+        from cubos.instruments.pipette.vendors.opentrons import OpentronsPipette
+
+        mock_ser = MagicMock()
+        mock_ser.is_open = True
+        mock_ser.in_waiting = 0
+        mock_ser.readline.side_effect = [
+            b'OK:{"value1":0}\n',                       # capper handshake
+            b'OK:{"homed":1,"pos":0.0,"max_vol":300}\n',  # pipette status
+            b'OK:{"homed":1,"pos":0.0,"max_vol":300}\n',  # pipette primed check
+        ]
+        mock_serial_cls.return_value = mock_ser
+
+        capper = PawduinoCapper(
+            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+        )
+        pipette = OpentronsPipette(port="/dev/ttyUSB0")
+        capper.connect()
+        pipette.connect()
+        # One physical open for both instruments: the second connect must not
+        # DTR-reset the Arduino out from under the first.
+        mock_serial_cls.assert_called_once()
+        assert capper._link is pipette._link
+        pipette.disconnect()
+        mock_ser.close.assert_not_called()
+        capper.disconnect()
+        mock_ser.close.assert_called_once()

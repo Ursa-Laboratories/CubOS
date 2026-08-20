@@ -1,28 +1,13 @@
 """Protocol commands: camera capture and the composed well-imaging sequence.
 
-``capture`` grabs one frame wherever the gantry currently is; YAML composes
-it freely with ``move`` and ``set_lights``. ``image_well`` is the packaged
-common case ported from PANDA-BEAR's ``panda_lib.actions.imaging.image_well``
-(read-only source): move the camera over a well, light it, capture, lights
-off, retract — with PANDA's curvature Z-stack mode parameterized instead of
-hardcoded.
-
-Both are built from generic primitives (``InstrumentedGantry.move_to_labware``
-/ ``.move``) plus the vendor-agnostic ``CameraInstrument`` /
-``LightingInstrument`` surfaces — no vendor-specific behavior appears here.
-
-Failure policy (PANDA parity — its source comments "the image is not
-critical to the experiment"): inside ``image_well``, capture and lighting
-failures are logged and the run continues; the camera always retracts to
-``safe_z`` and the lights are always commanded off. Gantry motion failures
-still fail the run — motion faults are never swallowed.
-
-Persistence: a capture's saved image path is a string measurement — the
-data store's ``camera_measurements`` table (``DataStore._log_camera``)
-already dispatches string results, so a tracked run (data store +
-campaign) records every image against its well with no schema change.
-Images land under ``~/.cubos/images`` (override with ``CUBOS_IMAGES_DIR``),
-grouped by campaign.
+``capture`` grabs one frame wherever the gantry currently is; ``image_well``
+packages the common case: move over a well, light it, capture, lights off,
+retract. Both are built from generic gantry primitives plus the
+vendor-agnostic camera/lighting interfaces. Inside ``image_well``, capture
+and lighting failures log and continue (an image is never worth failing a
+run over) while motion failures still raise. Saved image paths persist
+through the data store's ``camera_measurements`` table; files land under
+``~/.cubos/images`` (override with ``CUBOS_IMAGES_DIR``).
 """
 
 from __future__ import annotations
@@ -49,14 +34,14 @@ if TYPE_CHECKING:
 
 IMAGES_DIR_ENV = "CUBOS_IMAGES_DIR"
 
-# PANDA-BEAR curvature-mode defaults: 11 planes descending 0.2 mm per step
-# from the imaging height, contact (red+blue) lights at 50%.
+# Curvature-mode defaults: 11 planes descending 0.2 mm per step from the
+# imaging height, contact (red+blue) lights at 50%.
 _CURVATURE_DEFAULT_Z_STEPS = 11
 _CURVATURE_DEFAULT_Z_STEP_MM = 0.2
 _CURVATURE_DEFAULT_CHANNEL = "contact"
 _CURVATURE_DEFAULT_BRIGHTNESS = 50
 
-# PANDA settles 0.2 s between arriving over the well and lighting/capturing.
+# Settle after motion before lighting/capturing.
 _SETTLE_S = 0.2
 
 
@@ -125,10 +110,9 @@ def _persist_image(
 ) -> None:
     """Record *image_path* against the run's campaign, best-effort.
 
-    Requires an active data store + campaign and a resolvable deck
-    ``position`` to attribute the image to. An image is auxiliary data
-    (PANDA parity), so persistence failures log rather than fail the run —
-    the file on disk is never lost.
+    Needs an active data store + campaign and a deck ``position`` to
+    attribute the image to; persistence failures log rather than fail the
+    run — the file on disk is never lost.
     """
     if context.data_store is None or context.campaign_id is None:
         return
@@ -202,27 +186,17 @@ def image_well(
 ) -> list[str]:
     """Move the camera over *well*, light it, capture, lights off, retract.
 
-    Modes (PANDA-BEAR ``image_well`` parity):
-
-    * ``standard`` — one shot: travel above the well at ``safe_z``, descend
-      to ``well.z + image_height``, white lights at 5% (or ``brightness``),
-      capture, lights off, retract to ``safe_z``.
-    * ``curvature`` — Z-stack for contact-angle/curvature analysis: from
-      ``well.z + image_height`` descend ``z_step_mm`` per plane for
-      ``z_steps`` planes, contact lights at 50% (or ``brightness``) around
-      each capture. Images are labeled ``{label}_z{z}mm_b{brightness}``.
+    * ``standard`` — one shot: descend to ``well.z + image_height``, white
+      lights at 5% (or ``brightness``), capture, lights off, retract.
+    * ``curvature`` — Z-stack: descend ``z_step_mm`` per plane for
+      ``z_steps`` planes with contact lights at 50% (or ``brightness``);
+      images are labeled ``{label}_z{z}mm_b{brightness}``.
 
     ``image_height`` is a labware-relative offset (mm above the well's
-    calibrated surface Z), like ``measure``'s ``measurement_height`` — the
-    camera's working standoff for focus.
-
-    Capture and lighting failures log and continue (an image is never worth
-    failing a run over); motion failures still raise. Lights are always
-    commanded off and the camera always retracts to ``safe_z``, even on
-    failure.
-
-    Returns the list of saved image paths (possibly empty on capture
-    failure).
+    surface Z), like ``measure``'s ``measurement_height``. Capture and
+    lighting failures log and continue; motion failures raise. Lights-off
+    and the retract to ``safe_z`` run even on failure. Returns the saved
+    image paths.
     """
     camera_instr = _get_camera(context, camera)
     lighting: LightingInstrument | None = (
@@ -289,8 +263,6 @@ def image_well(
             )
             return False
 
-    # Approach: travel at safe_z, then descend to the imaging plane. Motion
-    # failures propagate — but lights never stay on past this command.
     try:
         context.gantry.move_to_labware(camera, coord)
         planes = (

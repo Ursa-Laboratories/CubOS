@@ -1,24 +1,12 @@
 """Manual instrument control endpoints (outside protocol runs).
 
-The first out-of-run actuation surface: lighting toggles and camera
-captures for bring-up and focus/framing work, where round-tripping a YAML
-protocol per test shot is unworkable. Everything here:
-
-* acts on the ``instruments:`` section of the gantry config the operator
-  connected (``GantrySession.connected_gantry_config``) — never on a config
-  that isn't live;
-* is rejected with 409 while a protocol run is active (a manual light
-  toggle mid-run would fight the protocol's own ``set_lights`` steps),
-  mirroring the manual-motion endpoints;
-* holds its instrument connections in a module-level cache so hardware
-  state survives between calls (closing the Pawduino serial port after
-  every request would DTR-reset the Arduino and turn the lights back off).
-  The cache is cleared — instruments disconnected — whenever the gantry
-  session connects or disconnects (see the gantry router).
-
-Manual captures land under ``<images root>/manual/`` and are not recorded
-in the data store — the store attributes images to campaigns and wells,
-which ad-hoc bring-up shots don't have.
+Lighting toggles and camera captures for bring-up work. Endpoints act on
+the connected gantry config, reject with 409 while a run is active, and
+cache instrument connections between calls (closing the Pawduino port
+after every request would reset the Arduino and turn the lights off); the
+cache clears when the gantry session connects or disconnects. Manual
+captures land under ``<images root>/manual/`` and are not recorded in the
+data store.
 """
 
 from __future__ import annotations
@@ -82,11 +70,7 @@ class CaptureResponse(BaseModel):
 
 
 def reset_manual_instruments() -> None:
-    """Disconnect and drop every manually connected instrument.
-
-    Called when the gantry session connects (the config may have changed)
-    or disconnects, and on app shutdown.
-    """
+    """Disconnect and drop every manually connected instrument."""
     with _manual_lock:
         for name, instrument in _manual_instruments.items():
             try:
@@ -176,12 +160,7 @@ def _entries_of_type(type_key: str) -> Dict[str, Dict[str, Any]]:
 
 @router.get("/lighting")
 def list_lighting() -> List[LightingChannelInfo]:
-    """Describe every lighting instrument on the connected gantry config.
-
-    ``channels`` comes from an unconnected driver instance, so the UI can
-    render level buttons before anything touches hardware; ``active`` is
-    the live shadow state when the instrument has been manually connected.
-    """
+    """Describe every lighting instrument on the connected gantry config."""
     infos: List[LightingChannelInfo] = []
     for name, entry in _entries_of_type("lighting").items():
         with _manual_lock:

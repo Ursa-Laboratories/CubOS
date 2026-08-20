@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -207,3 +208,115 @@ class TestImageWell:
             image_well(context, camera="cam", well="plate.B1",
                        image_height=30.0, lights="lights")
         assert lights.status().channels == {"white": 0, "contact": 0}
+
+
+class TestPathBuilder:
+    def test_default_images_dir_without_override(self, monkeypatch):
+        from cubos.protocol_engine.commands.camera import default_images_dir
+
+        monkeypatch.delenv("CUBOS_IMAGES_DIR", raising=False)
+        assert default_images_dir() == Path.home() / ".cubos" / "images"
+
+    def test_collision_gets_numeric_suffix(self, monkeypatch):
+        import cubos.protocol_engine.commands.camera as camera_module
+        from cubos.protocol_engine.commands.camera import build_image_path
+
+        monkeypatch.setattr(
+            camera_module.time, "strftime", lambda fmt: "frozen",
+        )
+        context = _context({})
+        first = build_image_path(context, "shot", "cam")
+        first.touch()
+        second = build_image_path(context, "shot", "cam")
+        assert second.name == "shot_frozen_001.png"
+
+
+class TestPersistFailure:
+    def test_persist_failure_logs_and_continues(self, tmp_path):
+        data_store = DataStore(tmp_path / "test.db")
+        campaign_id = data_store.create_campaign("imaging test")
+        context = _context({"cam": _camera()}, data_store, campaign_id)
+
+        def exploding_resolve(target):
+            raise RuntimeError("deck registry corrupt")
+
+        context.deck.resolve_labware_target = exploding_resolve
+        saved = capture(context, instrument="cam", position="plate.A1")
+        # File saved, step succeeded, nothing recorded.
+        assert Path(saved).exists()
+        rows = data_store._conn.execute(
+            "SELECT COUNT(*) FROM camera_measurements",
+        ).fetchone()
+        assert rows[0] == 0
+
+
+class TestImageWellValidation:
+    def test_non_finite_image_height(self):
+        with pytest.raises(ProtocolExecutionError, match="image_height"):
+            image_well(_context({"cam": _camera()}), camera="cam",
+                       well="plate.B1", image_height=float("nan"))
+
+    def test_curvature_z_steps_must_be_positive(self):
+        with pytest.raises(ProtocolExecutionError, match="z_steps"):
+            image_well(_context({"cam": _camera()}), camera="cam",
+                       well="plate.B1", image_height=30.0,
+                       mode="curvature", z_steps=0)
+
+    def test_curvature_z_step_mm_must_be_nonnegative(self):
+        with pytest.raises(ProtocolExecutionError, match="z_step_mm"):
+            image_well(_context({"cam": _camera()}), camera="cam",
+                       well="plate.B1", image_height=30.0,
+                       mode="curvature", z_step_mm=-0.1)
+
+
+class TestImageWellFailurePaths:
+    def test_lighting_failure_skips_capture_and_continues(self):
+        from cubos.instruments.lighting.exceptions import LightingCommandError
+
+        lights = _lights()
+
+        def failing_set_channel(channel, brightness):
+            raise LightingCommandError("board gone")
+
+        lights.set_channel = failing_set_channel
+        context = _context({"cam": _camera(), "lights": lights})
+        saved = image_well(context, camera="cam", well="plate.B1",
+                           image_height=30.0, lights="lights")
+        assert saved == []
+        assert context.gantry.trace[-1] == ("move", (WELL.x, WELL.y, SAFE_Z), SAFE_Z)
+
+    def test_no_safe_z_skips_retract(self):
+        context = _context({"cam": _camera()})
+        context.gantry.safe_z = None
+        saved = image_well(context, camera="cam", well="plate.B1",
+                           image_height=30.0)
+        assert len(saved) == 1
+        assert all(entry[2] is None for entry in context.gantry.trace
+                   if entry[0] == "move")
+
+    def test_retract_failure_is_logged_not_raised(self):
+        context = _context({"cam": _camera()})
+        original_move = context.gantry.move
+
+        def move_failing_retract(instrument, position, travel_z=None):
+            if travel_z is not None:
+                raise RuntimeError("limit on retract")
+            original_move(instrument, position, travel_z)
+
+        context.gantry.move = move_failing_retract
+        saved = image_well(context, camera="cam", well="plate.B1",
+                           image_height=30.0)
+        assert len(saved) == 1
+
+
+class TestSummaries:
+    def test_set_lights_summaries(self):
+        from cubos.protocol_engine.commands import _summaries
+
+        assert "off" in _summaries.set_lights(
+            {"instrument": "lights", "all_off": True})
+        assert "white 5%" in _summaries.set_lights(
+            {"instrument": "lights", "channel": "white", "brightness": 5})
+        assert "a1" in _summaries.capture({"instrument": "cam", "label": "a1"})
+        assert "standard" in _summaries.image_well(
+            {"camera": "cam", "well": "plate.B1"})

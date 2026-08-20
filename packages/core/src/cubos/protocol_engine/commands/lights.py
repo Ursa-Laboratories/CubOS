@@ -1,14 +1,8 @@
-"""Protocol command: control imaging/deck lighting channels.
+"""Protocol command: control lighting channels.
 
-Built entirely on the vendor-agnostic
-``cubos.instruments.lighting.interface.LightingInstrument`` surface — no
-vendor-specific behavior (Arduino command IDs, channel-to-command mapping)
-appears here; see ``cubos.instruments.lighting.vendors.pawduino`` for that.
-
-Lights the protocol turns on, the protocol (or its teardown) turns off:
-``InstrumentedGantry.disconnect_instruments`` calls ``all_off`` best-effort
-on every lighting instrument, so a failed run never leaves the contact
-lights baking a sample.
+Built on the vendor-agnostic ``LightingInstrument`` surface. Lights the
+protocol turns on, the run teardown turns off
+(``InstrumentedGantry.disconnect_instruments``).
 """
 
 from __future__ import annotations
@@ -54,21 +48,10 @@ def set_lights(
 ) -> None:
     """Set one lighting channel, or turn everything off.
 
-    Two mutually exclusive forms:
-
-    * ``channel`` + ``brightness`` — turn *channel* on at *brightness*
-      percent (an exact level from the vendor's supported set; ``0`` turns
-      just that channel off).
-    * ``all_off: true`` — turn every channel off. (Named ``all_off`` rather
-      than ``off`` because YAML 1.1 parses a bare ``off:`` key as the
-      boolean ``false``, not a string.)
-
-    Args:
-        context:    Runtime context (instrumented gantry, deck, logger).
-        instrument: Name of the lighting instrument registered on the gantry.
-        channel:    Channel name, e.g. ``white`` or ``contact``.
-        brightness: Brightness percent; must be a level the channel supports.
-        all_off:    Turn all channels off instead.
+    Either ``channel`` + ``brightness`` (an exact vendor-supported level;
+    ``0`` turns that channel off), or ``all_off: true`` for every channel.
+    (``all_off`` rather than ``off`` because YAML parses a bare ``off:``
+    key as a boolean.)
     """
     lighting = _get_lighting(context, instrument)
     if all_off:

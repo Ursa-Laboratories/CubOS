@@ -45,7 +45,6 @@ from typing import Optional
 from cubos.instruments._shared.pawduino_link import (
     PawduinoLink,
     PawduinoLinkCommandError,
-    PawduinoLinkConnectionError,
     PawduinoLinkError,
     PawduinoLinkTimeoutError,
 )
@@ -107,9 +106,7 @@ class PawduinoCapper(CapperInstrument):
         if self._offline:
             self.logger.info("Capper connected (offline)")
             return
-        # The pipette and imaging lights share this Arduino: the link is one
-        # refcounted serial connection per port, so only the first holder
-        # pays the DTR reset.
+        # The pipette and lights share this Arduino via one link per port.
         try:
             self._link = PawduinoLink.acquire(self._port, self._baud_rate)
             self._link.connect(timeout=self._command_timeout)
