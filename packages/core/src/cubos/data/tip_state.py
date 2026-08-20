@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, Optional, TypedDict
 
 from cubos.deck.labware.tip_rack import TipRack
+from cubos.data.data_store import UTC_NOW_SQL
 
 if TYPE_CHECKING:
     from cubos.deck.deck import Deck
@@ -316,7 +317,7 @@ def begin_pick_up_tip(
 
         cursor = connection.execute(
             "UPDATE tip_containers SET status = 'reserved', version = version + 1, "
-            "updated_at = datetime('now') WHERE id = ? AND version = ? "
+            f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ? "
             "AND status = 'available'",
             (slot["id"], slot["version"]),
         )
@@ -448,7 +449,7 @@ def begin_drop_tip(
 
         cursor = connection.execute(
             "UPDATE tip_containers SET status = 'reserved', version = version + 1, "
-            "updated_at = datetime('now') WHERE id = ? AND version = ? "
+            f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ? "
             "AND status = 'attached'",
             (slot["id"], slot["version"]),
         )
@@ -527,7 +528,7 @@ def mark_tip_reconciliation_required(
 
         cursor = connection.execute(
             "UPDATE tip_operations SET status = 'reconciliation_required', "
-            "detail = ?, updated_at = datetime('now') "
+            f"detail = ?, updated_at = {UTC_NOW_SQL} "
             "WHERE operation_key = ? AND status = 'started'",
             (detail, operation_key),
         )
@@ -543,7 +544,7 @@ def mark_tip_reconciliation_required(
         # change those need to detect.
         connection.execute(
             "UPDATE tip_containers SET status = 'reconciliation_required', "
-            "updated_at = datetime('now') "
+            f"updated_at = {UTC_NOW_SQL} "
             "WHERE fluid_state_id = ? AND rack_key = ? AND slot_id = ?",
             (
                 operation["fluid_state_id"],
@@ -554,7 +555,7 @@ def mark_tip_reconciliation_required(
         connection.execute(
             "UPDATE pipette_attachment SET attachment_uncertain = 1, "
             "contents_known_empty = 0, version = version + 1, "
-            "updated_at = datetime('now') WHERE fluid_state_id = ?",
+            f"updated_at = {UTC_NOW_SQL} WHERE fluid_state_id = ?",
             (operation["fluid_state_id"],),
         )
         _touch_session(connection, operation["fluid_state_id"])
@@ -707,7 +708,7 @@ def _apply_pick_up(
         )
     cursor = connection.execute(
         "UPDATE tip_containers SET status = 'attached', version = version + 1, "
-        "updated_at = datetime('now') WHERE id = ? AND version = ?",
+        f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ?",
         (slot["id"], slot["version"]),
     )
     if cursor.rowcount != 1:
@@ -748,7 +749,7 @@ def _apply_drop(
         )
     cursor = connection.execute(
         "UPDATE tip_containers SET status = 'consumed', version = version + 1, "
-        "updated_at = datetime('now') WHERE id = ? AND version = ?",
+        f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ?",
         (slot["id"], slot["version"]),
     )
     if cursor.rowcount != 1:
@@ -783,7 +784,7 @@ def _revert_tip_operation(
     )
     cursor = connection.execute(
         "UPDATE tip_containers SET status = ?, version = version + 1, "
-        "updated_at = datetime('now') WHERE id = ? AND version = ?",
+        f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ?",
         (operation["previous_slot_status"], slot["id"], slot["version"]),
     )
     if cursor.rowcount != 1:
@@ -793,7 +794,7 @@ def _revert_tip_operation(
         )
     connection.execute(
         "UPDATE pipette_attachment SET attachment_uncertain = 0, "
-        "version = version + 1, updated_at = datetime('now') "
+        f"version = version + 1, updated_at = {UTC_NOW_SQL} "
         "WHERE fluid_state_id = ?",
         (fluid_state_id,),
     )
@@ -816,7 +817,7 @@ def _reconcile_tip_operation(
     )
     cursor = connection.execute(
         "UPDATE tip_containers SET status = ?, version = version + 1, "
-        "updated_at = datetime('now') WHERE id = ? AND version = ?",
+        f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ?",
         (final_slot_status, slot["id"], slot["version"]),
     )
     if cursor.rowcount != 1:
@@ -1046,7 +1047,7 @@ def _set_pipette_attachment(
         "UPDATE pipette_attachment SET rack_key = ?, slot_id = ?, "
         "tip_extension_mm = ?, contents_known_empty = ?, "
         "attachment_uncertain = ?, version = version + 1, "
-        "updated_at = datetime('now') WHERE fluid_state_id = ? AND pipette_key = ?",
+        f"updated_at = {UTC_NOW_SQL} WHERE fluid_state_id = ? AND pipette_key = ?",
         (
             rack_key,
             slot_id,
@@ -1070,8 +1071,8 @@ def _set_tip_operation_terminal(
     placeholders = ", ".join("?" for _ in allowed_statuses)
     cursor = connection.execute(
         "UPDATE tip_operations SET status = ?, detail = COALESCE(?, detail), "
-        "applied_at = CASE WHEN ? = 'applied' THEN datetime('now') ELSE "
-        "applied_at END, updated_at = datetime('now') WHERE id = ? AND status "
+        f"applied_at = CASE WHEN ? = 'applied' THEN {UTC_NOW_SQL} ELSE "
+        f"applied_at END, updated_at = {UTC_NOW_SQL} WHERE id = ? AND status "
         f"IN ({placeholders})",
         (status, detail, status, operation["id"], *allowed_statuses),
     )
@@ -1085,7 +1086,7 @@ def _set_tip_operation_terminal(
 
 def _touch_session(connection: sqlite3.Connection, fluid_state_id: int) -> None:
     connection.execute(
-        "UPDATE fluid_state_sessions SET updated_at = datetime('now') WHERE id = ?",
+        f"UPDATE fluid_state_sessions SET updated_at = {UTC_NOW_SQL} WHERE id = ?",
         (fluid_state_id,),
     )
 

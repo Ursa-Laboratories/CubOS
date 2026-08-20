@@ -39,6 +39,7 @@ from typing import TYPE_CHECKING, Any, Iterator, Optional, TypedDict
 
 from cubos.deck.labware.vial import Vial
 from cubos.deck.labware.vial_grid import VialGrid
+from cubos.data.data_store import UTC_NOW_SQL
 
 if TYPE_CHECKING:
     from cubos.deck.deck import Deck
@@ -404,7 +405,7 @@ def mark_cap_reconciliation_required(
 
         cursor = connection.execute(
             "UPDATE cap_operations SET status = 'reconciliation_required', "
-            "detail = ?, updated_at = datetime('now') "
+            f"detail = ?, updated_at = {UTC_NOW_SQL} "
             "WHERE operation_key = ? AND status = 'started'",
             (detail, operation_key),
         )
@@ -420,7 +421,7 @@ def mark_cap_reconciliation_required(
         # out-of-band changes.
         connection.execute(
             "UPDATE cap_containers SET status = 'reconciliation_required', "
-            "updated_at = datetime('now') "
+            f"updated_at = {UTC_NOW_SQL} "
             "WHERE fluid_state_id = ? AND labware_key = ? AND location_id = ?",
             (
                 operation["fluid_state_id"],
@@ -538,7 +539,7 @@ def _apply_cap_operation(
         )
     cursor = connection.execute(
         "UPDATE cap_containers SET status = ?, version = version + 1, "
-        "updated_at = datetime('now') WHERE id = ? AND version = ?",
+        f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ?",
         (_next_status, container["id"], container["version"]),
     )
     if cursor.rowcount != 1:
@@ -564,7 +565,7 @@ def _revert_cap_operation(
     )
     cursor = connection.execute(
         "UPDATE cap_containers SET status = ?, version = version + 1, "
-        "updated_at = datetime('now') WHERE id = ? AND version = ?",
+        f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ?",
         (operation["previous_status"], container["id"], container["version"]),
     )
     if cursor.rowcount != 1:
@@ -591,7 +592,7 @@ def _reconcile_cap_operation(
     )
     cursor = connection.execute(
         "UPDATE cap_containers SET status = ?, version = version + 1, "
-        "updated_at = datetime('now') WHERE id = ? AND version = ?",
+        f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND version = ?",
         (final_status, container["id"], container["version"]),
     )
     if cursor.rowcount != 1:
@@ -768,8 +769,8 @@ def _set_cap_operation_terminal(
     placeholders = ", ".join("?" for _ in allowed_statuses)
     cursor = connection.execute(
         "UPDATE cap_operations SET status = ?, detail = COALESCE(?, detail), "
-        "applied_at = CASE WHEN ? = 'applied' THEN datetime('now') ELSE "
-        "applied_at END, updated_at = datetime('now') WHERE id = ? AND status "
+        f"applied_at = CASE WHEN ? = 'applied' THEN {UTC_NOW_SQL} ELSE "
+        f"applied_at END, updated_at = {UTC_NOW_SQL} WHERE id = ? AND status "
         f"IN ({placeholders})",
         (status, detail, status, operation["id"], *allowed_statuses),
     )
@@ -783,7 +784,7 @@ def _set_cap_operation_terminal(
 
 def _touch_session(connection: sqlite3.Connection, fluid_state_id: int) -> None:
     connection.execute(
-        "UPDATE fluid_state_sessions SET updated_at = datetime('now') WHERE id = ?",
+        f"UPDATE fluid_state_sessions SET updated_at = {UTC_NOW_SQL} WHERE id = ?",
         (fluid_state_id,),
     )
 

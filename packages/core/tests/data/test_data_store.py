@@ -28,6 +28,9 @@ def _make_store() -> DataStore:
     return DataStore(db_path=":memory:")
 
 
+ISO8601_UTC_RE = r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z"
+
+
 def _create_legacy_fluid_operations_table(
     connection: sqlite3.Connection,
 ) -> None:
@@ -408,10 +411,88 @@ class TestExperimentCRUD:
             (eid,),
         ).fetchone()
 
-        assert re.fullmatch(
-            r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z",
-            row[0],
+        assert re.fullmatch(ISO8601_UTC_RE, row[0])
+
+        store.close()
+
+    def test_update_timestamps_are_iso8601_utc(self):
+        """UPDATE statements must emit the same format as the insert defaults."""
+        store = _make_store()
+
+        cid = store.create_campaign(description="test")
+        vial = Vial(
+            name="source",
+            model_name="standard",
+            height=10.0,
+            diameter=5.0,
+            location=Coordinate3D(x=0.0, y=0.0, z=0.0),
+            capacity_ul=1000.0,
+            working_volume_ul=800.0,
         )
+        plate = WellPlate(
+            name="plate",
+            model_name="test",
+            rows=1,
+            columns=1,
+            wells={"A1": Coordinate3D(x=1.0, y=0.0, z=0.0)},
+            capacity_ul=200.0,
+            working_volume_ul=150.0,
+        )
+        store.register_labware(cid, "vial_1", vial)
+        store.register_labware(cid, "plate_1", plate)
+        store._conn.execute(
+            "UPDATE labware SET current_volume_ul = 100.0, "
+            "updated_at = '2026-01-01 12:00:00' WHERE labware_key = 'vial_1'"
+        )
+        store._conn.commit()
+
+        store.record_transfer(cid, "vial_1", None, "plate_1", "A1", 30.0)
+        store.finish_campaign(cid, "completed")
+
+        updated_at = store._conn.execute(
+            "SELECT updated_at FROM labware WHERE labware_key = 'vial_1'"
+        ).fetchone()[0]
+        finished_at = store._conn.execute(
+            "SELECT finished_at FROM campaigns WHERE id = ?", (cid,)
+        ).fetchone()[0]
+
+        assert re.fullmatch(ISO8601_UTC_RE, updated_at)
+        assert re.fullmatch(ISO8601_UTC_RE, finished_at)
+
+        store.close()
+
+    def test_legacy_naive_timestamps_normalized_on_open(self, tmp_path):
+        """Reopening a database rewrites old datetime('now') values as UTC ISO-8601."""
+        db_path = tmp_path / "legacy.db"
+
+        store = DataStore(db_path=db_path)
+        cid = store.create_campaign(description="legacy")
+        eid = store.create_experiment(
+            campaign_id=cid,
+            labware_name="plate_1",
+            well_id="A1",
+            contents_json="[]",
+        )
+        store.close()
+
+        with sqlite3.connect(db_path) as conn:
+            conn.execute(
+                "UPDATE campaigns SET created_at = '2026-01-01 12:00:00', "
+                "finished_at = '2026-01-02 08:30:00'"
+            )
+            conn.execute("UPDATE experiments SET created_at = '2026-01-01 12:00:05'")
+
+        store = DataStore(db_path=db_path)
+        campaign_row = store._conn.execute(
+            "SELECT created_at, finished_at FROM campaigns WHERE id = ?", (cid,)
+        ).fetchone()
+        experiment_created = store._conn.execute(
+            "SELECT created_at FROM experiments WHERE id = ?", (eid,)
+        ).fetchone()[0]
+
+        assert campaign_row[0] == "2026-01-01T12:00:00Z"
+        assert campaign_row[1] == "2026-01-02T08:30:00Z"
+        assert experiment_created == "2026-01-01T12:00:05Z"
 
         store.close()
 

@@ -25,6 +25,7 @@ from cubos.deck.labware.vial_grid import VialGrid
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.deck.loader import resolve_load_names
 from cubos.yaml_utils import load_yaml_file
+from cubos.data.data_store import UTC_NOW_SQL
 
 logger = logging.getLogger(__name__)
 
@@ -250,7 +251,7 @@ def create_fluid_state(
                 definition["composition"],
             )
         connection.execute(
-            "UPDATE fluid_state_sessions SET updated_at = datetime('now') "
+            f"UPDATE fluid_state_sessions SET updated_at = {UTC_NOW_SQL} "
             "WHERE id = ?",
             (fluid_state_id,),
         )
@@ -352,7 +353,7 @@ def seed_fluid(
             connection, fluid_state_id, labware_key, location_id, volume, normalized,
         )
         connection.execute(
-            "UPDATE fluid_state_sessions SET updated_at = datetime('now') WHERE id = ?",
+            f"UPDATE fluid_state_sessions SET updated_at = {UTC_NOW_SQL} WHERE id = ?",
             (fluid_state_id,),
         )
 
@@ -698,7 +699,7 @@ def mark_fluid_reconciliation_required(
 
         cursor = connection.execute(
             "UPDATE fluid_operations SET status = 'reconciliation_required', "
-            "detail = ?, updated_at = datetime('now') "
+            f"detail = ?, updated_at = {UTC_NOW_SQL} "
             "WHERE operation_key = ? AND status = 'started'",
             (detail, operation_key),
         )
@@ -707,7 +708,7 @@ def mark_fluid_reconciliation_required(
                 f"Operation {operation_key!r} changed while marking reconciliation."
             )
         connection.execute(
-            "UPDATE fluid_state_sessions SET updated_at = datetime('now') WHERE id = ?",
+            f"UPDATE fluid_state_sessions SET updated_at = {UTC_NOW_SQL} WHERE id = ?",
             (row[0],),
         )
 
@@ -1308,7 +1309,7 @@ def _seed_fluid_row(
         )
     connection.execute(
         "UPDATE fluid_containers SET current_volume_ul = ?, composition_json = ?, "
-        "version = version + 1, updated_at = datetime('now') WHERE id = ?",
+        f"version = version + 1, updated_at = {UTC_NOW_SQL} WHERE id = ?",
         (volume_ul, _canonical_json(dict(composition)), row["id"]),
     )
 
@@ -1547,7 +1548,7 @@ def _insert_started_operation(
             ) from exc
         raise
     connection.execute(
-        "UPDATE fluid_state_sessions SET updated_at = datetime('now') WHERE id = ?",
+        f"UPDATE fluid_state_sessions SET updated_at = {UTC_NOW_SQL} WHERE id = ?",
         (fluid_state_id,),
     )
 
@@ -1649,7 +1650,7 @@ def _update_container(
 ) -> None:
     cursor = connection.execute(
         "UPDATE fluid_containers SET current_volume_ul = ?, composition_json = ?, "
-        "version = version + 1, updated_at = datetime('now') "
+        f"version = version + 1, updated_at = {UTC_NOW_SQL} "
         "WHERE id = ? AND version = ?",
         (
             volume_ul,
@@ -1675,8 +1676,8 @@ def _set_operation_terminal(
     placeholders = ", ".join("?" for _ in allowed_statuses)
     cursor = connection.execute(
         "UPDATE fluid_operations SET status = ?, detail = COALESCE(?, detail), "
-        "applied_at = CASE WHEN ? = 'applied' THEN datetime('now') ELSE applied_at END, "
-        "updated_at = datetime('now') WHERE id = ? AND status IN "
+        f"applied_at = CASE WHEN ? = 'applied' THEN {UTC_NOW_SQL} ELSE applied_at END, "
+        f"updated_at = {UTC_NOW_SQL} WHERE id = ? AND status IN "
         f"({placeholders})",
         (status, detail, status, operation["id"], *allowed_statuses),
     )
@@ -1685,7 +1686,7 @@ def _set_operation_terminal(
             f"Operation {operation['operation_key']!r} changed while resolving it."
         )
     connection.execute(
-        "UPDATE fluid_state_sessions SET updated_at = datetime('now') WHERE id = ?",
+        f"UPDATE fluid_state_sessions SET updated_at = {UTC_NOW_SQL} WHERE id = ?",
         (operation["fluid_state_id"],),
     )
 

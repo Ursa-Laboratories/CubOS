@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 
 DATA_DB_PATH_ENV = "CUBOS_DATA_DB_PATH"
 SQLITE_MEMORY_DATABASE = ":memory:"
+# UTC ISO-8601 (YYYY-MM-DDTHH:MM:SSZ). Must match the column defaults in
+# _SCHEMA_SQL; every SQL statement that writes a timestamp uses this instead
+# of datetime('now'), which emits a timezone-naive format.
+UTC_NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%SZ', 'now')"
 LEGACY_PACKAGE_DATABASE_PATH = Path(__file__).resolve().parent / "databases" / "panda_data.db"
 logger = logging.getLogger(__name__)
 
@@ -397,7 +401,49 @@ class DataStore:
         self._relax_asmi_metadata_columns()
         self._migrate_fluid_operations_schema()
         self._create_fluid_operation_indexes()
+        self._normalize_legacy_timestamps()
         self._conn.commit()
+
+    # Database-generated timestamp columns, per table. Kept in sync with
+    # _SCHEMA_SQL so _normalize_legacy_timestamps can rewrite rows created
+    # before timestamps switched from datetime('now') to UTC_NOW_SQL.
+    _DB_TIMESTAMP_COLUMNS: Mapping[str, tuple[str, ...]] = {
+        "fluid_state_sessions": ("created_at", "updated_at"),
+        "campaigns": ("created_at", "finished_at"),
+        "experiments": ("created_at",),
+        "uvvis_measurements": ("timestamp",),
+        "filmetrics_measurements": ("timestamp",),
+        "uv_curing_measurements": ("timestamp",),
+        "camera_measurements": ("timestamp",),
+        "asmi_measurements": ("timestamp",),
+        "potentiostat_measurements": ("timestamp",),
+        "labware": ("updated_at",),
+        "fluid_containers": ("created_at", "updated_at"),
+        "fluid_operations": ("created_at", "updated_at", "applied_at"),
+        "tip_containers": ("created_at", "updated_at"),
+        "tip_operations": ("created_at", "updated_at", "applied_at"),
+        "cap_containers": ("created_at", "updated_at"),
+        "cap_operations": ("created_at", "updated_at", "applied_at"),
+        "pipette_attachment": ("updated_at",),
+    }
+
+    def _normalize_legacy_timestamps(self) -> None:
+        """Rewrite timezone-naive datetime('now') values as UTC ISO-8601.
+
+        Databases created before the strftime defaults stored timestamps as
+        'YYYY-MM-DD HH:MM:SS'. Those values were already UTC, just unlabeled,
+        so appending the Z suffix is lossless. The shape guard restricts the
+        rewrite to exactly that legacy format; idempotent on every startup.
+        """
+        legacy_shape = "____-__-__ __:__:__"
+        for table, columns in self._DB_TIMESTAMP_COLUMNS.items():
+            for column in columns:
+                self._conn.execute(
+                    f"UPDATE {table} "
+                    f"SET {column} = strftime('%Y-%m-%dT%H:%M:%SZ', {column}) "
+                    f"WHERE {column} LIKE ? AND datetime({column}) IS NOT NULL",
+                    (legacy_shape,),
+                )
 
     def _migrate_fluid_operations_schema(self) -> None:
         """Expand the operation journal without weakening legacy data.
@@ -599,7 +645,7 @@ class DataStore:
         """Mark a campaign as finished with a terminal status."""
         if status not in {"completed", "failed"}:
             raise ValueError("Campaign status must be 'completed' or 'failed'")
-        timestamp_expr = "datetime('now')" if finished_at is None else "?"
+        timestamp_expr = UTC_NOW_SQL if finished_at is None else "?"
         params: tuple[Any, ...]
         if finished_at is None:
             params = (status, campaign_id)
@@ -1556,7 +1602,7 @@ class DataStore:
         with self._conn:
             self._conn.execute(
                 f"UPDATE labware SET current_volume_ul = current_volume_ul + ?, "
-                f"contents = ?, updated_at = datetime('now') WHERE {where}",
+                f"contents = ?, updated_at = {UTC_NOW_SQL} WHERE {where}",
                 (volume_ul, json.dumps(existing)) + params,
             )
 
@@ -1635,13 +1681,13 @@ class DataStore:
         if contents_json is None:
             self._conn.execute(
                 "UPDATE labware SET current_volume_ul = current_volume_ul + ?, "
-                "updated_at = datetime('now') WHERE id = ?",
+                f"updated_at = {UTC_NOW_SQL} WHERE id = ?",
                 (delta_ul, row["id"]),
             )
         else:
             self._conn.execute(
                 "UPDATE labware SET current_volume_ul = current_volume_ul + ?, "
-                "contents = ?, updated_at = datetime('now') WHERE id = ?",
+                f"contents = ?, updated_at = {UTC_NOW_SQL} WHERE id = ?",
                 (delta_ul, contents_json, row["id"]),
             )
 
