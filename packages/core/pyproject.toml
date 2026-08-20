@@ -29,6 +29,15 @@ asmi = [
 potentiostat = [
     "SquidstatPyLibrary",
 ]
+# camera: OpenCV covers both the `opencv` webcam vendor and image saving for
+# the `flir` vendor. PySpin itself is proprietary (Spinnaker SDK, manual
+# install from https://www.flir.com/products/spinnaker-sdk/) and cannot be a
+# pip dependency; the flir driver imports it lazily and raises a clear error
+# with the install pointer when missing.
+camera = [
+    "opencv-python",
+    "numpy",
+]
 docs = [
     "mkdocs>=1.6",
     # Pinned below 0.6: 0.6.0+ added a hard dependency on `properdocs`, which
