@@ -148,7 +148,22 @@ class InstrumentedGantry:
             instrument.connect()
 
     def disconnect_instruments(self) -> None:
-        """Disconnect all instruments, logging errors without re-raising."""
+        """Disconnect all instruments, logging errors without re-raising.
+
+        Lighting instruments are commanded off first, best-effort: every run
+        path (completed or aborted) funnels through here, so a protocol that
+        failed mid-``set_lights`` never leaves lights baking a sample.
+        """
+        from cubos.instruments.lighting.interface import LightingInstrument
+
+        for name, instrument in self.instruments.items():
+            if isinstance(instrument, LightingInstrument):
+                try:
+                    instrument.all_off()
+                except Exception:
+                    self.logger.exception(
+                        "Failed to turn off lighting instrument '%s'", name,
+                    )
         for name, instrument in self.instruments.items():
             try:
                 self.logger.info("Disconnecting instrument: %s", name)
