@@ -637,6 +637,11 @@ def connect(body: Optional[ConnectRequest] = None) -> GantryPosition:
     session = _get_or_create_session()
     if session.connected:
         raise HTTPException(409, "Gantry already connected; disconnect first")
+    # Manually connected instruments belong to the previous config; the
+    # import is deferred to avoid a circular import at module load.
+    from cubos_api.routers.instruments import reset_manual_instruments
+
+    reset_manual_instruments()
     try:
         filename, path = _selected_gantry_path(body.filename if body else None)
         snapshot = session.connect(path, filename=filename)
@@ -651,6 +656,9 @@ def connect(body: Optional[ConnectRequest] = None) -> GantryPosition:
 
 @router.post("/disconnect")
 def disconnect() -> GantryPosition:
+    from cubos_api.routers.instruments import reset_manual_instruments
+
+    reset_manual_instruments()
     session = current_session()
     if session is None:
         return GantryPosition(connected=False, status="Disconnected")

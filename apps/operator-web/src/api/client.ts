@@ -354,3 +354,43 @@ export const dataApi = {
   exportCampaignAsmiZip: (campaignId: number) =>
     download(`/data/campaigns/${campaignId}/asmi.zip`),
 };
+
+// Manual instrument control (outside protocol runs)
+export type LightingInfo = {
+  instrument: string;
+  connected: boolean;
+  channels: Record<string, number[]>;
+  active: Record<string, number>;
+};
+
+export type CameraInfo = {
+  instrument: string;
+  vendor: string;
+  connected: boolean;
+  last_image: string | null;
+};
+
+export const instrumentsApi = {
+  listLighting: () => request<LightingInfo[]>("/instruments/lighting"),
+  setLights: (body: {
+    instrument: string;
+    channel?: string;
+    brightness?: number;
+    all_off?: boolean;
+  }) =>
+    request<LightingInfo>("/instruments/lighting/set", {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  listCameras: () => request<CameraInfo[]>("/instruments/camera"),
+  capture: (instrument: string, label?: string) =>
+    request<{ instrument: string; image_path: string }>(
+      "/instruments/camera/capture",
+      {
+        method: "POST",
+        body: JSON.stringify({ instrument, label }),
+      },
+    ),
+  lastImageUrl: (instrument: string) =>
+    `${BASE}/instruments/camera/last-image?instrument=${encodeURIComponent(instrument)}`,
+};
