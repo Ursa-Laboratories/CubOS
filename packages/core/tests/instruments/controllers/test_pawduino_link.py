@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import serial as real_serial
 
-from cubos.instruments._shared.pawduino_link import (
+from cubos.instruments.controllers.pawduino import (
     PawduinoLink,
     PawduinoLinkCommandError,
     PawduinoLinkConfigError,
@@ -46,8 +46,8 @@ class TestRegistry:
 
 
 class TestLifecycle:
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     def test_two_holders_one_open(self, mock_serial_cls, mock_sleep):
         mock_serial_cls.return_value = _mock_serial()
         link = PawduinoLink.acquire("/dev/ttyACM0")
@@ -57,8 +57,8 @@ class TestLifecycle:
         mock_serial_cls.assert_called_once()
         assert link.is_open
 
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     def test_closes_only_when_last_holder_leaves(self, mock_serial_cls, mock_sleep):
         mock_ser = _mock_serial()
         mock_serial_cls.return_value = mock_ser
@@ -71,8 +71,8 @@ class TestLifecycle:
         mock_ser.close.assert_called_once()
         assert not link.is_open
 
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     def test_open_failure_counts_no_holder(self, mock_serial_cls, mock_sleep):
         mock_serial_cls.side_effect = real_serial.SerialException("busy")
         link = PawduinoLink.acquire("/dev/ttyACM0")
@@ -82,8 +82,8 @@ class TestLifecycle:
         # A later disconnect must not underflow the count.
         link.disconnect()
 
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     def test_extra_disconnect_is_noop(self, mock_serial_cls, mock_sleep):
         mock_serial_cls.return_value = _mock_serial()
         link = PawduinoLink.acquire("/dev/ttyACM0")
@@ -94,8 +94,8 @@ class TestLifecycle:
 
 
 class TestCommands:
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     def _connected_link(self, responses, mock_serial_cls, mock_sleep):
         mock_ser = _mock_serial(responses)
         mock_serial_cls.return_value = mock_ser
@@ -168,8 +168,8 @@ class TestCommands:
 
 class TestErrorPaths:
     def _connected(self):
-        with patch("cubos.instruments._shared.pawduino_link.serial.Serial") as cls, \
-                patch("cubos.instruments._shared.pawduino_link.time.sleep"):
+        with patch("cubos.instruments.controllers.pawduino.serial.Serial") as cls, \
+                patch("cubos.instruments.controllers.pawduino.time.sleep"):
             mock_ser = _mock_serial()
             cls.return_value = mock_ser
             link = PawduinoLink.acquire("/dev/ttyACM0")
@@ -215,8 +215,8 @@ class TestErrorPaths:
         mock_ser = MagicMock()
         mock_ser.is_open = True
         type(mock_ser).in_waiting = Waiting()
-        with patch("cubos.instruments._shared.pawduino_link.serial.Serial") as cls, \
-                patch("cubos.instruments._shared.pawduino_link.time.sleep"):
+        with patch("cubos.instruments.controllers.pawduino.serial.Serial") as cls, \
+                patch("cubos.instruments.controllers.pawduino.time.sleep"):
             cls.return_value = mock_ser
             link = PawduinoLink.acquire("/dev/ttyACM0")
             link.connect()

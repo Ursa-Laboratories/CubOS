@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Mapping, Optional, Tuple
 
-from cubos.instruments._shared.pawduino_link import (
+from cubos.instruments.controllers.pawduino import (
     PawduinoLink,
     PawduinoLinkCommandError,
     PawduinoLinkError,

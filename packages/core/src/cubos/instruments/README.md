@@ -24,7 +24,7 @@ The PANDA-family Arduino serves several instruments over one serial port
 Drivers must never open the port themselves: opening it toggles DTR and
 resets the board mid-session, and interleaved reads steal each other's
 responses. Instead every Pawduino-backed driver acquires
-`cubos.instruments._shared.pawduino_link.PawduinoLink` — one refcounted,
+`cubos.instruments.controllers.pawduino.PawduinoLink` — one refcounted,
 lock-serialized connection per port string. Configure every Pawduino-backed
 instrument in the gantry YAML with the **same** `port`; the first
 `connect()` opens (and resets) the board once, and the port closes when the

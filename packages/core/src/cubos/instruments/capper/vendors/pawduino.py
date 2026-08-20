@@ -42,7 +42,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from cubos.instruments._shared.pawduino_link import (
+from cubos.instruments.controllers.pawduino import (
     PawduinoLink,
     PawduinoLinkCommandError,
     PawduinoLinkError,

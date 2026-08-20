@@ -2,7 +2,7 @@
 
 import pytest
 
-from cubos.instruments._shared.pawduino_link import PawduinoLink
+from cubos.instruments.controllers.pawduino import PawduinoLink
 
 
 @pytest.fixture(autouse=True)

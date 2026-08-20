@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 import serial as real_serial
 
-from cubos.instruments._shared.pawduino_link import PawduinoLink
+from cubos.instruments.controllers.pawduino import PawduinoLink
 from cubos.instruments.base_instrument import BaseInstrument
 from cubos.instruments.lighting.exceptions import (
     LightingCommandError,
@@ -146,8 +146,8 @@ def _mock_serial(responses=None):
 
 
 class TestLifecycle:
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
     def test_connect_forces_known_off_state(self, mock_sleep, mock_serial_cls):
         mock_ser = _mock_serial()
         mock_serial_cls.return_value = mock_ser
@@ -161,8 +161,8 @@ class TestLifecycle:
         lights.disconnect()
         assert lights.health_check() is False
 
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
     def test_connect_open_failure(self, mock_sleep, mock_serial_cls):
         mock_serial_cls.side_effect = real_serial.SerialException("busy")
         lights = PawduinoLighting(port="/dev/ttyACM0")
@@ -175,8 +175,8 @@ class TestLifecycle:
         with pytest.raises(LightingConnectionError, match="non-empty"):
             lights.connect()
 
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
     def test_connect_releases_link_when_board_silent(
         self, mock_sleep, mock_serial_cls,
     ):
@@ -190,8 +190,8 @@ class TestLifecycle:
         assert lights._link is None
         mock_ser.close.assert_called_once()
 
-    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
-    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
     def test_disconnect_warns_but_releases_on_lights_off_error(
         self, mock_sleep, mock_serial_cls,
     ):
