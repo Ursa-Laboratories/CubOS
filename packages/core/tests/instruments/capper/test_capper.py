@@ -15,6 +15,7 @@ from cubos.instruments.capper.exceptions import (
 )
 from cubos.instruments.capper.models import CapperStatus
 from cubos.instruments.capper.vendors.mock import MockCapper
+from cubos.instruments._shared.pawduino_link import PawduinoLink
 from cubos.instruments.capper.vendors.pawduino import PawduinoCapper
 
 
@@ -168,11 +169,19 @@ class TestPawduinoCapperSerial:
     def _make_mock_serial(self, responses):
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.in_waiting = 0
         mock_ser.readline.side_effect = [r.encode() for r in responses]
         return mock_ser
 
-    @patch("cubos.instruments.capper.vendors.pawduino.serial.Serial")
-    @patch("cubos.instruments.capper.vendors.pawduino.time.sleep")
+    def _attach_link(self, capper, mock_ser):
+        """Hand the capper a pre-opened shared link (bypassing connect)."""
+        link = PawduinoLink.acquire(capper._port, capper._baud_rate)
+        link._serial = mock_ser
+        link._holders = 1
+        capper._link = link
+
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_sends_line_break_handshake(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial(['OK:{"value1":0}\n'])
         mock_serial_cls.return_value = mock_ser
@@ -185,8 +194,8 @@ class TestPawduinoCapperSerial:
             port="/dev/ttyUSB0", baudrate=115200, timeout=30.0,
         )
 
-    @patch("cubos.instruments.capper.vendors.pawduino.serial.Serial")
-    @patch("cubos.instruments.capper.vendors.pawduino.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_raises_on_serial_error(self, mock_sleep, mock_serial_cls):
         import serial as real_serial
         mock_serial_cls.side_effect = real_serial.SerialException("port busy")
@@ -197,80 +206,81 @@ class TestPawduinoCapperSerial:
         with pytest.raises(CapperConnectionError, match="Cannot open serial"):
             capper.connect()
 
-    @patch("cubos.instruments.capper.vendors.pawduino.serial.Serial")
-    @patch("cubos.instruments.capper.vendors.pawduino.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_capture_cap_sends_emag_on(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial(["OK:Electromagnet on\n"])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
             engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
         )
-        capper._serial = mock_ser
+        self._attach_link(capper, mock_ser)
         capper.capture_cap()
         sent = mock_ser.write.call_args[0][0]
         assert sent == b"5\n"
 
-    @patch("cubos.instruments.capper.vendors.pawduino.serial.Serial")
-    @patch("cubos.instruments.capper.vendors.pawduino.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_release_cap_sends_emag_off(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial(["OK:Electromagnet off\n"])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
             engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
         )
-        capper._serial = mock_ser
+        self._attach_link(capper, mock_ser)
         capper.release_cap()
         sent = mock_ser.write.call_args[0][0]
         assert sent == b"6\n"
 
-    @patch("cubos.instruments.capper.vendors.pawduino.serial.Serial")
-    @patch("cubos.instruments.capper.vendors.pawduino.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_read_cap_present_true_on_broken_beam(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial(['OK:{"value1":1}\n'])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
             engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
         )
-        capper._serial = mock_ser
+        self._attach_link(capper, mock_ser)
         assert capper.read_cap_present() is True
         sent = mock_ser.write.call_args[0][0]
         assert sent == b"7\n"
 
-    @patch("cubos.instruments.capper.vendors.pawduino.serial.Serial")
-    @patch("cubos.instruments.capper.vendors.pawduino.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_read_cap_present_false_on_unbroken_beam(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial(['OK:{"value1":0}\n'])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
             engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
         )
-        capper._serial = mock_ser
+        self._attach_link(capper, mock_ser)
         assert capper.read_cap_present() is False
 
-    @patch("cubos.instruments.capper.vendors.pawduino.serial.Serial")
-    @patch("cubos.instruments.capper.vendors.pawduino.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_command_error_on_err_response(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial(["ERR:jam\n"])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
             engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
         )
-        capper._serial = mock_ser
+        self._attach_link(capper, mock_ser)
         with pytest.raises(CapperCommandError, match="jam"):
             capper.capture_cap()
 
-    @patch("cubos.instruments.capper.vendors.pawduino.serial.Serial")
-    @patch("cubos.instruments.capper.vendors.pawduino.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_timeout_when_no_response(self, mock_sleep, mock_serial_cls):
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.in_waiting = 0
         mock_ser.readline.return_value = b""
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
             engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
             command_timeout=0.05,
         )
-        capper._serial = mock_ser
+        self._attach_link(capper, mock_ser)
         with pytest.raises(CapperTimeoutError):
             capper.capture_cap()
 

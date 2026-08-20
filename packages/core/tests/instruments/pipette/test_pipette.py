@@ -222,8 +222,8 @@ class TestPipetteLifecycle:
         mock_ser.readline.side_effect = [r.encode() for r in responses]
         return mock_ser
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_opens_serial(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial()
         mock_serial_cls.return_value = mock_ser
@@ -236,8 +236,8 @@ class TestPipetteLifecycle:
         )
         assert mock_sleep.called
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_homes_and_primes_unhomed_plunger(
         self, mock_sleep, mock_serial_cls
     ):
@@ -259,8 +259,8 @@ class TestPipetteLifecycle:
         assert written[1].startswith("10")      # home
         assert written[2].startswith("11,36.0")  # prime = move to prime_position
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_skips_homing_when_already_homed(
         self, mock_sleep, mock_serial_cls
     ):
@@ -276,8 +276,8 @@ class TestPipetteLifecycle:
         assert len(written) == 1
         assert written[0].startswith("14")
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_discards_boot_banner(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial()
         # Banner bytes pending on the first check, quiet on the second.
@@ -289,8 +289,8 @@ class TestPipetteLifecycle:
 
         mock_ser.reset_input_buffer.assert_called_once()
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_raises_when_homing_fails(self, mock_sleep, mock_serial_cls):
         responses = [
             'OK:{"homed":0,"pos":0.00,"max_vol":300.00}\n',
@@ -305,8 +305,8 @@ class TestPipetteLifecycle:
             pip.connect()
         mock_ser.close.assert_called_once()
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_raises_on_serial_error(self, mock_sleep, mock_serial_cls):
         import serial as real_serial
         mock_serial_cls.side_effect = real_serial.SerialException("port busy")
@@ -315,8 +315,8 @@ class TestPipetteLifecycle:
         with pytest.raises(PipetteConnectionError, match="Cannot open serial"):
             pip.connect()
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_connect_raises_on_no_response(self, mock_sleep, mock_serial_cls):
         mock_ser = MagicMock()
         mock_ser.is_open = True
@@ -331,8 +331,8 @@ class TestPipetteLifecycle:
         with pytest.raises(PipetteConnectionError, match="did not respond"):
             pip.connect()
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_disconnect_closes_serial(self, mock_sleep, mock_serial_cls):
         mock_ser = self._make_mock_serial()
         mock_serial_cls.return_value = mock_ser
@@ -351,8 +351,8 @@ class TestPipetteLifecycle:
         pip = OpentronsPipette(pipette_model="p300_single_gen2", port="/dev/null")
         assert pip.health_check() is False
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_health_check_true_when_connected(self, mock_sleep, mock_serial_cls):
         # Two status calls: one for connect, one for health_check
         responses = [
@@ -384,8 +384,8 @@ class TestPipetteCommands:
         pip.connect()
         return pip, mock_ser
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_home(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -395,8 +395,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
         assert any("10" in cmd for cmd in written)
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_prime(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -406,8 +406,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
         assert any("11" in cmd for cmd in written)
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_aspirate_returns_result(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -419,8 +419,8 @@ class TestPipetteCommands:
         assert result.volume_ul == 100.0
         assert result.position_mm == pytest.approx(46.98)
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_dispense_returns_result(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -431,8 +431,8 @@ class TestPipetteCommands:
         assert result.success is True
         assert result.volume_ul == 100.0
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_mix_returns_result(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -444,8 +444,8 @@ class TestPipetteCommands:
         assert result.volume_ul == 50.0
         assert result.repetitions == 5
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_get_status(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -457,8 +457,8 @@ class TestPipetteCommands:
         assert status.position_mm == pytest.approx(36.0)
         assert status.is_primed is True
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_pick_up_tip_sets_flag(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -468,8 +468,8 @@ class TestPipetteCommands:
         status = pip.get_status()
         assert status.has_tip is True
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_drop_tip_clears_flag(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -485,8 +485,8 @@ class TestPipetteCommands:
         status = pip.get_status()
         assert status.has_tip is False
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_drop_tip_returns_plunger_to_prime(self, mock_sleep, mock_serial_cls):
         # The ejector stroke parks the plunger at the bottom of travel; the
         # driver must move it back to prime so the next cycle starts ready.
@@ -501,8 +501,8 @@ class TestPipetteCommands:
         assert moves[1].startswith("11,36.0")  # return to prime
         assert pip._position_mm == pytest.approx(36.0)
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_drop_tip_failed_return_to_prime_does_not_raise(
         self, mock_sleep, mock_serial_cls
     ):
@@ -522,8 +522,8 @@ class TestPipetteCommands:
         status = pip.get_status()
         assert status.has_tip is False
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_command_error_on_err_response(self, mock_sleep, mock_serial_cls):
         # home() retries once, so it takes two ERR responses to fail.
         pip, _ = self._make_connected_pipette(
@@ -533,8 +533,8 @@ class TestPipetteCommands:
         with pytest.raises(PipetteCommandError, match="motor stall"):
             pip.home()
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_home_retries_once_when_first_attempt_falls_short(
         self, mock_sleep, mock_serial_cls
     ):
@@ -551,8 +551,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode().strip() for c in mock_ser.write.call_args_list]
         assert [w.split(",")[0] for w in written].count("10") == 2
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_status_skips_stray_ok_lines(self, mock_sleep, mock_serial_cls):
         # A late boot banner must not be taken as the status response.
         pip, _ = self._make_connected_pipette(
@@ -563,8 +563,8 @@ class TestPipetteCommands:
         assert status.is_homed is True
         assert status.position_mm == pytest.approx(36.0)
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_plunger_moves_use_firmware_default_speed(
         self, mock_sleep, mock_serial_cls
     ):
@@ -587,8 +587,8 @@ class TestPipetteCommands:
         assert len(moves) == 4
         assert all(w.split(",")[2] == "0.0" for w in moves)
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_blowout(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -598,8 +598,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
         assert any("46.0" in cmd for cmd in written)
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_drip_stop(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
@@ -609,8 +609,8 @@ class TestPipetteCommands:
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
         assert any("28" in cmd for cmd in written)
 
-    @patch("cubos.instruments.pipette.vendors.opentrons.serial.Serial")
-    @patch("cubos.instruments.pipette.vendors.opentrons.time.sleep")
+    @patch("cubos.instruments._shared.pawduino_link.serial.Serial")
+    @patch("cubos.instruments._shared.pawduino_link.time.sleep")
     def test_warm_up_homes_and_primes(self, mock_sleep, mock_serial_cls):
         pip, mock_ser = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
