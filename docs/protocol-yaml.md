@@ -418,8 +418,9 @@ to `safe_z` — with lights-off and the retract guaranteed even on failure.
 - `image_height` *(float, required)* — labware-relative offset in mm above
   the well's surface Z: the camera's focus standoff. Like every height
   argument it lives on the command, never on labware or instrument config.
-- `lights` *(str, optional)* — lighting instrument; omit to image with
-  ambient light.
+- `lights` *(str, optional)* — lighting instrument. Defaults to the
+  gantry's lighting instrument when it has exactly one; pass a name to
+  disambiguate, or the literal `none` to image with ambient light.
 - `label` *(str, optional)* — filename label (defaults to the well target).
 - `mode` *(str, default `standard`)* — `standard` is one shot with white
   lights at 5% (or `brightness`); `curvature` is a contact-angle Z-stack:

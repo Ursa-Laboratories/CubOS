@@ -40,9 +40,10 @@ protocol:
       all_off: true
 
   # -- Packaged form: same sequence plus focus descent and cleanup --------
+  # lights defaults to the gantry's lighting instrument; pass `lights: none`
+  # to image with ambient light.
   - image_well:
       camera: camera
-      lights: lights
       well: well_plate_holder.plate.B1
       image_height: 30.0
       label: b1_standard
@@ -51,7 +52,6 @@ protocol:
   # uncomment when contact-angle imaging is wanted.
   # - image_well:
   #     camera: camera
-  #     lights: lights
   #     well: well_plate_holder.plate.B2
   #     image_height: 30.0
   #     mode: curvature

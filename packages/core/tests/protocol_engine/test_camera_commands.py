@@ -320,3 +320,32 @@ class TestSummaries:
         assert "a1" in _summaries.capture({"instrument": "cam", "label": "a1"})
         assert "standard" in _summaries.image_well(
             {"camera": "cam", "well": "plate.B1"})
+
+
+class TestLightsAutoDiscovery:
+    def test_defaults_to_single_lighting_instrument(self):
+        lights = _lights()
+        context = _context({"cam": _camera(), "lights": lights})
+        image_well(context, camera="cam", well="plate.B1", image_height=30.0)
+        # The auto-discovered lights were used and turned back off.
+        assert lights.status().channels == {"white": 0, "contact": 0}
+
+    def test_multiple_lighting_instruments_require_explicit_name(self):
+        context = _context({
+            "cam": _camera(), "lights_a": _lights(), "lights_b": _lights(),
+        })
+        with pytest.raises(ProtocolExecutionError, match="lights_a, lights_b"):
+            image_well(context, camera="cam", well="plate.B1",
+                       image_height=30.0)
+
+    def test_none_opts_out(self):
+        lights = _lights()
+
+        def exploding_set_channel(channel, brightness):
+            raise AssertionError("lights must not be used")
+
+        lights.set_channel = exploding_set_channel
+        context = _context({"cam": _camera(), "lights": lights})
+        saved = image_well(context, camera="cam", well="plate.B1",
+                           image_height=30.0, lights="none")
+        assert len(saved) == 1

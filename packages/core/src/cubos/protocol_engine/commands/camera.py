@@ -171,6 +171,34 @@ def capture(
     return saved
 
 
+def _resolve_lighting(
+    context: "ProtocolContext", lights: str | None,
+) -> LightingInstrument | None:
+    """Resolve the lighting instrument, defaulting to the gantry's only one."""
+    if lights == "none":
+        return None
+    if lights is not None:
+        return _get_lighting(context, lights)
+    found = [
+        instrument
+        for instrument in context.gantry.instruments.values()
+        if isinstance(instrument, LightingInstrument)
+    ]
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        names = sorted(
+            name
+            for name, instrument in context.gantry.instruments.items()
+            if isinstance(instrument, LightingInstrument)
+        )
+        raise ProtocolExecutionError(
+            "image_well: multiple lighting instruments on the gantry "
+            f"({', '.join(names)}); pass `lights` to pick one."
+        )
+    return None
+
+
 @protocol_command("image_well", summary=_summaries.image_well)
 def image_well(
     context: "ProtocolContext",
@@ -193,15 +221,15 @@ def image_well(
       images are labeled ``{label}_z{z}mm_b{brightness}``.
 
     ``image_height`` is a labware-relative offset (mm above the well's
-    surface Z), like ``measure``'s ``measurement_height``. Capture and
-    lighting failures log and continue; motion failures raise. Lights-off
-    and the retract to ``safe_z`` run even on failure. Returns the saved
-    image paths.
+    surface Z), like ``measure``'s ``measurement_height``. ``lights``
+    defaults to the gantry's lighting instrument when it has exactly one;
+    pass a name to disambiguate, or ``lights: none`` in YAML to image with
+    ambient light. Capture and lighting failures log and continue; motion
+    failures raise. Lights-off and the retract to ``safe_z`` run even on
+    failure. Returns the saved image paths.
     """
     camera_instr = _get_camera(context, camera)
-    lighting: LightingInstrument | None = (
-        _get_lighting(context, lights) if lights is not None else None
-    )
+    lighting = _resolve_lighting(context, lights)
     if mode not in ("standard", "curvature"):
         raise ProtocolExecutionError(
             f"image_well: unknown mode {mode!r}; expected 'standard' or "
