@@ -10,6 +10,7 @@ interface Props {
   selectedFile: string | null;
   onSelectFile: (f: string) => void;
   onImportFile: (f: string) => void;
+  importedFrom?: string | null;
   deck: DeckResponse | null;
   /** The last-saved (server-loaded) deck, used to reset local edits when
    * the user discards. Differs from `deck` when the parent is passing a
@@ -92,7 +93,7 @@ function labwareFromDeck(deck: DeckResponse | null): Record<string, LabwareConfi
   return obj;
 }
 
-export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, deck, baseline, onSave, onLocalChange, dirty, onRefresh }: Props) {
+export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, importedFrom, deck, baseline, onSave, onLocalChange, dirty, onRefresh }: Props) {
   const [labware, setLabware] = useState<Record<string, LabwareConfig>>(() => labwareFromDeck(deck));
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
@@ -175,7 +176,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
 
   return (
     <div>
-      <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import deck config" />
+      <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import deck config" selectedFile={importedFrom ?? selectedFile} />
 
       <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
         <button onClick={() => addLabware("well_plate")} style={addBtnStyle}>

@@ -390,7 +390,7 @@ export default function ProtocolEditor({
   return (
     <div>
       <div style={protocolPickerStyle}>
-        <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import protocol config" />
+        <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import protocol config" selectedFile={selectedFile} />
       </div>
 
       {!hasSteps && (

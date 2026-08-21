@@ -4,18 +4,20 @@ interface Props {
   configs: string[];
   onSelectFile: (f: string) => void;
   label: string;
+  selectedFile?: string | null;
 }
 
-export default function ImportFromFile({ configs, onSelectFile, label }: Props) {
+export default function ImportFromFile({ configs, onSelectFile, label, selectedFile }: Props) {
   const displayLabel = label.replace(/^Import\s+/i, "").replace(/\s+config$/i, "");
   const placeholder = configs.length > 0 ? `Choose ${displayLabel.toLowerCase()}...` : "No configs found";
+  const value = selectedFile && configs.includes(selectedFile) ? selectedFile : "";
 
   return (
     <label style={wrapperStyle}>
       <span style={labelStyle}>{displayLabel}</span>
       <select
         aria-label={label}
-        value=""
+        value={value}
         onChange={(e) => {
           if (e.target.value) {
             onSelectFile(e.target.value);

@@ -670,6 +670,7 @@ export default function App() {
             selectedFile={deckFile}
             onSelectFile={setDeckFile}
             onImportFile={handleImportDeck}
+            importedFrom={deckImportedFrom}
             deck={localDeck ?? deckQuery.data ?? null}
             baseline={deckQuery.data ?? null}
             dirty={deckDirty}
