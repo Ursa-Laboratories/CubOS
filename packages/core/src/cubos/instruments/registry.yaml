@@ -36,6 +36,9 @@ instruments:
       admiral:
         module: cubos.instruments.potentiostat.vendors.admiral
         class_name: AdmiralPotentiostat
+      emstat:
+        module: cubos.instruments.potentiostat.vendors.emstat
+        class_name: EmstatPotentiostat
 
   uv_curing:
     interface: cubos.instruments.uv_curing.interface.UVCuringInstrument

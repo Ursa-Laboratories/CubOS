@@ -88,6 +88,41 @@ def test_pstat_online_without_port_fails_cleanly():
     assert rc == 1
 
 
+def test_pstat_emstat_offline_exits_zero(capsys):
+    rc = _run(["pstat", "--vendor", "emstat", "--offline"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "vendor=emstat" in out
+    assert "healthy=True" in out
+
+
+def test_pstat_emstat_online_without_port_fails_cleanly():
+    rc = _run(["pstat", "--vendor", "emstat"])
+    assert rc == 1
+
+
+def test_pstat_offline_ocp_prints_trace(capsys):
+    rc = _run(["pstat", "--vendor", "emstat", "--offline", "--ocp", "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "running OCP for 1.0s" in out
+    assert "OCP samples: 10" in out
+    assert "final voltage:" in out
+
+
+def test_pstat_ocp_failure_exits_nonzero(monkeypatch, capsys):
+    from cubos.instruments.potentiostat.exceptions import PotentiostatCommandError
+    from cubos.instruments.potentiostat.vendors import emstat as emstat_module
+
+    def _broken_ocp(self, params):
+        raise PotentiostatCommandError("simulated OCP failure")
+
+    monkeypatch.setattr(emstat_module.EmstatPotentiostat, "run_OCP", _broken_ocp)
+    rc = _run(["pstat", "--vendor", "emstat", "--offline", "--ocp", "1"])
+    assert rc == 1
+    assert "simulated OCP failure" in capsys.readouterr().out
+
+
 def test_all_offline_exits_zero_with_pass_summary(tmp_path, capsys):
     out_path = tmp_path / "capture.png"
     rc = _run(["all", "--offline", "--hold", "0", "--out", str(out_path)])

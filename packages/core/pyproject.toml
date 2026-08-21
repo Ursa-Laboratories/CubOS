@@ -23,11 +23,20 @@ asmi-vernier = [
 potentiostat-admiral = [
     "SquidstatPyLibrary",
 ]
+# PyPI's hardpotato (<=1.3.13) predates Setup.check_connection; the driver
+# needs the 1.3.14 git build. EmStat4 LR ("emstat4_lr") additionally needs a
+# not-yet-public patch (hardpotato/emstat4_lr.py + potentiostat.py hooks)
+# carried in the PANDA bench venvs — upstream or fork it before relying on a
+# clean install for that model.
+potentiostat-emstat = [
+    "hardpotato @ git+https://github.com/BU-KABlab/hardpotato.git@87584e4cc03773cb7484d99309f86817809047bf",
+]
 asmi = [
     "godirect>=1.0.0",
 ]
 potentiostat = [
     "SquidstatPyLibrary",
+    "hardpotato @ git+https://github.com/BU-KABlab/hardpotato.git@87584e4cc03773cb7484d99309f86817809047bf",
 ]
 # camera: OpenCV covers both the `opencv` webcam vendor and image saving for
 # the `flir` vendor. PySpin itself is proprietary (Spinnaker SDK, manual
