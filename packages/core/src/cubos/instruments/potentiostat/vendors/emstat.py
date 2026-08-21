@@ -290,6 +290,9 @@ class EmstatPotentiostat(PotentiostatInstrument):
         started_at = datetime.now(timezone.utc)
         try:
             experiment = build(self._hp, stem)
+            # hardpotato only sets .port on techniques when auto-detecting;
+            # with an explicit Setup port, run() would hit AttributeError.
+            experiment.port = self._port
             experiment.run()
         except Exception as exc:
             raise PotentiostatCommandError(

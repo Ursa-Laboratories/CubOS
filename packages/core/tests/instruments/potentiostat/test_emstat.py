@@ -275,6 +275,9 @@ class TestRunOCPOnline:
         assert kwargs_log[0]["ttot"] == 5.0
         assert kwargs_log[0]["dt"] == 0.1
         assert kwargs_log[0]["header"] == "OCP"
+        # run() needs .port when Setup got an explicit port (hardpotato only
+        # sets it itself on the auto-detect path)
+        assert hp.potentiostat.OCP.port == "/dev/ttyACM1"
 
     def test_multi_curve_data_is_concatenated(self):
         two_curves = [
