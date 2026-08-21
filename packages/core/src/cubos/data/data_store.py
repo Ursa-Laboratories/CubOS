@@ -1295,6 +1295,19 @@ class DataStore:
 
         complete_pick_up_tip(self._conn, operation_key)
 
+    def reconcile_tip_presence(
+        self,
+        fluid_state_id: int,
+        rack_key: str,
+        presence: Any,
+    ) -> Any:
+        """Reconcile durable tip-slot state against sensed physical presence."""
+        from .tip_state import reconcile_tip_presence
+
+        return reconcile_tip_presence(
+            self._conn, fluid_state_id, rack_key, presence,
+        )
+
     def begin_drop_tip(
         self,
         fluid_state_id: int,

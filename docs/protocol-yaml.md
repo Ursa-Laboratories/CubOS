@@ -140,6 +140,7 @@ Commands available in YAML:
 - `set_lights`
 - `capture`
 - `image_well`
+- `scan_tip_rack`
 
 ### `home`
 
@@ -229,8 +230,18 @@ deliberate follow-up.
 Pick up a tip from a tip-rack slot, record its length, and mark the slot consumed.
 
 - `position` *(str, required)* — tip-rack slot, including the explicit tip slot
-  (e.g. `tips.A1`).
+  (e.g. `tips.A1`), or a bare rack (e.g. `tips`) for next-available selection.
 - `speed` *(float, default `50.0`)* — approach/pick-up speed.
+- `verify_tip` *(bool, default `true`)* — sensor-confirm the pickup when the
+  pipette has a tip-presence sensor (the Pawduino tool-head line-break beam);
+  sensorless pipettes skip verification silently.
+- `verify_retries` *(int, default `1`)* — extra same-slot pickup attempts
+  after a no-tip reading before the slot is marked consumed.
+- `verify_slot_advance` *(int, default `3`)* — for bare-rack requests, how
+  many further slots a verified-dry pickup may advance to before the command
+  fails. Explicit-slot requests never advance: a verified-dry named slot is
+  marked consumed and the command fails. Each consumed-and-advanced slot is
+  recorded durably when tracking is active, so resumed runs skip it.
 
 #### `aspirate`
 
@@ -328,6 +339,10 @@ Move to a position and drop the tip.
 
 - `position` *(str, required)* — deck target where the tip is dropped.
 - `speed` *(float, default `50.0`)* — approach/drop speed.
+- `verify_tip` *(bool, default `true`)* — sensor-confirm the drop when the
+  pipette has a tip-presence sensor: a beam still broken afterward means the
+  tip is stuck, the operation is marked for reconciliation, and the command
+  fails.
 
 ### Capper commands
 
@@ -432,6 +447,39 @@ to `safe_z` — with lights-off and the retract guaranteed even on failure.
 Capture and lighting failures **log and continue** (an image is never
 worth failing a run over) and the command returns the list of image paths
 actually saved. Motion failures still fail the run.
+
+#### `scan_tip_rack`
+
+Image a tip rack from above, classify per-slot tip presence, and reconcile
+the result into tip state — durable `available`/`consumed` slot state when
+fluid tracking is active (slots mid-operation are skipped and logged), the
+in-memory rack otherwise. Run it before pickups (typically right after
+`home`) so `pick_up_tip`'s next-available selection reflects the physical
+rack. Unlike `image_well`, a failed capture **fails the command** — the
+scan exists to produce state. Lighting failures log and continue; the
+retract to `safe_z` runs even on failure.
+
+- `camera` *(str, required)* — camera instrument.
+- `rack` *(str, required)* — deck key of the tip rack (whole rack, not a slot).
+- `image_height` *(float, required)* — labware-relative offset in mm above
+  the rack's reference Z for the shot.
+- `mm_per_px` *(float, required)* — pixel scale at the scan height,
+  calibrated per rig with `python -m cubos.tools.tip_scan_check`.
+- `lights` *(str, optional)* — as `image_well`: default single lighting
+  instrument, or `none` for ambient light.
+- `brightness` *(int, default `5`)* — white-channel level for the shot.
+- `label` *(str, optional)* — filename label (defaults to `scan_<rack>`).
+- `patch_radius_mm` *(float, default `1.0`)* — half-width of the square
+  patch scored per slot.
+- `present_threshold` / `absent_threshold` *(float, defaults `0.55` /
+  `0.35`)* — normalized mean-intensity cutoffs; scores between them (or
+  slots outside the frame) classify **uncertain** and are treated as not
+  pickable.
+- `flip_x` / `flip_y` *(bool, defaults `false` / `true`)* — camera-to-deck
+  axis orientation.
+
+Returns the saved image path and each slot's `present`/`absent`/`uncertain`
+status.
 
 ### Compound liquid commands
 

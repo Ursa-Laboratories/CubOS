@@ -22,6 +22,7 @@ from __future__ import annotations
 import math
 import sqlite3
 from contextlib import contextmanager
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Iterator, Optional, TypedDict
 
 from cubos.deck.labware.tip_rack import TipRack
@@ -633,6 +634,68 @@ def resolve_tip_operation(
         )
 
 
+class TipPresenceReconcileSummary(TypedDict):
+    changed: list[tuple[str, str, str]]
+    skipped: list[tuple[str, str]]
+    unchanged: list[str]
+
+
+def reconcile_tip_presence(
+    connection: sqlite3.Connection,
+    fluid_state_id: int,
+    rack_key: str,
+    presence: "Mapping[str, Optional[bool]]",
+) -> TipPresenceReconcileSummary:
+    """Reconcile durable per-slot tip state against sensed physical presence.
+
+    *presence* maps slot IDs to a sensed value: ``True`` (tip present) makes
+    the slot ``available``; ``False`` or ``None`` (absent or uncertain — a
+    slot that cannot confidently be picked from) makes it ``consumed``. Only
+    slots whose current status is ``available`` or ``consumed`` are touched;
+    ``reserved``/``attached``/``reconciliation_required`` rows belong to the
+    operation journal and are reported in ``skipped`` instead. Refuses to run
+    while any tip operation is pending.
+    """
+    if not isinstance(presence, Mapping) or not presence:
+        raise TipStateError("presence must map at least one tip slot ID.")
+    with _immediate_transaction(connection):
+        _require_session(connection, fluid_state_id)
+        pending = pending_tip_operations(connection, fluid_state_id)
+        if pending:
+            details = ", ".join(f"{key} ({status})" for key, status in pending)
+            raise TipStateReconciliationRequiredError(
+                f"Fluid state {fluid_state_id} cannot reconcile tip presence "
+                f"while these tip operations require physical reconciliation: "
+                f"{details}."
+            )
+        changed: list[tuple[str, str, str]] = []
+        skipped: list[tuple[str, str]] = []
+        unchanged: list[str] = []
+        for slot_id in sorted(presence):
+            slot = _tip_container_row(connection, fluid_state_id, rack_key, slot_id)
+            target = "available" if presence[slot_id] is True else "consumed"
+            if slot["status"] not in ("available", "consumed"):
+                skipped.append((slot_id, slot["status"]))
+                continue
+            if slot["status"] == target:
+                unchanged.append(slot_id)
+                continue
+            cursor = connection.execute(
+                "UPDATE tip_containers SET status = ?, version = version + 1, "
+                "updated_at = datetime('now') WHERE id = ? AND version = ?",
+                (target, slot["id"], slot["version"]),
+            )
+            if cursor.rowcount != 1:
+                raise TipStateConflictError(
+                    f"Tip {rack_key}.{slot_id} changed while reconciling "
+                    "its presence."
+                )
+            changed.append((slot_id, slot["status"], target))
+        if changed:
+            _touch_session(connection, fluid_state_id)
+    return {"changed": changed, "skipped": skipped, "unchanged": unchanged}
+
+
 # ── Resume-time pipette restore ──────────────────────────────────────────────
 
 
@@ -1139,6 +1202,7 @@ __all__ = [
     "PipetteAttachmentSnapshot",
     "TipContainerSnapshot",
     "TipOperationSnapshot",
+    "TipPresenceReconcileSummary",
     "TipStateConflictError",
     "TipStateDeckMismatchError",
     "TipStateError",
@@ -1152,6 +1216,7 @@ __all__ = [
     "get_tip_snapshot",
     "mark_tip_reconciliation_required",
     "pending_tip_operations",
+    "reconcile_tip_presence",
     "resolve_tip_operation",
     "restore_pipette_attachment",
     "seed_tip_state",

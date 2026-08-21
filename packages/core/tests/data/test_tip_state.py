@@ -748,3 +748,106 @@ def test_complete_pick_up_tip_is_idempotent_when_already_applied(tmp_path):
     assert len(snapshot["operations"]) == 1
     assert _slot(snapshot, "tip_rack", "A1")["status"] == "attached"
     store.close()
+
+
+# ── reconcile_tip_presence ──────────────────────────────────────────────────
+
+
+def test_reconcile_tip_presence_flips_both_directions(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)  # B2 pre-consumed
+    store = DataStore(":memory:")
+    state_id = _create_state(store, deck_path, deck)
+
+    summary = store.reconcile_tip_presence(
+        state_id, "tip_rack", {"A1": False, "B2": True, "A2": None},
+    )
+
+    assert summary["changed"] == [
+        ("A1", "available", "consumed"),
+        ("A2", "available", "consumed"),
+        ("B2", "consumed", "available"),
+    ]
+    assert summary["unchanged"] == []
+    assert summary["skipped"] == []
+    snapshot = store.get_tip_snapshot(state_id)
+    assert _slot(snapshot, "tip_rack", "A1")["status"] == "consumed"
+    assert _slot(snapshot, "tip_rack", "B2")["status"] == "available"
+    # Uncertain (None) reads as not pickable.
+    assert _slot(snapshot, "tip_rack", "A2")["status"] == "consumed"
+
+
+def test_reconcile_tip_presence_matching_state_is_unchanged(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)
+    store = DataStore(":memory:")
+    state_id = _create_state(store, deck_path, deck)
+    before = _slot(store.get_tip_snapshot(state_id), "tip_rack", "A1")["version"]
+
+    summary = store.reconcile_tip_presence(state_id, "tip_rack", {"A1": True})
+
+    assert summary == {"changed": [], "skipped": [], "unchanged": ["A1"]}
+    after = _slot(store.get_tip_snapshot(state_id), "tip_rack", "A1")["version"]
+    assert after == before
+
+
+def test_reconcile_tip_presence_skips_slots_mid_operation(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)
+    store = DataStore(":memory:")
+    state_id = _create_state(store, deck_path, deck)
+    campaign_id = _create_linked_campaign(store, state_id)
+    store.begin_pick_up_tip(
+        state_id, "op-1", "tip_rack", "A1", 59.3, campaign_id=campaign_id,
+    )
+    store.complete_pick_up_tip("op-1")
+
+    summary = store.reconcile_tip_presence(
+        state_id, "tip_rack", {"A1": False, "A2": False},
+    )
+
+    assert summary["skipped"] == [("A1", "attached")]
+    assert summary["changed"] == [("A2", "available", "consumed")]
+    assert (
+        _slot(store.get_tip_snapshot(state_id), "tip_rack", "A1")["status"]
+        == "attached"
+    )
+
+
+def test_reconcile_tip_presence_refuses_while_operation_pending(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)
+    store = DataStore(":memory:")
+    state_id = _create_state(store, deck_path, deck)
+    campaign_id = _create_linked_campaign(store, state_id)
+    store.begin_pick_up_tip(
+        state_id, "op-1", "tip_rack", "A1", 59.3, campaign_id=campaign_id,
+    )
+
+    with pytest.raises(TipStateReconciliationRequiredError, match="op-1"):
+        store.reconcile_tip_presence(state_id, "tip_rack", {"A2": True})
+
+
+def test_reconcile_tip_presence_unknown_slot_raises(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)
+    store = DataStore(":memory:")
+    state_id = _create_state(store, deck_path, deck)
+
+    with pytest.raises(TipStateError, match="not registered"):
+        store.reconcile_tip_presence(state_id, "tip_rack", {"Z9": True})
+
+    with pytest.raises(TipStateError, match="not registered"):
+        store.reconcile_tip_presence(state_id, "no_such_rack", {"A1": True})
+
+
+def test_reconcile_tip_presence_unknown_session_raises(tmp_path):
+    store = DataStore(":memory:")
+
+    with pytest.raises(TipStateNotFoundError):
+        store.reconcile_tip_presence(999, "tip_rack", {"A1": True})
+
+
+def test_reconcile_tip_presence_rejects_empty_or_non_mapping():
+    from cubos.data.tip_state import reconcile_tip_presence
+
+    store = DataStore(":memory:")
+    with pytest.raises(TipStateError, match="at least one"):
+        reconcile_tip_presence(store._conn, 1, "tip_rack", {})
+    with pytest.raises(TipStateError, match="at least one"):
+        reconcile_tip_presence(store._conn, 1, "tip_rack", ["A1"])

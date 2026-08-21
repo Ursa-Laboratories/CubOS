@@ -199,6 +199,10 @@ def clear_well(args: Dict[str, Any]) -> str:
     return _join(str(args["well"]), amount)
 
 
+def scan_tip_rack(args: Dict[str, Any]) -> str:
+    return f"{args['camera']} @ {args['rack']}"
+
+
 __all__ = [
     "aspirate",
     "blowout",
@@ -219,6 +223,7 @@ __all__ = [
     "purge_pipette",
     "rinse_well",
     "scan",
+    "scan_tip_rack",
     "serial_transfer",
     "set_lights",
     "transfer",
