@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type {
   GantryResponse,
   GantryConfig,
@@ -36,8 +37,6 @@ interface Props {
   dirty?: boolean;
   onRefresh: () => void;
 }
-
-const Y_AXIS_MOTION_OPTIONS = ["head", "bed"] as const;
 
 const EMPTY_GANTRY: GantryConfig = {
   serial_port: "",
@@ -87,7 +86,7 @@ const INSTRUMENT_COLORS: Record<string, string> = {
   uv_curing: theme.categorical.blue,
 };
 
-/** Section heading inside a config card (Gantry Type, Instruments, Connection, …). */
+/** Section heading inside a config card (Gantry, Connection, Instruments, …). */
 const sectionTitleStyle: React.CSSProperties = {
   ...theme.panelTitle,
   fontSize: 13,
@@ -121,6 +120,15 @@ export default function GantryEditor({
   const [advancedOpen, setAdvancedOpen] = useState(() => (
     grblFieldsDiffer(gantry?.config.grbl_settings, baseline?.config.grbl_settings, baseline != null)
   ));
+  // Raw YAML mode: an alternate view of the same `config` state, so Save
+  // always goes through the identical onSave -> server-schema-validation
+  // path as the structured form. `rawText` only drives `config` forward
+  // (via commit) when it parses to a plain mapping; an unparsable or
+  // malformed edit is held locally as `rawError` instead of corrupting
+  // the last-known-good config.
+  const [rawMode, setRawMode] = useState(false);
+  const [rawText, setRawText] = useState("");
+  const [rawError, setRawError] = useState<string | null>(null);
 
   const selectedAddType = addType || instrumentTypes[0]?.type || "";
 
@@ -132,6 +140,39 @@ export default function GantryEditor({
 
   const startNew = () => {
     commit(structuredClone(EMPTY_GANTRY));
+  };
+
+  const enterRawMode = () => {
+    if (!config) return;
+    setRawText(stringifyYaml(config));
+    setRawError(null);
+    setRawMode(true);
+  };
+
+  // Leaving raw mode while the text doesn't parse would either discard the
+  // operator's in-progress edit or silently fall back to the last-parsed
+  // config — both surprising. Block the switch until the YAML is valid
+  // again (or the operator discards).
+  const exitRawMode = () => {
+    if (rawError) return;
+    setRawMode(false);
+  };
+
+  const handleRawChange = (text: string) => {
+    setRawText(text);
+    let parsed: unknown;
+    try {
+      parsed = parseYaml(text);
+    } catch (err) {
+      setRawError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    if (parsed === null || parsed === undefined || typeof parsed !== "object" || Array.isArray(parsed)) {
+      setRawError("Gantry YAML must be a mapping (key: value) at the top level.");
+      return;
+    }
+    setRawError(null);
+    commit(parsed as GantryConfig);
   };
 
   const updateInstrument = (key: string, inst: InstrumentConfig) => {
@@ -203,7 +244,6 @@ export default function GantryEditor({
     factory_z_travel_mm: !!cnc && !notDirty(cnc.factory_z_travel_mm, bcnc?.factory_z_travel_mm),
     calibration_block_height_mm: !!cnc && !notDirty(cnc.calibration_block_height_mm, bcnc?.calibration_block_height_mm),
     safe_z: !!cnc && !notDirty(cnc.safe_z, bcnc?.safe_z),
-    y_axis_motion: !!cnc && !notDirty(cnc.y_axis_motion, bcnc?.y_axis_motion),
     x_min: !!wv && !notDirty(wv.x_min, bwv?.x_min),
     x_max: !!wv && !notDirty(wv.x_max, bwv?.x_max),
     y_min: !!wv && !notDirty(wv.y_min, bwv?.y_min),
@@ -212,7 +252,7 @@ export default function GantryEditor({
     z_max: !!wv && !notDirty(wv.z_max, bwv?.z_max),
   };
 
-  const canSave = !!config && isValidGantry(config) && (!!saveAs.trim() || !!selectedFile) && !saving;
+  const canSave = !!config && isValidGantry(config) && (!!saveAs.trim() || !!selectedFile) && !saving && !(rawMode && !!rawError);
 
   const handleSave = async () => {
     if (!config || !canSave) return;
@@ -241,6 +281,8 @@ export default function GantryEditor({
     if (!confirmed) return;
     setConfig(baseline ? structuredClone(baseline.config) : null);
     setSaveError(null);
+    setRawMode(false);
+    setRawError(null);
     onRefresh();
   };
 
@@ -253,279 +295,309 @@ export default function GantryEditor({
 
       {config && (
         <>
-          <div style={cardStyle}>
-            <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Gantry Type</h4>
-            <SelectField
-              id="gantry-type"
-              name="gantry_type"
-              label="Gantry type"
-              value={config.gantry_type}
-              options={[
-                { value: "cub", label: "Cub" },
-                { value: "cub_xl", label: "Cub XL" },
-              ]}
-              onChange={(v) => commit({ ...config, gantry_type: v as "cub" | "cub_xl" })}
-              dirty={d.gantry_type}
-              required
-            />
-          </div>
-
-          <div style={cardStyle}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
-              <h4 style={sectionTitleStyle}>Instruments</h4>
-              <div style={{ display: "flex", gap: 8 }}>
-                <select value={selectedAddType} onChange={(e) => setAddType(e.target.value)} style={selectStyle}>
-                  {instrumentTypes.map((it) => (
-                    <option key={it.type} value={it.type}>{typeLabel(it.type)}{it.is_mock ? " (mock)" : ""}</option>
-                  ))}
-                </select>
-                <button onClick={addInstrument} style={addBtnStyle} disabled={!selectedAddType}>+ Add</button>
-              </div>
-            </div>
-
-            {Object.keys(config.instruments).length === 0 && (
-              <div style={emptyInstrumentNoticeStyle}>
-                No mounted instruments yet. Choose the instruments installed on this machine, then save the gantry config.
-              </div>
-            )}
-
-            {Object.entries(config.instruments).map(([key, inst]) => {
-              const color = INSTRUMENT_COLORS[inst.type] ?? INSTRUMENT_COLORS[inst.type.replace("mock_", "")] ?? theme.color.textMuted;
-              const fields = fieldsForInstrument(instrumentSchemas, inst.type, inst.vendor);
-              const vendors = vendorsForType(instrumentTypes, inst.type);
-              return (
-                <div key={key} style={instrumentCardStyle}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                    <h4 style={{ ...sectionTitleStyle, color, ...theme.mono }}>
-                      {key} <span style={{ fontWeight: 400, color: theme.color.textMuted, fontSize: 11, fontFamily: theme.font.ui }}>({typeLabel(inst.type)})</span>
-                    </h4>
-                    <button onClick={() => removeInstrument(key)} style={removeBtnStyle}>Remove</button>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                    <TextField
-                      id={`${key}-type`}
-                      name={`${key}_type`}
-                      label="Type"
-                      value={inst.type}
-                      onChange={(v) => {
-                        const nextVendors = vendorsForType(instrumentTypes, v);
-                        const nextVendor = nextVendors.includes(inst.vendor)
-                          ? inst.vendor
-                          : nextVendors[0] ?? inst.vendor;
-                        updateInstrument(
-                          key,
-                          rebuildInstrumentForType(inst, v, nextVendor, instrumentSchemas),
-                        );
-                      }}
-                      dirty={isInstrumentFieldDirty(baseline, key, "type", inst.type)}
-                      required
-                    />
-                    {vendors.length > 0 ? (
-                      <SelectField
-                        id={`${key}-vendor`}
-                        name={`${key}_vendor`}
-                        label="Vendor"
-                        value={inst.vendor}
-                        options={vendors.map((v) => ({ value: v, label: v }))}
-                        onChange={(v) => updateInstrument(
-                          key,
-                          applyInstrumentFieldDefaults(
-                            { ...inst, vendor: v },
-                            instrumentSchemas,
-                          ),
-                        )}
-                        dirty={isInstrumentFieldDirty(baseline, key, "vendor", inst.vendor)}
-                        required
-                      />
-                    ) : (
-                      <TextField
-                        id={`${key}-vendor`}
-                        name={`${key}_vendor`}
-                        label="Vendor"
-                        value={inst.vendor}
-                        onChange={(v) => updateInstrument(key, { ...inst, vendor: v })}
-                        dirty={isInstrumentFieldDirty(baseline, key, "vendor", inst.vendor)}
-                        required
-                      />
-                    )}
-                    <NumberField id={`${key}-offset-x`} name={`${key}_offset_x`} label="Offset X" value={inst.offset_x} onChange={(v) => updateInstrument(key, { ...inst, offset_x: v })} dirty={isInstrumentFieldDirty(baseline, key, "offset_x", inst.offset_x)} />
-                    <NumberField id={`${key}-offset-y`} name={`${key}_offset_y`} label="Offset Y" value={inst.offset_y} onChange={(v) => updateInstrument(key, { ...inst, offset_y: v })} dirty={isInstrumentFieldDirty(baseline, key, "offset_y", inst.offset_y)} />
-                    <NumberField id={`${key}-depth`} name={`${key}_depth`} label="Depth" value={Number(inst.depth ?? 0)} onChange={(v) => updateInstrument(key, { ...inst, depth: v })} dirty={isInstrumentFieldDirty(baseline, key, "depth", inst.depth)} />
-                  </div>
-
-                  {fields.length > 0 && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
-                      {fields.map((field) => {
-                        const value = (inst as Record<string, unknown>)[field.name];
-                        const fieldDirty = isInstrumentFieldDirty(baseline, key, field.name, value);
-                        if (field.choices) {
-                          return (
-                            <SelectField
-                              key={field.name}
-                              id={`${key}-${field.name}`}
-                              name={`${key}_${field.name}`}
-                              label={fieldLabel(field.name) + (field.required ? " *" : "")}
-                              value={String(value ?? field.default ?? "")}
-                              options={field.choices.map((c) => ({ value: c, label: c }))}
-                              onChange={(v) => updateInstrument(key, { ...inst, [field.name]: v })}
-                              dirty={fieldDirty}
-                            />
-                          );
-                        }
-                        if (field.type === "bool") {
-                          return (
-                            <SelectField
-                              key={field.name}
-                              id={`${key}-${field.name}`}
-                              name={`${key}_${field.name}`}
-                              label={fieldLabel(field.name) + (field.required ? " *" : "")}
-                              value={String(value ?? field.default ?? false)}
-                              options={[{ value: "true", label: "true" }, { value: "false", label: "false" }]}
-                              onChange={(v) => updateInstrument(key, { ...inst, [field.name]: v === "true" })}
-                              dirty={fieldDirty}
-                            />
-                          );
-                        }
-                        if (field.type === "float" || field.type === "int") {
-                          return (
-                            <NumberField
-                              key={field.name}
-                              id={`${key}-${field.name}`}
-                              name={`${key}_${field.name}`}
-                              label={fieldLabel(field.name) + (field.required ? " *" : "")}
-                              value={Number(value ?? field.default ?? 0)}
-                              onChange={(v) => updateInstrument(key, { ...inst, [field.name]: v })}
-                              dirty={fieldDirty}
-                            />
-                          );
-                        }
-                        return (
-                          <TextField
-                            key={field.name}
-                            id={`${key}-${field.name}`}
-                            name={`${key}_${field.name}`}
-                            label={fieldLabel(field.name) + (field.required ? " *" : "")}
-                            value={String(value ?? field.default ?? "")}
-                            onChange={(v) => updateInstrument(key, { ...inst, [field.name]: v })}
-                            dirty={fieldDirty}
-                          />
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={cardStyle}>
-            <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Connection</h4>
-            <TextField
-              id="gantry-serial-port"
-              name="serial_port"
-              label="Serial port"
-              value={config.serial_port}
-              onChange={(v) => commit({ ...config, serial_port: v })}
-              dirty={d.serial_port}
-            />
-            <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <SelectField
-                id="gantry-y-axis-motion"
-                name="y_axis_motion"
-                label="Y-axis motion"
-                value={config.cnc.y_axis_motion ?? "head"}
-                options={Y_AXIS_MOTION_OPTIONS.map((s) => ({ value: s, label: s === "head" ? "Head moves" : "Bed moves" }))}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, y_axis_motion: v as "head" | "bed" } })}
-                dirty={d.y_axis_motion}
-              />
-              <NumberField
-                id="gantry-factory-z-travel"
-                name="factory_z_travel_mm"
-                label="Factory Z travel"
-                value={config.cnc.factory_z_travel_mm}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, factory_z_travel_mm: v } })}
-                dirty={d.factory_z_travel_mm}
-                required
-              />
-              <NumberField
-                id="gantry-calibration-block-height"
-                name="calibration_block_height_mm"
-                label="Block height"
-                value={Number(config.cnc.calibration_block_height_mm ?? 0)}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, calibration_block_height_mm: v } })}
-                dirty={d.calibration_block_height_mm}
-                required
-              />
-              <NumberField
-                id="gantry-safe-z"
-                name="safe_z"
-                label="Safe Z"
-                value={Number(config.cnc.safe_z ?? config.working_volume.z_max)}
-                onChange={(v) => commit({ ...config, cnc: { ...config.cnc, safe_z: v } })}
-                dirty={d.safe_z}
-              />
-            </div>
-          </div>
-
-          <div style={cardStyle}>
-            <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Working Volume</h4>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <NumberField id="wv-xmin" name="x_min" label="X min" value={config.working_volume.x_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, x_min: v } })} dirty={d.x_min} />
-              <NumberField id="wv-xmax" name="x_max" label="X max" value={config.working_volume.x_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, x_max: v } })} dirty={d.x_max} />
-              <NumberField id="wv-ymin" name="y_min" label="Y min" value={config.working_volume.y_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, y_min: v } })} dirty={d.y_min} />
-              <NumberField id="wv-ymax" name="y_max" label="Y max" value={config.working_volume.y_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, y_max: v } })} dirty={d.y_max} />
-              <NumberField id="wv-zmin" name="z_min" label="Z min" value={config.working_volume.z_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, z_min: v } })} dirty={d.z_min} />
-              <NumberField id="wv-zmax" name="z_max" label="Z max" value={config.working_volume.z_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, z_max: v } })} dirty={d.z_max} />
-            </div>
-          </div>
-
-          <div style={cardStyle}>
+          <div style={rawToggleRowStyle}>
             <button
               type="button"
-              onClick={() => setAdvancedOpen((open) => !open)}
-              aria-expanded={advancedOpen}
-              style={advancedHeaderStyle}
+              onClick={() => (rawMode ? exitRawMode() : enterRawMode())}
+              disabled={rawMode && !!rawError}
+              style={rawModeToggleStyle}
+              title={rawMode && rawError ? "Fix the YAML error before switching back to the form" : undefined}
             >
-              <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ color: theme.color.textMuted, fontSize: 12, width: 12, display: "inline-block" }}>
-                  {advancedOpen ? "▾" : "▸"}
-                </span>
-                Advanced settings
-                {grblDirty && <DirtyMarker />}
-              </span>
-              <span style={theme.sectionLabel}>GRBL Settings</span>
+              {rawMode ? "Back to form" : "Edit raw YAML"}
             </button>
-            {advancedOpen && (
-              <div style={{ marginTop: 12 }}>
-                <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>GRBL Settings</h4>
+          </div>
+
+          {rawMode ? (
+            <div style={cardStyle}>
+              <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Raw YAML</h4>
+              <textarea
+                aria-label="Raw gantry YAML"
+                value={rawText}
+                onChange={(e) => handleRawChange(e.target.value)}
+                spellCheck={false}
+                style={rawTextareaStyle}
+              />
+              {rawError && (
+                <div style={saveErrorStyle}>{rawError}</div>
+              )}
+              <div style={rawHintStyle}>
+                Saved through the same path as the form editor — the server re-validates this YAML against the
+                gantry schema before writing it to disk.
+              </div>
+            </div>
+          ) : (
+            <>
+              {/* Top-level identity: the only two things an operator needs
+                  at a glance — which machine this is, and where it's
+                  plugged in. */}
+              <div style={cardStyle}>
+                <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Gantry</h4>
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {GRBL_BOOLEAN_FIELDS.map(({ key, label }) => (
-                    <OptionalBooleanField
-                      key={key}
-                      id={`grbl-${key}`}
-                      name={key}
-                      label={label}
-                      value={config.grbl_settings?.[key] as boolean | null | undefined}
-                      onChange={(v) => updateGrblSetting(key, v)}
-                      dirty={!notDirty(config.grbl_settings?.[key], base?.grbl_settings?.[key])}
-                    />
-                  ))}
-                  {GRBL_NUMBER_FIELDS.map(({ key, label }) => (
-                    <OptionalNumberField
-                      key={key}
-                      id={`grbl-${key}`}
-                      name={key}
-                      label={label}
-                      value={config.grbl_settings?.[key] as number | null | undefined}
-                      onChange={(v) => updateGrblSetting(key, v)}
-                      dirty={!notDirty(config.grbl_settings?.[key], base?.grbl_settings?.[key])}
-                    />
-                  ))}
+                  <SelectField
+                    id="gantry-type"
+                    name="gantry_type"
+                    label="Gantry type"
+                    value={config.gantry_type}
+                    options={[
+                      { value: "cub", label: "Cub" },
+                      { value: "cub_xl", label: "Cub XL" },
+                    ]}
+                    onChange={(v) => commit({ ...config, gantry_type: v as "cub" | "cub_xl" })}
+                    dirty={d.gantry_type}
+                    required
+                  />
+                  <TextField
+                    id="gantry-serial-port"
+                    name="serial_port"
+                    label="Serial port"
+                    value={config.serial_port}
+                    onChange={(v) => commit({ ...config, serial_port: v })}
+                    dirty={d.serial_port}
+                  />
                 </div>
               </div>
-            )}
-          </div>
+
+              <div style={cardStyle}>
+                <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Connection</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <NumberField
+                    id="gantry-factory-z-travel"
+                    name="factory_z_travel_mm"
+                    label="Factory Z travel"
+                    value={config.cnc.factory_z_travel_mm}
+                    onChange={(v) => commit({ ...config, cnc: { ...config.cnc, factory_z_travel_mm: v } })}
+                    dirty={d.factory_z_travel_mm}
+                    required
+                  />
+                  <NumberField
+                    id="gantry-calibration-block-height"
+                    name="calibration_block_height_mm"
+                    label="Block height"
+                    value={Number(config.cnc.calibration_block_height_mm ?? 0)}
+                    onChange={(v) => commit({ ...config, cnc: { ...config.cnc, calibration_block_height_mm: v } })}
+                    dirty={d.calibration_block_height_mm}
+                    required
+                  />
+                  <NumberField
+                    id="gantry-safe-z"
+                    name="safe_z"
+                    label="Safe Z"
+                    value={Number(config.cnc.safe_z ?? config.working_volume.z_max)}
+                    onChange={(v) => commit({ ...config, cnc: { ...config.cnc, safe_z: v } })}
+                    dirty={d.safe_z}
+                  />
+                </div>
+              </div>
+
+              <div style={cardStyle}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                  <h4 style={sectionTitleStyle}>Instruments</h4>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <select value={selectedAddType} onChange={(e) => setAddType(e.target.value)} style={selectStyle}>
+                      {instrumentTypes.map((it) => (
+                        <option key={it.type} value={it.type}>{typeLabel(it.type)}{it.is_mock ? " (mock)" : ""}</option>
+                      ))}
+                    </select>
+                    <button onClick={addInstrument} style={addBtnStyle} disabled={!selectedAddType}>+ Add</button>
+                  </div>
+                </div>
+
+                {Object.keys(config.instruments).length === 0 && (
+                  <div style={emptyInstrumentNoticeStyle}>
+                    No mounted instruments yet. Choose the instruments installed on this machine, then save the gantry config.
+                  </div>
+                )}
+
+                {Object.entries(config.instruments).map(([key, inst]) => {
+                  const color = INSTRUMENT_COLORS[inst.type] ?? INSTRUMENT_COLORS[inst.type.replace("mock_", "")] ?? theme.color.textMuted;
+                  const fields = fieldsForInstrument(instrumentSchemas, inst.type, inst.vendor);
+                  const vendors = vendorsForType(instrumentTypes, inst.type);
+                  return (
+                    <div key={key} style={instrumentCardStyle}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                        <h4 style={{ ...sectionTitleStyle, color, ...theme.mono }}>
+                          {key} <span style={{ fontWeight: 400, color: theme.color.textMuted, fontSize: 11, fontFamily: theme.font.ui }}>({typeLabel(inst.type)})</span>
+                        </h4>
+                        <button onClick={() => removeInstrument(key)} style={removeBtnStyle}>Remove</button>
+                      </div>
+
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                        <TextField
+                          id={`${key}-type`}
+                          name={`${key}_type`}
+                          label="Type"
+                          value={inst.type}
+                          onChange={(v) => {
+                            const nextVendors = vendorsForType(instrumentTypes, v);
+                            const nextVendor = nextVendors.includes(inst.vendor)
+                              ? inst.vendor
+                              : nextVendors[0] ?? inst.vendor;
+                            updateInstrument(
+                              key,
+                              rebuildInstrumentForType(inst, v, nextVendor, instrumentSchemas),
+                            );
+                          }}
+                          dirty={isInstrumentFieldDirty(baseline, key, "type", inst.type)}
+                          required
+                        />
+                        {vendors.length > 0 ? (
+                          <SelectField
+                            id={`${key}-vendor`}
+                            name={`${key}_vendor`}
+                            label="Vendor"
+                            value={inst.vendor}
+                            options={vendors.map((v) => ({ value: v, label: v }))}
+                            onChange={(v) => updateInstrument(
+                              key,
+                              applyInstrumentFieldDefaults(
+                                { ...inst, vendor: v },
+                                instrumentSchemas,
+                              ),
+                            )}
+                            dirty={isInstrumentFieldDirty(baseline, key, "vendor", inst.vendor)}
+                            required
+                          />
+                        ) : (
+                          <TextField
+                            id={`${key}-vendor`}
+                            name={`${key}_vendor`}
+                            label="Vendor"
+                            value={inst.vendor}
+                            onChange={(v) => updateInstrument(key, { ...inst, vendor: v })}
+                            dirty={isInstrumentFieldDirty(baseline, key, "vendor", inst.vendor)}
+                            required
+                          />
+                        )}
+                        <NumberField id={`${key}-offset-x`} name={`${key}_offset_x`} label="Offset X" value={inst.offset_x} onChange={(v) => updateInstrument(key, { ...inst, offset_x: v })} dirty={isInstrumentFieldDirty(baseline, key, "offset_x", inst.offset_x)} />
+                        <NumberField id={`${key}-offset-y`} name={`${key}_offset_y`} label="Offset Y" value={inst.offset_y} onChange={(v) => updateInstrument(key, { ...inst, offset_y: v })} dirty={isInstrumentFieldDirty(baseline, key, "offset_y", inst.offset_y)} />
+                        <NumberField id={`${key}-depth`} name={`${key}_depth`} label="Depth" value={Number(inst.depth ?? 0)} onChange={(v) => updateInstrument(key, { ...inst, depth: v })} dirty={isInstrumentFieldDirty(baseline, key, "depth", inst.depth)} />
+                      </div>
+
+                      {fields.length > 0 && (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
+                          {fields.map((field) => {
+                            const value = (inst as Record<string, unknown>)[field.name];
+                            const fieldDirty = isInstrumentFieldDirty(baseline, key, field.name, value);
+                            if (field.choices) {
+                              return (
+                                <SelectField
+                                  key={field.name}
+                                  id={`${key}-${field.name}`}
+                                  name={`${key}_${field.name}`}
+                                  label={fieldLabel(field.name) + (field.required ? " *" : "")}
+                                  value={String(value ?? field.default ?? "")}
+                                  options={field.choices.map((c) => ({ value: c, label: c }))}
+                                  onChange={(v) => updateInstrument(key, { ...inst, [field.name]: v })}
+                                  dirty={fieldDirty}
+                                />
+                              );
+                            }
+                            if (field.type === "bool") {
+                              return (
+                                <SelectField
+                                  key={field.name}
+                                  id={`${key}-${field.name}`}
+                                  name={`${key}_${field.name}`}
+                                  label={fieldLabel(field.name) + (field.required ? " *" : "")}
+                                  value={String(value ?? field.default ?? false)}
+                                  options={[{ value: "true", label: "true" }, { value: "false", label: "false" }]}
+                                  onChange={(v) => updateInstrument(key, { ...inst, [field.name]: v === "true" })}
+                                  dirty={fieldDirty}
+                                />
+                              );
+                            }
+                            if (field.type === "float" || field.type === "int") {
+                              return (
+                                <NumberField
+                                  key={field.name}
+                                  id={`${key}-${field.name}`}
+                                  name={`${key}_${field.name}`}
+                                  label={fieldLabel(field.name) + (field.required ? " *" : "")}
+                                  value={Number(value ?? field.default ?? 0)}
+                                  onChange={(v) => updateInstrument(key, { ...inst, [field.name]: v })}
+                                  dirty={fieldDirty}
+                                />
+                              );
+                            }
+                            return (
+                              <TextField
+                                key={field.name}
+                                id={`${key}-${field.name}`}
+                                name={`${key}_${field.name}`}
+                                label={fieldLabel(field.name) + (field.required ? " *" : "")}
+                                value={String(value ?? field.default ?? "")}
+                                onChange={(v) => updateInstrument(key, { ...inst, [field.name]: v })}
+                                dirty={fieldDirty}
+                              />
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div style={cardStyle}>
+                <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Working Volume</h4>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  <NumberField id="wv-xmin" name="x_min" label="X min" value={config.working_volume.x_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, x_min: v } })} dirty={d.x_min} />
+                  <NumberField id="wv-xmax" name="x_max" label="X max" value={config.working_volume.x_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, x_max: v } })} dirty={d.x_max} />
+                  <NumberField id="wv-ymin" name="y_min" label="Y min" value={config.working_volume.y_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, y_min: v } })} dirty={d.y_min} />
+                  <NumberField id="wv-ymax" name="y_max" label="Y max" value={config.working_volume.y_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, y_max: v } })} dirty={d.y_max} />
+                  <NumberField id="wv-zmin" name="z_min" label="Z min" value={config.working_volume.z_min} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, z_min: v } })} dirty={d.z_min} />
+                  <NumberField id="wv-zmax" name="z_max" label="Z max" value={config.working_volume.z_max} onChange={(v) => commit({ ...config, working_volume: { ...config.working_volume, z_max: v } })} dirty={d.z_max} />
+                </div>
+              </div>
+
+              <div style={cardStyle}>
+                <button
+                  type="button"
+                  onClick={() => setAdvancedOpen((open) => !open)}
+                  aria-expanded={advancedOpen}
+                  style={advancedHeaderStyle}
+                >
+                  <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ color: theme.color.textMuted, fontSize: 12, width: 12, display: "inline-block" }}>
+                      {advancedOpen ? "▾" : "▸"}
+                    </span>
+                    Advanced settings
+                    {grblDirty && <DirtyMarker />}
+                  </span>
+                  <span style={theme.sectionLabel}>GRBL Settings</span>
+                </button>
+                {advancedOpen && (
+                  <div style={{ marginTop: 12 }}>
+                    <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>GRBL Settings</h4>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                      {GRBL_BOOLEAN_FIELDS.map(({ key, label }) => (
+                        <OptionalBooleanField
+                          key={key}
+                          id={`grbl-${key}`}
+                          name={key}
+                          label={label}
+                          value={config.grbl_settings?.[key] as boolean | null | undefined}
+                          onChange={(v) => updateGrblSetting(key, v)}
+                          dirty={!notDirty(config.grbl_settings?.[key], base?.grbl_settings?.[key])}
+                        />
+                      ))}
+                      {GRBL_NUMBER_FIELDS.map(({ key, label }) => (
+                        <OptionalNumberField
+                          key={key}
+                          id={`grbl-${key}`}
+                          name={key}
+                          label={label}
+                          value={config.grbl_settings?.[key] as number | null | undefined}
+                          onChange={(v) => updateGrblSetting(key, v)}
+                          dirty={!notDirty(config.grbl_settings?.[key], base?.grbl_settings?.[key])}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           {dirty && (
             <div style={{ marginTop: 12 }}>
@@ -558,16 +630,42 @@ export default function GantryEditor({
   );
 }
 
-function isValidGantry(config: GantryConfig): boolean {
+// Structural + range checks mirroring the server's Pydantic schema closely
+// enough to gate the Save button. Raw-YAML mode can hand this a config with
+// missing/mistyped fields (a key deleted or a string typed where a number
+// belongs), so every access is defensive — this must never throw, only
+// return false. The server's GantryYamlSchema is still the source of truth
+// and re-validates on every PUT regardless of what this returns.
+function isValidGantry(config: GantryConfig | null | undefined): boolean {
+  if (!config || typeof config !== "object") return false;
+  if (typeof config.serial_port !== "string") return false;
+  if (config.gantry_type !== "cub" && config.gantry_type !== "cub_xl") return false;
+
   const wv = config.working_volume;
+  if (!wv || typeof wv !== "object") return false;
+  const wvFields = [wv.x_min, wv.x_max, wv.y_min, wv.y_max, wv.z_min, wv.z_max];
+  if (!wvFields.every(isFiniteNumber)) return false;
   if (wv.x_min >= wv.x_max || wv.y_min >= wv.y_max || wv.z_min >= wv.z_max) return false;
-  if (config.cnc.factory_z_travel_mm <= 0 || config.cnc.factory_z_travel_mm < wv.z_max - wv.z_min) return false;
-  if (config.cnc.calibration_block_height_mm != null && config.cnc.calibration_block_height_mm <= 0) return false;
-  if (config.cnc.safe_z != null && (config.cnc.safe_z < wv.z_min || config.cnc.safe_z > wv.z_max)) return false;
-  for (const inst of Object.values(config.instruments)) {
-    if (!inst.type.trim() || !inst.vendor.trim()) return false;
+
+  const cnc = config.cnc;
+  if (!cnc || typeof cnc !== "object" || !isFiniteNumber(cnc.factory_z_travel_mm)) return false;
+  if (cnc.factory_z_travel_mm <= 0 || cnc.factory_z_travel_mm < wv.z_max - wv.z_min) return false;
+  if (cnc.calibration_block_height_mm != null
+    && (!isFiniteNumber(cnc.calibration_block_height_mm) || cnc.calibration_block_height_mm <= 0)) return false;
+  if (cnc.safe_z != null
+    && (!isFiniteNumber(cnc.safe_z) || cnc.safe_z < wv.z_min || cnc.safe_z > wv.z_max)) return false;
+
+  const instruments = config.instruments;
+  if (instruments == null || typeof instruments !== "object") return false;
+  for (const inst of Object.values(instruments)) {
+    if (!inst || typeof inst.type !== "string" || !inst.type.trim()) return false;
+    if (typeof inst.vendor !== "string" || !inst.vendor.trim()) return false;
   }
   return true;
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
 }
 
 // True when any GRBL field in `current` differs from `saved`. A missing
@@ -757,7 +855,7 @@ function OptionalBooleanField({
   );
 }
 
-/** Muted section group (Gantry Type, Instruments, Connection, Working Volume, Advanced). */
+/** Muted section group (Gantry, Connection, Instruments, Working Volume, Advanced). */
 const cardStyle: React.CSSProperties = {
   background: theme.color.surfaceMuted,
   border: `1px solid ${theme.color.border}`,
@@ -807,6 +905,35 @@ const configPickerRowStyle: React.CSSProperties = {
   gap: 10,
   marginBottom: 12,
   flexWrap: "wrap",
+};
+
+const rawToggleRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  marginBottom: 8,
+};
+
+const rawModeToggleStyle: React.CSSProperties = {
+  ...theme.btn.secondary,
+  ...theme.btnSmall,
+};
+
+const rawTextareaStyle: React.CSSProperties = {
+  ...theme.input,
+  ...theme.mono,
+  width: "100%",
+  minHeight: 360,
+  resize: "vertical",
+  fontSize: 12,
+  lineHeight: 1.5,
+  whiteSpace: "pre",
+};
+
+const rawHintStyle: React.CSSProperties = {
+  marginTop: 8,
+  fontSize: 11,
+  color: theme.color.textMuted,
+  lineHeight: 1.45,
 };
 
 const selectStyle: React.CSSProperties = {

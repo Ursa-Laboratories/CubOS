@@ -375,6 +375,50 @@ export interface RunRecord {
   fluid_state_id: number | null;
 }
 
+// Step-execution progress. `kind`/`data` are additive on RunEvent: events
+// written before they existed default to "lifecycle"/null, and an unknown
+// future kind must be ignored rather than treated as an error.
+export type RunEventKind = "lifecycle" | "step";
+
+export type StepOutcome = "started" | "completed" | "failed" | "skipped";
+
+export interface StepEventData {
+  index: number;
+  command: string;
+  /** Colon-joined nested scope for compound commands, e.g. "leg2:fill". */
+  substep: string | null;
+  outcome: StepOutcome;
+  duration_s: number | null;
+  error: string | null;
+  reason: string | null;
+}
+
+export interface RunEvent {
+  sequence: number;
+  timestamp: number;
+  state: RunState;
+  message: string;
+  kind: RunEventKind;
+  data: Record<string, unknown> | null;
+}
+
+export interface RunEventsResponse {
+  run_id: string;
+  events: RunEvent[];
+}
+
+export interface PlanStep {
+  index: number;
+  command: string;
+  summary: string;
+  args: Record<string, unknown>;
+}
+
+export interface RunPlanResponse {
+  run_id: string;
+  steps: PlanStep[];
+}
+
 export interface FluidSeedItem {
   volume_ul: number;
   composition?: Record<string, number> | null;

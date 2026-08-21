@@ -9,6 +9,7 @@ from typing import Any, Dict, TYPE_CHECKING
 from ..errors import ProtocolExecutionError
 from ..measurements import normalize_measurement
 from ..registry import protocol_command
+from . import _summaries
 from ..scan_args import normalize_scan_arguments, surface_detection_enabled
 from ._dispatch import inject_runtime_args
 from ._fluid_contents import (
@@ -24,7 +25,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-@protocol_command("measure")
+@protocol_command("measure", summary=_summaries.measure)
 def measure(
     context: ProtocolContext,
     instrument: str,

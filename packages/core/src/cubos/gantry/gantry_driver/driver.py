@@ -40,6 +40,30 @@ DEFAULT_FEED_RATE = 2000
 HOMING_TIMEOUT = 90
 ERROR_22_MAX_RETRIES = 2
 
+def looks_like_connection_loss(value: Exception | str) -> bool:
+    """Return true when an error looks like the serial link itself died.
+
+    Hardware validation on the CubXL showed the controller dropping off the
+    USB bus at a hard-limit trip (supply-rail glitch reboots the board and
+    re-enumerates the USB bridge). The stale file descriptor then times out
+    or raises OS-level errors on every exchange.
+    """
+    message = str(value).lower()
+    return any(
+        token in message
+        for token in (
+            "timed out",
+            "device not configured",
+            "errno 6",
+            "input/output error",
+            "bad file descriptor",
+            "device reports readiness to read but returned no data",
+            "write failed",
+            "no initial grbl status",
+        )
+    )
+
+
 # Compile regex patterns for extracting coordinates from the mill status
 wpos_pattern = re.compile(r"WPos:([\d.-]+),([\d.-]+),([\d.-]+)")
 mpos_pattern = re.compile(r"MPos:([\d.-]+),([\d.-]+),([\d.-]+)")
@@ -516,10 +540,70 @@ class Mill:
             line = self.ser_mill.readline().decode("ascii", errors="replace").strip()
             self.logger.debug("Soft reset response: %s", line)
 
+    def reconnect(self, attempts: int = 4, delay_s: float = 1.0) -> None:
+        """Re-open the serial port after the controller dropped off the bus.
+
+        The USB bridge re-enumerates with the same device name, but the old
+        file descriptor stays dead — every read times out. Prefer the
+        previously connected port name; fall back to auto-scan on the final
+        attempt in case the name changed. Enumeration is not instant, so
+        retry with a delay.
+        """
+        port = self.connected_port()
+        try:
+            if self.ser_mill is not None:
+                self.ser_mill.close()
+        except Exception as exc:
+            self.logger.warning("Closing stale serial handle failed: %s", exc)
+        self.ser_mill = None
+        self.active_connection = False
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            time.sleep(delay_s)
+            try:
+                self.connect(port=port if attempt < attempts else None)
+            except MillConnectionError as exc:
+                last_error = exc
+                self.logger.warning(
+                    "Serial reconnect attempt %d/%d failed: %s",
+                    attempt,
+                    attempts,
+                    exc,
+                )
+                continue
+            self.logger.info("Serial reconnect succeeded on attempt %d", attempt)
+            return
+        raise MillConnectionError(
+            "Controller connection lost and serial reconnect failed after "
+            f"{attempts} attempts"
+        ) from last_error
+
     def soft_reset_and_unlock(self):
-        """Soft reset followed by unlock — single serial sequence."""
-        self.soft_reset()
-        self.unlock()
+        """Soft reset followed by unlock — single serial sequence.
+
+        Some controller boards drop off the USB bus when a hard-limit trip
+        glitches their supply rail; the first symptom is the unlock read
+        timing out here. Reconnect once and retry the unlock — after a bus
+        drop the board has already rebooted, so the reset part is moot.
+        """
+        try:
+            self.soft_reset()
+            self.unlock()
+        except (
+            MillConnectionError,
+            CommandExecutionError,
+            OSError,
+            serial.SerialException,
+        ) as exc:
+            if not looks_like_connection_loss(exc):
+                raise
+            self.logger.warning(
+                "Controller stopped responding during reset/unlock (%s); "
+                "attempting serial reconnect.",
+                exc,
+            )
+            self.reconnect()
+            self.unlock()
 
     def home(self, timeout=HOMING_TIMEOUT):
         """Home the mill with a timeout."""

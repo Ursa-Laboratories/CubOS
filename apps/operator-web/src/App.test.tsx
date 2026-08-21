@@ -23,6 +23,8 @@ type ApiState = {
   protocols: Record<string, ProtocolResponse>;
 };
 
+let lastSubmittedBody: Record<string, unknown> | null = null;
+
 type FetchMockOptions = {
   protocolRun?: (init?: RequestInit) => Promise<Response>;
   protocolCancel?: () => Response | Promise<Response>;
@@ -31,6 +33,10 @@ type FetchMockOptions = {
   calibrationWarning?: string | null;
   fluidStates?: FluidStateSummary[];
   runsSubmit?: (body: Record<string, unknown> | null) => Response | Promise<Response>;
+  runsGet?: (runId: string) => Response | Promise<Response>;
+  runsCancel?: (runId: string) => Response | Promise<Response>;
+  runPlan?: (runId: string) => Response | Promise<Response>;
+  runEvents?: (runId: string) => Response | Promise<Response>;
   browse?: () => Response | Promise<Response>;
 };
 
@@ -334,6 +340,7 @@ function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
     }
     if (path === "/api/v1/runs" && method === "POST") {
       if (options.runsSubmit) return options.runsSubmit(body);
+      lastSubmittedBody = body;
       lastSubmittedRunId = (body?.run_id as string) ?? null;
       lastSubmittedFluidStateId = (body?.state as { fluid_state_id?: number } | undefined)?.fluid_state_id
         ?? null;
@@ -352,8 +359,37 @@ function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
         fluid_state_id: lastSubmittedFluidStateId,
       });
     }
+    if (path.endsWith("/cancel") && path.startsWith("/api/v1/runs/") && method === "POST") {
+      const runId = path.slice("/api/v1/runs/".length, -"/cancel".length);
+      if (options.runsCancel) return options.runsCancel(runId);
+      return jsonResponse({
+        run_id: runId,
+        state: "cancel_requested",
+        created_at: 0,
+        started_at: 0,
+        finished_at: null,
+        mock_mode: false,
+        metadata: {},
+        digests: {},
+        result: null,
+        error: null,
+        artifacts: [],
+        fluid_state_id: null,
+      });
+    }
+    if (path.endsWith("/plan") && path.startsWith("/api/v1/runs/") && method === "GET") {
+      const runId = path.slice("/api/v1/runs/".length, -"/plan".length);
+      if (options.runPlan) return options.runPlan(runId);
+      return jsonResponse({ run_id: runId, steps: [] });
+    }
+    if (path.includes("/events") && path.startsWith("/api/v1/runs/") && method === "GET") {
+      const runId = path.slice("/api/v1/runs/".length).split("/")[0];
+      if (options.runEvents) return options.runEvents(runId);
+      return jsonResponse({ run_id: runId, events: [] });
+    }
     if (path.startsWith("/api/v1/runs/") && method === "GET") {
       const runId = path.slice("/api/v1/runs/".length);
+      if (options.runsGet) return options.runsGet(runId);
       return jsonResponse({
         run_id: runId,
         state: "succeeded",
@@ -438,6 +474,10 @@ async function loadRequiredProtocolDependencies(user: ReturnType<typeof userEven
 async function connectGantry(user: ReturnType<typeof userEvent.setup>) {
   await user.click(await screen.findByRole("button", { name: "Connect" }));
   await screen.findByRole("button", { name: "Disconnect" });
+}
+
+async function returnToWorkflowTab(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Workflow" }));
 }
 
 describe("CubOS editor interactions", () => {
@@ -1015,8 +1055,8 @@ describe("CubOS editor interactions", () => {
     expect(runButton).toBeDisabled();
     await user.click(runButton);
     expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/v1/protocol/run",
-      expect.anything(),
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
     );
   });
 
@@ -1041,7 +1081,10 @@ describe("CubOS editor interactions", () => {
     await waitFor(() => expect(runButton).toBeEnabled());
     await user.click(runButton);
     await waitFor(() =>
-      expect(fetchMock).toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything()),
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/v1/runs",
+        expect.objectContaining({ method: "POST" }),
+      ),
     );
   });
 
@@ -1070,7 +1113,10 @@ describe("CubOS editor interactions", () => {
     expect(await screen.findByText(/Unsaved changes/i)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Run Protocol" }));
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
+    );
 
     // Saving clears the dirty state and re-enables running.
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -1082,26 +1128,37 @@ describe("CubOS editor interactions", () => {
     await user.click(runAfterSave);
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/protocol/run",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({
-          gantry_file: "cubos.yaml",
-          deck_file: "cub_deck.yaml",
-          protocol_file: "move.yaml",
-        }),
-      }),
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
     ));
-    expect(await screen.findByText(/campaign #123 created/i)).toBeInTheDocument();
-    expect(screen.getByLabelText("Last Campaign")).toHaveValue("#123");
+    // run_id is generated per submission, so assert the config selection
+    // rather than an exact body string.
+    expect(lastSubmittedBody).toMatchObject({
+      gantry_file: "cubos.yaml",
+      deck_file: "cub_deck.yaml",
+      protocol_file: "move.yaml",
+    });
+    await returnToWorkflowTab(user);
+    expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
+    expect(screen.getByLabelText("Last Campaign")).toHaveValue("#456");
   });
 
   it("surfaces protocol run failures and re-enables Run Protocol", async () => {
     const user = userEvent.setup();
     installFetchMock(createState(), {
-      protocolRun: async () => new Response("Gantry lost connection", {
-        status: 500,
-        statusText: "Internal Server Error",
+      runsGet: (runId: string) => jsonResponse({
+        run_id: runId,
+        state: "failed",
+        created_at: 0,
+        started_at: 0,
+        finished_at: 1,
+        mock_mode: false,
+        metadata: {},
+        digests: {},
+        result: null,
+        error: "Gantry lost connection",
+        artifacts: [],
+        fluid_state_id: null,
       }),
     });
 
@@ -1114,24 +1171,36 @@ describe("CubOS editor interactions", () => {
     await importConfig(user, "Import protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
-    expect(await screen.findByText("Gantry lost connection")).toBeInTheDocument();
+    // The Run view reports the failure where the operator already is.
+    expect(await screen.findByRole("alert")).toHaveTextContent("Gantry lost connection");
+    await returnToWorkflowTab(user);
+    expect(await screen.findAllByText("Gantry lost connection")).not.toHaveLength(0);
     await waitFor(() => expect(screen.getByRole("button", { name: "Run Protocol" })).toBeEnabled());
     expect(screen.queryByRole("button", { name: "Running..." })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancelling..." })).not.toBeInTheDocument();
   });
 
-  it("keeps the run pending after cancel until the protocol request settles", async () => {
+  it("keeps the run pending after cancel until the run reaches a terminal state", async () => {
     const user = userEvent.setup();
-    let resolveRun!: (response: Response) => void;
-    let runSignal: AbortSignal | undefined;
+    // The run stays "running" until the test flips it, mirroring a gantry
+    // that has acknowledged the cancel but not yet stopped.
+    let runState = "running";
     const fetchMock = installFetchMock(createState(), {
-      protocolRun: (init?: RequestInit) => new Promise<Response>((resolve) => {
-        runSignal = init?.signal ?? undefined;
-        resolveRun = resolve;
-      }),
-      protocolCancel: () => jsonResponse({
-        status: "cancel_requested",
-        warning: "sent but not acknowledged",
+      runsGet: (runId: string) => jsonResponse({
+        run_id: runId,
+        state: runState,
+        created_at: 0,
+        started_at: 0,
+        finished_at: runState === "running" ? null : 1,
+        mock_mode: false,
+        metadata: {},
+        digests: {},
+        result: runState === "succeeded"
+          ? { status: "ok", steps_executed: 1, campaign_id: 456 }
+          : null,
+        error: null,
+        artifacts: [],
+        fluid_state_id: null,
       }),
     });
     renderApp();
@@ -1143,25 +1212,89 @@ describe("CubOS editor interactions", () => {
     await importConfig(user, "Import protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
+    await returnToWorkflowTab(user);
     expect(await screen.findByRole("button", { name: "Running..." })).toBeDisabled();
     const cancelButton = await screen.findByRole("button", { name: "Cancel Run" });
     expect(cancelButton).toBeEnabled();
 
     await user.click(cancelButton);
 
+    // An addressable run cancels through its own resource, not the legacy
+    // whole-session endpoint.
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/protocol/cancel",
+      expect.stringMatching(/^\/api\/v1\/runs\/.+\/cancel$/),
       expect.objectContaining({ method: "POST" }),
     ));
-    expect(runSignal).toBeUndefined();
-    expect(await screen.findAllByText(/sent but not acknowledged/i)).not.toHaveLength(0);
+    expect(await screen.findAllByText(/cancellation requested/i)).not.toHaveLength(0);
     expect(screen.getAllByRole("button", { name: "Cancelling..." }).every((button) => button.hasAttribute("disabled"))).toBe(true);
     expect(screen.getByRole("button", { name: "Cancelling — waiting for protocol to stop" })).toBeDisabled();
 
-    resolveRun(jsonResponse({ status: "complete", steps_executed: 1, campaign_id: 123 }));
+    runState = "succeeded";
 
-    expect(await screen.findByText(/campaign #123 created/i)).toBeInTheDocument();
+    expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Cancelling — waiting for protocol to stop" })).not.toBeInTheDocument();
+  });
+
+  it("enters a Run view on submit, and keeps it reachable afterwards", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      runPlan: (runId: string) => jsonResponse({
+        run_id: runId,
+        steps: [
+          { index: 0, command: "home", summary: "all axes", args: {} },
+          { index: 1, command: "move", summary: "pipette → plate_1.A1", args: {} },
+        ],
+      }),
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+
+    // No run yet: an empty Run view would be a dead tab.
+    expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
+
+    await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
+
+    // Submitting switches into the run mode and shows the compiled steps
+    // alongside the live gantry readout.
+    const runRegion = await screen.findByRole("region", { name: "Run progress" });
+    expect(runRegion).toBeInTheDocument();
+    expect(await screen.findByText("all axes")).toBeInTheDocument();
+    expect(screen.getByText("pipette → plate_1.A1")).toBeInTheDocument();
+
+    // Navigating away and back returns to the same run.
+    await user.click(screen.getByRole("button", { name: "State" }));
+    expect(screen.queryByRole("region", { name: "Run progress" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Run" }));
+    expect(await screen.findByRole("region", { name: "Run progress" })).toBeInTheDocument();
+  });
+
+  it("reports the run outcome inside the Run view", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState(), {
+      runPlan: (runId: string) => jsonResponse({
+        run_id: runId,
+        steps: [{ index: 0, command: "home", summary: "all axes", args: {} }],
+      }),
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await connectGantry(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Import protocol config", "move.yaml");
+    await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
+
+    // The operator stays in the Run view when it finishes, so the outcome
+    // has to be reported there and not only in the workflow footer.
+    expect(
+      await screen.findByText(/campaign #456 created/i),
+    ).toBeInTheDocument();
   });
 
   it("shows a protocol-running sidebar banner outside the Protocol tab", async () => {
@@ -1209,7 +1342,10 @@ describe("CubOS editor interactions", () => {
     expect(banner).toHaveTextContent("Deck");
     await waitFor(() => expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled());
     await user.click(screen.getByRole("button", { name: "Run Protocol" }));
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything());
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/runs",
+      expect.objectContaining({ method: "POST" }),
+    );
   });
 
   it("prompts to save deck edits in the Deck tab", async () => {
@@ -1478,9 +1614,13 @@ describe("CubOS editor interactions", () => {
       state: { fluid_state_id: 5 },
     });
 
+    await returnToWorkflowTab(user);
     expect(await screen.findByText(/campaign #456 created/i)).toBeInTheDocument();
-    // The legacy synchronous endpoint must never be used for a stateful run.
-    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/protocol/run", expect.anything());
+    // The legacy synchronous endpoint is no longer used by the UI at all.
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/protocol/run",
+      expect.anything(),
+    );
   });
 
   it("surfaces a deck-fingerprint mismatch error clearly when resuming", async () => {
@@ -1515,6 +1655,7 @@ describe("CubOS editor interactions", () => {
     await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
+    await user.click(screen.getByRole("button", { name: "Workflow" }));
     expect(await screen.findByText(/deck fingerprint/i)).toBeInTheDocument();
   });
 

@@ -10,7 +10,12 @@ project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
 
 from cubos.gantry.coordinates import Coordinates
-from cubos.gantry.gantry_driver.driver import Mill, wpos_pattern, mpos_pattern
+from cubos.gantry.gantry_driver.driver import (
+    Mill,
+    looks_like_connection_loss,
+    mpos_pattern,
+    wpos_pattern,
+)
 from cubos.gantry.gantry_driver.exceptions import (
     CommandExecutionError,
     LocationNotFound,
@@ -310,6 +315,90 @@ class TestCNCDriverLogic(unittest.TestCase):
         mill.ser_mill = FakeGrblSerial(chunks=["error:2\r\n"])
         with self.assertRaises(StatusReturnError):
             mill._collect_grbl_settings_response()
+
+    def test_looks_like_connection_loss_classifies_errors(self):
+        self.assertTrue(
+            looks_like_connection_loss(
+                CommandExecutionError("Unlock ($X) timed out waiting for ok")
+            )
+        )
+        self.assertTrue(
+            looks_like_connection_loss(OSError(6, "Device not configured"))
+        )
+        self.assertFalse(looks_like_connection_loss(CommandExecutionError("error:9")))
+        self.assertFalse(looks_like_connection_loss("ALARM:1"))
+
+    @patch('cubos.gantry.gantry_driver.driver.time.sleep')
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_soft_reset_and_unlock_reconnects_when_link_dies(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        # Dead link: writes succeed into the void, reads never answer — the
+        # signature of a controller that dropped off the USB bus.
+        dead = FakeGrblSerial()
+        dead.write = MagicMock(return_value=1)
+        mill.ser_mill = dead
+        alive = FakeGrblSerial()
+        alive.queue_line("ok")
+
+        def fake_reconnect(attempts=4, delay_s=1.0):
+            mill.ser_mill = alive
+
+        with patch.object(Mill, "reconnect", side_effect=fake_reconnect) as mock_reconnect:
+            with patch(
+                'cubos.gantry.gantry_driver.driver.time.time',
+                side_effect=[0.0, 3.0, 10.0, 10.1, 10.2],
+            ):
+                mill.soft_reset_and_unlock()
+
+        mock_reconnect.assert_called_once()
+        self.assertIn(b"$X\n", alive.writes)
+
+    @patch('cubos.gantry.gantry_driver.driver.time.sleep')
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_reconnect_prefers_same_port_then_succeeds(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial(port="/dev/cu.usbserial-130")
+
+        with patch.object(
+            Mill,
+            "connect",
+            side_effect=[MillConnectionError("device not yet enumerated"), None],
+        ) as mock_connect:
+            mill.reconnect(attempts=3, delay_s=0.0)
+
+        self.assertEqual(mock_connect.call_count, 2)
+        mock_connect.assert_any_call(port="/dev/cu.usbserial-130")
+
+    @patch('cubos.gantry.gantry_driver.driver.time.sleep')
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_reconnect_raises_after_exhausting_attempts(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
+    ):
+        mill = Mill()
+        mill.ser_mill = FakeGrblSerial(port="/dev/cu.usbserial-130")
+
+        with patch.object(
+            Mill,
+            "connect",
+            side_effect=MillConnectionError("device not yet enumerated"),
+        ) as mock_connect:
+            with self.assertRaises(MillConnectionError) as ctx:
+                mill.reconnect(attempts=2, delay_s=0.0)
+
+        self.assertEqual(mock_connect.call_count, 2)
+        self.assertIn("reconnect failed", str(ctx.exception))
+        # Final attempt falls back to auto-scan in case the name changed.
+        mock_connect.assert_called_with(port=None)
 
     @patch('cubos.gantry.gantry_driver.driver.time.sleep')
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')

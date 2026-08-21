@@ -23,6 +23,7 @@ import {
   useInstrumentSchemas,
   useInstrumentMethods,
 } from "./hooks/useGantryPosition";
+import RunPanel from "./components/run/RunPanel";
 import { useProtocolCommands, useProtocolConfigs, useProtocol, useSaveProtocol, useValidateProtocolSetup, useRunStatus } from "./hooks/useProtocol";
 import { useExperimentData } from "./hooks/useExperimentData";
 import { useFluidStates } from "./hooks/useFluidState";
@@ -95,7 +96,7 @@ const WORKING_DECK_FILENAME = "cub_deck.yaml";
 
 export default function App() {
   const qc = useQueryClient();
-  const [activeView, setActiveView] = useState<"Workflow" | "Visualize" | "State" | "Results">("Workflow");
+  const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "State" | "Results">("Workflow");
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
@@ -437,40 +438,26 @@ export default function App() {
     setRunError(null);
     qc.setQueryData(["protocol", "run-status"], { active: true, protocol_file: protocolFile });
 
-    if (!state) {
-      // No state choice was made: byte-identical to the pre-Feature-07
-      // stateless flow, through the legacy synchronous endpoint.
-      try {
-        const result = await protocolApi.run({
-          gantry_file: gantryFile,
-          deck_file: deckFile,
-          protocol_file: protocolFile,
-        });
-        setRunResult(result);
-        qc.invalidateQueries({ queryKey: ["data", "campaigns"] });
-      } catch (err: unknown) {
-        setRunError(err instanceof Error ? err.message : String(err));
-      } finally {
-        setIsRunning(false);
-        setIsCancelingRun(false);
-        qc.invalidateQueries({ queryKey: ["protocol", "run-status"] });
-      }
-      return;
-    }
-
-    // A fluid-state choice was made: only the versioned /api/v1/runs
-    // resource accepts state selection (the legacy endpoint structurally
-    // cannot), so submission and polling go through it instead.
+    // Every run goes through the versioned /api/v1/runs resource, including
+    // stateless ones (`state` omitted). It is the only path that yields a
+    // run_id and an event stream, which the step view needs; the legacy
+    // synchronous endpoint remains available to API clients but is no longer
+    // used here.
     const runId = `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    setActiveRunId(runId);
     try {
       const submitted = await runsApi.submit({
         run_id: runId,
         gantry_file: gantryFile,
         deck_file: deckFile,
         protocol_file: protocolFile,
-        state,
+        ...(state ? { state } : {}),
       });
+      // Enter the run mode only once the server has accepted the run. A
+      // rejected submission (server busy, policy, deck fingerprint) would
+      // otherwise strand the operator on a Run view whose plan and record
+      // both 404, hiding the actual reason on the tab they just left.
+      setActiveRunId(runId);
+      setActiveView("Run");
       const finalRecord = RUN_TERMINAL_STATES.has(submitted.state)
         ? submitted
         : await pollVersionedRun(runId);
@@ -486,7 +473,8 @@ export default function App() {
     } finally {
       setIsRunning(false);
       setIsCancelingRun(false);
-      setActiveRunId(null);
+      // activeRunId is intentionally NOT cleared: the finished run's step
+      // list stays on screen until the next run replaces it.
       qc.invalidateQueries({ queryKey: ["protocol", "run-status"] });
     }
   };
@@ -496,7 +484,11 @@ export default function App() {
     setIsCancelingRun(true);
     setRunError(null);
     try {
-      if (activeRunId) {
+      // `activeRunId` outlives its run so the Run view stays reachable, so it
+      // alone cannot say which run to cancel. `isRunning` is true only while
+      // this tab's own submission is in flight; anything else active is a run
+      // started elsewhere, which the session-wide endpoint below stops.
+      if (activeRunId && isRunning) {
         await runsApi.cancel(activeRunId);
         setRunError("Protocol cancellation requested.");
       } else {
@@ -534,7 +526,17 @@ export default function App() {
         </div>
       </div>
       <div style={viewToggleStyle} aria-label="Workspace view">
-        {(["Workflow", "Visualize", "State", "Results"] as const).map((view) => (
+        {(
+          [
+            "Workflow",
+            // Only offered once a run exists — an empty run view is a dead
+            // tab, and the run is what the operator navigates back to.
+            ...(activeRunId ? (["Run"] as const) : []),
+            "Visualize",
+            "State",
+            "Results",
+          ] as const
+        ).map((view) => (
           <button
             key={view}
             type="button"
@@ -619,7 +621,13 @@ export default function App() {
   );
 
   const left = (
-    <div>
+    <div
+      style={
+        activeView === "Run"
+          ? { height: "100%", display: "flex", flexDirection: "column" }
+          : undefined
+      }
+    >
       {activeView === "Workflow" && (
         <>
           <EditorTabs
@@ -776,6 +784,18 @@ export default function App() {
         </>
           )}
         </>
+      )}
+      {/* The persistent right column already carries the live deck view and
+          gantry readout, so the run mode only needs to own the left region. */}
+      {activeView === "Run" && activeRunId && (
+        <div style={{ flex: "1 1 auto", minHeight: 0, display: "flex" }}>
+          <RunPanel
+            runId={activeRunId}
+            onCancel={handleCancelRun}
+            isCancelling={isCancelingRun}
+            fill
+          />
+        </div>
       )}
       {activeView === "Visualize" && (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>

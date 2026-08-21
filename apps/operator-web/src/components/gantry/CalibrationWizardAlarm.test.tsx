@@ -76,6 +76,50 @@ describe("CalibrationWizard alarm recovery", () => {
     vi.unstubAllGlobals();
   });
 
+  it("shows the power-cycle instruction when recovery reports connection loss", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(typeof input === "string" ? input : (input as Request).url, "http://localhost");
+      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
+        return new Response(JSON.stringify({ detail: "ALARM:1" }), {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
+        return new Response(
+          JSON.stringify({
+            detail:
+              "Controller connection lost during limit recovery. Power-cycle the controller, re-seat the USB cable, then Disconnect and Connect again before continuing.",
+          }),
+          { status: 503, headers: { "Content-Type": "application/json" } },
+        );
+      }
+      return jsonResponse(position());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <CalibrationWizard
+        open
+        onClose={() => undefined}
+        gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
+        position={position()}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    const zDown = await advanceToOriginJog(user);
+    await user.click(zDown);
+
+    // The recovery failure surfaces on both the primary "GANTRY ALARM" banner
+    // and the secondary generic error line, so a bare findByText on this
+    // substring matches two elements. Scope to the alarm banner, which is
+    // the actionable instruction this test is actually about.
+    const alarmBanner = (await screen.findByText("GANTRY ALARM")).closest("div");
+    expect(alarmBanner).toHaveTextContent(/Power-cycle the controller, re-seat the USB cable/);
+  });
+
   it("closes even when restoring soft limits fails (dead controller link)", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();

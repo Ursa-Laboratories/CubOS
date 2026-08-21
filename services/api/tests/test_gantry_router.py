@@ -823,6 +823,31 @@ def test_calibration_and_recovery_endpoints_delegate_to_session(monkeypatch):
     assert "recover_calibration_limit" in called
 
 
+def test_limit_recovery_connection_loss_maps_to_503(monkeypatch):
+    from cubos.gantry.gantry_driver.exceptions import MillConnectionError
+
+    session = FakeSession()
+
+    def fail(**_kwargs):
+        raise MillConnectionError(
+            "Controller connection lost and serial reconnect failed after 4 attempts"
+        )
+
+    session.recover_calibration_limit = fail
+    monkeypatch.setattr(gantry_router, "_session", session)
+
+    response = api_request(
+        create_app(),
+        "POST",
+        "/api/v1/gantry/calibration/recover-limit",
+        json={"x": 1, "y": 0, "z": 0},
+    )
+
+    assert response.status_code == 503
+    assert "Controller connection lost" in response.text
+    assert "Power-cycle" in response.text
+
+
 def test_limit_recovery_alarm_error_maps_to_409(monkeypatch):
     session = FakeSession()
 

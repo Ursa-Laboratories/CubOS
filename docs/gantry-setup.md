@@ -127,6 +127,33 @@ instruments:
     depth: 0.0
 ```
 
+**`pipette` / `sartorius`** — Sartorius Picus 2 electronic pipette over USB
+serial. Unlike the Opentrons vendor (a CubOS-driven stepper on a bare pipette
+body), the Picus owns its own piston, so there is no plunger geometry to
+calibrate — volumes are commanded directly:
+
+```yaml
+instruments:
+  pipette:
+    type: pipette
+    vendor: sartorius
+    pipette_model: picus2_1ch_1000   # or picus2_1ch_10
+    port: "/dev/ttyACM0"
+    offline: true
+    offset_x: 180.0
+    offset_y: -25.0
+    depth: 0.0
+    # Optional, shown with defaults:
+    # min_battery_percent: 20.0      # refuse to start below this charge
+    # verify_model: true             # fail closed if the device is a different model
+    # blowout_delay_ms: 3000
+    # whole_microlitres_only: false  # force integer uL on the wire
+```
+
+The pipette asks for on-screen confirmation before accepting host motor
+control; the driver satisfies that during `connect()` and, if it times out,
+fails with a message naming the softkey to press.
+
 **`potentiostat` / `admiral`** — Admiral SquidStat, addressed by serial port and
 channel number:
 
