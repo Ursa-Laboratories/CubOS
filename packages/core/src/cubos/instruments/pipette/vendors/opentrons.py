@@ -2,10 +2,12 @@ import math
 from typing import Optional
 
 from cubos.instruments.controllers.pawduino import (
+    CMD_LINE_BREAK,
     PawduinoLink,
     PawduinoLinkCommandError,
     PawduinoLinkError,
     PawduinoLinkTimeoutError,
+    parse_line_break_response,
 )
 from cubos.instruments.pipette.interface import PipetteInstrument
 from cubos.instruments.pipette.exceptions import (
@@ -312,6 +314,16 @@ class OpentronsPipette(PipetteInstrument):
             return
         self._position_mm = self._config.prime_position
         self._is_primed = True
+
+    def read_tip_present(self) -> bool | None:
+        """Read the tool-head line-break beam: an attached tip breaks it."""
+        if self._offline:
+            return self._has_tip
+        response = self._send_command(CMD_LINE_BREAK)
+        try:
+            return parse_line_break_response(response)
+        except ValueError as exc:
+            raise PipetteCommandError(str(exc)) from None
 
     def get_status(self) -> PipetteStatus:
         if self._offline:

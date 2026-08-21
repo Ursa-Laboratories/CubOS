@@ -264,3 +264,40 @@ class TestErrorPaths:
             link = PawduinoLink.acquire("/dev/ttyACM0")
             link.connect()
         mock_ser.reset_input_buffer.assert_called_once()
+
+
+class TestParseLineBreakResponse:
+
+    def test_quoted_key_forms(self):
+        from cubos.instruments.controllers.pawduino import parse_line_break_response
+
+        assert parse_line_break_response('OK:{"value1":1}') is True
+        assert parse_line_break_response('OK:{"value1":0}') is False
+
+    def test_unquoted_key_forms(self):
+        from cubos.instruments.controllers.pawduino import parse_line_break_response
+
+        assert parse_line_break_response("OK:{value1:1}") is True
+        assert parse_line_break_response("OK:{value1:0}") is False
+
+    def test_non_one_value_reads_false(self):
+        from cubos.instruments.controllers.pawduino import parse_line_break_response
+
+        assert parse_line_break_response('OK:{"value1":2}') is False
+
+    def test_missing_value1_raises(self):
+        from cubos.instruments.controllers.pawduino import parse_line_break_response
+
+        with pytest.raises(ValueError, match="value1"):
+            parse_line_break_response("OK:{}")
+
+    def test_unparseable_value_raises(self):
+        from cubos.instruments.controllers.pawduino import parse_line_break_response
+
+        with pytest.raises(ValueError, match="[Uu]nparseable"):
+            parse_line_break_response('OK:{"value1":"nope"}')
+
+    def test_skips_unrelated_keys(self):
+        from cubos.instruments.controllers.pawduino import parse_line_break_response
+
+        assert parse_line_break_response('OK:{"other":5,"value1":1}') is True

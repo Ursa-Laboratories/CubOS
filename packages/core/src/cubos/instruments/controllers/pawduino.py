@@ -23,6 +23,40 @@ _CMD_HELLO = 0
 _HELLO_MARKER = "Hello"
 _HELLO_TIMEOUT = 5.0
 
+# Line-break beam sensor at the tool head, shared by every instrument on the
+# board: a held cap or an attached pipette tip interrupts the beam.
+CMD_LINE_BREAK = 7
+
+
+def parse_line_break_response(response: str) -> bool:
+    """Parse a line-break sensor response into a beam-broken bool.
+
+    The real firmware sends JSON-quoted keys for this command
+    (``OK:{"value1":1}``, 1 = beam broken); bare keys are tolerated in case
+    a future firmware revision aligns it with the pipette-status format.
+    Raises ``ValueError`` when no parseable ``value1`` field is present.
+    """
+    body = response.removeprefix("OK:").strip()
+    if body.startswith("{") and body.endswith("}"):
+        body = body[1:-1]
+    for pair in body.split(","):
+        if ":" not in pair:
+            continue
+        key, _, raw_value = pair.partition(":")
+        if key.strip().strip('"') != "value1":
+            continue
+        value = raw_value.strip().strip('"')
+        try:
+            return int(value) == 1
+        except ValueError:
+            raise ValueError(
+                f"Unparseable line-break sensor value {value!r} in "
+                f"response {response!r}."
+            ) from None
+    raise ValueError(
+        f"No 'value1' field in line-break sensor response {response!r}."
+    )
+
 
 class PawduinoLinkError(Exception):
     """Base exception for Pawduino link failures."""

@@ -1442,3 +1442,316 @@ class TestSerialTransferCommand:
                 ctx, source="vial_1", plate="plate_1", axis="A",
                 volumes=[10.0],
             )
+
+
+# ─── tip-presence verification tests ─────────────────────────────────────────
+
+
+class TestPickUpTipVerify:
+
+    def test_verify_disabled_never_reads_sensor(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, pipette = _tip_rack_context()
+        pick_up_tip(ctx, position="tips.A1", verify_tip=False)
+
+        pipette.read_tip_present.assert_not_called()
+        pipette.pick_up_tip.assert_called_once()
+
+    def test_sensorless_pipette_skips_verification(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _tip_rack_context()
+        pipette.read_tip_present.return_value = None
+
+        pick_up_tip(ctx, position="tips.A1")
+
+        pipette.read_tip_present.assert_called_once_with()
+        pipette.pick_up_tip.assert_called_once()
+        pipette.set_attached_tip_extension.assert_called_once_with(
+            DEFAULT_TIP_LENGTH_MM,
+        )
+        assert rack.is_tip_present("A1") is False
+
+    def test_verified_success_first_read(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _tip_rack_context()
+        pipette.read_tip_present.return_value = True
+
+        pick_up_tip(ctx, position="tips.A1")
+
+        pipette.pick_up_tip.assert_called_once()
+        assert rack.is_tip_present("A1") is False
+
+    def test_dry_read_retries_same_slot_then_succeeds(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _tip_rack_context()
+        pipette.read_tip_present.side_effect = [False, True]
+
+        pick_up_tip(ctx, position="tips.A1", verify_retries=1)
+
+        assert pipette.pick_up_tip.call_count == 2
+        pipette.set_attached_tip_extension.assert_called_once_with(
+            DEFAULT_TIP_LENGTH_MM,
+        )
+        assert rack.is_tip_present("A1") is False
+
+    def test_untracked_explicit_slot_dry_consumes_and_raises(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _tip_rack_context()
+        pipette.read_tip_present.return_value = False
+
+        with pytest.raises(ProtocolExecutionError, match="no tip detected"):
+            pick_up_tip(ctx, position="tips.A1", verify_retries=1)
+
+        assert pipette.pick_up_tip.call_count == 2
+        pipette.set_attached_tip_extension.assert_not_called()
+        assert rack.is_tip_present("A1") is False
+
+    def test_tracked_explicit_slot_dry_resolves_consumed_and_raises(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, pipette = _tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        store = MagicMock()
+        store.get_tip_snapshot.return_value = {"operations": []}
+        store.begin_pick_up_tip.return_value = (True, "A1", DEFAULT_TIP_LENGTH_MM)
+        ctx.data_store = store
+        pipette.read_tip_present.return_value = False
+
+        with pytest.raises(ProtocolExecutionError, match="no tip detected"):
+            pick_up_tip(ctx, position="tips.A1")
+
+        store.resolve_tip_operation.assert_called_once()
+        assert store.resolve_tip_operation.call_args.args[1] == "reconciled"
+        assert (
+            store.resolve_tip_operation.call_args.kwargs["final_slot_status"]
+            == "consumed"
+        )
+        store.complete_pick_up_tip.assert_not_called()
+        store.mark_tip_reconciliation_required.assert_not_called()
+
+    def test_untracked_rack_level_advances_to_next_slot(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _two_tip_rack_context()
+        pipette.read_tip_present.side_effect = [False, False, True]
+
+        pick_up_tip(ctx, position="tips", verify_retries=1)
+
+        assert pipette.pick_up_tip.call_count == 3
+        pipette.set_attached_tip_extension.assert_called_once_with(
+            DEFAULT_TIP_LENGTH_MM,
+        )
+        assert rack.is_tip_present("A1") is False
+        assert rack.is_tip_present("A2") is False
+
+    def test_untracked_rack_level_budget_exhausted_raises(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _two_tip_rack_context()
+        pipette.read_tip_present.return_value = False
+
+        with pytest.raises(ProtocolExecutionError, match="operator attention"):
+            pick_up_tip(
+                ctx, position="tips", verify_retries=0, verify_slot_advance=1,
+            )
+
+        assert pipette.pick_up_tip.call_count == 2
+        assert rack.is_tip_present("A1") is False
+        assert rack.is_tip_present("A2") is False
+
+    def test_tracked_rack_level_advance_journals_each_slot(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, rack, pipette = _two_tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        store = MagicMock()
+        store.get_tip_snapshot.return_value = {"operations": []}
+        store.begin_pick_up_tip.side_effect = [
+            (True, "A1", DEFAULT_TIP_LENGTH_MM),
+            (True, "A2", DEFAULT_TIP_LENGTH_MM),
+        ]
+        ctx.data_store = store
+        pipette.read_tip_present.side_effect = [False, True]
+
+        pick_up_tip(ctx, position="tips", verify_retries=0)
+
+        assert store.begin_pick_up_tip.call_count == 2
+        first_key = store.begin_pick_up_tip.call_args_list[0].args[1]
+        second_key = store.begin_pick_up_tip.call_args_list[1].args[1]
+        assert first_key != second_key
+        assert "pickup:slot1" in second_key
+        assert store.begin_pick_up_tip.call_args_list[1].args[3] is None
+        store.resolve_tip_operation.assert_called_once()
+        assert store.resolve_tip_operation.call_args.args[0] == first_key
+        store.complete_pick_up_tip.assert_called_once_with(second_key)
+        assert ctx.active_substep is None
+
+    def test_tracked_replay_skips_reconciled_slot_without_hardware(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, pipette = _two_tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        keys = iter(["k0", "k1"])
+        ctx.fluid_operation_key = lambda action: next(keys)
+        store = MagicMock()
+        store.get_tip_snapshot.return_value = {
+            "operations": [{"operation_key": "k0", "status": "reconciled"}],
+        }
+        store.begin_pick_up_tip.return_value = (False, "A2", 59.3)
+        ctx.data_store = store
+
+        pick_up_tip(ctx, position="tips")
+
+        pipette.pick_up_tip.assert_not_called()
+        store.begin_pick_up_tip.assert_called_once()
+        assert store.begin_pick_up_tip.call_args.args[1] == "k1"
+        pipette.set_attached_tip_extension.assert_called_once_with(59.3)
+        store.resolve_tip_operation.assert_not_called()
+
+    def test_tracked_slot_consume_failure_requires_reconciliation(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, pipette = _tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        store = MagicMock()
+        store.get_tip_snapshot.return_value = {"operations": []}
+        store.begin_pick_up_tip.return_value = (True, "A1", DEFAULT_TIP_LENGTH_MM)
+        store.resolve_tip_operation.side_effect = RuntimeError("database is locked")
+        ctx.data_store = store
+        pipette.read_tip_present.return_value = False
+
+        with pytest.raises(ProtocolExecutionError, match="[Rr]econciliation"):
+            pick_up_tip(ctx, position="tips.A1", verify_retries=0)
+
+        store.mark_tip_reconciliation_required.assert_called_once()
+
+    def test_tracked_sensor_read_failure_marks_reconciliation(self):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, pipette = _tip_rack_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        store = MagicMock()
+        store.get_tip_snapshot.return_value = {"operations": []}
+        store.begin_pick_up_tip.return_value = (True, "A1", DEFAULT_TIP_LENGTH_MM)
+        ctx.data_store = store
+        pipette.read_tip_present.side_effect = RuntimeError("sensor fault")
+
+        with pytest.raises(RuntimeError, match="sensor fault"):
+            pick_up_tip(ctx, position="tips.A1")
+
+        store.mark_tip_reconciliation_required.assert_called_once()
+        store.complete_pick_up_tip.assert_not_called()
+
+    @pytest.mark.parametrize("kwargs", [
+        {"verify_retries": -1},
+        {"verify_retries": True},
+        {"verify_slot_advance": -2},
+        {"verify_slot_advance": False},
+        {"verify_retries": 1.5},
+    ])
+    def test_invalid_verify_parameters_rejected(self, kwargs):
+        from cubos.protocol_engine.commands.pipette import pick_up_tip
+
+        ctx, _rack, pipette = _tip_rack_context()
+        with pytest.raises(ProtocolExecutionError, match="non-negative integer"):
+            pick_up_tip(ctx, position="tips.A1", **kwargs)
+        pipette.pick_up_tip.assert_not_called()
+
+
+class TestDropTipVerify:
+
+    def test_verify_disabled_never_reads_sensor(self):
+        from cubos.protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        drop_tip(ctx, position="waste_1", verify_tip=False)
+
+        _get_pipette(ctx).read_tip_present.assert_not_called()
+        _get_pipette(ctx).clear_attached_tip_extension.assert_called_once_with()
+
+    def test_clear_beam_confirms_drop(self):
+        from cubos.protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        _get_pipette(ctx).read_tip_present.return_value = False
+
+        drop_tip(ctx, position="waste_1")
+
+        _get_pipette(ctx).clear_attached_tip_extension.assert_called_once_with()
+
+    def test_sensorless_pipette_confirms_drop(self):
+        from cubos.protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        _get_pipette(ctx).read_tip_present.return_value = None
+
+        drop_tip(ctx, position="waste_1")
+
+        _get_pipette(ctx).clear_attached_tip_extension.assert_called_once_with()
+
+    def test_untracked_stuck_tip_raises(self):
+        from cubos.protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        _get_pipette(ctx).read_tip_present.return_value = True
+
+        with pytest.raises(ProtocolExecutionError, match="stuck"):
+            drop_tip(ctx, position="waste_1")
+
+        _get_pipette(ctx).clear_attached_tip_extension.assert_not_called()
+
+    def test_tracked_stuck_tip_marks_reconciliation_required(self):
+        from cubos.protocol_engine.commands.pipette import drop_tip
+
+        ctx = _mock_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_drop_tip.return_value = (True, "tips", "A1")
+        _get_pipette(ctx).read_tip_present.return_value = True
+
+        with pytest.raises(ProtocolExecutionError, match="stuck"):
+            drop_tip(ctx, position="waste_1")
+
+        ctx.data_store.mark_tip_reconciliation_required.assert_called_once()
+        ctx.data_store.complete_drop_tip.assert_not_called()
+        _get_pipette(ctx).clear_attached_tip_extension.assert_not_called()
+
+
+class TestTipOperationReplayStatus:
+
+    def test_snapshot_read_failure_returns_none(self):
+        from cubos.protocol_engine.commands.pipette import (
+            _tip_operation_replay_status,
+        )
+
+        ctx = _mock_context()
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.get_tip_snapshot.side_effect = RuntimeError("locked")
+
+        assert _tip_operation_replay_status(ctx, "k0") is None
+
+    def test_absent_key_returns_none(self):
+        from cubos.protocol_engine.commands.pipette import (
+            _tip_operation_replay_status,
+        )
+
+        ctx = _mock_context()
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.get_tip_snapshot.return_value = {
+            "operations": [{"operation_key": "other", "status": "applied"}],
+        }
+
+        assert _tip_operation_replay_status(ctx, "k0") is None

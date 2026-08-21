@@ -43,10 +43,12 @@ from __future__ import annotations
 from typing import Optional
 
 from cubos.instruments.controllers.pawduino import (
+    CMD_LINE_BREAK,
     PawduinoLink,
     PawduinoLinkCommandError,
     PawduinoLinkError,
     PawduinoLinkTimeoutError,
+    parse_line_break_response,
 )
 from cubos.instruments.capper.exceptions import (
     CapperCommandError,
@@ -59,7 +61,6 @@ from cubos.instruments.capper.models import CapperStatus
 
 _CMD_EMAG_ON = 5
 _CMD_EMAG_OFF = 6
-_CMD_LINE_BREAK = 7
 
 
 class PawduinoCapper(CapperInstrument):
@@ -159,7 +160,7 @@ class PawduinoCapper(CapperInstrument):
     def read_cap_present(self) -> bool:
         if self._offline:
             return self._cap_present
-        response = self._send_command(_CMD_LINE_BREAK)
+        response = self._send_command(CMD_LINE_BREAK)
         return self._parse_line_break_response(response)
 
     def get_status(self) -> CapperStatus:
@@ -181,33 +182,11 @@ class PawduinoCapper(CapperInstrument):
 
     @staticmethod
     def _parse_line_break_response(response: str) -> bool:
-        """Parse the line-break sensor response into a cap-present bool.
-
-        Tolerates both the quoted-key JSON-ish form the real firmware sends
-        for this command (``{"value1":1}``) and an unquoted form, in case a
-        future firmware revision aligns it with the pipette-status format.
-        """
-        body = response.removeprefix("OK:").strip()
-        if body.startswith("{") and body.endswith("}"):
-            body = body[1:-1]
-        for pair in body.split(","):
-            if ":" not in pair:
-                continue
-            key, _, raw_value = pair.partition(":")
-            key = key.strip().strip('"')
-            if key != "value1":
-                continue
-            value = raw_value.strip().strip('"')
-            try:
-                return int(value) == 1
-            except ValueError:
-                raise CapperSensorFault(
-                    f"Unparseable line-break sensor value {value!r} in "
-                    f"response {response!r}."
-                ) from None
-        raise CapperSensorFault(
-            f"No 'value1' field in line-break sensor response {response!r}."
-        )
+        """Parse the line-break sensor response into a cap-present bool."""
+        try:
+            return parse_line_break_response(response)
+        except ValueError as exc:
+            raise CapperSensorFault(str(exc)) from None
 
     def _release_link(self) -> None:
         if self._link is not None:

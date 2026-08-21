@@ -395,11 +395,160 @@ def mix(
     return result
 
 
+def _tip_operation_replay_status(
+    context: ProtocolContext,
+    operation_key: str,
+) -> str | None:
+    """Return the journaled status of *operation_key*, or None if absent.
+
+    Callers act only on ``reconciled``: it is the marker a verified-dry
+    pickup leaves behind (slot auto-consumed, see ``_attempt_pick_up_tip``),
+    so a resumed run must skip that slot attempt rather than replay it —
+    ``begin_pick_up_tip`` rejects reuse of an operator-resolved key.
+    """
+    try:
+        operations = context.data_store.get_tip_snapshot(
+            context.fluid_state_id,
+        )["operations"]
+    except Exception:
+        return None
+    for operation in operations:
+        if operation["operation_key"] == operation_key:
+            return operation["status"]
+    return None
+
+
+def _attempt_pick_up_tip(
+    context: ProtocolContext,
+    pipette: Any,
+    rack: Any,
+    rack_key: str,
+    tip_id: Optional[str],
+    *,
+    speed: float,
+    verify_tip: bool,
+    verify_retries: int,
+) -> str:
+    """Journal, actuate, and sensor-verify one slot's pickup.
+
+    Returns ``"done"`` when a tip is attached (or the step replayed as
+    already applied) and ``"dry"`` when the sensor found no tip after every
+    retry — the slot is then already marked consumed (durably when tracked,
+    in-memory otherwise) so the caller can advance.
+    """
+    tracked = _tracked_fluid_state(context)
+    operation_key = None
+    if tracked:
+        operation_key = context.fluid_operation_key("pick_up_tip")
+        if _tip_operation_replay_status(context, operation_key) == "reconciled":
+            context.logger.info(
+                "Skipping tip slot already consumed by operation %s",
+                operation_key,
+            )
+            return "dry"
+        try:
+            should_execute, resolved_tip_id, extension_mm = (
+                context.data_store.begin_pick_up_tip(
+                    context.fluid_state_id,
+                    operation_key,
+                    rack_key,
+                    tip_id,
+                    rack.tip_length,
+                    campaign_id=context.campaign_id,
+                )
+            )
+        except Exception as exc:
+            target = f"{rack_key}.{tip_id}" if tip_id is not None else rack_key
+            raise ProtocolExecutionError(
+                f"Tip-state preflight failed for pick_up_tip at {target!r}: "
+                f"{type(exc).__name__}: {exc}"
+            ) from exc
+        if not should_execute:
+            pipette.set_attached_tip_extension(extension_mm)
+            context.logger.info(
+                "Skipping already-applied tip operation %s", operation_key,
+            )
+            context.notify_step("step_skipped", reason=_ALREADY_APPLIED)
+            return "done"
+        tip_id = resolved_tip_id
+    else:
+        if tip_id is None:
+            tip_id = rack.next_available_tip()
+            if tip_id is None:
+                raise ProtocolExecutionError(
+                    f"pick_up_tip rack {rack_key!r} has no available tips."
+                )
+        if not rack.is_tip_present(tip_id):
+            raise ProtocolExecutionError(
+                f"pick_up_tip target '{rack_key}.{tip_id}' is not available "
+                "(slot is unknown or already consumed)."
+            )
+
+    attempt_position = f"{rack_key}.{tip_id}"
+    verified: Optional[bool] = None
+    try:
+        for _ in range(1 + verify_retries):
+            _engage(context, attempt_position, command_label="pick_up_tip")
+            pipette.pick_up_tip(speed)
+            if not verify_tip:
+                break
+            verified = pipette.read_tip_present()
+            if verified is not False:
+                break
+    except BaseException as exc:
+        if operation_key is not None:
+            _mark_tip_uncertain(context, operation_key, exc)
+        raise
+
+    if verified is False:
+        detail = (
+            f"line-break verify: no tip detected at {attempt_position} after "
+            f"{1 + verify_retries} attempt(s)"
+        )
+        context.logger.warning("pick_up_tip %s", detail)
+        if operation_key is not None:
+            try:
+                context.data_store.resolve_tip_operation(
+                    operation_key,
+                    "reconciled",
+                    detail=detail,
+                    final_slot_status="consumed",
+                )
+            except Exception as exc:
+                _mark_tip_uncertain(context, operation_key, exc)
+                raise ProtocolExecutionError(
+                    f"Pickup at {attempt_position} found no tip, and marking "
+                    f"its slot consumed failed for operation "
+                    f"{operation_key!r}: {type(exc).__name__}: {exc}. "
+                    "Reconciliation is required."
+                ) from exc
+        else:
+            rack.mark_tip_used(tip_id)
+        return "dry"
+
+    pipette.set_attached_tip_extension(rack.tip_length)
+    rack.mark_tip_used(tip_id)
+    if operation_key is not None:
+        try:
+            context.data_store.complete_pick_up_tip(operation_key)
+        except Exception as exc:
+            _mark_tip_uncertain(context, operation_key, exc)
+            raise ProtocolExecutionError(
+                "Physical tip pickup completed, but its tip-state commit "
+                f"failed for operation {operation_key!r}: "
+                f"{type(exc).__name__}: {exc}. Reconciliation is required."
+            ) from exc
+    return "done"
+
+
 @protocol_command("pick_up_tip", summary=_summaries.pick_up_tip)
 def pick_up_tip(
     context: ProtocolContext,
     position: str,
     speed: float = 50.0,
+    verify_tip: bool = True,
+    verify_retries: int = 1,
+    verify_slot_advance: int = 3,
 ) -> None:
     """Move pipette to *position*, then pick up a tip.
 
@@ -417,76 +566,69 @@ def pick_up_tip(
     a protocol cannot know which physical slots were emptied by an earlier
     run, so operators must refresh/replace racks or update the deck
     definition before reruns.
+
+    When ``verify_tip`` is true (the default) and the pipette has a
+    tip-presence sensor (``read_tip_present`` returns non-``None``; sensorless
+    pipettes skip verification silently), every physical pickup is
+    sensor-confirmed. A slot whose pickup reads no-tip is retried in place up
+    to ``verify_retries`` extra times, then marked consumed — durably via an
+    auto-``reconciled`` journal resolution whose detail records the sensor
+    outcome, in-memory otherwise. A rack-level request then advances to the
+    next available slot, at most ``verify_slot_advance`` times, before
+    failing; each advanced attempt is its own journaled operation under a
+    ``pickup:slot{N}`` substep, so a resumed run skips consumed slots and
+    replays only what never applied. An explicit-slot request never advances:
+    a verified-dry named slot is consumed and the command fails.
     """
+    for label, value in (
+        ("verify_retries", verify_retries),
+        ("verify_slot_advance", verify_slot_advance),
+    ):
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise ProtocolExecutionError(
+                f"pick_up_tip {label} must be a non-negative integer, "
+                f"got {value!r}."
+            )
     pipette = _get_pipette(context)
     try:
         rack, tip_id = resolve_tip_rack_slot(context.deck, position)
     except TipRackResolutionError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
     rack_key = _tip_rack_key(position)
+    explicit_slot = tip_id is not None
 
-    tracked = _tracked_fluid_state(context)
-    operation_key = None
-    if tracked:
-        operation_key = context.fluid_operation_key("pick_up_tip")
-        try:
-            should_execute, resolved_tip_id, extension_mm = (
-                context.data_store.begin_pick_up_tip(
-                    context.fluid_state_id,
-                    operation_key,
-                    rack_key,
-                    tip_id,
-                    rack.tip_length,
-                    campaign_id=context.campaign_id,
-                )
-            )
-        except Exception as exc:
-            raise ProtocolExecutionError(
-                f"Tip-state preflight failed for pick_up_tip at {position!r}: "
-                f"{type(exc).__name__}: {exc}"
-            ) from exc
-        if not should_execute:
-            pipette.set_attached_tip_extension(extension_mm)
-            context.logger.info(
-                "Skipping already-applied tip operation %s", operation_key,
-            )
-            context.notify_step("step_skipped", reason=_ALREADY_APPLIED)
-            return
-        tip_id = resolved_tip_id
-        position = f"{rack_key}.{tip_id}"
-    else:
-        if tip_id is None:
-            tip_id = rack.next_available_tip()
-            if tip_id is None:
-                raise ProtocolExecutionError(
-                    f"pick_up_tip rack {rack_key!r} has no available tips."
-                )
-            position = f"{rack_key}.{tip_id}"
-        if not rack.is_tip_present(tip_id):
-            raise ProtocolExecutionError(
-                f"pick_up_tip target {position!r} is not available "
-                "(slot is unknown or already consumed)."
-            )
-
+    attempts = 1 if explicit_slot else 1 + verify_slot_advance
+    previous_substep = context.active_substep
     try:
-        _engage(context, position, command_label="pick_up_tip")
-        pipette.pick_up_tip(speed)
-    except BaseException as exc:
-        if operation_key is not None:
-            _mark_tip_uncertain(context, operation_key, exc)
-        raise
-    pipette.set_attached_tip_extension(rack.tip_length)
-    rack.mark_tip_used(tip_id)
-    if operation_key is not None:
-        try:
-            context.data_store.complete_pick_up_tip(operation_key)
-        except Exception as exc:
-            _mark_tip_uncertain(context, operation_key, exc)
-            raise ProtocolExecutionError(
-                "Physical tip pickup completed, but its tip-state commit "
-                f"failed for operation {operation_key!r}: "
-                f"{type(exc).__name__}: {exc}. Reconciliation is required."
-            ) from exc
+        for attempt in range(attempts):
+            if attempt:
+                suffix = f"pickup:slot{attempt}"
+                context.active_substep = (
+                    f"{previous_substep}:{suffix}" if previous_substep else suffix
+                )
+            outcome = _attempt_pick_up_tip(
+                context,
+                pipette,
+                rack,
+                rack_key,
+                tip_id if attempt == 0 else None,
+                speed=speed,
+                verify_tip=verify_tip,
+                verify_retries=verify_retries,
+            )
+            if outcome != "dry":
+                return
+            if explicit_slot:
+                raise ProtocolExecutionError(
+                    f"pick_up_tip {position!r}: no tip detected after "
+                    f"{1 + verify_retries} attempt(s); slot marked consumed."
+                )
+    finally:
+        context.active_substep = previous_substep
+    raise ProtocolExecutionError(
+        f"pick_up_tip rack {rack_key!r}: no tip detected on {attempts} "
+        "slot(s); rack needs operator attention."
+    )
 
 
 @protocol_command("transfer", summary=_summaries.transfer)
@@ -791,6 +933,7 @@ def drop_tip(
     context: ProtocolContext,
     position: str,
     speed: float = 50.0,
+    verify_tip: bool = True,
 ) -> None:
     """Move pipette to *position*, then drop the tip.
 
@@ -799,6 +942,12 @@ def drop_tip(
     ``consumed`` only after ``pipette.drop_tip`` succeeds, and marked
     ``reconciliation_required`` (blocking further liquid handling) if the
     physical outcome is uncertain.
+
+    When ``verify_tip`` is true (the default) and the pipette has a
+    tip-presence sensor, the drop is sensor-confirmed: a beam still broken
+    afterward means the tip is stuck on the pipette, so the operation is
+    marked ``reconciliation_required`` and the command fails — there is no
+    safe automatic recovery from a stuck tip.
     """
     pipette = _get_pipette(context)
     tracked = _tracked_fluid_state(context)
@@ -827,10 +976,21 @@ def drop_tip(
     try:
         _engage(context, position, command_label="drop_tip")
         pipette.drop_tip(speed)
+        still_present = pipette.read_tip_present() if verify_tip else None
     except BaseException as exc:
         if operation_key is not None:
             _mark_tip_uncertain(context, operation_key, exc)
         raise
+    if still_present is True:
+        message = (
+            f"drop_tip at {position!r}: line-break sensor still detects a "
+            "tip after the drop; the tip is stuck on the pipette."
+        )
+        if operation_key is not None:
+            _mark_tip_uncertain(
+                context, operation_key, ProtocolExecutionError(message),
+            )
+        raise ProtocolExecutionError(message)
     pipette.clear_attached_tip_extension()
     if operation_key is not None:
         try:

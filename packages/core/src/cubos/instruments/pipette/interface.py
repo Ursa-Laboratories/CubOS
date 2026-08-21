@@ -101,6 +101,11 @@ class PipetteInstrument(BaseInstrument):
     def drop_tip(self, speed: float = 50.0) -> None:
         """Drop the attached disposable tip."""
 
+    def read_tip_present(self) -> bool | None:
+        """Return whether a tip is physically attached, or ``None`` when
+        this pipette has no tip-presence sensor."""
+        return None
+
     @abstractmethod
     def get_status(self) -> PipetteStatus:
         """Return the current pipette status."""

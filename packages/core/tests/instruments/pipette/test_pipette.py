@@ -776,3 +776,47 @@ class TestLiquidClassCorrection:
                 offline=True,
                 liquid_classes={"bad": {"scale": 2.0}},
             )
+
+
+class TestReadTipPresent:
+
+    def test_interface_default_is_none(self):
+        from cubos.instruments.pipette.interface import PipetteInstrument
+
+        assert PipetteInstrument.read_tip_present(
+            OpentronsPipette(offline=True)
+        ) is None
+        assert PipetteInstrument.read_tip_present is not OpentronsPipette.read_tip_present
+
+    def test_offline_tracks_has_tip(self):
+        pip = OpentronsPipette(offline=True)
+        pip.connect()
+        assert pip.read_tip_present() is False
+        pip.pick_up_tip()
+        assert pip.read_tip_present() is True
+        pip.drop_tip()
+        assert pip.read_tip_present() is False
+
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
+    def test_online_reads_line_break_sensor(self, mock_sleep, mock_serial_cls):
+        pip, mock_ser = TestPipetteCommands._make_connected_pipette(
+            TestPipetteCommands(), mock_serial_cls, mock_sleep,
+            ['OK:{"value1":1}\n', 'OK:{"value1":0}\n'],
+        )
+        assert pip.read_tip_present() is True
+        assert pip.read_tip_present() is False
+        written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
+        assert any(cmd.startswith("7") for cmd in written)
+
+    @patch("cubos.instruments.controllers.pawduino.serial.Serial")
+    @patch("cubos.instruments.controllers.pawduino.time.sleep")
+    def test_online_unparseable_raises_command_error(
+        self, mock_sleep, mock_serial_cls,
+    ):
+        pip, _ = TestPipetteCommands._make_connected_pipette(
+            TestPipetteCommands(), mock_serial_cls, mock_sleep,
+            ['OK:{"value1":"nope"}\n'],
+        )
+        with pytest.raises(PipetteCommandError, match="[Uu]nparseable"):
+            pip.read_tip_present()
