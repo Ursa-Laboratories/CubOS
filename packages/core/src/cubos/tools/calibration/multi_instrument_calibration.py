@@ -35,10 +35,12 @@ from cubos.tools.calibration.single_instrument_calibration import (  # noqa: E40
     _load_raw_config,
     _maybe_write_gantry_yaml,
     _print_yaml_block,
+    _restore_hard_limits_after_origin_jog,
     _restore_soft_limits_after_origin_jog,
     _round_mm,
     _set_serial_timeout_if_available,
     _temporarily_disable_soft_limits_for_origin_jog,
+    _temporarily_enable_hard_limits_for_origin_jog,
     _wait_until_idle_if_available,
 )
 from cubos.tools.keyboard_input import flush_stdin, read_keypress_batch  # noqa: E402
@@ -545,6 +547,7 @@ def run_multi_instrument_calibration(
     gantry_runtime_config.pop("grbl_settings", None)
     gantry = gantry_factory(config=gantry_runtime_config)
     restore_soft_limits_after_calibration = False
+    restore_hard_limits_after_calibration = False
     try:
         output("Connecting to gantry...")
         gantry.connect()
@@ -560,6 +563,12 @@ def run_multi_instrument_calibration(
         gantry.clear_g92_offsets()
         restore_soft_limits_after_calibration = (
             _temporarily_disable_soft_limits_for_origin_jog(
+                gantry,
+                output=output,
+            )
+        )
+        restore_hard_limits_after_calibration = (
+            _temporarily_enable_hard_limits_for_origin_jog(
                 gantry,
                 output=output,
             )
@@ -595,9 +604,13 @@ def run_multi_instrument_calibration(
         xy_origin_coords = dict(gantry.get_coordinates())
         _assert_near_xy_origin(xy_origin_coords, tolerance_mm=tolerance_mm)
 
+        # Re-enable soft limits before dropping the hard-limit backstop.
         if restore_soft_limits_after_calibration:
             restore_soft_limits_after_calibration = False
             _restore_soft_limits_after_origin_jog(gantry, output=output)
+        if restore_hard_limits_after_calibration:
+            restore_hard_limits_after_calibration = False
+            _restore_hard_limits_after_origin_jog(gantry, output=output)
 
         output("Re-homing after XY origining to measure machine-derived X/Y bounds...")
         _set_serial_timeout_if_available(gantry, homing_serial_timeout_s)
@@ -897,10 +910,15 @@ def run_multi_instrument_calibration(
                 restore_soft_limits_after_calibration = False
                 _restore_soft_limits_after_origin_jog(gantry, output=output)
         finally:
-            _cancel_jog_if_available(gantry, output=output)
-            _set_serial_timeout_if_available(gantry, 0.05)
-            output("Disconnecting...")
-            gantry.disconnect()
+            try:
+                if restore_hard_limits_after_calibration:
+                    restore_hard_limits_after_calibration = False
+                    _restore_hard_limits_after_origin_jog(gantry, output=output)
+            finally:
+                _cancel_jog_if_available(gantry, output=output)
+                _set_serial_timeout_if_available(gantry, 0.05)
+                output("Disconnecting...")
+                gantry.disconnect()
 
 
 def _prompt_instrument_name(

@@ -16,8 +16,8 @@ from cubos.instruments.pipette.liquid_class import build_liquid_classes
 from cubos.instruments.pipette.models import (
     AspirateResult,
     MixResult,
-    PipetteConfig,
     PipetteStatus,
+    PlungerPipetteConfig,
     PIPETTE_MODELS,
 )
 
@@ -78,7 +78,7 @@ class OpentronsPipette(PipetteInstrument):
                 f"Unknown pipette model '{pipette_model}'. "
                 f"Available: {', '.join(sorted(PIPETTE_MODELS.keys()))}"
             )
-        self._config: PipetteConfig = PIPETTE_MODELS[pipette_model]
+        self._config: PlungerPipetteConfig = PIPETTE_MODELS[pipette_model]
         # Per-liquid-class stroke-volume correction (multiplier + offset_ul),
         # keyed by an operator-chosen name; empty/disabled unless configured.
         # See cubos.instruments.pipette.liquid_class for the parametric form.
@@ -95,7 +95,7 @@ class OpentronsPipette(PipetteInstrument):
         self._is_primed = False
 
     @property
-    def config(self) -> PipetteConfig:
+    def config(self) -> PlungerPipetteConfig:
         return self._config
 
     @property

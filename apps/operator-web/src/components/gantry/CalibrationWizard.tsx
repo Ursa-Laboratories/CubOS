@@ -10,6 +10,7 @@ import {
   getFactoryZTravel,
   type ZCalibrationResult,
 } from "./calibrationMath";
+import { createJogPacer, jogPaceMs } from "./jogPacing";
 
 interface Props {
   open: boolean;
@@ -43,7 +44,6 @@ type PendingZReference = {
   lowestInstrument: string;
 };
 
-const JOG_INTERVAL_MS = 150;
 const MIN_STEP = 0.001;
 const NON_CONTACT_TYPES = new Set(["camera"]);
 
@@ -81,7 +81,8 @@ export default function CalibrationWizard({
   const [referenceInstrument, setReferenceInstrument] = useState("");
   const [lowestInstrument, setLowestInstrument] = useState("");
   const [resolvedAlarmStatus, setResolvedAlarmStatus] = useState<string | null>(null);
-  const jogTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const jogHeld = useRef<JogDelta | null>(null);
+  const jogPumpActive = useRef(false);
   const jogRequestCount = useRef(0);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
@@ -177,17 +178,20 @@ export default function CalibrationWizard({
     }
   }, [step]);
 
+  const jogPacer = useRef(createJogPacer()).current;
+
   const stopJog = useCallback(() => {
-    const shouldCancelJog = jogTimer.current !== null && jogRequestCount.current > 1;
-    if (jogTimer.current) {
-      clearInterval(jogTimer.current);
-      jogTimer.current = null;
-    }
-    if (shouldCancelJog) {
+    if (jogHeld.current === null) return;
+    jogHeld.current = null;
+    // A single click lets its full step finish (predictable stepping); a
+    // held jog cancels so motion stops at release instead of running out
+    // whatever GRBL has queued.
+    if (jogRequestCount.current > 1) {
       gantryApi.jogCancel().catch(() => undefined);
     }
     jogRequestCount.current = 0;
-  }, []);
+    jogPacer.wake();
+  }, [jogPacer]);
 
   const rememberJogDelta = useCallback((delta: JogDelta) => {
     if (!isZeroDelta(delta)) {
@@ -235,8 +239,12 @@ export default function CalibrationWizard({
     } catch (recoveryErr) {
       const recoveryMessage = recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr);
       setResolvedAlarmStatus(null);
+      // A lost serial link needs a power-cycle, not an E-stop — tell the
+      // operator the actionable step instead of the generic lockout text.
       setAlarmPrompt(
-        "Limit recovery did not clear the switch. Controls stay locked; use E-stop/controller reset before continuing.",
+        /connection lost/i.test(recoveryMessage)
+          ? recoveryMessage
+          : "Limit recovery did not clear the switch. Controls stay locked; use E-stop/controller reset before continuing.",
       );
       setError(`Limit recovery failed after jog error (${message}): ${recoveryMessage}`);
     } finally {
@@ -307,21 +315,26 @@ export default function CalibrationWizard({
   const reset = async () => {
     if (busy) return;
     stopJog();
+    let restoreError: string | null = null;
     if (connected) {
       try {
         await gantryApi.restoreCalibrationSoftLimits();
       } catch (err) {
-        setError(
-          `Failed to restore soft limits: ${err instanceof Error ? err.message : String(err)}. Reconnect before running protocols.`,
-        );
-        return;
+        restoreError = `Failed to restore soft limits: ${err instanceof Error ? err.message : String(err)}. Reconnect before running protocols.`;
       }
     }
+    // Reset even when the restore failed (e.g. the serial link died after
+    // a limit crash) — refusing traps the operator in a wizard whose every
+    // exit needs a controller round-trip. The session still tracks the
+    // un-restored state and the gantry widget's CALIBRATION INTERRUPTED
+    // banner offers the retry.
     resetFlow();
+    if (restoreError) {
+      setError(restoreError);
+    }
   };
 
   const close = async () => {
-    if (busy) return;
     stopJog();
     if (!connected) {
       onClose();
@@ -329,11 +342,11 @@ export default function CalibrationWizard({
     }
     try {
       await gantryApi.restoreCalibrationSoftLimits();
-    } catch (err) {
-      setError(
-        `Failed to restore soft limits: ${err instanceof Error ? err.message : String(err)}. Reconnect before running protocols.`,
-      );
-      return;
+    } catch {
+      // Closing must never be gated on a controller round-trip. If the
+      // restore failed, calibration_active stays true on the session and
+      // the gantry widget's CALIBRATION INTERRUPTED banner takes over
+      // until soft limits are actually restored.
     }
     onClose();
   };
@@ -701,28 +714,75 @@ export default function CalibrationWizard({
     onClose();
   });
 
-  const jog = useCallback((x: number, y: number, z: number) => {
-    if (!connected || busy || alarmRecoveryMessage || recoveryInProgress.current) return;
+  const jog = useCallback(async (x: number, y: number, z: number): Promise<boolean> => {
+    if (!connected || busy || alarmRecoveryMessage || recoveryInProgress.current) return false;
     rememberJogDelta({ x, y, z });
     jogRequestCount.current += 1;
-    gantryApi.jog(x, y, z).catch((err) => {
+    try {
+      await gantryApi.jog(x, y, z);
+      return true;
+    } catch (err) {
       if (looksLikeAlarm(errorMessage(err))) {
         void recoverFromLimitAlarm({ x, y, z }, err);
       } else {
         reportError(err);
       }
-    });
+      return false;
+    }
   }, [alarmRecoveryMessage, busy, connected, recoverFromLimitAlarm, rememberJogDelta, reportError]);
+
+  // The held-jog pump reads jog through a ref so an in-flight hold always
+  // uses the latest guards (alarm/busy state) instead of a stale closure.
+  const jogRef = useRef(jog);
+  useEffect(() => {
+    jogRef.current = jog;
+  }, [jog]);
 
   const startJog = (x: number, y: number, z: number) => {
     if (busy || alarmRecoveryMessage || recoveryInProgress.current) return;
-    if (jogTimer.current) {
-      stopJog();
-    } else {
+    const heldBefore = jogHeld.current !== null;
+    jogHeld.current = { x, y, z };
+    if (heldBefore && jogPumpActive.current) {
+      // Direction change mid-hold: hand the new delta to the pump instead
+      // of firing immediately — an immediate send would repeat at the
+      // previous segment's pace, and with soft limits off during
+      // calibration that backlog runs the gantry into the hard-limit
+      // switches. wake() cuts the remaining sleep so the new direction
+      // still starts promptly.
+      jogPacer.wake();
+      return;
+    }
+    if (!jogPumpActive.current) {
       jogRequestCount.current = 0;
     }
-    jog(x, y, z);
-    jogTimer.current = setInterval(() => jog(x, y, z), JOG_INTERVAL_MS);
+    // The first jog of a distinct press always sends immediately — a click
+    // must never wait behind a previous press's pacing.
+    const first = jogRef.current(x, y, z);
+    if (jogPumpActive.current) return;
+    jogPumpActive.current = true;
+    const pump = async () => {
+      try {
+        let sent = { x, y, z };
+        let ok = await first;
+        while (ok && jogHeld.current) {
+          // Held repeats stay one-in-flight, paced by the segment actually
+          // sent last (the held delta can change mid-hold) — soft limits
+          // are off during calibration, so an unbounded jog backlog here
+          // runs the gantry into the hard-limit switches.
+          await jogPacer.sleep(jogPaceMs(sent.x, sent.y, sent.z));
+          const delta = jogHeld.current;
+          if (!delta) break;
+          sent = delta;
+          ok = await jogRef.current(delta.x, delta.y, delta.z);
+        }
+        if (!ok) {
+          jogHeld.current = null;
+        }
+      } finally {
+        jogPumpActive.current = false;
+      }
+    };
+    void pump();
   };
 
   const parsedXyStep = parsePositiveStep(xyStep);
@@ -763,8 +823,7 @@ export default function CalibrationWizard({
             </button>
             <button
               onClick={close}
-              disabled={busy}
-              style={buttonStateStyle(closeButtonStyle, busy)}
+              style={closeButtonStyle}
               aria-label="Close calibration"
             >
               ×
@@ -798,6 +857,14 @@ export default function CalibrationWizard({
                 >
                   Unlock alarm
                 </button>
+              </div>
+            )}
+            {!alarmRecoveryMessage && connected && (
+              <div style={softLimitNoticeStyle}>
+                <strong>Soft limits are off during calibration</strong> — only the
+                physical limit switches will stop the gantry (CubOS enables GRBL hard
+                limits for this window). Jog with small steps near the edges of travel;
+                a tripped switch halts motion and CubOS attempts an automatic pull-off.
               </div>
             )}
             {error && <div style={errorStyle}>{error}</div>}
@@ -1640,6 +1707,12 @@ const alarmStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
   flexWrap: "wrap",
+};
+
+const softLimitNoticeStyle: React.CSSProperties = {
+  ...theme.notice.warning,
+  fontSize: 11,
+  marginBottom: 10,
 };
 
 const alarmTitleStyle: React.CSSProperties = {

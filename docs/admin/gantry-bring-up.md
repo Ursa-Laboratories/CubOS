@@ -69,6 +69,16 @@ Record these values:
 - `$21` hard limits
 - the status line, especially whether it shows `WPos:` or `MPos:`
 
+!!! note "Enable hard limits (`$21=1`) on Cub machines"
+    Hobby controllers ship with `$21=0`, which means the limit switches do
+    **nothing outside homing** — a jog past a travel end grinds against
+    the frame and silently skips steps instead of stopping. Cub machines
+    have no spindle (the usual source of false hard-limit trips), so run
+    them with `$21=1` and set `hard_limits: true` in the gantry YAML's
+    `grbl_settings` so CubOS validates it on every connect. Calibration
+    enforces `$21=1` for its own window regardless, but that does not
+    protect normal operation on a miscalibrated machine.
+
 For every value you change, write down the old value, new value, date, machine,
 operator, and reason. Example:
 

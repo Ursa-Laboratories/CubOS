@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, List, Optional
@@ -16,6 +17,7 @@ from cubos.instruments.pipette.liquid_class import IDENTITY_CORRECTION
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
+from . import _summaries
 from ._cap_preflight import require_uncapped as _require_uncapped
 from ._liquid_selection import (
     LiquidSelectionError,
@@ -35,6 +37,12 @@ from ._liquid_transfer import (
 from ._movement import engage_at_labware
 
 logger = logging.getLogger(__name__)
+
+# Reason text for steps the durable fluid/tip journal reports as already
+# applied on a resumed run. Deliberately distinct from "never reached": the
+# operator needs to read a resumed run as having done this work, just not in
+# this process.
+_ALREADY_APPLIED = "already applied on a previous run"
 
 if TYPE_CHECKING:
     from ..runtime import ProtocolContext
@@ -284,7 +292,7 @@ def _mark_tip_uncertain(
         )
 
 
-@protocol_command("aspirate")
+@protocol_command("aspirate", summary=_summaries.aspirate)
 def aspirate(
     context: ProtocolContext,
     position: str,
@@ -326,7 +334,7 @@ def dispense(
     return pipette.dispense(volume_ul, speed)
 
 
-@protocol_command("blowout")
+@protocol_command("blowout", summary=_summaries.blowout)
 def blowout(
     context: ProtocolContext,
     position: str,
@@ -339,7 +347,7 @@ def blowout(
     pipette.blowout(speed)
 
 
-@protocol_command("mix")
+@protocol_command("mix", summary=_summaries.mix)
 def mix(
     context: ProtocolContext,
     position: str,
@@ -365,6 +373,7 @@ def mix(
             context.logger.info(
                 "Skipping already-applied fluid operation %s", operation_key,
             )
+            context.notify_step("step_skipped", reason=_ALREADY_APPLIED)
             return None
     try:
         _engage(context, position, command_label="mix", height=height)
@@ -386,7 +395,7 @@ def mix(
     return result
 
 
-@protocol_command("pick_up_tip")
+@protocol_command("pick_up_tip", summary=_summaries.pick_up_tip)
 def pick_up_tip(
     context: ProtocolContext,
     position: str,
@@ -441,6 +450,7 @@ def pick_up_tip(
             context.logger.info(
                 "Skipping already-applied tip operation %s", operation_key,
             )
+            context.notify_step("step_skipped", reason=_ALREADY_APPLIED)
             return
         tip_id = resolved_tip_id
         position = f"{rack_key}.{tip_id}"
@@ -479,7 +489,7 @@ def pick_up_tip(
             ) from exc
 
 
-@protocol_command("transfer")
+@protocol_command("transfer", summary=_summaries.transfer)
 def transfer(
     context: ProtocolContext,
     source: str,
@@ -729,6 +739,13 @@ def _execute_transfer_stroke(
                 "Skipping already-applied fluid operation %s (stroke %d/%d)",
                 operation_key, stroke_index + 1, stroke_count,
             )
+            context.notify_step(
+                "step_skipped",
+                reason=(
+                    f"{_ALREADY_APPLIED} "
+                    f"(stroke {stroke_index + 1}/{stroke_count})"
+                ),
+            )
             return
 
     commanded_volume_ul = correction.apply(stroke_volume_ul)
@@ -769,7 +786,7 @@ def _execute_transfer_stroke(
         _record_transfer_to_store(context, source, destination, stroke_volume_ul)
 
 
-@protocol_command("drop_tip")
+@protocol_command("drop_tip", summary=_summaries.drop_tip)
 def drop_tip(
     context: ProtocolContext,
     position: str,
@@ -804,6 +821,7 @@ def drop_tip(
             context.logger.info(
                 "Skipping already-applied tip operation %s", operation_key,
             )
+            context.notify_step("step_skipped", reason=_ALREADY_APPLIED)
             return
 
     try:
@@ -850,7 +868,7 @@ def _wells_for_axis(plate: WellPlate, axis: str) -> list:
     return sorted(wells, key=lambda w: (w[0], int(w[1:])))
 
 
-@protocol_command("serial_transfer")
+@protocol_command("serial_transfer", summary=_summaries.serial_transfer)
 def serial_transfer(
     context: ProtocolContext,
     source: str,
@@ -934,8 +952,21 @@ def _substep_scope(context: ProtocolContext, suffix: str) -> Iterator[None]:
     """
     previous = context.active_substep
     context.active_substep = f"{previous}:{suffix}" if previous else suffix
+    started = time.monotonic()
+    context.notify_step("step_started")
     try:
         yield
+    except BaseException as exc:
+        context.notify_step(
+            "step_failed",
+            duration_s=time.monotonic() - started,
+            error=f"{type(exc).__name__}: {exc}",
+        )
+        raise
+    else:
+        context.notify_step(
+            "step_completed", duration_s=time.monotonic() - started,
+        )
     finally:
         context.active_substep = previous
 
@@ -989,6 +1020,7 @@ def _transfer_or_skip(context: ProtocolContext, **kwargs: Any) -> None:
     skip.
     """
     if _leg_already_applied(context):
+        context.notify_step("step_skipped", reason=_ALREADY_APPLIED)
         context.logger.info(
             "Skipping already-applied fluid operation %s",
             context.fluid_operation_key("transfer"),
@@ -1102,7 +1134,7 @@ def _resolve_waste_target(
     return position
 
 
-@protocol_command("rinse_well")
+@protocol_command("rinse_well", summary=_summaries.rinse_well)
 def rinse_well(
     context: ProtocolContext,
     well: str,
@@ -1173,7 +1205,7 @@ def rinse_well(
             )
 
 
-@protocol_command("flush_pipette")
+@protocol_command("flush_pipette", summary=_summaries.flush_pipette)
 def flush_pipette(
     context: ProtocolContext,
     volume_ul: float,
@@ -1217,7 +1249,7 @@ def flush_pipette(
             )
 
 
-@protocol_command("purge_pipette")
+@protocol_command("purge_pipette", summary=_summaries.purge_pipette)
 def purge_pipette(
     context: ProtocolContext,
     volume_ul: float,
@@ -1264,7 +1296,7 @@ def purge_pipette(
         )
 
 
-@protocol_command("clear_well")
+@protocol_command("clear_well", summary=_summaries.clear_well)
 def clear_well(
     context: ProtocolContext,
     well: str,

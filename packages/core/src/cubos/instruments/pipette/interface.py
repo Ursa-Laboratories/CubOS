@@ -12,7 +12,22 @@ from cubos.instruments.pipette.models import AspirateResult, MixResult, PipetteS
 
 
 class PipetteInstrument(BaseInstrument):
-    """Base class for pipette implementations."""
+    """Base class for pipette implementations.
+
+    Speed semantics
+    ---------------
+    Every ``speed`` argument below is a **normalized 0-100 percentage of the
+    instrument's usable speed range**, not a physical unit. Each driver maps
+    it onto whatever its hardware takes -- an index, steps per second, a
+    millimetres-per-second figure -- so a protocol stays portable across
+    vendors.
+
+    This contract was written once two vendors existed. ``OpentronsPipette``
+    still discards ``speed`` and lets its firmware pick a velocity (see the
+    ``TODO(iter)`` there); honoring it would change motion on machines
+    already in use, so that is a deliberate follow-up rather than part of
+    this contract's introduction.
+    """
 
     @property
     def liquid_classes(self) -> dict[str, LiquidClassCorrection]:

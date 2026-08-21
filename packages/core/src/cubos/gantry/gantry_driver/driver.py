@@ -15,6 +15,7 @@ import logging
 import math
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Optional, Tuple
@@ -38,6 +39,30 @@ from .logger import set_up_command_logger, set_up_mill_logger
 DEFAULT_FEED_RATE = 2000
 HOMING_TIMEOUT = 90
 ERROR_22_MAX_RETRIES = 2
+
+def looks_like_connection_loss(value: Exception | str) -> bool:
+    """Return true when an error looks like the serial link itself died.
+
+    Hardware validation on the CubXL showed the controller dropping off the
+    USB bus at a hard-limit trip (supply-rail glitch reboots the board and
+    re-enumerates the USB bridge). The stale file descriptor then times out
+    or raises OS-level errors on every exchange.
+    """
+    message = str(value).lower()
+    return any(
+        token in message
+        for token in (
+            "timed out",
+            "device not configured",
+            "errno 6",
+            "input/output error",
+            "bad file descriptor",
+            "device reports readiness to read but returned no data",
+            "write failed",
+            "no initial grbl status",
+        )
+    )
+
 
 # Compile regex patterns for extracting coordinates from the mill status
 wpos_pattern = re.compile(r"WPos:([\d.-]+),([\d.-]+),([\d.-]+)")
@@ -64,6 +89,23 @@ class Mill:
         self.config = {}
         self._init_state()
         self.ser_mill: serial.Serial = None
+        self._write_lock = threading.Lock()
+
+    def _write_serial(self, data: bytes) -> None:
+        """Write bytes to the controller under the write lock.
+
+        Realtime characters (``?``, ``!``, ``~``, jog cancel ``0x85``, soft
+        reset ``0x18``) are sent from threads that deliberately do not hold
+        the session operation lock, so two threads can reach the serial port
+        at once. GRBL itself strips realtime characters out of the stream
+        wherever they appear — even mid-line — but pyserial makes no
+        thread-safety guarantee for concurrent ``write()`` calls. This lock
+        makes each write atomic at the port. It only serializes the write
+        syscall, never a command/response cycle, so realtime characters
+        still bypass waiting on in-flight commands.
+        """
+        with self._write_lock:
+            self.ser_mill.write(data)
 
     def _init_state(self):
         """Initialize state attributes for a fresh, unconnected mill."""
@@ -239,7 +281,7 @@ class Mill:
         # everything except $X and $H while in alarm state.
         initial_status = ""
         for _ in range(3):
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.2)
             initial_status = self._read_serial()
             if initial_status:
@@ -364,11 +406,11 @@ class Mill:
             self.command_logger.debug("%s", command)
 
             if command == "$$":
-                self.ser_mill.write(str(command).encode(encoding="ascii") + b"\n")
+                self._write_serial(str(command).encode(encoding="ascii") + b"\n")
                 return self._collect_grbl_settings_response()
 
             for attempt in range(ERROR_22_MAX_RETRIES + 1):
-                self.ser_mill.write(str(command).encode(encoding="ascii") + b"\n")
+                self._write_serial(str(command).encode(encoding="ascii") + b"\n")
                 mill_response = self._read_serial().lower()
                 if not command.startswith("$"):
                     mill_response = self._wait_until_idle(
@@ -409,7 +451,7 @@ class Mill:
     def stop(self):
         """Send GRBL feed hold and verify the controller entered Hold."""
         self.feed_hold_realtime()
-        self.ser_mill.write(b"?")
+        self._write_serial(b"?")
         time.sleep(0.05)
         status = self._read_serial()
         if "hold" not in status.lower():
@@ -418,12 +460,12 @@ class Mill:
     def feed_hold_realtime(self) -> None:
         """Send GRBL realtime feed hold without line protocol or reads."""
         self._require_open_serial()
-        self.ser_mill.write(b"!")
+        self._write_serial(b"!")
 
     def resume(self) -> None:
         """Resume a feed-held GRBL controller with realtime cycle start."""
         self._require_open_serial()
-        self.ser_mill.write(b"~")
+        self._write_serial(b"~")
 
     def jog(self, x: float = 0, y: float = 0, z: float = 0,
             feed_rate: float = DEFAULT_FEED_RATE) -> None:
@@ -450,7 +492,7 @@ class Mill:
             return
         cmd = f"$J=G91 {' '.join(parts)} F{feed_rate}"
         self.logger.debug("Jog command: %s", cmd)
-        self.ser_mill.write((cmd + "\n").encode("ascii"))
+        self._write_serial((cmd + "\n").encode("ascii"))
         response = self._read_serial().lower()
         if (
             "error" in response
@@ -467,13 +509,13 @@ class Mill:
     def jog_cancel(self) -> None:
         """Cancel any in-progress jog motion immediately."""
         self._require_open_serial()
-        self.ser_mill.write(b"\x85")
+        self._write_serial(b"\x85")
 
     def unlock(self):
         """Unlock the mill by sending $X directly over serial."""
         self._require_open_serial()
         self.logger.info("Sending unlock ($X)")
-        self.ser_mill.write(b"$X\n")
+        self._write_serial(b"$X\n")
         deadline = time.time() + 2
         while time.time() < deadline:
             line = self.ser_mill.readline().decode("ascii", errors="replace").strip()
@@ -492,16 +534,76 @@ class Mill:
         """Soft reset the mill (GRBL Ctrl-X / 0x18)."""
         self._require_open_serial()
         self.logger.info("Sending soft reset (0x18)")
-        self.ser_mill.write(b"\x18")
+        self._write_serial(b"\x18")
         time.sleep(1.0)
         while self.ser_mill.in_waiting:
             line = self.ser_mill.readline().decode("ascii", errors="replace").strip()
             self.logger.debug("Soft reset response: %s", line)
 
+    def reconnect(self, attempts: int = 4, delay_s: float = 1.0) -> None:
+        """Re-open the serial port after the controller dropped off the bus.
+
+        The USB bridge re-enumerates with the same device name, but the old
+        file descriptor stays dead — every read times out. Prefer the
+        previously connected port name; fall back to auto-scan on the final
+        attempt in case the name changed. Enumeration is not instant, so
+        retry with a delay.
+        """
+        port = self.connected_port()
+        try:
+            if self.ser_mill is not None:
+                self.ser_mill.close()
+        except Exception as exc:
+            self.logger.warning("Closing stale serial handle failed: %s", exc)
+        self.ser_mill = None
+        self.active_connection = False
+        last_error: Exception | None = None
+        for attempt in range(1, attempts + 1):
+            time.sleep(delay_s)
+            try:
+                self.connect(port=port if attempt < attempts else None)
+            except MillConnectionError as exc:
+                last_error = exc
+                self.logger.warning(
+                    "Serial reconnect attempt %d/%d failed: %s",
+                    attempt,
+                    attempts,
+                    exc,
+                )
+                continue
+            self.logger.info("Serial reconnect succeeded on attempt %d", attempt)
+            return
+        raise MillConnectionError(
+            "Controller connection lost and serial reconnect failed after "
+            f"{attempts} attempts"
+        ) from last_error
+
     def soft_reset_and_unlock(self):
-        """Soft reset followed by unlock — single serial sequence."""
-        self.soft_reset()
-        self.unlock()
+        """Soft reset followed by unlock — single serial sequence.
+
+        Some controller boards drop off the USB bus when a hard-limit trip
+        glitches their supply rail; the first symptom is the unlock read
+        timing out here. Reconnect once and retry the unlock — after a bus
+        drop the board has already rebooted, so the reset part is moot.
+        """
+        try:
+            self.soft_reset()
+            self.unlock()
+        except (
+            MillConnectionError,
+            CommandExecutionError,
+            OSError,
+            serial.SerialException,
+        ) as exc:
+            if not looks_like_connection_loss(exc):
+                raise
+            self.logger.warning(
+                "Controller stopped responding during reset/unlock (%s); "
+                "attempting serial reconnect.",
+                exc,
+            )
+            self.reconnect()
+            self.unlock()
 
     def home(self, timeout=HOMING_TIMEOUT):
         """Home the mill with a timeout."""
@@ -581,7 +683,7 @@ class Mill:
         status = self._read_serial()
 
         while status.strip().lower() in ["", "ok"] and attempt_limit > 0:
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.05)
             status = self._read_serial()
             attempt_limit -= 1
@@ -675,7 +777,7 @@ class Mill:
         """
         self._require_open_serial()
         for _ in range(15):
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.15)
             status = self._read_serial()
             match = wco_pattern.search(status)
@@ -706,7 +808,7 @@ class Mill:
         if not self.is_connected():
             return ""
         try:
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.1)
             raw = ""
             for _ in range(5):
@@ -776,7 +878,7 @@ class Mill:
         max_attempts = 4
         status = ""
         for attempt in range(max_attempts):
-            self.ser_mill.write(b"?")
+            self._write_serial(b"?")
             time.sleep(0.05)
             status = self._read_serial()
             # Skim past stale acknowledgments ("ok") and blank reads that

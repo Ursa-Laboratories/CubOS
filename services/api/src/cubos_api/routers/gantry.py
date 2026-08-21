@@ -20,6 +20,7 @@ from cubos.gantry.session import (
     InterruptFeedHoldTimeoutError,
     MovementOutOfBoundsError,
 )
+from cubos.gantry.gantry_driver.exceptions import MillConnectionError
 from cubos.gantry.limit_recovery import looks_like_limit_alarm
 from cubos.gantry.yaml_schema import GantryYamlSchema
 from cubos.instruments.pipette.models import PIPETTE_MODELS
@@ -540,6 +541,13 @@ def recover_calibration_limit(req: LimitRecoveryRequest) -> LimitRecoveryRespons
             "Limit recovery did not clear the gantry alarm. "
             f"Use E-stop/controller reset before continuing: {exc}",
         ) from exc
+    except MillConnectionError as exc:
+        raise HTTPException(
+            503,
+            "Controller connection lost during limit recovery. Power-cycle "
+            "the controller, re-seat the USB cable, then Disconnect and "
+            f"Connect again before continuing: {exc}",
+        ) from exc
     except Exception as exc:
         if looks_like_limit_alarm(exc):
             raise HTTPException(
@@ -596,7 +604,12 @@ def feed_hold() -> GantryPosition:
 def jog_cancel() -> GantryPosition:
     session = _require_session()
     try:
-        return _position_response(session.jog_cancel(), session=session)
+        # Realtime cancel (0x85) without waiting on the operation lock:
+        # during a held jog the lock is contended by queued jog requests,
+        # and a cancel that waits its turn arrives after the motion it was
+        # meant to stop. position() is non-blocking (cache fallback).
+        session.jog_cancel_interrupt()
+        return _position_response(session.position(), session=session)
     except Exception as exc:
         raise _session_http_exception(exc, default_action="Jog cancel") from exc
 
