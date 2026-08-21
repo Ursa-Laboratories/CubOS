@@ -344,9 +344,9 @@ def test_export_campaign_asmi_zip_has_raw_rows_and_metadata(monkeypatch, tmp_pat
         assert archive.read("metadata.csv").decode().splitlines() == [
             "File,Measurement_ID,Test_Time,Well,Target_Z(mm),Step_Size(mm),"
             "Force_Limit(N),Baseline_Force(N),Baseline_Std(N),Force_Exceeded,Data_Points",
-            "well_E5_20251030_122107.csv,11,2025-10-30 12:21:07,E5,"
+            "well_E5_20251030_122107.csv,11,2025-10-30T12:21:07Z,E5,"
             "-80.000,0.010,10.0,0.459,0.003,True,2",
-            "well_E6_20251030_122207.csv,12,2025-10-30 12:22:07,E6,"
+            "well_E6_20251030_122207.csv,12,2025-10-30T12:22:07Z,E6,"
             "-80.000,0.010,10.0,0.459,0.003,False,1",
         ]
         assert archive.read("well_E5_20251030_122107.csv").decode().splitlines() == [
