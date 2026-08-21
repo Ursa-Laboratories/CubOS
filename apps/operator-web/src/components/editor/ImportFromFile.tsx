@@ -4,7 +4,6 @@ interface Props {
   configs: string[];
   onSelectFile: (f: string) => void;
   label: string;
-  /** Currently loaded config file; shown as the selected option. */
   selectedFile?: string | null;
 }
 

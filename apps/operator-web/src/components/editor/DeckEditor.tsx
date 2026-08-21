@@ -10,9 +10,6 @@ interface Props {
   selectedFile: string | null;
   onSelectFile: (f: string) => void;
   onImportFile: (f: string) => void;
-  /** Source file of the current import; shown as the picker's selection.
-   * Differs from `selectedFile` because imports are copied into the
-   * working-copy file, whose name the user never picked. */
   importedFrom?: string | null;
   deck: DeckResponse | null;
   /** The last-saved (server-loaded) deck, used to reset local edits when
