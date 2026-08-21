@@ -1,7 +1,7 @@
 # Tip-Presence Detection Scope
 
 **Branch:** `feat/tip-detection` off `origin/feat/imaging-parity` (PR #299 still open as of 2026-08-21; rebase to main when it merges).
-**Status:** design for review — no implementation yet.
+**Status:** IMPLEMENTED 2026-08-21 as PR #303 (both phases, recommended defaults). Offline validation complete (full suite + diff-cover 99%); bench validation of the line-break path and camera calibration still pending — see the PR's hardware-validation section.
 
 ## Problem
 
