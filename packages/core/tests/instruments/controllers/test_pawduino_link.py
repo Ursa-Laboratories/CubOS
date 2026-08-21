@@ -15,12 +15,20 @@ from cubos.instruments.controllers.pawduino import (
 )
 
 
+HELLO_RESPONSE = 'OK:{"msg":"Hello from Pawduino!"}\n'
+
+
 def _mock_serial(responses=None):
+    """Mock serial whose first queued response answers the connect hello."""
     mock_ser = MagicMock()
     mock_ser.is_open = True
     mock_ser.in_waiting = 0
     if responses is not None:
-        mock_ser.readline.side_effect = [r.encode() for r in responses]
+        mock_ser.readline.side_effect = [
+            r.encode() for r in [HELLO_RESPONSE, *responses]
+        ]
+    else:
+        mock_ser.readline.return_value = HELLO_RESPONSE.encode()
     return mock_ser
 
 
@@ -203,6 +211,40 @@ class TestErrorPaths:
         mock_ser.close.assert_called_once()
         assert not link.is_open
 
+    def test_hello_resyncs_past_late_boot_banner(self):
+        # A banner arriving after the drain must not become the first
+        # command's response: hello absorbs it, so replies pair correctly.
+        with patch("cubos.instruments.controllers.pawduino.serial.Serial") as cls, \
+                patch("cubos.instruments.controllers.pawduino.time.sleep"):
+            mock_ser = MagicMock()
+            mock_ser.is_open = True
+            mock_ser.in_waiting = 0
+            mock_ser.readline.side_effect = [
+                b"OK:Ready\n",              # late boot banner
+                HELLO_RESPONSE.encode(),
+                b"OK:White lights on\n",
+            ]
+            cls.return_value = mock_ser
+            link = PawduinoLink.acquire("/dev/ttyACM0")
+            link.connect()
+            assert link.send_command(17) == "OK:White lights on"
+
+    def test_connect_fails_when_hello_unanswered(self):
+        with patch("cubos.instruments.controllers.pawduino.serial.Serial") as cls, \
+                patch("cubos.instruments.controllers.pawduino.time.sleep"):
+            mock_ser = MagicMock()
+            mock_ser.is_open = True
+            mock_ser.in_waiting = 0
+            mock_ser.readline.return_value = b""
+            cls.return_value = mock_ser
+            link = PawduinoLink.acquire("/dev/ttyACM0")
+            with pytest.raises(
+                PawduinoLinkConnectionError, match="did not answer hello",
+            ):
+                link.connect(timeout=0.05)
+            mock_ser.close.assert_called_once()
+            assert not link.is_open
+
     def test_drain_resets_pending_input(self):
         class Waiting:
             def __init__(self):
@@ -214,6 +256,7 @@ class TestErrorPaths:
 
         mock_ser = MagicMock()
         mock_ser.is_open = True
+        mock_ser.readline.return_value = HELLO_RESPONSE.encode()
         type(mock_ser).in_waiting = Waiting()
         with patch("cubos.instruments.controllers.pawduino.serial.Serial") as cls, \
                 patch("cubos.instruments.controllers.pawduino.time.sleep"):

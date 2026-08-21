@@ -135,13 +135,15 @@ class TestSerialProtocol:
 
 
 def _mock_serial(responses=None):
+    """Mock serial whose first queued response answers the connect hello."""
+    hello = 'OK:{"msg":"Hello from Pawduino!"}\n'
     mock_ser = MagicMock()
     mock_ser.is_open = True
     mock_ser.in_waiting = 0
     if responses is None:
-        mock_ser.readline.return_value = b"OK:done\n"
+        mock_ser.readline.return_value = hello.encode()
     else:
-        mock_ser.readline.side_effect = [r.encode() for r in responses]
+        mock_ser.readline.side_effect = [r.encode() for r in [hello, *responses]]
     return mock_ser
 
 
@@ -156,7 +158,8 @@ class TestLifecycle:
         # Connect commands both channels off explicitly (the board may not
         # have reset if another holder already owned the link).
         sent = [call[0][0] for call in mock_ser.write.call_args_list]
-        assert set(sent) == {b"2\n", b"4\n"}
+        assert sent[0] == b"0\n"  # link hello resync
+        assert set(sent[1:]) == {b"2\n", b"4\n"}
         assert lights.health_check() is True
         lights.disconnect()
         assert lights.health_check() is False
@@ -185,7 +188,7 @@ class TestLifecycle:
         mock_ser.readline.return_value = b""
         mock_serial_cls.return_value = mock_ser
         lights = PawduinoLighting(port="/dev/ttyACM0", command_timeout=0.05)
-        with pytest.raises(LightingConnectionError, match="did not respond"):
+        with pytest.raises(LightingConnectionError, match="did not answer hello"):
             lights.connect()
         assert lights._link is None
         mock_ser.close.assert_called_once()

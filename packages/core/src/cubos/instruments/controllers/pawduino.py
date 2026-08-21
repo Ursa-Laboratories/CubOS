@@ -19,6 +19,9 @@ import serial
 
 
 _ARDUINO_SETTLE_TIME = 2.0
+_CMD_HELLO = 0
+_HELLO_MARKER = "Hello"
+_HELLO_TIMEOUT = 5.0
 
 
 class PawduinoLinkError(Exception):
@@ -113,6 +116,20 @@ class PawduinoLink:
                 ) from exc
             time.sleep(_ARDUINO_SETTLE_TIME)
             self._drain_input_locked()
+            # The boot banner can trail the drain window and would then be
+            # consumed as the first command's response, skewing every reply
+            # one command behind. A hello round-trip resynchronizes: expect=
+            # skips stale lines until the hello answer arrives.
+            try:
+                self._send_command_locked(
+                    _CMD_HELLO, timeout=min(timeout, _HELLO_TIMEOUT),
+                    expect=_HELLO_MARKER,
+                )
+            except PawduinoLinkError as exc:
+                self._close_locked()
+                raise PawduinoLinkConnectionError(
+                    f"Pawduino on {self._port} did not answer hello: {exc}"
+                ) from exc
             self._holders = 1
 
     def disconnect(self) -> None:
@@ -152,41 +169,52 @@ class PawduinoLink:
         from a prior timeout).
         """
         with self._lock:
-            if not self.is_open:
-                raise PawduinoLinkCommandError(
-                    f"Pawduino link on {self._port} is not connected."
-                )
-            parts = [str(code)] + [str(a) for a in args]
-            message = ",".join(parts) + "\n"
+            return self._send_command_locked(
+                code, *args, timeout=timeout, expect=expect,
+            )
+
+    def _send_command_locked(
+        self,
+        code: int,
+        *args: float,
+        timeout: float = 30.0,
+        expect: Optional[str] = None,
+    ) -> str:
+        if not self.is_open:
+            raise PawduinoLinkCommandError(
+                f"Pawduino link on {self._port} is not connected."
+            )
+        parts = [str(code)] + [str(a) for a in args]
+        message = ",".join(parts) + "\n"
+        try:
+            self._serial.write(message.encode())
+            self._serial.flush()
+        except serial.SerialException as exc:
+            raise PawduinoLinkCommandError(
+                f"Failed to send command {code}: {exc}"
+            ) from exc
+
+        deadline = time.monotonic() + timeout
+        while time.monotonic() < deadline:
             try:
-                self._serial.write(message.encode())
-                self._serial.flush()
+                line = self._serial.readline().decode().strip()
             except serial.SerialException as exc:
                 raise PawduinoLinkCommandError(
-                    f"Failed to send command {code}: {exc}"
+                    f"Serial read error for command {code}: {exc}"
                 ) from exc
-
-            deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                try:
-                    line = self._serial.readline().decode().strip()
-                except serial.SerialException as exc:
-                    raise PawduinoLinkCommandError(
-                        f"Serial read error for command {code}: {exc}"
-                    ) from exc
-                if not line:
+            if not line:
+                continue
+            if line.startswith("OK:"):
+                if expect is not None and expect not in line:
                     continue
-                if line.startswith("OK:"):
-                    if expect is not None and expect not in line:
-                        continue
-                    return line
-                if line.startswith("ERR:"):
-                    raise PawduinoLinkCommandError(
-                        f"Command {code} failed: {line}"
-                    )
-            raise PawduinoLinkTimeoutError(
-                f"Timed out ({timeout}s) waiting for response to command {code}"
-            )
+                return line
+            if line.startswith("ERR:"):
+                raise PawduinoLinkCommandError(
+                    f"Command {code} failed: {line}"
+                )
+        raise PawduinoLinkTimeoutError(
+            f"Timed out ({timeout}s) waiting for response to command {code}"
+        )
 
     def _drain_input_locked(self, quiet_s: float = 0.6, max_s: float = 5.0) -> None:
         """Discard pending input until the port stays quiet for *quiet_s*."""

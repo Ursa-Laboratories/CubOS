@@ -183,7 +183,9 @@ class TestPawduinoCapperSerial:
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     @patch("cubos.instruments.controllers.pawduino.time.sleep")
     def test_connect_sends_line_break_handshake(self, mock_sleep, mock_serial_cls):
-        mock_ser = self._make_mock_serial(['OK:{"value1":0}\n'])
+        mock_ser = self._make_mock_serial(
+            ['OK:{"msg":"Hello from Pawduino!"}\n', 'OK:{"value1":0}\n'],
+        )
         mock_serial_cls.return_value = mock_ser
 
         capper = PawduinoCapper(
@@ -320,7 +322,9 @@ class TestPawduinoCapperLinkLifecycle:
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     @patch("cubos.instruments.controllers.pawduino.time.sleep")
     def test_disconnect_releases_link(self, mock_sleep, mock_serial_cls):
-        mock_ser = self._make_mock_serial(['OK:{"value1":0}\n'])
+        mock_ser = self._make_mock_serial(
+            ['OK:{"msg":"Hello from Pawduino!"}\n', 'OK:{"value1":0}\n'],
+        )
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
             engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
@@ -334,7 +338,9 @@ class TestPawduinoCapperLinkLifecycle:
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     @patch("cubos.instruments.controllers.pawduino.time.sleep")
     def test_probe_failure_releases_link(self, mock_sleep, mock_serial_cls):
-        mock_ser = self._make_mock_serial(["ERR:dead\n"])
+        mock_ser = self._make_mock_serial(
+            ['OK:{"msg":"Hello from Pawduino!"}\n', "ERR:dead\n"],
+        )
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
             engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
@@ -362,6 +368,7 @@ class TestPawduinoCapperLinkLifecycle:
         mock_ser.is_open = True
         mock_ser.in_waiting = 0
         mock_ser.readline.side_effect = [
+            b'OK:{"msg":"Hello from Pawduino!"}\n',      # link hello
             b'OK:{"value1":0}\n',                       # capper handshake
             b'OK:{"homed":1,"pos":0.0,"max_vol":300}\n',  # pipette status
             b'OK:{"homed":1,"pos":0.0,"max_vol":300}\n',  # pipette primed check

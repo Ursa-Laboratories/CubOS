@@ -218,7 +218,8 @@ class TestPipetteLifecycle:
         mock_ser.in_waiting = 0
         if responses is None:
             responses = ["OK:{homed:1,pos:0.0,max_vol:200}\n"]
-        mock_ser.readline.side_effect = [r.encode() for r in responses]
+        hello = 'OK:{"msg":"Hello from Pawduino!"}\n'
+        mock_ser.readline.side_effect = [r.encode() for r in [hello, *responses]]
         return mock_ser
 
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
@@ -254,9 +255,10 @@ class TestPipetteLifecycle:
         pip.connect()
 
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
-        assert written[0].startswith("14")      # status
-        assert written[1].startswith("10")      # home
-        assert written[2].startswith("11,36.0")  # prime = move to prime_position
+        assert written[0].startswith("0")       # link hello
+        assert written[1].startswith("14")      # status
+        assert written[2].startswith("10")      # home
+        assert written[3].startswith("11,36.0")  # prime = move to prime_position
 
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     @patch("cubos.instruments.controllers.pawduino.time.sleep")
@@ -272,8 +274,9 @@ class TestPipetteLifecycle:
         pip.connect()
 
         written = [c[0][0].decode() for c in mock_ser.write.call_args_list]
-        assert len(written) == 1
-        assert written[0].startswith("14")
+        assert len(written) == 2
+        assert written[0].startswith("0")   # link hello
+        assert written[1].startswith("14")
 
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     @patch("cubos.instruments.controllers.pawduino.time.sleep")
@@ -327,7 +330,7 @@ class TestPipetteLifecycle:
             pipette_model="p300_single_gen2", port="/dev/ttyUSB0",
             command_timeout=0.1,
         )
-        with pytest.raises(PipetteConnectionError, match="did not respond"):
+        with pytest.raises(PipetteConnectionError, match="did not answer hello"):
             pip.connect()
 
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
@@ -372,7 +375,10 @@ class TestPipetteCommands:
 
     def _make_connected_pipette(self, mock_serial_cls, mock_sleep, responses):
         """Helper: create a connected OpentronsPipette with mocked serial."""
-        all_responses = ["OK:{homed:1,pos:0.0,max_vol:200}\n"] + responses
+        all_responses = [
+            'OK:{"msg":"Hello from Pawduino!"}\n',  # link hello
+            "OK:{homed:1,pos:0.0,max_vol:200}\n",
+        ] + responses
         mock_ser = MagicMock()
         mock_ser.is_open = True
         mock_ser.in_waiting = 0
