@@ -11,6 +11,7 @@ Usage:
     python -m cubos.tools.bench_check camera --vendor flir --out /tmp/bench_capture.png
     python -m cubos.tools.bench_check pipette --aspirate 50 --dispense 50
     python -m cubos.tools.bench_check pstat --port /dev/ttyUSB0
+    python -m cubos.tools.bench_check pstat --vendor emstat --port /dev/ttyACM1 --ocp 5
     python -m cubos.tools.bench_check all --offline
 
 Known firmware quirk: the Pawduino emits a late "OK:Ready" boot banner
@@ -42,7 +43,9 @@ from cubos.instruments.lighting.vendors.pawduino import PawduinoLighting  # noqa
 from cubos.instruments.pipette.exceptions import PipetteError  # noqa: E402
 from cubos.instruments.pipette.vendors.opentrons import OpentronsPipette  # noqa: E402
 from cubos.instruments.potentiostat.exceptions import PotentiostatError  # noqa: E402
+from cubos.instruments.potentiostat.models import OCPParams  # noqa: E402
 from cubos.instruments.potentiostat.vendors.admiral import AdmiralPotentiostat  # noqa: E402
+from cubos.instruments.potentiostat.vendors.emstat import EmstatPotentiostat  # noqa: E402
 
 DEFAULT_PAWDUINO_PORT = "/dev/ttyACM0"
 DEFAULT_CAPTURE_PATH = "/tmp/bench_capture.png"
@@ -170,12 +173,23 @@ def run_pipette(
     return success
 
 
-def run_pstat(*, port: str, channel: int, offline: bool) -> bool:
+def run_pstat(
+    *, port: str, channel: int, offline: bool,
+    vendor: str = "admiral", ocp: float | None = None,
+) -> bool:
     if not offline and not port:
         print("[pstat] FAILED: --port is required for a hardware run")
         return False
-    pstat = AdmiralPotentiostat(port=port, channel=channel, offline=offline)
-    print(f"[pstat] connecting (port={port or '<unset>'}, channel={channel}, offline={offline})")
+    if vendor == "emstat":
+        pstat: AdmiralPotentiostat | EmstatPotentiostat = EmstatPotentiostat(
+            port=port, offline=offline,
+        )
+    else:
+        pstat = AdmiralPotentiostat(port=port, channel=channel, offline=offline)
+    print(
+        f"[pstat] connecting (vendor={vendor}, port={port or '<unset>'}, "
+        f"channel={channel}, offline={offline})"
+    )
     success = True
     try:
         pstat.connect()
@@ -187,6 +201,14 @@ def run_pstat(*, port: str, channel: int, offline: bool) -> bool:
         if not healthy:
             print("[pstat] FAILED: health_check reported unhealthy")
             success = False
+        elif ocp is not None:
+            print(f"[pstat] running OCP for {ocp}s")
+            result = pstat.run_OCP(OCPParams(duration_s=ocp))
+            print(f"[pstat] OCP samples: {len(result.time_s)}")
+            print(f"  {'t/s':>10}  {'E/V':>12}")
+            for t, e in zip(result.time_s, result.voltage_v):
+                print(f"  {t:>10.3f}  {e:>12.6f}")
+            print(f"[pstat] final voltage: {result.final_voltage_v} V")
     except PotentiostatError as exc:
         print(f"[pstat] FAILED: {exc}")
         success = False
@@ -231,7 +253,10 @@ def cmd_pipette(args: argparse.Namespace) -> bool:
 
 
 def cmd_pstat(args: argparse.Namespace) -> bool:
-    return run_pstat(port=args.port, channel=args.channel, offline=args.offline)
+    return run_pstat(
+        port=args.port, channel=args.channel, offline=args.offline,
+        vendor=args.vendor, ocp=args.ocp,
+    )
 
 
 def cmd_all(args: argparse.Namespace) -> bool:
@@ -262,7 +287,10 @@ def cmd_all(args: argparse.Namespace) -> bool:
     print("\n[pstat]")
     results.append((
         "pstat",
-        run_pstat(port=args.pstat_port, channel=args.pstat_channel, offline=args.offline),
+        run_pstat(
+            port=args.pstat_port, channel=args.pstat_channel,
+            offline=args.offline, vendor=args.pstat_vendor,
+        ),
     ))
 
     print()
@@ -314,9 +342,14 @@ def _build_parser() -> argparse.ArgumentParser:
     pipette_parser.set_defaults(func=cmd_pipette)
 
     pstat_parser = subparsers.add_parser("pstat", help="Connect and health-check the potentiostat")
+    pstat_parser.add_argument("--vendor", choices=["admiral", "emstat"], default="admiral")
     pstat_parser.add_argument("--port", default="")
-    pstat_parser.add_argument("--channel", type=int, default=0)
+    pstat_parser.add_argument("--channel", type=int, default=0, help="Admiral only")
     pstat_parser.add_argument("--offline", action="store_true")
+    pstat_parser.add_argument(
+        "--ocp", type=float, default=None, metavar="SECONDS",
+        help="After the health check, run an OCP of this duration and print the trace",
+    )
     pstat_parser.set_defaults(func=cmd_pstat)
 
     all_parser = subparsers.add_parser(
@@ -325,6 +358,7 @@ def _build_parser() -> argparse.ArgumentParser:
     all_parser.add_argument(
         "--port", default=DEFAULT_PAWDUINO_PORT, help="Shared Pawduino port (lights + pipette)",
     )
+    all_parser.add_argument("--pstat-vendor", choices=["admiral", "emstat"], default="admiral")
     all_parser.add_argument("--pstat-port", default="")
     all_parser.add_argument("--pstat-channel", type=int, default=0)
     all_parser.add_argument("--offline", action="store_true")

@@ -23,11 +23,15 @@ asmi-vernier = [
 potentiostat-admiral = [
     "SquidstatPyLibrary",
 ]
+potentiostat-emstat = [
+    "hardpotato>=1.3.14",
+]
 asmi = [
     "godirect>=1.0.0",
 ]
 potentiostat = [
     "SquidstatPyLibrary",
+    "hardpotato>=1.3.14",
 ]
 # camera: OpenCV covers both the `opencv` webcam vendor and image saving for
 # the `flir` vendor. PySpin itself is proprietary (Spinnaker SDK, manual
