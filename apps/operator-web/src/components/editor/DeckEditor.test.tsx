@@ -175,14 +175,71 @@ describe("DeckEditor", () => {
         deck={{
           filename: "deck.yaml",
           labware: [
-            { key: "trash_1", config: { type: "tip_disposal", name: "Trash" }, wells: null },
+            { key: "holder_1", config: { type: "vial_holder", name: "Holder" }, wells: null },
           ],
         }}
       />,
     );
     expect(screen.getByText(/editing not supported/i)).toBeInTheDocument();
     expect(screen.getByText(/visualization updates after saving/i)).toBeInTheDocument();
-    expect(screen.getByText("tip_disposal")).toBeInTheDocument();
+    expect(screen.getByText("vial_holder")).toBeInTheDocument();
+  });
+
+  it("adds and edits a tip rack", async () => {
+    const user = userEvent.setup();
+    const props = renderDeck({ deck: { filename: "deck.yaml", labware: [] } });
+
+    await user.click(screen.getByRole("button", { name: "+ Tip Rack" }));
+    expect(screen.getByText("tiprack_1")).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Pickup Z/)).toHaveValue("43");
+    expect(screen.getByLabelText(/^Tip length/)).toHaveValue("59.3");
+
+    await user.clear(screen.getByLabelText(/^Pickup Z/));
+    await user.type(screen.getByLabelText(/^Pickup Z/), "40");
+    await user.clear(screen.getByLabelText("Calibration A1 X"));
+    await user.type(screen.getByLabelText("Calibration A1 X"), "168");
+    // Calibration inputs are XY-only: Z comes from pickup_z.
+    expect(screen.queryByLabelText("Calibration A1 Z")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const [, body] = vi.mocked(props.onSave).mock.calls.at(-1)!;
+    const rack = body.labware.tiprack_1;
+    expect(rack).toMatchObject({
+      type: "tip_rack",
+      pickup_z: 40,
+      tip_length: 59.3,
+      calibration: { a1: { x: 168, y: 50 }, a2: { x: 109, y: 50 } },
+    });
+  });
+
+  it("adds and edits a tip disposal", async () => {
+    const user = userEvent.setup();
+    const props = renderDeck({ deck: { filename: "deck.yaml", labware: [] } });
+
+    await user.click(screen.getByRole("button", { name: "+ Tip Disposal" }));
+    expect(screen.getByText("tipdisposal_1")).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Location X"));
+    await user.type(screen.getByLabelText("Location X"), "306");
+    await user.clear(screen.getByLabelText("Length (mm)"));
+    await user.type(screen.getByLabelText("Length (mm)"), "60");
+
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const [, body] = vi.mocked(props.onSave).mock.calls.at(-1)!;
+    expect(body.labware.tipdisposal_1).toMatchObject({
+      type: "tip_disposal",
+      location: { x: 306, y: 120, z: 38 },
+      length: 60,
+    });
+  });
+
+  it("disables Save when a tip rack name is blank", async () => {
+    const user = userEvent.setup();
+    renderDeck({ deck: { filename: "deck.yaml", labware: [] } });
+
+    await user.click(screen.getByRole("button", { name: "+ Tip Rack" }));
+    await user.clear(screen.getByLabelText(/^Component ID/));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
   });
 
   it("does not reuse a labware key after removing an earlier item", async () => {
@@ -214,7 +271,7 @@ describe("DeckEditor", () => {
     renderDeck({ deck: { filename: "deck.yaml", labware: [] } });
 
     expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    expect(screen.getByText(/Add at least one well plate or vial/i)).toBeInTheDocument();
+    expect(screen.getByText(/Add at least one labware item/i)).toBeInTheDocument();
   });
 
   it("shows a save-failed banner and clears it on the next edit or successful save", async () => {

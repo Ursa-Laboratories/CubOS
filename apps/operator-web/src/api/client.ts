@@ -70,7 +70,7 @@ export const deckApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
-  previewWells: (config: import("../types").WellPlateConfig) =>
+  previewWells: (config: import("../types").WellPlateConfig | import("../types").TipRackConfig) =>
     request<Record<string, import("../types").WellPosition>>("/deck/preview-wells", {
       method: "POST",
       body: JSON.stringify(config),
