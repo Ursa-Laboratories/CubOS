@@ -97,12 +97,19 @@ def export_campaign_results_csvs(
         if campaign is None:
             raise CampaignNotFoundError(f"Campaign {campaign_id} not found")
 
+        campaign_dict = dict(campaign)
+
+        if campaign_dict.get("created_at"):
+            campaign_dict["created_at"] = _export_timestamp(
+                campaign_dict["created_at"]
+            )
+
         run_dir = output_root / _result_dir_name(campaign)
         run_dir.mkdir(parents=True, exist_ok=True)
 
         written.append(_write_csv_path(
             run_dir / "campaign.csv",
-            _rows_csv(list(campaign.keys()), [campaign]),
+            _rows_csv(list(campaign_dict.keys()), [campaign_dict])
         ))
         written.append(_write_csv_path(
             run_dir / "experiments.csv",
@@ -411,6 +418,7 @@ def _measurement_table_csv(
 
 def _experiments_csv(conn: sqlite3.Connection, campaign_id: int) -> str:
     columns = _table_columns(conn, "experiments")
+
     rows = conn.execute(
         """
         SELECT *
@@ -420,7 +428,20 @@ def _experiments_csv(conn: sqlite3.Connection, campaign_id: int) -> str:
         """,
         (campaign_id,),
     ).fetchall()
-    return _rows_csv(columns, rows)
+
+    export_rows = []
+
+    for row in rows:
+        row_dict = dict(row)
+
+        if row_dict.get("created_at"):
+            row_dict["created_at"] = _export_timestamp(
+                row_dict["created_at"]
+            )
+
+        export_rows.append(row_dict)
+
+    return _dict_rows_csv(columns, export_rows)
 
 
 def _table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
@@ -429,8 +450,10 @@ def _table_columns(conn: sqlite3.Connection, table_name: str) -> list[str]:
         for row in conn.execute(f"PRAGMA table_info({table_name})").fetchall()
     ]
 
-
-def _rows_csv(columns: list[str], rows: list[sqlite3.Row]) -> str:
+def _rows_csv(
+    columns: list[str],
+    rows: list[sqlite3.Row | dict[str, Any]],
+) -> str:
     handle = io.StringIO()
     writer = csv.writer(handle, lineterminator="\n")
     writer.writerow(columns)
@@ -501,8 +524,8 @@ def _common_result_fields(row: sqlite3.Row) -> dict[str, Any]:
         "labware_key": row["experiment_labware_key"],
         "labware_name": row["experiment_labware_name"],
         "well_id": row["experiment_well_id"] or "",
-        "measurement_timestamp": row["timestamp"],
-        "experiment_created_at": row["experiment_created_at"],
+        "measurement_timestamp": _export_timestamp(row["timestamp"]),
+        "experiment_created_at": _export_timestamp(row["experiment_created_at"]),
     }
 
 
@@ -645,8 +668,8 @@ def _potentiostat_results_csv(rows: list[sqlite3.Row]) -> str:
                 "vendor": row["vendor"],
                 "device_id": row["device_id"],
                 "channel": row["channel"],
-                "started_at": row["started_at"],
-                "stopped_at": row["stopped_at"],
+                "started_at": _export_timestamp(row["started_at"]),
+                "stopped_at": _export_timestamp(row["stopped_at"]),
                 "aborted": "" if row["aborted"] is None else bool(row["aborted"]),
                 "stop_reason": row["stop_reason"],
             })
@@ -772,7 +795,7 @@ def _metadata_csv(rows: list[sqlite3.Row]) -> str:
             [
                 _filename_for_row(row),
                 row["measurement_id"],
-                row["timestamp"],
+                _export_timestamp(row["timestamp"]),
                 row["well_id"] or "",
                 _format_optional(row["z_target_mm"], 3),
                 _format_optional(row["step_size_mm"], 3),
@@ -819,6 +842,21 @@ def _timestamp_suffix(timestamp: str) -> str:
         safe = re.sub(r"[^0-9A-Za-z]+", "_", timestamp).strip("_")
         return safe or "unknown_time"
     return "".join(match.groups()[:3]) + "_" + "".join(match.groups()[3:])
+
+
+def _export_timestamp(timestamp: str | None) -> str:
+    if not timestamp:
+        return ""
+
+    timestamp = str(timestamp)
+
+    if " " in timestamp:
+        timestamp = timestamp.replace(" ", "T")
+
+    if not timestamp.endswith("Z"):
+        timestamp += "Z"
+
+    return timestamp
 
 
 def _json_array(value: Any, field_name: str) -> list[Any]:

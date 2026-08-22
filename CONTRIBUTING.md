@@ -32,6 +32,29 @@ python -m pytest packages/core/tests --cov=packages/core/src/cubos --cov-report=
 diff-cover coverage.xml --compare-branch=origin/main --fail-under=90
 ```
 
+## Code Comments
+
+Default to no comment. Code should explain itself through naming and
+structure; if a change needs a paragraph of comments to be understood, make
+the code clearer instead.
+
+Write a comment only to state something the code cannot: a non-obvious
+constraint, a hardware or vendor quirk, or why the obvious approach is wrong.
+Keep it to one or two lines.
+
+Do not write comments that:
+
+- Narrate what the next line does.
+- Restate what a name, type, prop, or parameter already says.
+- Justify the change to a reviewer ("differs from X because...", "this keeps
+  working when..."). That reasoning belongs in the PR description or commit
+  message, not the source.
+- Recount history ("previously...", "moved from...") — that is what git is
+  for.
+
+Reviewers should treat comment bloat like any other defect and ask for it to
+be removed.
+
 ## Hardware-Facing Changes
 
 Hardware-facing changes require hardware validation before merge. This includes
