@@ -40,6 +40,7 @@ interface EditingCellState {
   labware_key: string;
   location_id: string;
   version: number;
+  previousVolume: number;
 }
 
 interface CorrectFormState {
@@ -117,6 +118,7 @@ export default function StatePanel() {
       labware_key: container.labware_key,
       location_id: container.location_id,
       version: container.version,
+      previousVolume: container.current_volume_ul,
     });
     setEditingValue(String(container.current_volume_ul));
   };
@@ -125,40 +127,44 @@ export default function StatePanel() {
     setEditingCell(null);
   };
 
-  const commitEditingVolume = (container: ContainerView) => {
+  // Use the version/volume captured when editing began, not whatever the
+  // row re-rendered with meanwhile (e.g. a background refetch) — otherwise
+  // a concurrent change to this container would go undetected instead of
+  // rejecting with a 409.
+  const commitEditingVolume = (editing: EditingCellState) => {
     const parsed = Number(editingValue);
     const changed =
       Number.isFinite(parsed) &&
-      Math.abs(parsed - container.current_volume_ul) > VOLUME_CHANGE_TOLERANCE_UL;
+      Math.abs(parsed - editing.previousVolume) > VOLUME_CHANGE_TOLERANCE_UL;
     setEditingCell(null);
     if (!changed) return;
     setCorrectForm({
-      labware_key: container.labware_key,
-      location_id: container.location_id,
-      version: container.version,
-      previousVolume: container.current_volume_ul,
+      labware_key: editing.labware_key,
+      location_id: editing.location_id,
+      version: editing.version,
+      previousVolume: editing.previousVolume,
       newVolume: parsed,
       operator: "",
       reason: "",
     });
   };
 
-  const handleVolumeKeyDown = (event: KeyboardEvent<HTMLInputElement>, container: ContainerView) => {
+  const handleVolumeKeyDown = (event: KeyboardEvent<HTMLInputElement>, editing: EditingCellState) => {
     if (event.key === "Enter") {
       suppressNextBlurRef.current = true;
-      commitEditingVolume(container);
+      commitEditingVolume(editing);
     } else if (event.key === "Escape") {
       suppressNextBlurRef.current = true;
       cancelEditingVolume();
     }
   };
 
-  const handleVolumeBlur = (container: ContainerView) => {
+  const handleVolumeBlur = (editing: EditingCellState) => {
     if (suppressNextBlurRef.current) {
       suppressNextBlurRef.current = false;
       return;
     }
-    commitEditingVolume(container);
+    commitEditingVolume(editing);
   };
 
   const submitCorrect = async () => {
@@ -324,6 +330,7 @@ export default function StatePanel() {
                       const isEditing =
                         editingCell?.labware_key === container.labware_key &&
                         editingCell?.location_id === container.location_id;
+                      const editing = isEditing ? editingCell : null;
                       return (
                         <tr key={`${container.labware_key}.${container.location_id}`}>
                           <td style={tdStyle}>
@@ -337,7 +344,7 @@ export default function StatePanel() {
                             style={tdNumericStyle}
                             onDoubleClick={() => beginEditingVolume(container)}
                           >
-                            {isEditing ? (
+                            {editing ? (
                               <input
                                 type="number"
                                 step="0.001"
@@ -347,8 +354,8 @@ export default function StatePanel() {
                                 style={{ ...theme.input, width: 100 }}
                                 value={editingValue}
                                 onChange={(event) => setEditingValue(event.target.value)}
-                                onKeyDown={(event) => handleVolumeKeyDown(event, container)}
-                                onBlur={() => handleVolumeBlur(container)}
+                                onKeyDown={(event) => handleVolumeKeyDown(event, editing)}
+                                onBlur={() => handleVolumeBlur(editing)}
                               />
                             ) : (
                               <>
