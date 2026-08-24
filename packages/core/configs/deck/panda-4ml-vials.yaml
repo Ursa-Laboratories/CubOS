@@ -1,0 +1,43 @@
+labware:
+  vial_tray:
+    load_name: ursa_12_vial_grid_4ml
+    calibration:
+      a1:
+        x: 4.55
+        y: 114.645
+        z: 46.898
+      a2:
+        x: 4.55
+        y: 132.645
+  tip_rack:
+    load_name: ursa_13x2_tip_rack
+    calibration:
+      a1:
+        x: 135.391
+        y: 107.708
+        z: 88.003
+      a2:
+        x: 135.391
+        y: 117.708
+    pickup_z: 74.503
+    drop_z: 90.503
+  tip_disposal:
+    type: tip_disposal
+    name: tip_disposal
+    model_name: tip_disposal
+    location:
+      x: 185.0
+      y: 32.0
+      z: 55.0
+    length: 60.0
+    width: 60.0
+    height: 35.0
+    slots:
+      discard:
+        description: Tip drop point over the bin center.
+        location:
+          x: 185.0
+          y: 32.0
+          z: 55.0
+        supported_labware_types:
+        - pipette_tip

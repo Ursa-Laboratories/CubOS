@@ -1,0 +1,251 @@
+labware:
+  e1:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 160.478
+      y: 2.273
+      z: 80.6
+    name: e1
+    role: process
+    solution: ebath
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  ito_pama_plate:
+    calibration:
+      a1:
+        x: 164.978
+        y: 89.973
+        z: 11.8
+      a2:
+        x: 164.978
+        y: 74.973
+    capacity_ul: 700
+    columns: 4
+    name: ito_pama_plate
+    rows: 3
+    type: well_plate
+    working_volume_ul: 700
+    x_offset: 15
+    y_offset: 15
+    model_name: ''
+  s1:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 271.073
+      z: 78.6
+    name: s1
+    role: stock
+    solution: water
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  s2:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 238.073
+      z: 78.6
+    name: s2
+    role: stock
+    solution: dmfc
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  s3:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 205.073
+      z: 78.6
+    name: s3
+    role: stock
+    solution: electrolyte
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  s4:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 172.073
+      z: 78.6
+    name: s4
+    role: stock
+    solution: dmf
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  s5:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 139.073
+      z: 78.6
+    name: s5
+    role: stock
+    solution: dmf
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  s6:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 106.073
+      z: 78.6
+    name: s6
+    role: stock
+    solution: acn
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  tip_disposal:
+    location:
+      x: 342.478
+      y: 70.823
+      z: 81.6
+    name: tip_disposal
+    slots:
+      discard:
+        description: Tiprack drop_coordinates, converted to gantry frame.
+        location:
+          x: 342.478
+          y: 70.823
+          z: 81.6
+        supported_labware_types:
+        - pipette_tip
+    type: tip_disposal
+    model_name: tip_disposal
+    length: 198
+    width: 62
+    height: 30
+  tip_rack:
+    calibration:
+      a1:
+        x: 292.478
+        y: 269.823
+        z: 8.6
+      a2:
+        x: 292.478
+        y: 260.823
+    columns: 12
+    drop_z: 24.6
+    name: tip_rack
+    pickup_z: 8.6
+    rows: 2
+    tip_length: 0.01
+    type: tip_rack
+    x_offset: 9
+    y_offset: 9
+    model_name: tip_rack
+    location:
+      x: 292.478
+      y: 269.823
+      z: 8.6
+    slots: {}
+    length: 9
+    width: 99
+    height: 16
+    tip_present:
+      A1: true
+      A2: true
+      A3: true
+      A4: true
+      A5: true
+      A6: true
+      A7: true
+      A8: true
+      A9: true
+      A10: true
+      A11: true
+      A12: true
+      B1: true
+      B2: true
+      B3: true
+      B4: true
+      B5: true
+      B6: true
+      B7: true
+      B8: true
+      B9: true
+      B10: true
+      B11: true
+      B12: true
+  w1:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 73.073
+      z: 78.6
+    name: w1
+    role: waste
+    solution: wastedmfc
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  w2:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 40.073
+      z: 78.6
+    name: w2
+    role: waste
+    solution: waste
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  w3:
+    capacity_ul: 20000
+    diameter: 28
+    height: 57
+    location:
+      x: 388.478
+      y: 7.073
+      z: 78.6
+    name: w3
+    role: waste
+    solution: waste
+    type: vial
+    working_volume_ul: 20000
+    model_name: ''
+    dead_volume_ul: 0
+  vial_tray:
+    load_name: ursa_12_vial_grid_4ml
+    calibration:
+      a1:
+        x: 27.683
+        y: 112.977
+        z: 46.246
+      a2:
+        x: 27.683
+        y: 130.977

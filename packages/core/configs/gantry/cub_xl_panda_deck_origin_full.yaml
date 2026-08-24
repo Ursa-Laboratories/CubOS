@@ -1,7 +1,7 @@
 cnc:
   calibration_block_height_mm: 35.0
   factory_z_travel_mm: 117.0
-  safe_z: -0.1
+  safe_z: 97.748
   y_axis_motion: head
 gantry_type: cub
 grbl_settings:
@@ -9,9 +9,9 @@ grbl_settings:
   homing_dir_mask: 0
   homing_enable: true
   homing_pull_off: 1.0
-  max_travel_x: 350.15
-  max_travel_y: 278.073
-  max_travel_z: 94.6
+  max_travel_x: 375.018
+  max_travel_y: 235.85
+  max_travel_z: 98.848
   soft_limits: true
   status_report: 0
   steps_per_mm_x: 400.0
@@ -22,7 +22,7 @@ instruments:
     depth: 7.4
     offline: true
     offset_x: -117.33
-    offset_y: -6.0
+    offset_y: -9.0
     type: camera
     vendor: flir
   lights:
@@ -31,7 +31,7 @@ instruments:
     depth: 68.002
     offline: false
     offset_x: -115.15
-    offset_y: 3.0
+    offset_y: 0.0
     port: /dev/serial/by-id/usb-Arduino__www.arduino.cc__0043_2423531363635121C1B1-if00
     type: lighting
     vendor: pawduino
@@ -44,7 +44,7 @@ instruments:
     min_battery_percent: 20
     offline: false
     offset_x: 0.0
-    offset_y: 3.0
+    offset_y: 0.0
     pipette_model: picus2_1ch_1000
     port: /dev/serial/by-id/usb-Sartorius_Picus_2_47684951-if00
     type: pipette
@@ -56,7 +56,7 @@ instruments:
     model: emstat4_lr
     offline: false
     offset_x: -172.328
-    offset_y: -1.0
+    offset_y: -4.0
     port: /dev/serial/by-id/usb-PalmSens_EmStat4_ES4LR24M3030-if00
     type: potentiostat
     vendor: emstat
@@ -67,19 +67,19 @@ instruments:
     engage_depth_mm: -15.0
     offline: false
     offset_x: -53.25
-    offset_y: 1.0
+    offset_y: -2.0
     park_position:
-    - -10.0
-    - -10.0
+    - 339.15
+    - 267.073
     port: /dev/serial/by-id/usb-Arduino__www.arduino.cc__0043_2423531363635121C1B1-if00
     type: capper
     vendor: pawduino
-origin_policy: home_origin
+origin_policy: deck_origin
 serial_port: /dev/ttyUSB0
 working_volume:
-  x_max: 0.0
-  x_min: -349.15
-  y_max: 0.0
-  y_min: -277.073
-  z_max: 0.0
-  z_min: -93.6
+  x_max: 374.018
+  x_min: 0.0
+  y_max: 234.85
+  y_min: 0.0
+  z_max: 97.848
+  z_min: 0.0

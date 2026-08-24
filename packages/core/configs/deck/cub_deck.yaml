@@ -1,0 +1,188 @@
+labware:
+  vial_tray:
+    type: vial_grid
+    name: vial_tray
+    model_name: 12VialHolder4mL
+    rows: 2
+    columns: 6
+    x_offset: 18
+    y_offset: 18
+    vial_model_name: 4ml_vial
+    vial_height: 45
+    vial_diameter: 14.5
+    capacity_ul: 4000
+    working_volume_ul: 4000
+    calibration:
+      a1:
+        x: 3.7
+        y: 115.5
+        z: 49.5
+      a2:
+        x: 3.7
+        y: 133.5
+    aliases: {}
+  tip_rack:
+    type: tip_rack
+    name: tip_rack
+    model_name: panda_13x2_tip_rack
+    rows: 2
+    columns: 13
+    length: 30
+    width: 140
+    height: 17
+    tip_length: 70
+    x_offset: 10
+    y_offset: 10
+    calibration:
+      a1:
+        x: 135.1
+        y: 109.04
+        z: 87.351
+      a2:
+        x: 135.1
+        y: 119.04
+    pickup_z: 73.851
+    drop_z: 89.851
+    location:
+      x: 134.041
+      y: 106.04
+      z: 73.851
+    slots: {}
+    tip_present:
+      A1: true
+      A2: true
+      A3: true
+      A4: true
+      A5: true
+      A6: true
+      A7: true
+      A8: true
+      A9: true
+      A10: true
+      A11: true
+      A12: true
+      A13: true
+      B1: true
+      B2: true
+      B3: true
+      B4: true
+      B5: true
+      B6: true
+      B7: true
+      B8: true
+      B9: true
+      B10: true
+      B11: true
+      B12: true
+      B13: true
+  tip_disposal:
+    type: tip_disposal
+    name: tip_disposal
+    model_name: tip_disposal
+    location:
+      x: 185
+      y: 32
+      z: 50
+    length: 60
+    width: 60
+    height: 35
+    slots:
+      discard:
+        description: Tip drop point over the bin center.
+        location:
+          x: 185
+          y: 32
+          z: 50
+        supported_labware_types:
+        - pipette_tip
+  source_1:
+    type: vial
+    name: source_1
+    model_name: ''
+    height: 57
+    diameter: 28
+    location:
+      x: 239.49
+      y: 27.92
+      z: 73.5
+    capacity_ul: 20000
+    working_volume_ul: 20000
+    dead_volume_ul: 0
+  source_2:
+    type: vial
+    name: source_2
+    model_name: ''
+    height: 57
+    diameter: 28
+    location:
+      x: 239.49
+      y: 60.92
+      z: 73.5
+    capacity_ul: 20000
+    working_volume_ul: 20000
+    dead_volume_ul: 0
+  source_3:
+    type: vial
+    name: source_3
+    model_name: ''
+    height: 57
+    diameter: 28
+    location:
+      x: 239.49
+      y: 93.92
+      z: 73.5
+    capacity_ul: 20000
+    working_volume_ul: 20000
+    dead_volume_ul: 0
+  source_4:
+    type: vial
+    name: source_4
+    model_name: ''
+    height: 57
+    diameter: 28
+    location:
+      x: 239.49
+      y: 126.92
+      z: 73.5
+    capacity_ul: 20000
+    working_volume_ul: 20000
+    dead_volume_ul: 0
+  source_5:
+    type: vial
+    name: source_5
+    model_name: ''
+    height: 57
+    diameter: 28
+    location:
+      x: 239.49
+      y: 159.92
+      z: 73.5
+    capacity_ul: 20000
+    working_volume_ul: 20000
+    dead_volume_ul: 0
+  source_6:
+    type: vial
+    name: source_6
+    model_name: ''
+    height: 57
+    diameter: 28
+    location:
+      x: 239.49
+      y: 192.92
+      z: 73.5
+    capacity_ul: 20000
+    working_volume_ul: 20000
+    dead_volume_ul: 0
+  source_7:
+    type: vial
+    name: source_7
+    model_name: ''
+    height: 57
+    diameter: 28
+    location:
+      x: 239.49
+      y: 225.92
+      z: 73.5
+    capacity_ul: 20000
+    working_volume_ul: 20000
+    dead_volume_ul: 0

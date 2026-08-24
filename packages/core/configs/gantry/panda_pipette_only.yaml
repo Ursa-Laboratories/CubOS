@@ -1,0 +1,45 @@
+serial_port: /dev/ttyUSB0
+gantry_type: cub
+cnc:
+  factory_z_travel_mm: 117.0
+  calibration_block_height_mm: 76.5
+  y_axis_motion: head
+  safe_z: 98.5
+working_volume:
+  x_min: 0.0
+  x_max: 375.368
+  y_min: 0.0
+  y_max: 236.518
+  z_min: 51.5
+  z_max: 168.5
+origin_policy: deck_origin
+grbl_settings:
+  dir_invert_mask: 1
+  status_report: 0
+  soft_limits: true
+  homing_enable: true
+  homing_dir_mask: 0
+  homing_pull_off: 1.0
+  steps_per_mm_x: 400.0
+  steps_per_mm_y: 400.0
+  steps_per_mm_z: 400.0
+  max_travel_x: 376.368
+  max_travel_y: 237.518
+  max_travel_z: 118.0
+instruments:
+  pipette:
+    type: pipette
+    vendor: sartorius
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
+    baud_rate: 115200
+    blowout_delay_ms: 3000
+    blowout_go_home: true
+    command_timeout: 30
+    min_battery_percent: 20
+    offline: false
+    pipette_model: picus2_1ch_1000
+    port: /dev/serial/by-id/usb-Sartorius_Picus_2_47684951-if00
+    verify_model: true
+    whole_microlitres_only: false

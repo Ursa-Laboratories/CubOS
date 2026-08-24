@@ -1,0 +1,5 @@
+protocol:
+  - home:
+  - pick_up_tip:
+      position: tip_rack.A1
+  - home:
