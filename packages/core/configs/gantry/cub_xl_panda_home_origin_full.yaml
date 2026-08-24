@@ -1,85 +1,74 @@
+# GENERATED FILE -- do not hand-edit. See panda_imported_deck.yaml's header.
+#
+# This is gantry/cub_xl_panda_home_origin.yaml plus a `pipette` instrument
+# entry derived from PANDA-BEAR's tools.json. CubOS instrument offsets are
+# the NEGATION of the PANDA-BEAR tool offset for x/y; depth is the +z
+# offset unchanged (instrument_mount.py: gantry_x = target_x - offset_x,
+# gantry_z = target_z + depth -- algebraically identical to PANDA-BEAR's
+# gantry = tool_target + tool_offset when offset_cubos = -offset_pandabear).
+
 cnc:
-  calibration_block_height_mm: 35.0
-  factory_z_travel_mm: 117.0
-  safe_z: -0.1
+  factory_z_travel_mm: 100.0
+  safe_z: -5.0
   y_axis_motion: head
-gantry_type: cub
+gantry_type: cub_xl
 grbl_settings:
   dir_invert_mask: 1
   homing_dir_mask: 0
   homing_enable: true
-  homing_pull_off: 1.0
-  max_travel_x: 350.15
-  max_travel_y: 278.073
-  max_travel_z: 94.6
-  soft_limits: true
+  max_travel_x: 401.0
+  max_travel_y: 301.0
+  max_travel_z: 85.0
   status_report: 0
   steps_per_mm_x: 400.0
   steps_per_mm_y: 400.0
   steps_per_mm_z: 400.0
 instruments:
   camera:
-    depth: 7.4
-    offline: true
-    offset_x: -117.33
-    offset_y: -6.0
-    type: camera
-    vendor: flir
-  lights:
-    baud_rate: 115200
-    command_timeout: 30
-    depth: 68.002
-    offline: false
-    offset_x: -115.15
-    offset_y: 3.0
-    port: /dev/serial/by-id/usb-Arduino__www.arduino.cc__0043_2423531363635121C1B1-if00
-    type: lighting
-    vendor: pawduino
-  pipette:
-    baud_rate: 115200
-    blowout_delay_ms: 3000
-    blowout_go_home: true
-    command_timeout: 30
     depth: 0.0
-    min_battery_percent: 20
-    offline: false
+    offline: true
     offset_x: 0.0
-    offset_y: 3.0
-    pipette_model: picus2_1ch_1000
-    port: /dev/serial/by-id/usb-Sartorius_Picus_2_47684951-if00
+    offset_y: 0.0
+    type: camera
+    vendor: mount_only
+  pipette:
+    depth: 100.0
+    offline: true
+    offset_x: 115.9
+    offset_y: 6.1
+    pipette_model: p300_single_gen2
+    port: ''
     type: pipette
-    vendor: sartorius
-    verify_model: true
-    whole_microlitres_only: false
+    vendor: opentrons
   potentiostat:
-    depth: 70.0
-    model: emstat4_lr
-    offline: false
-    offset_x: -172.328
-    offset_y: -1.0
-    port: /dev/serial/by-id/usb-PalmSens_EmStat4_ES4LR24M3030-if00
+    channel: 0
+    depth: 100.0
+    offline: true
+    offset_x: -56.7
+    offset_y: 3.8
+    port: ''
     type: potentiostat
-    vendor: emstat
+    vendor: admiral
   vial_capper_decapper:
     capture_retries: 2
     capture_settle_s: 1.0
-    depth: 40.002
+    depth: 61.5
     engage_depth_mm: -15.0
-    offline: false
-    offset_x: -53.25
-    offset_y: 1.0
+    offline: true
+    offset_x: 62.9
+    offset_y: 5.1
     park_position:
     - -10.0
     - -10.0
-    port: /dev/serial/by-id/usb-Arduino__www.arduino.cc__0043_2423531363635121C1B1-if00
+    port: ''
     type: capper
     vendor: pawduino
 origin_policy: home_origin
 serial_port: /dev/ttyUSB0
 working_volume:
   x_max: 0.0
-  x_min: -349.15
+  x_min: -401.0
   y_max: 0.0
-  y_min: -277.073
+  y_min: -301.0
   z_max: 0.0
-  z_min: -93.6
+  z_min: -85.0

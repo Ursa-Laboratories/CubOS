@@ -175,7 +175,7 @@ describe("DeckEditor", () => {
         deck={{
           filename: "deck.yaml",
           labware: [
-            { key: "trash_1", config: { type: "tip_disposal", name: "Trash" }, wells: null },
+            { key: "holder_1", config: { type: "vial_holder", name: "Holder" }, wells: null },
           ],
         }}
       />,
