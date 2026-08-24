@@ -1,0 +1,470 @@
+protocol:
+- home:
+- pick_up_tip:
+    position: tip_rack.A1
+- transfer:
+    source: source_1
+    destination: vial_tray.A1
+    volume_ul: 501.2
+- transfer:
+    source: source_1
+    destination: vial_tray.A2
+    volume_ul: 874.7
+- transfer:
+    source: source_1
+    destination: vial_tray.A3
+    volume_ul: 726.7
+- transfer:
+    source: source_1
+    destination: vial_tray.A4
+    volume_ul: 332
+- transfer:
+    source: source_1
+    destination: vial_tray.A5
+    volume_ul: 1000
+- transfer:
+    source: source_1
+    destination: vial_tray.A5
+    volume_ul: 50.7
+- transfer:
+    source: source_1
+    destination: vial_tray.A6
+    volume_ul: 767.7
+- transfer:
+    source: source_1
+    destination: vial_tray.B1
+    volume_ul: 447.4
+- transfer:
+    source: source_1
+    destination: vial_tray.B2
+    volume_ul: 455.2
+- transfer:
+    source: source_1
+    destination: vial_tray.B3
+    volume_ul: 616.7
+- transfer:
+    source: source_1
+    destination: vial_tray.B4
+    volume_ul: 699
+- transfer:
+    source: source_1
+    destination: vial_tray.B5
+    volume_ul: 1000
+- transfer:
+    source: source_1
+    destination: vial_tray.B5
+    volume_ul: 36.9
+- transfer:
+    source: source_1
+    destination: vial_tray.B6
+    volume_ul: 1000
+- transfer:
+    source: source_1
+    destination: vial_tray.B6
+    volume_ul: 76.6
+- drop_tip:
+    position: tip_disposal.discard
+- pick_up_tip:
+    position: tip_rack.A2
+- transfer:
+    source: source_2
+    destination: vial_tray.A1
+    volume_ul: 241.8
+- transfer:
+    source: source_2
+    destination: vial_tray.A2
+    volume_ul: 44.3
+- transfer:
+    source: source_2
+    destination: vial_tray.A3
+    volume_ul: 257.4
+- transfer:
+    source: source_2
+    destination: vial_tray.A5
+    volume_ul: 101.6
+- transfer:
+    source: source_2
+    destination: vial_tray.B1
+    volume_ul: 29.9
+- transfer:
+    source: source_2
+    destination: vial_tray.B2
+    volume_ul: 252
+- transfer:
+    source: source_2
+    destination: vial_tray.B4
+    volume_ul: 56.9
+- transfer:
+    source: source_2
+    destination: vial_tray.B5
+    volume_ul: 26.1
+- transfer:
+    source: source_2
+    destination: vial_tray.B6
+    volume_ul: 129
+- drop_tip:
+    position: tip_disposal.discard
+- pick_up_tip:
+    position: tip_rack.A3
+- transfer:
+    source: source_3
+    destination: vial_tray.A4
+    volume_ul: 6
+- transfer:
+    source: source_3
+    destination: vial_tray.A6
+    volume_ul: 188.2
+- transfer:
+    source: source_3
+    destination: vial_tray.B3
+    volume_ul: 29.9
+- drop_tip:
+    position: tip_disposal.discard
+- pick_up_tip:
+    position: tip_rack.A4
+- transfer:
+    source: source_4
+    destination: vial_tray.A1
+    volume_ul: 874.5
+- transfer:
+    source: source_4
+    destination: vial_tray.A2
+    volume_ul: 972.6
+- transfer:
+    source: source_4
+    destination: vial_tray.A3
+    volume_ul: 1000
+- transfer:
+    source: source_4
+    destination: vial_tray.A3
+    volume_ul: 43.1
+- transfer:
+    source: source_4
+    destination: vial_tray.A4
+    volume_ul: 1000
+- transfer:
+    source: source_4
+    destination: vial_tray.A4
+    volume_ul: 132.5
+- transfer:
+    source: source_4
+    destination: vial_tray.A5
+    volume_ul: 1000
+- transfer:
+    source: source_4
+    destination: vial_tray.A5
+    volume_ul: 215.1
+- transfer:
+    source: source_4
+    destination: vial_tray.A6
+    volume_ul: 1000
+- transfer:
+    source: source_4
+    destination: vial_tray.A6
+    volume_ul: 124.6
+- transfer:
+    source: source_4
+    destination: vial_tray.B1
+    volume_ul: 819.1
+- transfer:
+    source: source_4
+    destination: vial_tray.B2
+    volume_ul: 1000
+- transfer:
+    source: source_4
+    destination: vial_tray.B2
+    volume_ul: 148.2
+- transfer:
+    source: source_4
+    destination: vial_tray.B3
+    volume_ul: 1000
+- transfer:
+    source: source_4
+    destination: vial_tray.B3
+    volume_ul: 113.5
+- transfer:
+    source: source_4
+    destination: vial_tray.B4
+    volume_ul: 800.5
+- transfer:
+    source: source_4
+    destination: vial_tray.B5
+    volume_ul: 1000
+- transfer:
+    source: source_4
+    destination: vial_tray.B5
+    volume_ul: 163.8
+- transfer:
+    source: source_4
+    destination: vial_tray.B6
+    volume_ul: 1000
+- transfer:
+    source: source_4
+    destination: vial_tray.B6
+    volume_ul: 289.4
+- drop_tip:
+    position: tip_disposal.discard
+- pick_up_tip:
+    position: tip_rack.A5
+- transfer:
+    source: source_5
+    destination: vial_tray.A1
+    volume_ul: 71.7
+- transfer:
+    source: source_5
+    destination: vial_tray.A2
+    volume_ul: 721.4
+- transfer:
+    source: source_5
+    destination: vial_tray.A3
+    volume_ul: 89.4
+- transfer:
+    source: source_5
+    destination: vial_tray.A4
+    volume_ul: 111.1
+- transfer:
+    source: source_5
+    destination: vial_tray.A5
+    volume_ul: 69.3
+- transfer:
+    source: source_5
+    destination: vial_tray.A6
+    volume_ul: 318.4
+- transfer:
+    source: source_5
+    destination: vial_tray.B1
+    volume_ul: 47
+- transfer:
+    source: source_5
+    destination: vial_tray.B2
+    volume_ul: 61.4
+- transfer:
+    source: source_5
+    destination: vial_tray.B3
+    volume_ul: 430.4
+- transfer:
+    source: source_5
+    destination: vial_tray.B4
+    volume_ul: 350
+- transfer:
+    source: source_5
+    destination: vial_tray.B5
+    volume_ul: 144.5
+- transfer:
+    source: source_5
+    destination: vial_tray.B6
+    volume_ul: 77.9
+- drop_tip:
+    position: tip_disposal.discard
+- pick_up_tip:
+    position: tip_rack.A6
+- transfer:
+    source: source_6
+    destination: vial_tray.A1
+    volume_ul: 446.4
+- transfer:
+    source: source_6
+    destination: vial_tray.A2
+    volume_ul: 53.2
+- transfer:
+    source: source_6
+    destination: vial_tray.A3
+    volume_ul: 73.9
+- transfer:
+    source: source_6
+    destination: vial_tray.A4
+    volume_ul: 64.3
+- transfer:
+    source: source_6
+    destination: vial_tray.A5
+    volume_ul: 77.5
+- transfer:
+    source: source_6
+    destination: vial_tray.A6
+    volume_ul: 57.7
+- transfer:
+    source: source_6
+    destination: vial_tray.B1
+    volume_ul: 87.6
+- transfer:
+    source: source_6
+    destination: vial_tray.B2
+    volume_ul: 221.7
+- transfer:
+    source: source_6
+    destination: vial_tray.B3
+    volume_ul: 91.2
+- transfer:
+    source: source_6
+    destination: vial_tray.B4
+    volume_ul: 274
+- transfer:
+    source: source_6
+    destination: vial_tray.B5
+    volume_ul: 382.4
+- transfer:
+    source: source_6
+    destination: vial_tray.B6
+    volume_ul: 352.5
+- drop_tip:
+    position: tip_disposal.discard
+- pick_up_tip:
+    position: tip_rack.B1
+- transfer:
+    source: source_7
+    destination: vial_tray.A1
+    volume_ul: 147.3
+- transfer:
+    source: source_7
+    destination: vial_tray.A2
+    volume_ul: 66.3
+- transfer:
+    source: source_7
+    destination: vial_tray.A3
+    volume_ul: 99.7
+- transfer:
+    source: source_7
+    destination: vial_tray.A4
+    volume_ul: 106
+- transfer:
+    source: source_7
+    destination: vial_tray.A5
+    volume_ul: 908.5
+- transfer:
+    source: source_7
+    destination: vial_tray.A6
+    volume_ul: 294.2
+- transfer:
+    source: source_7
+    destination: vial_tray.B1
+    volume_ul: 45.4
+- transfer:
+    source: source_7
+    destination: vial_tray.B2
+    volume_ul: 359.9
+- transfer:
+    source: source_7
+    destination: vial_tray.B3
+    volume_ul: 59.8
+- transfer:
+    source: source_7
+    destination: vial_tray.B4
+    volume_ul: 58.3
+- transfer:
+    source: source_7
+    destination: vial_tray.B5
+    volume_ul: 75.1
+- transfer:
+    source: source_7
+    destination: vial_tray.B6
+    volume_ul: 565.9
+- drop_tip:
+    position: tip_disposal.discard
+- pick_up_tip:
+    position: tip_rack.B2
+- transfer:
+    source: source_8
+    destination: vial_tray.A1
+    volume_ul: 262.9
+- transfer:
+    source: source_8
+    destination: vial_tray.A2
+    volume_ul: 107
+- transfer:
+    source: source_8
+    destination: vial_tray.A3
+    volume_ul: 117.9
+- transfer:
+    source: source_8
+    destination: vial_tray.A4
+    volume_ul: 1000
+- transfer:
+    source: source_8
+    destination: vial_tray.A4
+    volume_ul: 588.9
+- transfer:
+    source: source_8
+    destination: vial_tray.A5
+    volume_ul: 125.8
+- transfer:
+    source: source_8
+    destination: vial_tray.A6
+    volume_ul: 337.5
+- transfer:
+    source: source_8
+    destination: vial_tray.B1
+    volume_ul: 683.7
+- transfer:
+    source: source_8
+    destination: vial_tray.B2
+    volume_ul: 882.2
+- transfer:
+    source: source_8
+    destination: vial_tray.B3
+    volume_ul: 933.8
+- transfer:
+    source: source_8
+    destination: vial_tray.B4
+    volume_ul: 89.3
+- transfer:
+    source: source_8
+    destination: vial_tray.B5
+    volume_ul: 201.6
+- transfer:
+    source: source_8
+    destination: vial_tray.B6
+    volume_ul: 167.5
+- drop_tip:
+    position: tip_disposal.discard
+- pick_up_tip:
+    position: tip_rack.B3
+- transfer:
+    source: source_9
+    destination: vial_tray.A1
+    volume_ul: 77.7
+- transfer:
+    source: source_9
+    destination: vial_tray.A2
+    volume_ul: 78.2
+- transfer:
+    source: source_9
+    destination: vial_tray.A3
+    volume_ul: 721.2
+- transfer:
+    source: source_9
+    destination: vial_tray.A4
+    volume_ul: 56.7
+- transfer:
+    source: source_9
+    destination: vial_tray.A5
+    volume_ul: 96.8
+- transfer:
+    source: source_9
+    destination: vial_tray.A6
+    volume_ul: 285.6
+- transfer:
+    source: source_9
+    destination: vial_tray.B1
+    volume_ul: 297.2
+- transfer:
+    source: source_9
+    destination: vial_tray.B2
+    volume_ul: 64.1
+- transfer:
+    source: source_9
+    destination: vial_tray.B3
+    volume_ul: 65.2
+- transfer:
+    source: source_9
+    destination: vial_tray.B4
+    volume_ul: 73.6
+- transfer:
+    source: source_9
+    destination: vial_tray.B5
+    volume_ul: 460.9
+- transfer:
+    source: source_9
+    destination: vial_tray.B6
+    volume_ul: 209.3
+- drop_tip:
+    position: tip_disposal.discard

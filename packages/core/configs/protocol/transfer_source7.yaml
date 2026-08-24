@@ -3,7 +3,7 @@ protocol:
 - pick_up_tip:
     position: tip_rack.A1
 - transfer:
-    source: source_7
+    source: source_1
     destination: vial_tray.A1
     volume_ul: 100
     source_height: -30

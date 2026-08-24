@@ -7,9 +7,9 @@ cnc:
   safe_z: 98.5
 working_volume:
   x_min: 0.0
-  x_max: 375.368
+  x_max: 375.203
   y_min: 0.0
-  y_max: 236.518
+  y_max: 282.85
   z_min: 51.5
   z_max: 168.5
 origin_policy: deck_origin
@@ -23,8 +23,8 @@ grbl_settings:
   steps_per_mm_x: 400.0
   steps_per_mm_y: 400.0
   steps_per_mm_z: 400.0
-  max_travel_x: 376.368
-  max_travel_y: 237.518
+  max_travel_x: 376.203
+  max_travel_y: 283.85
   max_travel_z: 118.0
 instruments:
   pipette:
