@@ -182,7 +182,7 @@ describe("DeckEditor", () => {
     );
     expect(screen.getByText(/editing not supported/i)).toBeInTheDocument();
     expect(screen.getByText(/visualization updates after saving/i)).toBeInTheDocument();
-    expect(screen.getByText("tip_disposal")).toBeInTheDocument();
+    expect(screen.getByText("vial_holder")).toBeInTheDocument();
   });
 
   it("does not reuse a labware key after removing an earlier item", async () => {
