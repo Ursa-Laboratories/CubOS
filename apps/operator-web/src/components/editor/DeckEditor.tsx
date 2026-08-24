@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { DeckResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, DeckConfig } from "../../types";
 import { CoordinateField, NumberField, OptionalNumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
+import RawYamlPanel from "./RawYamlPanel";
 import { useConfirm } from "../common/useConfirm";
 import * as theme from "../../theme";
 
@@ -217,6 +218,23 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           )}
         </div>
       ))}
+
+      <RawYamlPanel
+        value={{ labware }}
+        onApply={(parsed) => {
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return "Top level must be a mapping with a `labware:` key.";
+          }
+          const lw = (parsed as { labware?: unknown }).labware;
+          if (!lw || typeof lw !== "object" || Array.isArray(lw)) {
+            return "`labware:` must be a mapping of deck keys.";
+          }
+          const next = lw as Record<string, LabwareConfig>;
+          setLabware(next);
+          syncViz(next);
+          return null;
+        }}
+      />
 
       <div style={{ marginTop: 12 }}>
         {dirty && (
