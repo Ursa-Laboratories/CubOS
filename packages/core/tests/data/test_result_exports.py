@@ -16,7 +16,9 @@ from cubos.data.exports import (
     export_campaign_results_csvs,
     list_campaign_summaries,
     _json_array,
+    _export_timestamp
 )
+
 from cubos.instruments.filmetrics.models import MeasurementResult
 from cubos.instruments.uv_curing.models import CureResult
 from cubos.protocol_engine.measurements import InstrumentMeasurement, MeasurementType
@@ -365,3 +367,21 @@ def test_export_campaign_results_csvs_writes_via_atomic_replace(monkeypatch, tmp
 
 def test_results_directory_is_gitignored():
     assert "data/results/" in open(".gitignore", encoding="utf-8").read()
+
+
+def test_export_timestamp_converts_space_to_t_and_adds_z():
+    assert (
+        _export_timestamp("2026-08-20 18:10:20")
+        == "2026-08-20T18:10:20Z"
+    )
+
+
+def test_export_timestamp_preserves_existing_z():
+    assert (
+        _export_timestamp("2026-08-20T18:10:20Z")
+        == "2026-08-20T18:10:20Z"
+    )
+
+
+def test_export_timestamp_none_returns_empty_string():
+    assert _export_timestamp(None) == ""
