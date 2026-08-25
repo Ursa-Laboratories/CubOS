@@ -478,7 +478,7 @@ export default function LabwareCalibrationModal({
                           <optgroup label="Add new">
                             {templatesOfType.map((template) => (
                               <option key={template.id} value={`${TEMPLATE_PREFIX}${template.id}`}>
-                                New: {template.label}
+                                {template.label}
                               </option>
                             ))}
                           </optgroup>
