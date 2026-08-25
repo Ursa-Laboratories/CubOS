@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type {
   CommandInfo,
   CompositionSeedRow,
@@ -166,6 +167,15 @@ export default function ProtocolEditor({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [requestConfirm, confirmDialog] = useConfirm();
+  // Raw YAML mode: an alternate view of the same steps/positions state, so
+  // Save always goes through the identical onSave -> server-schema-validation
+  // path as the structured form (mirrors GantryEditor's raw mode). `rawText`
+  // only drives `steps`/`positionRows` forward when it parses to a mapping
+  // with a `protocol` list; an unparsable or malformed edit is held locally
+  // as `rawError` instead of corrupting the last-known-good state.
+  const [rawMode, setRawMode] = useState(false);
+  const [rawText, setRawText] = useState("");
+  const [rawError, setRawError] = useState<string | null>(null);
 
   const commandsByName = Object.fromEntries(commands.map((c) => [c.name, c]));
   const choices = buildProtocolChoices(deck, gantry, positionRows, instrumentMethods);
@@ -289,6 +299,48 @@ export default function ProtocolEditor({
     rowsToPositions(positionRows) ? { positions: rowsToPositions(positionRows), protocol: steps } : { protocol: steps }
   );
 
+  const enterRawMode = () => {
+    setRawText(stringifyYaml(buildConfig()));
+    setRawError(null);
+    setRawMode(true);
+  };
+
+  // Leaving raw mode while the text doesn't parse would either discard the
+  // operator's in-progress edit or silently fall back to the last-parsed
+  // state — both surprising. Block the switch until the YAML is valid again
+  // (or the operator discards).
+  const exitRawMode = () => {
+    if (rawError) return;
+    setRawMode(false);
+  };
+
+  const handleRawChange = (text: string) => {
+    setRawText(text);
+    let parsed: unknown;
+    try {
+      parsed = parseYaml(text);
+    } catch (err) {
+      setRawError(err instanceof Error ? err.message : String(err));
+      return;
+    }
+    if (!isRecord(parsed)) {
+      setRawError("Protocol YAML must be a mapping (key: value) at the top level.");
+      return;
+    }
+    if (!Array.isArray(parsed.protocol)) {
+      setRawError('Protocol YAML must have a "protocol" list of steps.');
+      return;
+    }
+    setRawError(null);
+    const nextSteps = parsed.protocol as ProtocolStep[];
+    const nextRows = positionsToRows(isRecord(parsed.positions) ? parsed.positions as Record<string, number[]> : null);
+    setSteps(nextSteps);
+    setPositionRows(nextRows);
+    setSaveError(null);
+    onLocalChange?.(nextSteps);
+    onPositionsChange?.(rowsToPositions(nextRows));
+  };
+
   const handleValidate = () => onValidate(buildConfig());
 
   const handleSave = async () => {
@@ -319,6 +371,8 @@ export default function ProtocolEditor({
     setSteps(baseline?.steps ? structuredClone(baseline.steps) : []);
     setPositionRows(positionsToRows(baseline?.positions));
     setSaveError(null);
+    setRawMode(false);
+    setRawError(null);
     onRefresh();
   };
 
@@ -329,7 +383,7 @@ export default function ProtocolEditor({
   // banner only points the user there rather than asking them to save
   // those configs from here.
   const otherDirty = unsavedConfigs.filter((name) => name !== "Protocol");
-  const canSave = hasSteps && (!!saveAs.trim() || !!selectedFile) && !saving && !hasPositionErrors;
+  const canSave = hasSteps && (!!saveAs.trim() || !!selectedFile) && !saving && !hasPositionErrors && !(rawMode && !!rawError);
   // "new"/"resume" both need an explicit, complete choice before Run is
   // enabled — resume specifically needs a picked state id. "none" (the
   // default) never blocks Run, so every pre-Feature-07 flow is unaffected.
@@ -393,200 +447,234 @@ export default function ProtocolEditor({
         <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import protocol config" selectedFile={selectedFile} />
       </div>
 
-      {!hasSteps && (
-        <div style={emptyProtocolStyle}>
-          Load a protocol or add steps.
-        </div>
-      )}
-
-      <div style={namedPositionsStyle}>
-        <div style={namedPositionsHeaderStyle}>
-          <div>
-            <h3 style={sectionTitleStyle}>Named Positions</h3>
-            <p style={sectionSubtextStyle}>Protocol-level targets such as park_position.</p>
-          </div>
-          <button onClick={addPosition} style={addBtnStyle}>
-            Add Position
-          </button>
-        </div>
-
-        {positionRows.length === 0 ? (
-          <div style={emptyNamedPositionsStyle}>No named positions.</div>
-        ) : (
-          <div style={positionRowsStyle}>
-            {positionRows.map((position, i) => (
-              <div key={position.id} style={positionRowStyle}>
-                <label style={positionNameFieldStyle}>
-                  <span style={theme.fieldLabel}>Name</span>
-                  <input
-                    id={`pos-${i}-name`}
-                    name={`pos_${i}_name`}
-                    aria-label={`Position ${i + 1} name`}
-                    type="text"
-                    value={position.name}
-                    onChange={(event) => updatePosition(position.id, { name: event.target.value })}
-                    style={inputStyle}
-                  />
-                </label>
-                <CoordinateField
-                  id={`pos-${i}-coord`}
-                  name={`pos_${i}_coord`}
-                  label={`${position.name.trim() || `Position ${i + 1}`} coordinates`}
-                  value={{ x: position.x, y: position.y, z: position.z }}
-                  onChange={(value) => updatePosition(position.id, value)}
-                />
-                <button
-                  onClick={() => removePosition(position.id)}
-                  style={removeBtnStyle}
-                  aria-label={`Remove ${position.name.trim() || `position ${i + 1}`}`}
-                  title="Remove position"
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {positionErrors.length > 0 && (
-          <div style={positionErrorStyle}>
-            {positionErrors.map((error) => (
-              <div key={error}>{error}</div>
-            ))}
-          </div>
-        )}
+      <div style={rawToggleRowStyle}>
+        <button
+          type="button"
+          onClick={() => (rawMode ? exitRawMode() : enterRawMode())}
+          disabled={rawMode && !!rawError}
+          style={rawModeToggleStyle}
+          title={rawMode && rawError ? "Fix the YAML error before switching back to the form" : undefined}
+        >
+          {rawMode ? "Back to form" : "Edit raw YAML"}
+        </button>
       </div>
 
-      {steps.map((step, i) => {
-        const cmd = commandsByName[step.command];
-        const color = COMMAND_COLORS[step.command] ?? theme.color.textMuted;
+      {rawMode ? (
+        <div style={cardStyle}>
+          <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Raw YAML</h4>
+          <textarea
+            aria-label="Raw protocol YAML"
+            value={rawText}
+            onChange={(e) => handleRawChange(e.target.value)}
+            spellCheck={false}
+            style={rawTextareaStyle}
+          />
+          {rawError && (
+            <div style={saveErrorStyle}>{rawError}</div>
+          )}
+          <div style={rawHintStyle}>
+            Saved through the same path as the form editor — the server re-validates this YAML against the
+            protocol schema before writing it to disk.
+          </div>
+        </div>
+      ) : (
+        <>
+          {!hasSteps && (
+            <div style={emptyProtocolStyle}>
+              Load a protocol or add steps.
+            </div>
+          )}
 
-        return (
-          <div key={i} style={{ ...cardStyle, borderLeft: `3px solid ${color}` }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-              <h4 style={{ margin: 0, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={stepBadgeStyle}>Step {i + 1}:</span>{" "}
-                <span style={{ color, fontWeight: 600 }}>{step.command}</span>
-              </h4>
-              <div style={{ display: "flex", gap: 4 }}>
-                <button onClick={() => moveStep(i, -1)} disabled={i === 0} style={reorderBtnStyle} title="Move up">
-                  ↑
-                </button>
-                <button onClick={() => moveStep(i, 1)} disabled={i === steps.length - 1} style={reorderBtnStyle} title="Move down">
-                  ↓
-                </button>
-                <button onClick={() => removeStep(i)} style={removeBtnStyle}>
-                  ✕
-                </button>
+          <div style={namedPositionsStyle}>
+            <div style={namedPositionsHeaderStyle}>
+              <div>
+                <h3 style={sectionTitleStyle}>Named Positions</h3>
+                <p style={sectionSubtextStyle}>Protocol-level targets such as park_position.</p>
               </div>
+              <button onClick={addPosition} style={addBtnStyle}>
+                Add Position
+              </button>
             </div>
 
-            {cmd ? (
-              <div style={stepArgsGridStyle}>
-                {cmd.args.map((arg) => {
-                  if (isHiddenArgForStep(arg.name, step.args, choices)) {
-                    return null;
-                  }
-                  const val = step.args[arg.name];
-                  const contextualOptions = optionsForArg(arg.name, step.args, choices);
-                  const argOptions = contextualOptions.length > 0
-                    ? includeCurrentOption(contextualOptions, val)
-                    : [];
-                  if (argOptions.length > 0) {
-                    return (
-                      <SmartSelectField
-                        key={arg.name}
-                        id={`step-${i}-${arg.name}`}
-                        name={`step_${i}_${arg.name}`}
-                        label={argLabel(arg.name)}
-                        value={String(val ?? "")}
-                        options={argOptions}
-                        onChange={(v) => updateStepArg(i, arg.name, v)}
-                        required={arg.required}
+            {positionRows.length === 0 ? (
+              <div style={emptyNamedPositionsStyle}>No named positions.</div>
+            ) : (
+              <div style={positionRowsStyle}>
+                {positionRows.map((position, i) => (
+                  <div key={position.id} style={positionRowStyle}>
+                    <label style={positionNameFieldStyle}>
+                      <span style={theme.fieldLabel}>Name</span>
+                      <input
+                        id={`pos-${i}-name`}
+                        name={`pos_${i}_name`}
+                        aria-label={`Position ${i + 1} name`}
+                        type="text"
+                        value={position.name}
+                        onChange={(event) => updatePosition(position.id, { name: event.target.value })}
+                        style={inputStyle}
                       />
-                    );
-                  }
-                  if (arg.name === "method_kwargs") {
-                    return (
-                      <MethodOptionsField
-                        key={arg.name}
-                        idPrefix={`step-${i}-method`}
-                        namePrefix={`step_${i}_method`}
-                        value={val}
-                        asmiIndentation={isAsmiIndentationStep(step.args, choices)}
-                        onChange={(v) => updateStepArg(i, arg.name, v)}
-                      />
-                    );
-                  }
-                  if (isNumericType(arg.type)) {
-                    if (!arg.required) {
+                    </label>
+                    <CoordinateField
+                      id={`pos-${i}-coord`}
+                      name={`pos_${i}_coord`}
+                      label={`${position.name.trim() || `Position ${i + 1}`} coordinates`}
+                      value={{ x: position.x, y: position.y, z: position.z }}
+                      onChange={(value) => updatePosition(position.id, value)}
+                    />
+                    <button
+                      onClick={() => removePosition(position.id)}
+                      style={removeBtnStyle}
+                      aria-label={`Remove ${position.name.trim() || `position ${i + 1}`}`}
+                      title="Remove position"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {positionErrors.length > 0 && (
+              <div style={positionErrorStyle}>
+                {positionErrors.map((error) => (
+                  <div key={error}>{error}</div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {steps.map((step, i) => {
+            const cmd = commandsByName[step.command];
+            const color = COMMAND_COLORS[step.command] ?? theme.color.textMuted;
+
+            return (
+              <div key={i} style={{ ...cardStyle, borderLeft: `3px solid ${color}` }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <h4 style={{ margin: 0, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={stepBadgeStyle}>Step {i + 1}:</span>{" "}
+                    <span style={{ color, fontWeight: 600 }}>{step.command}</span>
+                  </h4>
+                  <div style={{ display: "flex", gap: 4 }}>
+                    <button onClick={() => moveStep(i, -1)} disabled={i === 0} style={reorderBtnStyle} title="Move up">
+                      ↑
+                    </button>
+                    <button onClick={() => moveStep(i, 1)} disabled={i === steps.length - 1} style={reorderBtnStyle} title="Move down">
+                      ↓
+                    </button>
+                    <button onClick={() => removeStep(i)} style={removeBtnStyle}>
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                {cmd ? (
+                  <div style={stepArgsGridStyle}>
+                    {cmd.args.map((arg) => {
+                      if (isHiddenArgForStep(arg.name, step.args, choices)) {
+                        return null;
+                      }
+                      const val = step.args[arg.name];
+                      const contextualOptions = optionsForArg(arg.name, step.args, choices);
+                      const argOptions = contextualOptions.length > 0
+                        ? includeCurrentOption(contextualOptions, val)
+                        : [];
+                      if (argOptions.length > 0) {
+                        return (
+                          <SmartSelectField
+                            key={arg.name}
+                            id={`step-${i}-${arg.name}`}
+                            name={`step_${i}_${arg.name}`}
+                            label={argLabel(arg.name)}
+                            value={String(val ?? "")}
+                            options={argOptions}
+                            onChange={(v) => updateStepArg(i, arg.name, v)}
+                            required={arg.required}
+                          />
+                        );
+                      }
+                      if (arg.name === "method_kwargs") {
+                        return (
+                          <MethodOptionsField
+                            key={arg.name}
+                            idPrefix={`step-${i}-method`}
+                            namePrefix={`step_${i}_method`}
+                            value={val}
+                            asmiIndentation={isAsmiIndentationStep(step.args, choices)}
+                            onChange={(v) => updateStepArg(i, arg.name, v)}
+                          />
+                        );
+                      }
+                      if (isNumericType(arg.type)) {
+                        if (!arg.required) {
+                          return (
+                            <OptionalNumberField
+                              key={arg.name}
+                              id={`step-${i}-${arg.name}`}
+                              name={`step_${i}_${arg.name}`}
+                              label={argLabel(arg.name)}
+                              value={typeof val === "number" ? val : null}
+                              onChange={(v) => updateStepArg(i, arg.name, v)}
+                            />
+                          );
+                        }
+                        return (
+                          <NumberField
+                            key={arg.name}
+                            id={`step-${i}-${arg.name}`}
+                            name={`step_${i}_${arg.name}`}
+                            label={argLabel(arg.name)}
+                            value={Number(val ?? 0)}
+                            onChange={(v) => updateStepArg(i, arg.name, v)}
+                            required={arg.required}
+                          />
+                        );
+                      }
                       return (
-                        <OptionalNumberField
+                        <TextField
                           key={arg.name}
                           id={`step-${i}-${arg.name}`}
                           name={`step_${i}_${arg.name}`}
                           label={argLabel(arg.name)}
-                          value={typeof val === "number" ? val : null}
+                          value={String(val ?? "")}
                           onChange={(v) => updateStepArg(i, arg.name, v)}
+                          required={arg.required}
                         />
                       );
-                    }
-                    return (
-                      <NumberField
-                        key={arg.name}
-                        id={`step-${i}-${arg.name}`}
-                        name={`step_${i}_${arg.name}`}
-                        label={argLabel(arg.name)}
-                        value={Number(val ?? 0)}
-                        onChange={(v) => updateStepArg(i, arg.name, v)}
-                        required={arg.required}
-                      />
-                    );
-                  }
-                  return (
-                    <TextField
-                      key={arg.name}
-                      id={`step-${i}-${arg.name}`}
-                      name={`step_${i}_${arg.name}`}
-                      label={argLabel(arg.name)}
-                      value={String(val ?? "")}
-                      onChange={(v) => updateStepArg(i, arg.name, v)}
-                      required={arg.required}
-                    />
-                  );
-                })}
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ color: theme.color.danger, fontSize: 12, margin: 0 }}>Unknown command: {step.command}</p>
+                )}
+
+                {validationErrors &&
+                  validationErrors
+                    .filter((e) => stepErrorPattern(i).test(e))
+                    .map((e, j) => (
+                      <p key={j} style={{ color: theme.color.danger, fontSize: 11, margin: "4px 0 0" }}>
+                        {displayStepError(e)}
+                      </p>
+                    ))}
               </div>
-            ) : (
-              <p style={{ color: theme.color.danger, fontSize: 12, margin: 0 }}>Unknown command: {step.command}</p>
-            )}
+            );
+          })}
 
-            {validationErrors &&
-              validationErrors
-                .filter((e) => stepErrorPattern(i).test(e))
-                .map((e, j) => (
-                  <p key={j} style={{ color: theme.color.danger, fontSize: 11, margin: "4px 0 0" }}>
-                    {displayStepError(e)}
-                  </p>
+          <div style={addStepPanelStyle}>
+            <label style={toolbarFieldStyle}>
+              <span style={toolbarLabelStyle}>Add step</span>
+              <select value={addCommand} onChange={(e) => setAddCommand(e.target.value)} style={selectStyle}>
+                {commands.map((c) => (
+                  <option key={c.name} value={c.name}>
+                    {commandLabel(c.name)}
+                  </option>
                 ))}
+              </select>
+            </label>
+            <button onClick={addStep} style={addBtnStyle}>
+              Add
+            </button>
           </div>
-        );
-      })}
-
-      <div style={addStepPanelStyle}>
-        <label style={toolbarFieldStyle}>
-          <span style={toolbarLabelStyle}>Add step</span>
-          <select value={addCommand} onChange={(e) => setAddCommand(e.target.value)} style={selectStyle}>
-            {commands.map((c) => (
-              <option key={c.name} value={c.name}>
-                {commandLabel(c.name)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <button onClick={addStep} style={addBtnStyle}>
-          Add
-        </button>
-      </div>
+        </>
+      )}
 
       <div style={{ marginTop: 12 }}>
         {onFluidStateChoiceChange && (
@@ -1351,6 +1439,35 @@ const emptyNamedPositionsStyle: React.CSSProperties = {
 const positionErrorStyle: React.CSSProperties = {
   ...theme.notice.error,
   marginTop: 8,
+};
+
+const rawToggleRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "flex-end",
+  marginBottom: 8,
+};
+
+const rawModeToggleStyle: React.CSSProperties = {
+  ...theme.btn.secondary,
+  ...theme.btnSmall,
+};
+
+const rawTextareaStyle: React.CSSProperties = {
+  ...theme.input,
+  ...theme.mono,
+  width: "100%",
+  minHeight: 360,
+  resize: "vertical",
+  fontSize: 12,
+  lineHeight: 1.5,
+  whiteSpace: "pre",
+};
+
+const rawHintStyle: React.CSSProperties = {
+  marginTop: 8,
+  fontSize: 11,
+  color: theme.color.textMuted,
+  lineHeight: 1.45,
 };
 
 const emptyProtocolStyle: React.CSSProperties = {
