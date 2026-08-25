@@ -1,0 +1,36 @@
+# WellPlate (deck.labware.well_plate.WellPlate) — generic SBS ANSI-standard
+# 24-well plate template.
+#
+# Follows the ANSI SLAS 1-2004 footprint (127.76 x 85.47 mm outer) with a
+# 6 column x 4 row grid on an 18 mm pitch. The A1 offset below centers the
+# well grid on that standard footprint: x = (127.76 - 5*18)/2 = 18.88,
+# y = (85.47 - 3*18)/2 = 15.74.
+#
+# The `calibration` values below are placeholders anchored at plate origin;
+# override `calibration.a1` and `calibration.a2` in your deck YAML with
+# real deck coordinates before use. `height`/`well_depth`/`capacity_ul`/
+# `working_volume_ul` default to typical flat-bottom 24-well values —
+# override for vendor-specific variants.
+
+type: well_plate
+name: sbs_24_wellplate
+model_name: sbs_24_wellplate
+rows: 4
+columns: 6
+length: 127.76
+width: 85.47
+height: 20.2            # OUTER plate height (rim → underside of plate)
+well_depth: 17.4         # INSIDE well depth (rim → inside floor where sample sits).
+                          # Typical flat-bottom 24-well (Corning/Falcon-style).
+                          # Override for deep-well/V-bottom/round-bottom variants.
+well_attributes:
+  diameter: 15.6         # well INNER diameter, typical 24-well (~1.9 cm^2 growth area) —
+                          # verify against your vendor's drawing before relying on it.
+  bottom: flat            # flat-bottom variant; override for V/round.
+calibration:
+  a1: { x: 18.88, y: 15.74 }   # centered A1 offset from plate corner
+  a2: { x: 36.88, y: 15.74 }   # next column (a1.x + x_offset)
+x_offset: 18.0
+y_offset: 18.0
+capacity_ul: 3400.0
+working_volume_ul: 2000.0
