@@ -99,6 +99,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={null}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -130,6 +132,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -153,6 +157,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -186,6 +192,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -216,6 +224,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -243,6 +253,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -275,6 +287,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -300,6 +314,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />
     );
@@ -333,6 +349,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -351,6 +369,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />
     );
@@ -385,6 +405,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -444,6 +466,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -482,6 +506,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -520,6 +546,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -548,6 +576,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -571,6 +601,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -606,6 +638,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -631,6 +665,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -651,6 +687,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -675,6 +713,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -709,6 +749,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={negativeWorkingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -739,6 +781,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={negativeWorkingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -762,6 +806,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={negativeWorkingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -786,6 +832,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={negativeWorkingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -813,6 +861,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -843,7 +893,9 @@ describe("GantryPositionWidget manual move safety", () => {
           workingVolume={workingVolume}
           gantryFile="cubos.yaml"
           gantry={null}
-          onSaveCalibrated={async () => undefined}
+          deck={null}
+        onSaveDeck={async () => undefined}
+        onSaveCalibrated={async () => undefined}
         />
       </>,
     );
@@ -867,6 +919,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -901,6 +955,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -934,6 +990,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -966,6 +1024,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -995,6 +1055,8 @@ describe("GantryPositionWidget manual move safety", () => {
         gantryFile="cubos.yaml"
         gantry={null}
         isRunning
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -1019,6 +1081,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -1046,6 +1110,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -1071,6 +1137,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -1099,6 +1167,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -1120,6 +1190,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );
@@ -1143,6 +1215,8 @@ describe("GantryPositionWidget manual move safety", () => {
         workingVolume={workingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
+        deck={null}
+        onSaveDeck={async () => undefined}
         onSaveCalibrated={async () => undefined}
       />,
     );

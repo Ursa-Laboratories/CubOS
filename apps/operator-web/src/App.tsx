@@ -849,6 +849,11 @@ export default function App() {
         gantryFile={displayGantry ? gantryFile : null}
         gantry={displayGantry}
         isRunning={protocolRunActive}
+        deck={localDeck ?? deckQuery.data ?? null}
+        onSaveDeck={async (filename, body) => {
+          await saveDeck.mutateAsync({ filename, body });
+          setLocalDeck(null);
+        }}
         onSaveCalibrated={async (filename, body) => {
           const previousGantryFile = gantryFile;
           const saved = await saveGantry.mutateAsync({ filename, body });

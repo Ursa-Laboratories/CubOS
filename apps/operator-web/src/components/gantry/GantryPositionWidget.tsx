@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { gantryApi } from "../../api/client";
-import type { GantryConfig, GantryPosition, GantryResponse, WorkingVolume } from "../../types";
+import type { DeckConfig, DeckResponse, GantryConfig, GantryPosition, GantryResponse, WorkingVolume } from "../../types";
 import * as theme from "../../theme";
 import CalibrationWizard from "./CalibrationWizard";
+import LabwareCalibrationModal from "../deck/LabwareCalibrationModal";
 import { createJogPacer, jogPaceMs } from "./jogPacing";
 import { useConfirm } from "../common/useConfirm";
 
@@ -12,7 +13,9 @@ interface Props {
   gantryFile: string | null;
   gantry: GantryResponse | null;
   isRunning?: boolean;
+  deck: DeckResponse | null;
   onSaveCalibrated: (filename: string, config: GantryConfig) => Promise<void>;
+  onSaveDeck: (filename: string, config: DeckConfig) => Promise<void>;
 }
 
 const MIN_STEP = 0.001;
@@ -29,13 +32,16 @@ export default function GantryPositionWidget({
   gantryFile,
   gantry,
   isRunning = false,
+  deck,
   onSaveCalibrated,
+  onSaveDeck,
 }: Props) {
   const [loading, setLoading] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [jogBusy, setJogBusy] = useState(false);
   const [homeBusy, setHomeBusy] = useState(false);
   const [calibrationOpen, setCalibrationOpen] = useState(false);
+  const [labwareCalibrationOpen, setLabwareCalibrationOpen] = useState(false);
   const [stepXY, setStepXY] = useState("0.5");
   const [stepZ, setStepZ] = useState("0.5");
   const [moveX, setMoveX] = useState("");
@@ -463,6 +469,7 @@ export default function GantryPositionWidget({
   const advancedDisabled = !connected || advancedBusy || isRunning;
   const canCalibrate = !!gantry;
   const canOpenCalibration = canCalibrate && !isRunning;
+  const canOpenLabwareCalibration = canCalibrate && !!deck && !isRunning;
 
   const jogBtnProps = (x: number, y: number, z: number) => ({
     onMouseDown: () => !jogDisabled && startJog(x, y, z),
@@ -744,6 +751,24 @@ export default function GantryPositionWidget({
         >
           Calibrate
         </button>
+        <button
+          onClick={() => setLabwareCalibrationOpen(true)}
+          disabled={!canOpenLabwareCalibration}
+          style={{
+            ...calibrateBtnStyle,
+            opacity: canOpenLabwareCalibration ? 1 : 0.45,
+            cursor: canOpenLabwareCalibration ? "pointer" : "not-allowed",
+          }}
+          title={canOpenLabwareCalibration
+            ? "Open labware calibration"
+            : isRunning
+              ? "Protocol running"
+              : !gantry
+                ? "Load a gantry config first"
+                : "Load a deck config first"}
+        >
+          Calibrate labware
+        </button>
       </div>
 
       {workingVolume && (
@@ -891,6 +916,14 @@ export default function GantryPositionWidget({
         gantry={gantry}
         position={position}
         onSaveCalibrated={handleSaveCalibrated}
+      />
+      <LabwareCalibrationModal
+        open={labwareCalibrationOpen}
+        onClose={() => setLabwareCalibrationOpen(false)}
+        deck={deck}
+        gantry={gantry}
+        position={position}
+        onSaveDeck={onSaveDeck}
       />
     </div>
   );
