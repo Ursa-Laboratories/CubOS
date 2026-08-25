@@ -145,7 +145,9 @@ describe("CalibrationWizard multi-instrument block height step", () => {
     await user.click(screen.getByRole("button", { name: "Continue" })); // -> Z reference
 
     expect(await screen.findByText("Set Z Reference")).toBeInTheDocument();
-    expect(screen.getByText("42 mm")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reset wizard" }));
+    await advanceToBlockHeightStep(user);
+    expect(await screen.findByLabelText("Block height (mm)")).toHaveValue("42");
   });
 
   it("blocks advancing from the block height step when the value is invalid", async () => {
@@ -177,7 +179,7 @@ describe("CalibrationWizard multi-instrument block height step", () => {
 
     await advanceToBlockHeightStep(user);
     await user.click(screen.getByRole("button", { name: "Continue" })); // -> Z reference
-    await user.click(await screen.findByRole("button", { name: "Set Z reference with asmi and retract" }));
+    await user.click(await screen.findByRole("button", { name: "Set Z reference with asmi and continue" }));
 
     expect(await screen.findByText("Record Instruments")).toBeInTheDocument();
     expect(screen.getByText(/Center the camera over the calibration block mark/i)).toBeInTheDocument();
@@ -249,7 +251,7 @@ describe("CalibrationWizard multi-instrument block height step", () => {
 
     await advanceToBlockHeightStep(user);
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    const setZ = await screen.findByRole("button", { name: "Set Z reference with asmi and retract" });
+    const setZ = await screen.findByRole("button", { name: "Set Z reference with asmi and continue" });
 
     await user.click(setZ);
     expect(await screen.findByText("retract failed")).toBeInTheDocument();
@@ -267,8 +269,8 @@ describe("CalibrationWizard multi-instrument block height step", () => {
     expect(workCoordinateBodies).toHaveLength(2);
     expect(workCoordinateBodies.filter((body) => "z" in body)).toHaveLength(1);
 
-    await user.click(screen.getByRole("button", { name: "Record pipette and retract" }));
-    expect(await screen.findByText("Measure And Save")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Record pipette" }));
+    expect(await screen.findByRole("heading", { name: "Save" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(onSaveCalibrated).toHaveBeenCalled());

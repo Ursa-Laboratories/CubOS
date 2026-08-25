@@ -354,3 +354,4 @@ export const dataApi = {
   exportCampaignAsmiZip: (campaignId: number) =>
     download(`/data/campaigns/${campaignId}/asmi.zip`),
 };
+

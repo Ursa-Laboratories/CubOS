@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type { DeckResponse, LabwareConfig, WellPlateConfig, VialConfig, DeckConfig } from "../../types";
-import { CoordinateField, NumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
+import type { DeckResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, DeckConfig } from "../../types";
+import { CoordinateField, NumberField, OptionalNumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
+import RawYamlPanel from "./RawYamlPanel";
 import { useConfirm } from "../common/useConfirm";
 import * as theme from "../../theme";
 
@@ -81,8 +82,16 @@ function isValid(labware: Record<string, LabwareConfig>): boolean {
   return true;
 }
 
-function isEditableDeckLabware(entry: LabwareConfig): entry is WellPlateConfig | VialConfig {
-  return entry.type === "well_plate" || entry.type === "vial";
+function isEditableDeckLabware(
+  entry: LabwareConfig,
+): entry is WellPlateConfig | VialConfig | VialGridConfig | TipRackConfig | TipDisposalConfig {
+  return (
+    entry.type === "well_plate" ||
+    entry.type === "vial" ||
+    entry.type === "vial_grid" ||
+    entry.type === "tip_rack" ||
+    entry.type === "tip_disposal"
+  );
 }
 
 function labwareFromDeck(deck: DeckResponse | null): Record<string, LabwareConfig> {
@@ -196,9 +205,12 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           {isEditableDeckLabware(entry) ? (
             <>
               <TextField id={`${key}-name`} name={`${key}_name`} label="Component ID" value={entry.name} onChange={(v) => updateLabware(key, { ...entry, name: v })} required />
-              <TextField id={`${key}-model`} name={`${key}_model`} label="Model" value={entry.model_name} onChange={(v) => updateLabware(key, { ...entry, model_name: v })} />
+              <TextField id={`${key}-model`} name={`${key}_model`} label="Model" value={entry.model_name ?? ""} onChange={(v) => updateLabware(key, { ...entry, model_name: v })} />
               {entry.type === "well_plate" && <WellPlateFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
               {entry.type === "vial" && <VialFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
+              {entry.type === "vial_grid" && <VialGridFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
+              {entry.type === "tip_rack" && <TipRackFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
+              {entry.type === "tip_disposal" && <TipDisposalFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
             </>
           ) : (
             <div style={unsupportedNoteStyle}>
@@ -207,6 +219,23 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           )}
         </div>
       ))}
+
+      <RawYamlPanel
+        value={{ labware }}
+        onApply={(parsed) => {
+          if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+            return "Top level must be a mapping with a `labware:` key.";
+          }
+          const lw = (parsed as { labware?: unknown }).labware;
+          if (!lw || typeof lw !== "object" || Array.isArray(lw)) {
+            return "`labware:` must be a mapping of deck keys.";
+          }
+          const next = lw as Record<string, LabwareConfig>;
+          setLabware(next);
+          syncViz(next);
+          return null;
+        }}
+      />
 
       <div style={{ marginTop: 12 }}>
         {dirty && (
@@ -281,6 +310,76 @@ function VialFields({ entry, onChange, parentKey }: { entry: VialConfig; onChang
         <NumberField id={`${parentKey}-capacity`} name={`${parentKey}_capacity`} label="Capacity (uL)" value={entry.capacity_ul} onChange={(v) => onChange({ ...entry, capacity_ul: v })} />
         <NumberField id={`${parentKey}-workingvol`} name={`${parentKey}_workingvol`} label="Working vol (uL)" value={entry.working_volume_ul} onChange={(v) => onChange({ ...entry, working_volume_ul: v })} />
       </div>
+    </div>
+  );
+}
+
+function VialGridFields({ entry, onChange, parentKey }: { entry: VialGridConfig; onChange: (v: VialGridConfig) => void; parentKey: string }) {
+  const a1 = entry.calibration.a1 ?? { x: 0, y: 0, z: 0 };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <NumberField id={`${parentKey}-rows`} name={`${parentKey}_rows`} label="Rows" value={entry.rows} step={1} onChange={(v) => onChange({ ...entry, rows: v })} required />
+        <NumberField id={`${parentKey}-cols`} name={`${parentKey}_cols`} label="Columns" value={entry.columns} step={1} onChange={(v) => onChange({ ...entry, columns: v })} required />
+      </div>
+      <CoordinateField id={`${parentKey}-a1`} name={`${parentKey}_a1`} label="Calibration A1 (vial rim)" value={a1} onChange={(v) => onChange({ ...entry, calibration: { ...entry.calibration, a1: v } })} required />
+      <CoordinateField id={`${parentKey}-a2`} name={`${parentKey}_a2`} label="Calibration A2" value={entry.calibration.a2} onChange={(v) => onChange({ ...entry, calibration: { ...entry.calibration, a2: v } })} required />
+      <div style={{ display: "flex", gap: 8 }}>
+        <NumberField id={`${parentKey}-xoffset`} name={`${parentKey}_xoffset`} label="Vial pitch A1->A2 (mm)" value={entry.x_offset} onChange={(v) => onChange({ ...entry, x_offset: v })} required />
+        <NumberField id={`${parentKey}-yoffset`} name={`${parentKey}_yoffset`} label="Row pitch (mm)" value={entry.y_offset} onChange={(v) => onChange({ ...entry, y_offset: v })} required />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <NumberField id={`${parentKey}-vialheight`} name={`${parentKey}_vialheight`} label="Vial height (mm)" value={entry.vial_height ?? 0} onChange={(v) => onChange({ ...entry, vial_height: v })} />
+        <NumberField id={`${parentKey}-vialdiameter`} name={`${parentKey}_vialdiameter`} label="Vial diameter (mm)" value={entry.vial_diameter ?? 0} onChange={(v) => onChange({ ...entry, vial_diameter: v })} />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <NumberField id={`${parentKey}-capacity`} name={`${parentKey}_capacity`} label="Capacity (uL)" value={entry.capacity_ul} onChange={(v) => onChange({ ...entry, capacity_ul: v })} required />
+        <NumberField id={`${parentKey}-workingvol`} name={`${parentKey}_workingvol`} label="Working vol (uL)" value={entry.working_volume_ul} onChange={(v) => onChange({ ...entry, working_volume_ul: v })} required />
+      </div>
+    </div>
+  );
+}
+
+function TipRackFields({ entry, onChange, parentKey }: { entry: TipRackConfig; onChange: (v: TipRackConfig) => void; parentKey: string }) {
+  const a1 = entry.calibration?.a1 ?? { x: 0, y: 0, z: 0 };
+  const a2 = entry.calibration?.a2 ?? { x: 0, y: 0, z: 0 };
+  const setCal = (point: "a1" | "a2", v: { x: number; y: number; z: number }) =>
+    onChange({ ...entry, calibration: { a1, a2, ...entry.calibration, [point]: v } });
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+      <div style={{ display: "flex", gap: 8 }}>
+        <NumberField id={`${parentKey}-rows`} name={`${parentKey}_rows`} label="Rows" value={entry.rows ?? 0} step={1} onChange={(v) => onChange({ ...entry, rows: v })} required />
+        <NumberField id={`${parentKey}-cols`} name={`${parentKey}_cols`} label="Columns" value={entry.columns ?? 0} step={1} onChange={(v) => onChange({ ...entry, columns: v })} required />
+      </div>
+      <CoordinateField id={`${parentKey}-a1`} name={`${parentKey}_a1`} label="Calibration A1 (tip top)" value={a1} onChange={(v) => setCal("a1", v)} required />
+      <CoordinateField id={`${parentKey}-a2`} name={`${parentKey}_a2`} label="Calibration A2" value={a2} onChange={(v) => setCal("a2", v)} required />
+      <div style={{ display: "flex", gap: 8 }}>
+        <NumberField id={`${parentKey}-xoffset`} name={`${parentKey}_xoffset`} label="Tip pitch A1->A2 (mm)" value={entry.x_offset ?? 0} onChange={(v) => onChange({ ...entry, x_offset: v })} required />
+        <NumberField id={`${parentKey}-yoffset`} name={`${parentKey}_yoffset`} label="Row pitch (mm)" value={entry.y_offset ?? 0} onChange={(v) => onChange({ ...entry, y_offset: v })} required />
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <NumberField id={`${parentKey}-pickupz`} name={`${parentKey}_pickupz`} label="Pickup Z (press)" value={entry.pickup_z ?? 0} onChange={(v) => onChange({ ...entry, pickup_z: v })} required />
+        <OptionalNumberField id={`${parentKey}-dropz`} name={`${parentKey}_dropz`} label="Drop Z (eject)" value={entry.drop_z ?? null} onChange={(v) => onChange({ ...entry, drop_z: v })} />
+        <NumberField id={`${parentKey}-tiplength`} name={`${parentKey}_tiplength`} label="Tip length (mm)" value={entry.tip_length ?? 0} onChange={(v) => onChange({ ...entry, tip_length: v })} required />
+      </div>
+    </div>
+  );
+}
+
+function TipDisposalFields({ entry, onChange, parentKey }: { entry: TipDisposalConfig; onChange: (v: TipDisposalConfig) => void; parentKey: string }) {
+  const location = (entry.location ?? { x: 0, y: 0, z: 0 }) as { x: number; y: number; z: number };
+  const setLocation = (v: { x: number; y: number; z: number }) => {
+    const next: TipDisposalConfig = { ...entry, location: v };
+    const slots = entry.slots as Record<string, { location?: unknown }> | undefined;
+    if (slots?.discard) {
+      // Keep the discard slot glued to the disposal reference point.
+      next.slots = { ...slots, discard: { ...slots.discard, location: v } };
+    }
+    onChange(next);
+  };
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+      <CoordinateField id={`${parentKey}-location`} name={`${parentKey}_location`} label="Drop point (tip-end height)" value={location} onChange={setLocation} required />
     </div>
   );
 }

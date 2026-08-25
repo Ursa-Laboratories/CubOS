@@ -175,14 +175,14 @@ describe("DeckEditor", () => {
         deck={{
           filename: "deck.yaml",
           labware: [
-            { key: "trash_1", config: { type: "tip_disposal", name: "Trash" }, wells: null },
+            { key: "holder_1", config: { type: "vial_holder", name: "Holder" }, wells: null },
           ],
         }}
       />,
     );
     expect(screen.getByText(/editing not supported/i)).toBeInTheDocument();
     expect(screen.getByText(/visualization updates after saving/i)).toBeInTheDocument();
-    expect(screen.getByText("tip_disposal")).toBeInTheDocument();
+    expect(screen.getByText("vial_holder")).toBeInTheDocument();
   });
 
   it("does not reuse a labware key after removing an earlier item", async () => {

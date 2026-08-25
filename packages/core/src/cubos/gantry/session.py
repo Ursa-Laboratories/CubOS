@@ -146,6 +146,16 @@ class GantrySession:
         return self._connected_gantry_filename
 
     @property
+    def connected_gantry_config(self) -> dict[str, Any] | None:
+        """Deep copy of the YAML config the connected gantry was built from.
+
+        ``None`` while disconnected. Consumers (e.g. the API's manual
+        instrument endpoints) read the ``instruments:`` section from here so
+        they act on exactly the configuration the operator connected.
+        """
+        return copy.deepcopy(self._connected_gantry_config)
+
+    @property
     def operation_lock(self) -> threading.Lock:
         """Return the serial-operation lock for targeted tests/observability."""
         return self._lock
