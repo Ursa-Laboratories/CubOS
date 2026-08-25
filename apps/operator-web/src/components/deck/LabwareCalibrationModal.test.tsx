@@ -311,6 +311,108 @@ describe("LabwareCalibrationModal", () => {
     expect((saved as Record<string, unknown>).drop_z).toBe(-173);
   });
 
+  it("adds new labware from a template under a chosen name", async () => {
+    const user = userEvent.setup();
+    stubPositions([
+      { x: 100, y: 50, z: -30 },
+      { x: 109.5, y: 50.1, z: -30 },
+    ]);
+    const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
+    render(
+      <LabwareCalibrationModal
+        open
+        onClose={() => undefined}
+        deck={deckResponse()}
+        gantry={gantryResponse()}
+        position={position()}
+        onSaveDeck={onSaveDeck}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Labware type"), "well_plate");
+    await user.selectOptions(screen.getByLabelText("Labware"), "new:sbs_96");
+    await user.type(screen.getByLabelText("Name"), "Plate 2");
+    expect(screen.getByText(/adds this 96-well SBS plate to the deck as "plate_2"/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+
+    // A template has no saved positions, so both points must be recorded.
+    expect(screen.queryByRole("button", { name: "Keep saved value" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Record A1" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Record A2" })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: "Record A2" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Save labware calibration" }));
+    await waitFor(() => expect(onSaveDeck).toHaveBeenCalledTimes(1));
+
+    const config = onSaveDeck.mock.calls[0][1];
+    const added = config.labware.plate_2 as WellPlateConfig;
+    expect(added).toBeDefined();
+    expect(added.name).toBe("Plate 2");
+    expect(added.rows).toBe(8);
+    expect(added.columns).toBe(12);
+    expect(added.calibration.a1).toEqual({ x: 100, y: 50, z: -30 });
+    // Snapped to one 9 mm SBS pitch along the dominant +X jog.
+    expect(added.calibration.a2).toEqual({ x: 109, y: 50 });
+    // Existing labware rides along untouched.
+    expect(config.labware.plate).toEqual(wellPlate());
+  });
+
+  it("rejects a template name that collides with an existing key", async () => {
+    const user = userEvent.setup();
+    render(
+      <LabwareCalibrationModal
+        open
+        onClose={() => undefined}
+        deck={deckResponse()}
+        gantry={gantryResponse()}
+        position={position()}
+        onSaveDeck={async () => undefined}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Labware type"), "well_plate");
+    await user.selectOptions(screen.getByLabelText("Labware"), "new:sbs_96");
+    await user.type(screen.getByLabelText("Name"), "Plate");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getAllByText(/"plate" already exists on this deck/).length).toBeGreaterThan(0);
+    // Still on the select step.
+    expect(screen.getByLabelText("Labware type")).toBeInTheDocument();
+  });
+
+  it("renames existing labware on save", async () => {
+    const user = userEvent.setup();
+    stubPositions([{ x: 90, y: 80, z: -35 }]);
+    const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
+    render(
+      <LabwareCalibrationModal
+        open
+        onClose={() => undefined}
+        deck={deckResponse()}
+        gantry={gantryResponse()}
+        position={position()}
+        onSaveDeck={onSaveDeck}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Labware type"), "vial");
+    const nameInput = screen.getByLabelText("Name");
+    expect(nameInput).toHaveValue("s1");
+    await user.clear(nameInput);
+    await user.type(nameInput, "Sample 1");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Record Vial top center" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Save labware calibration" }));
+    await waitFor(() => expect(onSaveDeck).toHaveBeenCalledTimes(1));
+
+    // The key is stable; only the display name changes.
+    const saved = onSaveDeck.mock.calls[0][1].labware.s1 as VialConfig;
+    expect(saved.name).toBe("Sample 1");
+    expect(saved.location).toEqual({ x: 90, y: 80, z: -35 });
+  });
+
   it("blocks recording while disconnected", async () => {
     const user = userEvent.setup();
     render(

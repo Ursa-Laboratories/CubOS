@@ -50,6 +50,53 @@ const TYPE_LABELS: Record<string, string> = {
 // Labware calibrated by two reference points (A1 anchor + A2 pitch/axis).
 const TWO_POINT_TYPES = new Set(["well_plate", "vial_grid", "tip_rack"]);
 
+const TEMPLATE_PREFIX = "new:";
+
+type LabwareTemplate = { id: string; label: string; config: Record<string, unknown> };
+
+// Standard labware the modal can add to the deck. Geometry follows the
+// ANSI/SLAS (SBS) footprint where one exists; volumes are typical prefills,
+// all editable in the deck editor afterwards. Calibration always comes from
+// the recorded positions.
+const LABWARE_TEMPLATES: Record<string, LabwareTemplate[]> = {
+  well_plate: [
+    {
+      id: "sbs_96",
+      label: "96-well SBS plate",
+      config: { type: "well_plate", model_name: "sbs_96_well_plate", rows: 8, columns: 12, x_offset: 9, y_offset: 9, length: 127.76, width: 85.48, capacity_ul: 360, working_volume_ul: 200 },
+    },
+    {
+      id: "sbs_384",
+      label: "384-well SBS plate",
+      config: { type: "well_plate", model_name: "sbs_384_well_plate", rows: 16, columns: 24, x_offset: 4.5, y_offset: 4.5, length: 127.76, width: 85.48, capacity_ul: 112, working_volume_ul: 80 },
+    },
+    {
+      id: "sbs_24",
+      label: "24-well plate",
+      config: { type: "well_plate", model_name: "24_well_plate", rows: 4, columns: 6, x_offset: 19.3, y_offset: 19.3, length: 127.76, width: 85.48, capacity_ul: 3400, working_volume_ul: 2000 },
+    },
+    {
+      id: "sbs_6",
+      label: "6-well plate",
+      config: { type: "well_plate", model_name: "6_well_plate", rows: 2, columns: 3, x_offset: 39.12, y_offset: 39.12, length: 127.76, width: 85.48, capacity_ul: 16800, working_volume_ul: 3000 },
+    },
+  ],
+  tip_rack: [
+    {
+      id: "tips_96",
+      label: "96-tip rack (SBS, 9 mm pitch)",
+      config: { type: "tip_rack", model_name: "96_tip_rack", rows: 8, columns: 12, x_offset: 9, y_offset: 9, tip_length: 59.3 },
+    },
+  ],
+  vial: [
+    {
+      id: "scint_20ml",
+      label: "20 mL scintillation vial",
+      config: { type: "vial", model_name: "scint_vial_20ml", height: 57, diameter: 28, capacity_ul: 20000, working_volume_ul: 18000 },
+    },
+  ],
+};
+
 const STEP_LABELS = ["Select labware", "Adjust positions", "Review & save"];
 
 export default function LabwareCalibrationModal({
@@ -62,7 +109,8 @@ export default function LabwareCalibrationModal({
 }: Props) {
   const [step, setStep] = useState(0);
   const [labwareType, setLabwareType] = useState("");
-  const [labwareKey, setLabwareKey] = useState("");
+  const [labwareChoice, setLabwareChoice] = useState("");
+  const [labwareName, setLabwareName] = useState("");
   const [referenceInstrument, setReferenceInstrument] = useState("");
   const [withTip, setWithTip] = useState(false);
   const [tipLength, setTipLength] = useState("");
@@ -77,9 +125,11 @@ export default function LabwareCalibrationModal({
   const previousOpen = useRef(false);
 
   const labwareEntries = useMemo(() => deck?.labware ?? [], [deck]);
-  const typesPresent = useMemo(() => {
-    const present = new Set(labwareEntries.map((item) => item.config.type));
-    const known = Object.keys(TYPE_LABELS).filter((type) => present.has(type as LabwareConfig["type"]));
+  const typeOptions = useMemo(() => {
+    const present = new Set<string>(labwareEntries.map((item) => item.config.type));
+    const known = Object.keys(TYPE_LABELS).filter(
+      (type) => present.has(type) || (LABWARE_TEMPLATES[type]?.length ?? 0) > 0,
+    );
     const unknown = [...present].filter((type) => !(type in TYPE_LABELS)).sort();
     return [...known, ...unknown];
   }, [labwareEntries]);
@@ -87,7 +137,22 @@ export default function LabwareCalibrationModal({
     () => labwareEntries.filter((item) => item.config.type === labwareType),
     [labwareEntries, labwareType],
   );
-  const selected = labwareEntries.find((item) => item.key === labwareKey) ?? null;
+  const templatesOfType = LABWARE_TEMPLATES[labwareType] ?? [];
+  const selectedItem = labwareChoice.startsWith(TEMPLATE_PREFIX)
+    ? null
+    : labwareEntries.find((item) => item.key === labwareChoice) ?? null;
+  const selectedTemplate = labwareChoice.startsWith(TEMPLATE_PREFIX)
+    ? templatesOfType.find((template) => template.id === labwareChoice.slice(TEMPLATE_PREFIX.length)) ?? null
+    : null;
+  const trimmedName = labwareName.trim();
+  const newKey = labwareKeyFromName(trimmedName);
+  const keyCollision = !!selectedTemplate && !!newKey && labwareEntries.some((item) => item.key === newKey);
+  const activeConfig: LabwareConfig | null = useMemo(() => {
+    if (selectedItem) return selectedItem.config;
+    if (!selectedTemplate) return null;
+    return { ...selectedTemplate.config, name: trimmedName || selectedTemplate.label } as unknown as LabwareConfig;
+  }, [selectedItem, selectedTemplate, trimmedName]);
+  const selectedLabel = selectedItem?.key ?? (selectedTemplate ? `new ${selectedTemplate.label}` : null);
 
   const instruments = useMemo(
     () => Object.entries(gantry?.config.instruments ?? {}),
@@ -101,15 +166,16 @@ export default function LabwareCalibrationModal({
   const tipApplies = isPipette && withTip;
 
   const defaultTipLength = useMemo(() => {
-    const rack = labwareEntries.find((item) => item.config.type === "tip_rack");
-    const length = rack ? Number((rack.config as Record<string, unknown>).tip_length) : Number.NaN;
+    const active = activeConfig?.type === "tip_rack" ? activeConfig : null;
+    const rack = active ?? labwareEntries.find((item) => item.config.type === "tip_rack")?.config ?? null;
+    const length = rack ? Number((rack as Record<string, unknown>).tip_length) : Number.NaN;
     return Number.isFinite(length) && length > 0 ? length : null;
-  }, [labwareEntries]);
+  }, [activeConfig, labwareEntries]);
 
   const connected = position?.connected ?? false;
   const targets = useMemo(
-    () => (selected ? targetsForLabware(selected.config) : []),
-    [selected],
+    () => (activeConfig ? targetsForLabware(activeConfig) : []),
+    [activeConfig],
   );
   const nextTarget = targets.find((target) => !captured[target.id]) ?? null;
   const allCaptured = targets.length > 0 && !nextTarget;
@@ -147,7 +213,8 @@ export default function LabwareCalibrationModal({
     if (!open || wasOpen) return;
     setStep(0);
     setLabwareType("");
-    setLabwareKey("");
+    setLabwareChoice("");
+    setLabwareName("");
     setReferenceInstrument("");
     setWithTip(false);
     setTipLength("");
@@ -201,18 +268,22 @@ export default function LabwareCalibrationModal({
     }
   };
 
-  const selectType = (type: string) => {
-    setLabwareType(type);
-    const items = labwareEntries.filter((item) => item.config.type === type);
-    setLabwareKey(items.length === 1 ? items[0].key : "");
+  const selectLabware = (choice: string) => {
+    setLabwareChoice(choice);
+    if (choice.startsWith(TEMPLATE_PREFIX)) {
+      setLabwareName("");
+    } else {
+      const item = labwareEntries.find((entry) => entry.key === choice) ?? null;
+      setLabwareName(item ? String((item.config as Record<string, unknown>).name ?? item.key) : "");
+    }
     setCaptured({});
     setError(null);
   };
 
-  const selectLabware = (key: string) => {
-    setLabwareKey(key);
-    setCaptured({});
-    setError(null);
+  const selectType = (type: string) => {
+    setLabwareType(type);
+    const items = labwareEntries.filter((item) => item.config.type === type);
+    selectLabware(items.length === 1 ? items[0].key : "");
   };
 
   const toggleWithTip = (checked: boolean) => {
@@ -223,9 +294,19 @@ export default function LabwareCalibrationModal({
   };
 
   const beginAdjust = () => {
-    if (!selected) {
+    if (!activeConfig) {
       setError("Select the labware to calibrate first.");
       return;
+    }
+    if (selectedTemplate) {
+      if (!trimmedName || !newKey) {
+        setError("Name the new labware before continuing.");
+        return;
+      }
+      if (keyCollision) {
+        setError(`"${newKey}" already exists on this deck - pick another name.`);
+        return;
+      }
     }
     if (tipLengthInvalid) {
       setError("Enter the attached tip length in mm (greater than 0).");
@@ -272,7 +353,7 @@ export default function LabwareCalibrationModal({
   };
 
   const save = async () => {
-    if (!deck || !selected) return;
+    if (!deck || !activeConfig) return;
     setBusy(true);
     setError(null);
     try {
@@ -280,7 +361,11 @@ export default function LabwareCalibrationModal({
       for (const item of deck.labware) {
         labware[item.key] = item.config;
       }
-      labware[selected.key] = buildUpdatedLabware(selected.config, targets, resolveTarget);
+      const targetKey = selectedItem ? selectedItem.key : newKey;
+      const base = selectedItem && trimmedName
+        ? ({ ...(selectedItem.config as unknown as Record<string, unknown>), name: trimmedName } as unknown as LabwareConfig)
+        : activeConfig;
+      labware[targetKey] = buildUpdatedLabware(base, targets, resolveTarget);
       await onSaveDeck(deck.filename, { labware });
       onClose();
     } catch (err) {
@@ -320,7 +405,7 @@ export default function LabwareCalibrationModal({
             <h2 style={{ margin: 0, fontSize: 18, color: theme.color.ink, letterSpacing: "-0.01em" }}>Calibrate labware</h2>
             <div style={{ marginTop: 3, fontSize: 12, color: theme.color.textMuted }}>
               {deck?.filename ?? "No deck loaded"}
-              {selected ? ` · ${selected.key}` : ""}
+              {selectedLabel ? ` · ${selectedLabel}` : ""}
             </div>
           </div>
           <button onClick={onClose} style={closeButtonStyle} aria-label="Close labware calibration">
@@ -355,7 +440,7 @@ export default function LabwareCalibrationModal({
                   using that instrument&apos;s configured offsets.
                 </p>
                 {labwareEntries.length === 0 && (
-                  <div style={warningStyle}>Load a deck configuration with labware before calibrating.</div>
+                  <div style={noteStyle}>No labware on this deck yet - pick a type and add one from a template below.</div>
                 )}
                 <div style={fieldRowStyle}>
                   <label style={fieldStyle}>
@@ -363,11 +448,11 @@ export default function LabwareCalibrationModal({
                     <select
                       value={labwareType}
                       onChange={(event) => selectType(event.target.value)}
-                      disabled={busy || labwareEntries.length === 0}
+                      disabled={busy || !deck}
                       style={inputStyle}
                     >
                       <option value="">Choose type…</option>
-                      {typesPresent.map((type) => (
+                      {typeOptions.map((type) => (
                         <option key={type} value={type}>{TYPE_LABELS[type] ?? type}</option>
                       ))}
                     </select>
@@ -376,16 +461,44 @@ export default function LabwareCalibrationModal({
                     <label style={fieldStyle}>
                       <span style={labelStyle}>Labware</span>
                       <select
-                        value={labwareKey}
+                        value={labwareChoice}
                         onChange={(event) => selectLabware(event.target.value)}
                         disabled={busy}
                         style={inputStyle}
                       >
                         <option value="">Choose labware…</option>
-                        {itemsOfType.map((item) => (
-                          <option key={item.key} value={item.key}>{item.key}</option>
-                        ))}
+                        {itemsOfType.length > 0 && (
+                          <optgroup label="On deck">
+                            {itemsOfType.map((item) => (
+                              <option key={item.key} value={item.key}>{item.key}</option>
+                            ))}
+                          </optgroup>
+                        )}
+                        {templatesOfType.length > 0 && (
+                          <optgroup label="Add new">
+                            {templatesOfType.map((template) => (
+                              <option key={template.id} value={`${TEMPLATE_PREFIX}${template.id}`}>
+                                New: {template.label}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
                       </select>
+                    </label>
+                  )}
+                  {labwareChoice && (
+                    <label style={fieldStyle}>
+                      <span style={labelStyle}>Name</span>
+                      <input
+                        value={labwareName}
+                        onChange={(event) => setLabwareName(event.target.value)}
+                        disabled={busy}
+                        placeholder={selectedTemplate ? "e.g. plate_2" : undefined}
+                        style={{
+                          ...inputStyle,
+                          borderColor: selectedTemplate && (!trimmedName || keyCollision) ? theme.color.danger : undefined,
+                        }}
+                      />
                     </label>
                   )}
                   {isMulti && (
@@ -434,17 +547,24 @@ export default function LabwareCalibrationModal({
                     </div>
                   </div>
                 )}
-                {selected && (
+                {selectedTemplate && (
+                  <div style={noteStyle}>
+                    {keyCollision
+                      ? `"${newKey}" already exists on this deck - pick another name.`
+                      : `Saving adds this ${selectedTemplate.label} to the deck as "${newKey || "…"}".`}
+                  </div>
+                )}
+                {activeConfig && (
                   <div style={summaryGridStyle}>
-                    <Readout label="Positions to adjust" value={targetsForLabware(selected.config).map((t) => t.label).join(", ")} />
+                    <Readout label="Positions to adjust" value={targets.map((t) => t.label).join(", ")} />
                     <Readout label="Reference instrument" value={`${selectedInstrumentName || "None"}${selectedInstrument ? ` (${selectedInstrument.type})` : ""}`} />
                   </div>
                 )}
                 <div style={actionRowStyle}>
                   <button
                     onClick={beginAdjust}
-                    disabled={busy || !selected}
-                    style={buttonStateStyle(primaryButtonStyle, busy || !selected)}
+                    disabled={busy || !activeConfig}
+                    style={buttonStateStyle(primaryButtonStyle, busy || !activeConfig)}
                   >
                     Continue
                   </button>
@@ -452,7 +572,7 @@ export default function LabwareCalibrationModal({
               </div>
             )}
 
-            {step === 1 && selected && (
+            {step === 1 && activeConfig && (
               <div>
                 <h3 style={sectionTitleStyle}>Adjust Positions</h3>
                 <p style={instructionStyle}>
@@ -550,11 +670,11 @@ export default function LabwareCalibrationModal({
               </div>
             )}
 
-            {step === 2 && selected && (
+            {step === 2 && activeConfig && (
               <div>
                 <h3 style={sectionTitleStyle}>Review &amp; Save</h3>
                 <p style={instructionStyle}>
-                  Saving writes these positions into {deck?.filename} for {selected.key}.
+                  Saving writes these positions into {deck?.filename} for {selectedItem ? selectedItem.key : `new labware “${newKey}”`}.
                   {anyRecorded && ` Recorded values are converted to the deck frame: ${compensationSummary}.`}
                 </p>
                 <div style={summaryGridStyle}>
@@ -566,7 +686,7 @@ export default function LabwareCalibrationModal({
                       const a1Target = targets.find((other) => other.id === "a1");
                       const a1Resolved = a1Target ? resolveTarget(a1Target) : null;
                       const snapped = !resolved.kept && a1Resolved
-                        ? snappedA2(selected.config as unknown as Record<string, unknown>, a1Resolved.point, resolved.point)
+                        ? snappedA2(activeConfig as unknown as Record<string, unknown>, a1Resolved.point, resolved.point)
                         : { x: resolved.point.x, y: resolved.point.y };
                       value = `${snapped.x.toFixed(3)}, ${snapped.y.toFixed(3)}`;
                     }
@@ -579,7 +699,7 @@ export default function LabwareCalibrationModal({
                     );
                   })}
                 </div>
-                {TWO_POINT_TYPES.has(selected.config.type) && hasRecorded(captured, "a2") && (
+                {TWO_POINT_TYPES.has(activeConfig.type) && hasRecorded(captured, "a2") && (
                   <div style={noteStyle}>
                     A2 is snapped to exactly one well/tip pitch from A1 in the direction
                     you jogged — it only sets the labware&apos;s orientation.
@@ -772,6 +892,13 @@ function snappedA2(
   }
   const pitch = Number.isFinite(yPitch) && yPitch > 0 ? yPitch : Math.abs(dy);
   return { x: a1.x, y: roundMm(a1.y + (dy < 0 ? -pitch : pitch)) };
+}
+
+function labwareKeyFromName(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 function pointFrom(value: unknown): Coordinate3D | null {

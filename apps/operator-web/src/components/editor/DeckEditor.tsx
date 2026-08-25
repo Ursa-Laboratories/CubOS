@@ -159,7 +159,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
   const hasItems = Object.keys(labware).length > 0;
   const valid = hasItems && isValid(labware);
   const canSave = valid && (!!saveAs.trim() || !!selectedFile) && !saving;
-  const canCalibrateLabware = !!deck && hasItems && !!gantry && !isRunning;
+  const canCalibrateLabware = !!deck && !!gantry && !isRunning;
   // The modal calibrates what the editor currently shows (including unsaved
   // edits), so build its deck view from the local labware state.
   const calibrationDeck: DeckResponse | null = deck
