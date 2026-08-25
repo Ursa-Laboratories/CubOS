@@ -75,6 +75,17 @@ def measure(args: Dict[str, Any]) -> str:
     )
 
 
+def cure(args: Dict[str, Any]) -> str:
+    intensity = args.get("intensity")
+    detail = f"{args['exposure_time']}s"
+    if intensity is not None:
+        detail += f" @ {intensity}%"
+    return _join(
+        f"{args['instrument']} @ {_position(args['position'])}",
+        detail,
+    )
+
+
 def scan(args: Dict[str, Any]) -> str:
     return _join(
         f"{args['instrument']} over {args['plate']}",
