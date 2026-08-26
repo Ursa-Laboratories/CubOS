@@ -5,6 +5,7 @@ import math
 from typing import Any, TYPE_CHECKING
 
 from cubos.instruments.base_instrument import BaseInstrument
+from cubos.instruments.lighting.interface import LightingInstrument
 
 if TYPE_CHECKING:
     from cubos.gantry import Gantry
@@ -106,7 +107,28 @@ class InstrumentedGantry:
         instr = self._resolve_instrument(instrument)
         x, y, z = self._resolve_position(labware)
         self._validate_finite_xyz(x, y, z, instr.name)
-        self.move(instr, (x, y, self.safe_z), travel_z=self.safe_z)
+        travel_z = self.safe_z
+        ceiling = self._gantry_z_ceiling()
+        if ceiling is not None:
+            # Travel with the carriage at the top of the working volume so
+            # every tool mounted on the head — not just the active
+            # instrument — clears the deck. safe_z remains the floor and the
+            # approach hover plane.
+            travel_z = max(travel_z, ceiling - self._effective_depth(instr))
+        self.move(instr, (x, y, self.safe_z), travel_z=travel_z)
+
+    def _gantry_z_ceiling(self) -> float | None:
+        """Gantry-frame z_max from the controller config, if available."""
+        config = getattr(self.controller, 'config', None)
+        if not isinstance(config, dict):
+            return None
+        volume = config.get('working_volume')
+        if not isinstance(volume, dict):
+            return None
+        z_max = volume.get('z_max')
+        if isinstance(z_max, (int, float)) and math.isfinite(float(z_max)):
+            return float(z_max)
+        return None
 
     def _validate_finite_xyz(self, x: float, y: float, z: float, instr_name: str) -> None:
         for label, value in (("x", x), ("y", y), ("z", z)):
@@ -148,7 +170,19 @@ class InstrumentedGantry:
             instrument.connect()
 
     def disconnect_instruments(self) -> None:
-        """Disconnect all instruments, logging errors without re-raising."""
+        """Disconnect all instruments, logging errors without re-raising.
+
+        Lighting is commanded off first, best-effort, so an aborted run
+        never leaves lights on.
+        """
+        for name, instrument in self.instruments.items():
+            if isinstance(instrument, LightingInstrument):
+                try:
+                    instrument.all_off()
+                except Exception:
+                    self.logger.exception(
+                        "Failed to turn off lighting instrument '%s'", name,
+                    )
         for name, instrument in self.instruments.items():
             try:
                 self.logger.info("Disconnecting instrument: %s", name)
