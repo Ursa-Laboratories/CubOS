@@ -1,7 +1,8 @@
 # SBS 24-Well Plate
 
 Generic SBS ANSI-standard 24-well microplate template: standard SLAS
-1-2004 footprint with a 6 column x 4 row grid on an 18 mm pitch.
+1-2004 footprint with a 6 column x 4 row grid on the SLAS 4-2004 19 mm
+pitch.
 
 Maps to `cubos.src.deck.labware.well_plate.WellPlate`.
 
@@ -19,8 +20,8 @@ Maps to `cubos.src.deck.labware.well_plate.WellPlate`.
 | Plate height (outer) | 20.2 mm | Rim → underside of plate; override for vendor variants |
 | Well depth (inside) | 17.4 mm | Rim → inside floor; typical flat-bottom 24-well |
 | Well grid | 6 x 4 (A1 - D6) | Letters are rows, numbers are columns |
-| Well pitch | 18.0 mm in both x and y | Requested spacing (not the 19 mm SLAS 24-well pitch) |
-| A1 offset from plate corner | (18.88, 15.74) mm | Centers the 18 mm grid on the standard footprint |
+| Well pitch | 19.0 mm in both x and y | ANSI SLAS 4-2004 24-well pitch; verified against a physical plate with a ruler on 2026-08-26 |
+| A1 offset from plate corner | (16.38, 14.24) mm | Centers the 19 mm grid on the standard footprint |
 | Default capacity | 3400 uL | Override for vendor-specific variants |
 | Default working volume | 2000 uL | Override as needed |
 
@@ -36,8 +37,8 @@ labware:
     calibration:
       a1: { x: -17.88, y: -42.23, z: -20.0 }
       a2: { x: -17.88, y: -60.23, z: -20.0 }
-    x_offset: 18.0    # positive spacing magnitude; A1/A2 determine direction
-    y_offset: 18.0
+    x_offset: 19.0    # positive spacing magnitude; A1/A2 determine direction
+    y_offset: 19.0
 ```
 
 Vendor-specific variants (well diameter, skirt height, capacity) should
