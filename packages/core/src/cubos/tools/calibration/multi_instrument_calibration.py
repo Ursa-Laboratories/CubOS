@@ -339,10 +339,7 @@ def _prompt_non_contact_block_distance(
         "Measure the height from the calibration block top to "
         f"{instrument_name}'s non-contact reference point now."
     )
-    output(
-        "Keep the instrument centered over the block mark, then enter that "
-        "measured distance in millimeters."
-    )
+    output("Keep the instrument centered over the block mark.")
     while True:
         raw = input_reader(
             "Distance from calibration block top to "
@@ -448,6 +445,9 @@ def run_multi_instrument_calibration(
     gantry_config = load_gantry_from_yaml(gantry_path)
     validate_working_volume_origin(gantry_config)
     origin_policy = OriginPolicy(gantry_config.origin_policy)
+    origin_corner = (
+        "back-right-top" if origin_policy is OriginPolicy.HOME_ORIGIN else "front-left"
+    )
     raw_config = _load_raw_config(gantry_path)
     factory_z_travel_mm = _factory_z_travel_mm(raw_config)
     if output_gantry_path is not None:
@@ -463,14 +463,14 @@ def run_multi_instrument_calibration(
         )
     output(f"Loaded {origin_policy.value} gantry config: {gantry_path}")
     output("Calibration overview:")
-    output("  This guided routine creates the shared CubOS deck frame for all mounted instruments.")
-    output("  Step 1 sets the system origin: place the origin block/artifact in the front-left")
-    output("  corner, then jog the first/left-most tool's active tip/probe point over the X mark.")
-    output("  The script sets only G54 WPos X=0 and Y=0 there; Z is set later after the full")
-    output("  mounted instruments are attached and the lowest mounted tool touches the reference point.")
+    output(
+        f"  Step 1: place the origin block/artifact at the {origin_corner} corner and "
+        "jog the reference tool over it to set WPos X=0, Y=0."
+    )
+    output("  Step 2: attach all instruments and touch the lowest tool to the same point to set Z.")
     output("")
     reference_instrument = reference_instrument or _prompt_instrument_name(
-        "Pick the number for the first/left-most tool for front-left origin",
+        f"Pick the number for the first/left-most tool for {origin_corner} origin",
         contact_instruments,
         raw_config=raw_config,
         input_reader=input_reader,
@@ -497,7 +497,7 @@ def run_multi_instrument_calibration(
         output("  $H")
         output("  temporarily disable stale GRBL soft limits during calibration jogs")
         output("  attach the first/left-most tool at the homed pose")
-        output("  place an origin block/artifact at the front-left corner")
+        output(f"  place an origin block/artifact at the {origin_corner} corner")
         output("  jog that tool's active tip/probe point over the X mark as closely as possible")
         output("  G10 L20 P1 X0 Y0  # XY only, do not set Z here")
         output("  $H and read X/Y bounds")
@@ -526,20 +526,15 @@ def run_multi_instrument_calibration(
     )
 
     output("Preflight:")
-    output("  - Keep E-stop reachable; calibration can move mounted tools and changes G54 WPos.")
-    if origin_policy is OriginPolicy.HOME_ORIGIN:
-        output(f"  - First/left-most tool for back-right-top origin: {reference_instrument}")
-    else:
-        output(f"  - First/left-most tool for front-left origin: {reference_instrument}")
+    output("  - Keep E-stop reachable.")
+    output(f"  - First/left-most tool for {origin_corner} origin: {reference_instrument}")
     if lowest_instrument is None:
-        output("  - The lowest mounted tool will be selected later, after all mounted instruments are attached/verified.")
+        output("  - Lowest mounted tool will be selected after all instruments are attached.")
     else:
         output(f"  - Lowest mounted tool for Z/reference point: {lowest_instrument}")
     output(
-        "  - Calibration block/reference point: place it near the deck center where every "
-        "instrument can reach the same physical point. The lowest instrument will "
-        "define Z and be recorded there first; its X/Y/Z coordinates will not be "
-        "requested a second time."
+        "  - Calibration block/reference point: place it near the deck center, "
+        "reachable by every instrument."
     )
     output("")
 
@@ -575,21 +570,17 @@ def run_multi_instrument_calibration(
         )
 
         output(
-            f"Attach {reference_instrument!r} at the homed BRT pose before jogging. "
-            "Place the front-left origin block/artifact in the front-left corner. "
-            "No automatic center move will be made."
+            f"Attach {reference_instrument!r} at the homed pose. "
+            f"Place the origin block/artifact at the {origin_corner} corner."
         )
         _interactive_jog_to_reference(
             gantry,
             target_description=(
-                f"Step 1: attach {reference_instrument!r} at the homed pose. "
-                "Place the origin block/artifact in the front-left corner, then "
-                "jog the tool's active tip/probe point (tool center point) directly "
-                "over the X mark as closely as possible. Do not use this step to define Z."
+                "Step 1: jog the tool's tip/probe point over the origin mark "
+                "as closely as possible. Do not set Z in this step."
             ),
             confirmation_description=(
-                "Press ENTER when current X/Y should become WPos X=0, Y=0. "
-                "The script will not change WPos Z in this step."
+                "Press ENTER to set WPos X=0, Y=0 here. Z is not changed in this step."
             ),
             key_reader=key_reader,
             stdin_flusher=stdin_flusher,
@@ -766,14 +757,13 @@ def run_multi_instrument_calibration(
             block_coordinates[instrument] = _interactive_jog_to_reference(
                 gantry,
                 target_description=(
-                    f"Step 3: calibrate {instrument!r}. Jog this tool's active tip/probe point "
-                    "(tool center point) to the same physical point used by the lowest instrument. The block's "
-                    "deck-frame X/Y/Z coordinates do not need to be known."
+                    f"Step 3: calibrate {instrument!r}. Jog this tool's tip/probe point "
+                    "to the same physical point used by the lowest instrument."
                 ),
                 confirmation_description=(
                     "Press ENTER when this instrument is touching the same block point "
                     "used for the other instruments. Do not move the block between "
-                    "cubos.instruments."
+                    "instruments."
                 ),
                 key_reader=key_reader,
                 stdin_flusher=stdin_flusher,

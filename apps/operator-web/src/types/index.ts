@@ -44,6 +44,24 @@ export interface VialConfig {
   working_volume_ul: number;
 }
 
+export interface VialGridConfig {
+  type: "vial_grid";
+  name: string;
+  model_name: string;
+  rows: number;
+  columns: number;
+  calibration: CalibrationPoints;
+  x_offset: number;
+  y_offset: number;
+  row_direction?: "positive" | "negative" | null;
+  vial_model_name?: string;
+  vial_height?: number | null;
+  vial_diameter?: number | null;
+  capacity_ul: number;
+  working_volume_ul: number;
+  [key: string]: unknown;
+}
+
 // Mirrors TipRackYamlEntry: tip positions derive from a two-point XY
 // calibration + pitch offsets; every tip's Z comes from pickup_z, so
 // calibration points carry no meaningful z.
@@ -52,18 +70,21 @@ export interface TipRackCalibration {
   a2: Coordinate2D | Coordinate3D;
 }
 
+// Core fields are optional because a raw-YAML entry may use load_name and
+// provide only calibration + pickup_z; the definition supplies the rest.
 export interface TipRackConfig {
   type: "tip_rack";
   name: string;
   model_name: string;
-  rows: number;
-  columns: number;
-  pickup_z: number;
+  load_name?: string;
+  rows?: number;
+  columns?: number;
+  pickup_z?: number;
   drop_z?: number | null;
-  tip_length: number;
-  calibration: TipRackCalibration;
-  x_offset: number;
-  y_offset: number;
+  tip_length?: number;
+  calibration?: TipRackCalibration;
+  x_offset?: number;
+  y_offset?: number;
   tip_present?: Record<string, boolean>;
   location?: Coordinate3D | null;
   length?: number | null;
@@ -124,8 +145,8 @@ export interface VialHolderConfig {
 export interface TipDisposalConfig {
   type: "tip_disposal";
   name: string;
-  model_name: string;
-  location: Coordinate3D;
+  model_name?: string;
+  location?: Coordinate3D;
   length?: number | null;
   width?: number | null;
   height?: number | null;
@@ -139,6 +160,7 @@ export type UnsupportedDeckConfig =
 export type LabwareConfig =
   | WellPlateConfig
   | VialConfig
+  | VialGridConfig
   | TipRackConfig
   | TipDisposalConfig
   | UnsupportedDeckConfig;

@@ -16,6 +16,7 @@ import type {
 } from "../../types";
 import { CoordinateField, NumberField, OptionalNumberField, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
+import RawYamlPanel from "./RawYamlPanel";
 import { useConfirm } from "../common/useConfirm";
 import {
   createCompositionRow,
@@ -82,6 +83,7 @@ const COMMAND_COLORS: Record<string, string> = {
   pick_up_tip: theme.color.success,
   drop_tip: theme.color.success,
   scan: theme.categorical.violet,
+  cure: theme.categorical.amber,
 };
 
 type ProtocolChoices = {
@@ -758,6 +760,55 @@ export default function ProtocolEditor({
             )}
           </div>
         )}
+        <RawYamlPanel
+          value={(() => {
+            const doc: Record<string, unknown> = {};
+            const rawPositions = rowsToPositions(positionRows);
+            if (rawPositions) doc.positions = rawPositions;
+            doc.protocol = steps.map((s) => (
+              { [s.command]: Object.keys(s.args).length ? s.args : null }
+            ));
+            return doc;
+          })()}
+          onApply={(parsed) => {
+            if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+              return "Top level must be a mapping with a `protocol:` list.";
+            }
+            const doc = parsed as { protocol?: unknown; positions?: unknown };
+            if (!Array.isArray(doc.protocol)) {
+              return "`protocol:` must be a list of steps.";
+            }
+            const nextSteps: ProtocolStep[] = [];
+            for (const [i, item] of doc.protocol.entries()) {
+              if (typeof item === "string") {
+                nextSteps.push({ command: item, args: {} });
+                continue;
+              }
+              if (!item || typeof item !== "object" || Array.isArray(item)) {
+                return `Step ${i + 1} must be a single-command mapping.`;
+              }
+              const keys = Object.keys(item);
+              if (keys.length !== 1) {
+                return `Step ${i + 1} must have exactly one command key, got ${keys.length}.`;
+              }
+              const command = keys[0];
+              const args = (item as Record<string, unknown>)[command];
+              if (args !== null && args !== undefined && (typeof args !== "object" || Array.isArray(args))) {
+                return `Step ${i + 1} (${command}) args must be a mapping.`;
+              }
+              nextSteps.push({ command, args: { ...((args ?? {}) as Record<string, unknown>) } });
+            }
+            if (doc.positions !== undefined && doc.positions !== null
+                && (typeof doc.positions !== "object" || Array.isArray(doc.positions))) {
+              return "`positions:` must be a mapping of named points.";
+            }
+            commit(nextSteps);
+            commitPositions(positionsToRows(
+              (doc.positions ?? null) as Record<string, number[]> | null,
+            ));
+            return null;
+          }}
+        />
         {hasUnsaved && (
           <UnsavedNotice>
             <strong>Unsaved changes.</strong>{" "}
@@ -1043,7 +1094,9 @@ function uniqueStrings(items: string[]): string[] {
 function argLabel(name: string): string {
   const labels: Record<string, string> = {
     delay_s: "Delay (s)",
+    exposure_time: "Cure time (s)",
     indentation_limit_height: "Indentation limit height",
+    intensity: "Intensity (%)",
     interwell_scan_height: "Interwell scan height",
     measurement_height: "Measurement height",
     method: "Measurement",

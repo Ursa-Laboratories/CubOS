@@ -196,10 +196,10 @@ describe("DeckEditor", () => {
 
     await user.clear(screen.getByLabelText(/^Pickup Z/));
     await user.type(screen.getByLabelText(/^Pickup Z/), "40");
-    await user.clear(screen.getByLabelText("Calibration A1 X"));
-    await user.type(screen.getByLabelText("Calibration A1 X"), "168");
+    await user.clear(screen.getByLabelText("Calibration A1 (tip top) X"));
+    await user.type(screen.getByLabelText("Calibration A1 (tip top) X"), "168");
     // Calibration inputs are XY-only: Z comes from pickup_z.
-    expect(screen.queryByLabelText("Calibration A1 Z")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Calibration A1 (tip top) Z")).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Save" }));
     const [, body] = vi.mocked(props.onSave).mock.calls.at(-1)!;
@@ -219,8 +219,8 @@ describe("DeckEditor", () => {
     await user.click(screen.getByRole("button", { name: "+ Tip Disposal" }));
     expect(screen.getByText("tipdisposal_1")).toBeInTheDocument();
 
-    await user.clear(screen.getByLabelText("Location X"));
-    await user.type(screen.getByLabelText("Location X"), "306");
+    await user.clear(screen.getByLabelText("Drop point (tip-end height) X"));
+    await user.type(screen.getByLabelText("Drop point (tip-end height) X"), "306");
     await user.clear(screen.getByLabelText("Length (mm)"));
     await user.type(screen.getByLabelText("Length (mm)"), "60");
 
