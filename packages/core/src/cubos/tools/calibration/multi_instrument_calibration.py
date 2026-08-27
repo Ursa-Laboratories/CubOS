@@ -281,10 +281,23 @@ def _non_contact_instrument_names(raw_config: dict[str, Any]) -> tuple[str, ...]
     )
 
 
-def _contact_instrument_names(raw_config: dict[str, Any]) -> tuple[str, ...]:
-    non_contact = set(_non_contact_instrument_names(raw_config))
+def _follow_camera_instrument_names(raw_config: dict[str, Any]) -> tuple[str, ...]:
     return tuple(
-        name for name in _instrument_names(raw_config) if name not in non_contact
+        name
+        for name in _instrument_names(raw_config)
+        if (
+            _instrument_type(raw_config, name) is not None
+            and get_calibration_mode(_instrument_type(raw_config, name))
+            == "follow_camera"
+        )
+    )
+
+
+def _contact_instrument_names(raw_config: dict[str, Any]) -> tuple[str, ...]:
+    skip = set(_non_contact_instrument_names(raw_config))
+    skip.update(_follow_camera_instrument_names(raw_config))
+    return tuple(
+        name for name in _instrument_names(raw_config) if name not in skip
     )
 
 
@@ -455,6 +468,7 @@ def run_multi_instrument_calibration(
     available_instruments = _instrument_names(raw_config)
     contact_instruments = _contact_instrument_names(raw_config)
     non_contact_instruments = set(_non_contact_instrument_names(raw_config))
+    follow_camera_instruments = set(_follow_camera_instrument_names(raw_config))
     if not contact_instruments:
         raise ValueError(
             "Multi-instrument calibration requires at least one contact-capable "
@@ -491,6 +505,12 @@ def run_multi_instrument_calibration(
             f"Lowest instrument {lowest_instrument!r} cannot be non-contact; "
             "choose a contact-capable instrument."
         )
+    for role, name in (("Reference", reference_instrument), ("Lowest", lowest_instrument)):
+        if name in follow_camera_instruments:
+            raise ValueError(
+                f"{role} instrument {name!r} follows the camera's calibration "
+                "and has no calibration step; choose a contact-capable instrument."
+            )
     if dry_run:
         output(f"Loaded {origin_policy.value} gantry config: {gantry_path}")
         output("Dry run only. Physical calibration flow:")
@@ -511,6 +531,11 @@ def run_multi_instrument_calibration(
             output(
                 "  center each non-contact instrument over the block, enter "
                 "its block distance, and record its pose"
+            )
+        if follow_camera_instruments:
+            output(
+                "  lighting instruments are skipped: they reuse the camera's "
+                "calibration"
             )
         output("  $H and read final working-volume maxima")
         return None
@@ -700,6 +725,7 @@ def run_multi_instrument_calibration(
                 (reference_instrument, *instruments)
             )
             if instrument != lowest_instrument
+            and instrument not in follow_camera_instruments
         )
         non_contact_calibrations: dict[str, dict[str, float]] = {}
         for instrument in calibration_sequence:
@@ -809,9 +835,30 @@ def run_multi_instrument_calibration(
             lowest_instrument=lowest_instrument,
         )
         all_calibrations.update(non_contact_calibrations)
+        camera_source = next(
+            (
+                name
+                for name in instruments
+                if _instrument_type(raw_config, name) == "camera"
+                and name in all_calibrations
+            ),
+            None,
+        )
+        for name in instruments:
+            if name not in follow_camera_instruments:
+                continue
+            if camera_source is None:
+                output(
+                    f"Skipping {name}: no calibrated camera to copy from; "
+                    "existing offsets are kept."
+                )
+                continue
+            all_calibrations[name] = dict(all_calibrations[camera_source])
+            output(f"{name} reuses the camera calibration from {camera_source}.")
         instrument_calibrations = {
             instrument: all_calibrations[instrument]
             for instrument in instruments
+            if instrument in all_calibrations
         }
         for instrument, calibration in instrument_calibrations.items():
             output(

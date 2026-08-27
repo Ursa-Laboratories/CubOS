@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 _REGISTRY_PATH = Path(__file__).parent / "registry.yaml"
 _ENTRY_POINT_GROUP = "cubos.instrument_registries"
 _OVERLAY_ENV_VAR = "CUBOS_INSTRUMENT_REGISTRY_PATHS"
-_VALID_CALIBRATION_MODES = {"contact", "non_contact"}
+_VALID_CALIBRATION_MODES = {"contact", "non_contact", "follow_camera"}
 _BASE_CONFIG_PARAMS = {"name", "offset_x", "offset_y", "depth", "offline"}
 _PRIMITIVE_CONFIG_TYPES = {str, int, float, bool}
 
@@ -85,7 +85,8 @@ def get_calibration_mode(instrument_type: str) -> str:
 
     ``contact`` instruments touch the shared calibration block. ``non_contact``
     instruments are centered over the block and calibrated from a measured
-    distance above the block top.
+    distance above the block top. ``follow_camera`` instruments are co-mounted
+    with the camera and reuse its calibration without their own step.
     """
     entry = _instrument_entry(instrument_type)
     return entry.get("calibration_mode", "contact")
