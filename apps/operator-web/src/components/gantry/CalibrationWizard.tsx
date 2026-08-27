@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent, TouchEvent } from "react";
 import { gantryApi } from "../../api/client";
 import * as theme from "../../theme";
+import CameraPreview from "./CameraPreview";
 import type { GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import {
   buildCalibratedConfig,
@@ -1114,6 +1115,9 @@ export default function CalibrationWizard({
                         </p>
                       )}
                     </div>
+                    {nextInstrumentIsCamera && (
+                      <CameraPreview instrument={nextInstrumentToRecord} />
+                    )}
                     {nextInstrumentIsCamera && (
                       <label style={{ ...fieldStyle, marginBottom: 12 }}>
                         <span style={labelStyle}>Distance from calibration block (mm)</span>

@@ -14,7 +14,7 @@ export type UpdateStatus = {
   error: string | null;
 };
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number;
 
   constructor(status: number, message: string) {
@@ -353,5 +353,17 @@ export const dataApi = {
     download(`/data/campaigns/${campaignId}/measurements.zip`),
   exportCampaignAsmiZip: (campaignId: number) =>
     download(`/data/campaigns/${campaignId}/asmi.zip`),
+};
+
+// Manual instrument control (bring-up work, outside protocol runs)
+export const instrumentsApi = {
+  captureCameraFrame: (instrument: string, preview = false) =>
+    request<{ instrument: string; image_path: string }>("/instruments/camera/capture", {
+      method: "POST",
+      body: JSON.stringify({ instrument, preview }),
+    }),
+  cameraLastImage: (instrument: string) =>
+    // Cache-bust: repeated preview polls hit the same URL as the frame changes.
+    download(`/instruments/camera/last-image?instrument=${encodeURIComponent(instrument)}&_=${Date.now()}`),
 };
 

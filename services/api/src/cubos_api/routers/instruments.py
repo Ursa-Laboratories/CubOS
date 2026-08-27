@@ -36,6 +36,17 @@ router = APIRouter(prefix="/api/v1/instruments", tags=["instruments"])
 _manual_instruments: Dict[str, BaseInstrument] = {}
 _manual_lock = threading.Lock()
 _last_capture: Dict[str, str] = {}
+_capture_locks: Dict[str, threading.Lock] = {}
+
+
+def _capture_lock(instrument: str) -> threading.Lock:
+    """Serialize capture calls per instrument (vendor handles aren't thread-safe)."""
+    with _manual_lock:
+        lock = _capture_locks.get(instrument)
+        if lock is None:
+            lock = threading.Lock()
+            _capture_locks[instrument] = lock
+        return lock
 
 
 class LightingChannelInfo(BaseModel):
@@ -62,6 +73,9 @@ class CameraInfo(BaseModel):
 class CaptureRequest(BaseModel):
     instrument: str
     label: Optional[str] = None
+    # Live-preview polling: overwrite one fixed file per instrument instead of
+    # writing a fresh timestamped file on every tick.
+    preview: bool = False
 
 
 class CaptureResponse(BaseModel):
@@ -79,6 +93,7 @@ def reset_manual_instruments() -> None:
                 pass
         _manual_instruments.clear()
         _last_capture.clear()
+        _capture_locks.clear()
 
 
 def _configured_instruments() -> Dict[str, Dict[str, Any]]:
@@ -242,15 +257,25 @@ def manual_capture(req: CaptureRequest) -> CaptureResponse:
     stem = re.sub(r"[^A-Za-z0-9._-]+", "-", (req.label or req.instrument)).strip("-")
     directory = default_images_dir() / "manual"
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{stem or 'image'}_{time.strftime('%Y%m%d-%H%M%S')}.png"
-    counter = 1
-    while path.exists():
-        path = directory / f"{stem}_{time.strftime('%Y%m%d-%H%M%S')}_{counter:03d}.png"
-        counter += 1
+    if req.preview:
+        # Overwrite one fixed file per instrument so polling doesn't pile up
+        # a new PNG on disk every tick.
+        path = directory / f"{stem or 'image'}_preview.png"
+    else:
+        path = directory / f"{stem or 'image'}_{time.strftime('%Y%m%d-%H%M%S')}.png"
+        counter = 1
+        while path.exists():
+            path = directory / f"{stem}_{time.strftime('%Y%m%d-%H%M%S')}_{counter:03d}.png"
+            counter += 1
     try:
-        saved = camera.capture(save_path=str(path))
+        with _capture_lock(req.instrument):
+            saved = camera.capture(save_path=str(path))
     except CameraError as exc:
         raise HTTPException(502, f"Capture failed: {exc}") from exc
+    except NotImplementedError as exc:
+        raise HTTPException(
+            501, f"Camera {req.instrument!r} does not support capture: {exc}"
+        ) from exc
     with _manual_lock:
         _last_capture[req.instrument] = saved
     return CaptureResponse(instrument=req.instrument, image_path=saved)
