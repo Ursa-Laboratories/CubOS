@@ -75,6 +75,8 @@ export default function CalibrationWizard({
   const [xyBounds, setXyBounds] = useState<CapturedPosition | null>(null);
   const [instrumentPositions, setInstrumentPositions] = useState<Record<string, CapturedPosition>>({});
   const [cameraBlockDistances, setCameraBlockDistances] = useState<Record<string, string>>({});
+  const [tipAttached, setTipAttached] = useState<Record<string, boolean>>({});
+  const [tipLengths, setTipLengths] = useState<Record<string, string>>({});
   const [outputFile, setOutputFile] = useState("");
   const [referenceInstrument, setReferenceInstrument] = useState("");
   const [lowestInstrument, setLowestInstrument] = useState("");
@@ -125,6 +127,13 @@ export default function CalibrationWizard({
   const nextInstrumentIsCamera = nextInstrumentToRecord ? nonContactInstruments.includes(nextInstrumentToRecord) : false;
   const nextCameraDistanceError = nextInstrumentIsCamera && nextInstrumentToRecord
     ? validateCameraBlockDistance(cameraBlockDistances[nextInstrumentToRecord])
+    : null;
+  const nextInstrumentIsPipette = nextInstrumentToRecord
+    ? config?.instruments[nextInstrumentToRecord]?.type === "pipette"
+    : false;
+  const nextInstrumentTipAttached = nextInstrumentToRecord ? !!tipAttached[nextInstrumentToRecord] : false;
+  const nextTipLengthError = nextInstrumentTipAttached && nextInstrumentToRecord
+    ? validateTipLength(tipLengths[nextInstrumentToRecord])
     : null;
   const readyForSave = isMulti
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(instruments, instrumentPositions, selectedReference, selectedLowest)
@@ -578,6 +587,10 @@ export default function CalibrationWizard({
       const message = validateCameraBlockDistance(cameraBlockDistances[name]);
       if (message) throw new Error(message);
     }
+    if (tipAttached[name]) {
+      const message = validateTipLength(tipLengths[name]);
+      if (message) throw new Error(message);
+    }
     const captured = requirePosition(await gantryApi.getPosition());
     const nextPositions = { ...instrumentPositions, [name]: captured };
     setInstrumentPositions(nextPositions);
@@ -694,6 +707,7 @@ export default function CalibrationWizard({
       referenceInstrument: selectedReference,
       lowestInstrument: selectedLowest,
       cameraBlockDistances: parsedCameraBlockDistances(cameraBlockDistances, nonContactInstruments),
+      tipLengths: parsedTipLengths(tipLengths, tipAttached),
     }));
     onClose();
   });
@@ -1092,6 +1106,13 @@ export default function CalibrationWizard({
                           Center the camera over the calibration block mark, then enter the distance from the camera to the top of the block.
                         </p>
                       )}
+                      {nextInstrumentIsPipette && (
+                        <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
+                          If this pipette can't reach the block bare, attach a tip and touch the block with the tip
+                          instead. Enter the tip length below and it's subtracted so the saved depth still reflects
+                          the bare-nozzle position.
+                        </p>
+                      )}
                     </div>
                     {nextInstrumentIsCamera && (
                       <label style={{ ...fieldStyle, marginBottom: 12 }}>
@@ -1111,6 +1132,42 @@ export default function CalibrationWizard({
                           <span style={{ color: theme.color.danger, fontSize: 12 }}>{nextCameraDistanceError}</span>
                         )}
                       </label>
+                    )}
+                    {nextInstrumentIsPipette && (
+                      <div style={{ marginBottom: 12 }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                          <input
+                            type="checkbox"
+                            aria-label="Calibrating with a tip attached"
+                            checked={nextInstrumentTipAttached}
+                            onChange={(event) => setTipAttached((prev) => ({
+                              ...prev,
+                              [nextInstrumentToRecord]: event.target.checked,
+                            }))}
+                            disabled={controlsLocked}
+                          />
+                          <span style={labelStyle}>Calibrating with a tip attached</span>
+                        </label>
+                        {nextInstrumentTipAttached && (
+                          <label style={{ ...fieldStyle, marginTop: 8 }}>
+                            <span style={labelStyle}>Tip length (mm)</span>
+                            <input
+                              aria-label="Tip length (mm)"
+                              value={tipLengths[nextInstrumentToRecord] ?? ""}
+                              onChange={(event) => setTipLengths((prev) => ({
+                                ...prev,
+                                [nextInstrumentToRecord]: event.target.value,
+                              }))}
+                              disabled={controlsLocked}
+                              inputMode="decimal"
+                              style={buttonStateStyle(inputStyle, controlsLocked)}
+                            />
+                            {nextTipLengthError && (
+                              <span style={{ color: theme.color.danger, fontSize: 12 }}>{nextTipLengthError}</span>
+                            )}
+                          </label>
+                        )}
+                      </div>
                     )}
                     <JogPanel
                       xyStep={xyStep}
@@ -1132,8 +1189,8 @@ export default function CalibrationWizard({
                     <div style={actionRowStyle}>
                       <button
                         onClick={() => recordCurrentInstrument(nextInstrumentToRecord)}
-                        disabled={controlsLocked || !connected || !!nextCameraDistanceError}
-                        style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !!nextCameraDistanceError)}
+                        disabled={controlsLocked || !connected || !!nextCameraDistanceError || !!nextTipLengthError}
+                        style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !!nextCameraDistanceError || !!nextTipLengthError)}
                       >
                         {`Record ${nextInstrumentToRecord}`}
                       </button>
@@ -1345,6 +1402,39 @@ function parsedCameraBlockDistances(
   for (const name of cameras) {
     if (values[name] == null || !values[name].trim()) continue;
     parsed[name] = parseCameraBlockDistance(values[name]);
+  }
+  return parsed;
+}
+
+function parseTipLength(value: string): number {
+  if (!value.trim()) {
+    throw new Error("Enter the tip length before recording a position calibrated with a tip attached.");
+  }
+  const length = Number(value);
+  if (!Number.isFinite(length) || length < 0) {
+    throw new Error("Tip length must be 0 or greater.");
+  }
+  return roundMm(length);
+}
+
+function validateTipLength(value: string | undefined): string | null {
+  try {
+    parseTipLength(value ?? "");
+    return null;
+  } catch (err) {
+    return errorMessage(err);
+  }
+}
+
+function parsedTipLengths(
+  values: Record<string, string>,
+  attached: Record<string, boolean>,
+): Record<string, number> {
+  const parsed: Record<string, number> = {};
+  for (const name of Object.keys(attached)) {
+    if (!attached[name]) continue;
+    if (values[name] == null || !values[name].trim()) continue;
+    parsed[name] = parseTipLength(values[name]);
   }
   return parsed;
 }
