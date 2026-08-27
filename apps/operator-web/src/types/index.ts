@@ -44,6 +44,24 @@ export interface VialConfig {
   working_volume_ul: number;
 }
 
+export interface VialGridConfig {
+  type: "vial_grid";
+  name: string;
+  model_name: string;
+  rows: number;
+  columns: number;
+  calibration: CalibrationPoints;
+  x_offset: number;
+  y_offset: number;
+  row_direction?: "positive" | "negative" | null;
+  vial_model_name?: string;
+  vial_height?: number | null;
+  vial_diameter?: number | null;
+  capacity_ul: number;
+  working_volume_ul: number;
+  [key: string]: unknown;
+}
+
 // Mirrors TipRackYamlEntry: tip positions derive from a two-point XY
 // calibration + pitch offsets; every tip's Z comes from pickup_z, so
 // calibration points carry no meaningful z.
@@ -139,6 +157,7 @@ export type UnsupportedDeckConfig =
 export type LabwareConfig =
   | WellPlateConfig
   | VialConfig
+  | VialGridConfig
   | TipRackConfig
   | TipDisposalConfig
   | UnsupportedDeckConfig;

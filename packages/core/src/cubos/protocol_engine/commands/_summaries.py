@@ -171,6 +171,27 @@ def purge_pipette(args: Dict[str, Any]) -> str:
     return _join(_volume(args["volume_ul"]), "to waste")
 
 
+def set_lights(args: Dict[str, Any]) -> str:
+    if args.get("all_off"):
+        return _join(str(args["instrument"]), "off")
+    return _join(
+        str(args["instrument"]),
+        f"{args.get('channel')} {args.get('brightness')}%",
+    )
+
+
+def capture(args: Dict[str, Any]) -> str:
+    label = args.get("label")
+    return _join(str(args["instrument"]), str(label) if label else "")
+
+
+def image_well(args: Dict[str, Any]) -> str:
+    return _join(
+        f"{args['camera']} @ {_position(args['well'])}",
+        str(args.get("mode", "standard")),
+    )
+
+
 def clear_well(args: Dict[str, Any]) -> str:
     target = args.get("target_volume_ul", 0.0)
     explicit = args.get("volume_ul")
@@ -183,11 +204,13 @@ __all__ = [
     "blowout",
     "breakpoint_cmd",
     "cap",
+    "capture",
     "clear_well",
     "decap",
     "drop_tip",
     "flush_pipette",
     "home",
+    "image_well",
     "measure",
     "mix",
     "move",
@@ -197,5 +220,6 @@ __all__ = [
     "rinse_well",
     "scan",
     "serial_transfer",
+    "set_lights",
     "transfer",
 ]

@@ -850,23 +850,25 @@ export default function App() {
   );
 
   const bottomRight = (
-    <GantryPositionWidget
-      position={gantryPosition.data ?? null}
-      workingVolume={workingVolume}
-      gantryFile={displayGantry ? gantryFile : null}
-      gantry={displayGantry}
-      isRunning={protocolRunActive}
-      onSaveCalibrated={async (filename, body) => {
-        const previousGantryFile = gantryFile;
-        const saved = await saveGantry.mutateAsync({ filename, body });
-        setGantryFile(saved.filename);
-        setLocalGantry(null);
-        if (previousGantryFile && saved.filename !== previousGantryFile) {
-          await gantryApi.disconnect();
-          await gantryApi.connect(saved.filename);
-        }
-      }}
-    />
+    <div>
+      <GantryPositionWidget
+        position={gantryPosition.data ?? null}
+        workingVolume={workingVolume}
+        gantryFile={displayGantry ? gantryFile : null}
+        gantry={displayGantry}
+        isRunning={protocolRunActive}
+        onSaveCalibrated={async (filename, body) => {
+          const previousGantryFile = gantryFile;
+          const saved = await saveGantry.mutateAsync({ filename, body });
+          setGantryFile(saved.filename);
+          setLocalGantry(null);
+          if (previousGantryFile && saved.filename !== previousGantryFile) {
+            await gantryApi.disconnect();
+            await gantryApi.connect(saved.filename);
+          }
+        }}
+      />
+    </div>
   );
 
   return (
