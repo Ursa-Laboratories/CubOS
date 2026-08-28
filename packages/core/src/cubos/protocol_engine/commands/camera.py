@@ -206,6 +206,7 @@ def image_well(
     well: str,
     image_height: float,
     lights: str | None = None,
+    light: str | None = None,
     label: str | None = None,
     mode: str = "standard",
     brightness: int | None = None,
@@ -214,19 +215,23 @@ def image_well(
 ) -> list[str]:
     """Move the camera over *well*, light it, capture, lights off, retract.
 
-    * ``standard`` — one shot: descend to ``well.z + image_height``, white
-      lights at 5% (or ``brightness``), capture, lights off, retract.
+    * ``standard`` — one shot: descend to ``well.z + image_height``.
     * ``curvature`` — Z-stack: descend ``z_step_mm`` per plane for
-      ``z_steps`` planes with contact lights at 50% (or ``brightness``);
-      images are labeled ``{label}_z{z}mm_b{brightness}``.
+      ``z_steps`` planes; images are labeled ``{label}_z{z}mm_b{brightness}``.
+
+    Lighting is part of the shot, not a separate step: ``light`` picks
+    ``"off"`` (ambient), a lighting channel (e.g. ``"white"`` or
+    ``"contact"`` — the red+blue LEDs), or, when omitted, the mode's
+    default (standard→white, curvature→contact). ``brightness`` is 0–100
+    (0 = off); it is snapped to the nearest level the lighting hardware
+    actually supports for that channel.
 
     ``image_height`` is a labware-relative offset (mm above the well's
     surface Z), like ``measure``'s ``measurement_height``. ``lights``
-    defaults to the gantry's lighting instrument when it has exactly one;
-    pass a name to disambiguate, or ``lights: none`` in YAML to image with
-    ambient light. Capture and lighting failures log and continue; motion
-    failures raise. Lights-off and the retract to ``safe_z`` run even on
-    failure. Returns the saved image paths.
+    names the lighting *instrument* and defaults to the gantry's lighting
+    instrument when it has exactly one. Capture and lighting failures log
+    and continue; motion failures raise. Lights-off and the retract to
+    ``safe_z`` run even on failure. Returns the saved image paths.
     """
     camera_instr = _get_camera(context, camera)
     lighting = _resolve_lighting(context, lights)
@@ -247,14 +252,34 @@ def image_well(
         if z_step_mm < 0:
             raise ProtocolExecutionError("image_well: z_step_mm must be >= 0.")
 
-    if mode == "standard":
-        channel, level = "white", brightness if brightness is not None else 5
-    else:
-        channel = _CURVATURE_DEFAULT_CHANNEL
-        level = (
-            brightness if brightness is not None
-            else _CURVATURE_DEFAULT_BRIGHTNESS
+    if brightness is not None and not (0 <= brightness <= 100):
+        raise ProtocolExecutionError(
+            f"image_well: brightness must be between 0 and 100, got {brightness}."
         )
+    if mode == "standard":
+        default_channel, default_level = "white", 5
+    else:
+        default_channel = _CURVATURE_DEFAULT_CHANNEL
+        default_level = _CURVATURE_DEFAULT_BRIGHTNESS
+    channel = default_channel if light in (None, "off") else light
+    level = brightness if brightness is not None else default_level
+    lights_off = light == "off" or level == 0
+    if not lights_off and lighting is not None:
+        supported = lighting.channels.get(channel)
+        if supported is None:
+            raise ProtocolExecutionError(
+                f"image_well: unknown light {channel!r}; available channels: "
+                f"{', '.join(sorted(lighting.channels))} (or 'off')."
+            )
+        if level not in supported:
+            snapped = min(supported, key=lambda value: abs(value - level))
+            context.logger.info(
+                "image_well: brightness %d is not a supported %s level; "
+                "using nearest supported %d", level, channel, snapped,
+            )
+            level = snapped
+    if lights_off:
+        level = 0
 
     try:
         coord = context.deck.resolve_coordinate(well)
@@ -310,7 +335,9 @@ def image_well(
             else:
                 z_text = f"{plane:.2f}".replace(".", "-")
                 shot_label = f"{base_label}_z{z_text}mm_b{level}"
-            if _lights("set_channel", channel, level):
+            if lights_off:
+                _capture_one(shot_label)
+            elif _lights("set_channel", channel, level):
                 _capture_one(shot_label)
             _lights("all_off")
     finally:

@@ -939,6 +939,7 @@ function defaultArgValue(name: string, choices: ProtocolChoices, current: Record
     const instrument = String(current.instrument ?? choices.instruments[0] ?? "");
     return measurementMethodsForInstrument(instrument, choices)[0] ?? "measure";
   }
+  if (name === "light") return "white";
   return undefined;
 }
 
@@ -1061,8 +1062,16 @@ function optionsForArg(
   if (isPositionArg(name)) return choices.positions;
   if (name === "method") return measurementMethodsForInstrument(String(args.instrument ?? ""), choices);
   if (name === "channel") return Object.keys(LIGHTING_LEVELS);
+  if (name === "light") return ["off", ...Object.keys(LIGHTING_LEVELS)];
   if (name === "brightness") {
-    const levels = LIGHTING_LEVELS[String(args.channel ?? "")];
+    // set_lights carries `channel`; image_well carries `light` (falling
+    // back to its mode default: standard→white, curvature→contact).
+    const channel = String(
+      args.channel
+      ?? (args.light && args.light !== "off" ? args.light : undefined)
+      ?? (args.mode === "curvature" ? "contact" : "white"),
+    );
+    const levels = LIGHTING_LEVELS[channel];
     return levels ? levels.map(String) : [];
   }
   return [];
@@ -1160,6 +1169,7 @@ function isHiddenArgForStep(
   args: Record<string, unknown>,
   choices: ProtocolChoices,
 ): boolean {
+  if (argName === "brightness" && String(args.light ?? "") === "off") return true;
   return argName === "indentation_limit_height" && !isAsmiIndentationStep(args, choices);
 }
 
