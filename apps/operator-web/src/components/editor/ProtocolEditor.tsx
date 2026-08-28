@@ -229,6 +229,16 @@ export default function ProtocolEditor({
         updatedArgs.method = methods[0];
       }
     }
+    if (argName === "brightness" && value !== null) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) updatedArgs.brightness = parsed;
+    }
+    if (argName === "channel") {
+      const levels = LIGHTING_LEVELS[String(value)];
+      if (levels && !levels.includes(Number(updatedArgs.brightness))) {
+        updatedArgs.brightness = 0;
+      }
+    }
     if ((argName === "instrument" || argName === "method") && isAsmiIndentationStep(updatedArgs, choices)) {
       updatedArgs.method_kwargs = {
         step_size: 0.1,
@@ -1050,8 +1060,23 @@ function optionsForArg(
   if (name === "plate") return choices.plates;
   if (isPositionArg(name)) return choices.positions;
   if (name === "method") return measurementMethodsForInstrument(String(args.instrument ?? ""), choices);
+  if (name === "channel") return Object.keys(LIGHTING_LEVELS);
+  if (name === "brightness") {
+    const levels = LIGHTING_LEVELS[String(args.channel ?? "")];
+    return levels ? levels.map(String) : [];
+  }
   return [];
 }
+
+// Pawduino imaging lights expose discrete brightness levels per channel
+// ("contact" = the red+blue LED pair); anything else is rejected by the
+// driver, so the editor offers only the supported values. 0 = channel off.
+// Mirrors cubos.instruments.lighting.vendors.pawduino._LEVELS — the sole
+// lighting vendor today; introspect from the backend if a second appears.
+const LIGHTING_LEVELS: Record<string, number[]> = {
+  white: [0, 5, 10, 15, 25, 50, 100],
+  contact: [0, 5, 10, 20, 30, 50],
+};
 
 function includeCurrentOption(options: string[], current: unknown): string[] {
   const value = String(current ?? "");
