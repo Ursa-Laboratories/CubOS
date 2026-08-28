@@ -836,11 +836,19 @@ function targetsForLabware(config: LabwareConfig): Target[] {
   if (TWO_POINT_TYPES.has(config.type)) {
     const calibration = (record.calibration ?? {}) as Record<string, unknown>;
     const noun = config.type === "tip_rack" ? "tip" : "well";
+    // The recorded tip-rack A1 Z is saved directly as pickup_z, and
+    // pick_up_tip's descent to that Z IS the press — so the operator must
+    // record the fully seated depth, not the tip's top surface.
+    const a1Hint = config.type === "tip_rack"
+      ? "Press the bare nozzle down into tip A1 until it is fully seated "
+        + "(as deep as a real pickup), then record — this Z becomes the "
+        + "pickup height. Leave 'with tip attached' off."
+      : `Jog until the instrument touches the top center of ${noun} A1.`;
     return [
       {
         id: "a1",
         label: "A1",
-        hint: `Jog until the instrument touches the top center of ${noun} A1.`,
+        hint: a1Hint,
         stored: pointFrom(calibration.a1),
       },
       {
