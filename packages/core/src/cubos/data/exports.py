@@ -225,6 +225,7 @@ def export_campaign_measurements_zip(db_path: str | Path, campaign_id: int) -> b
             archive, mode="w", compression=zipfile.ZIP_DEFLATED,
         ) as zip_handle:
             manifest_rows = []
+            image_manifest_rows: list[dict[str, Any]] = []
             for table, rows in table_exports:
                 filename = f"measurements/{table.table}.csv"
                 zip_handle.writestr(
@@ -239,12 +240,60 @@ def export_campaign_measurements_zip(db_path: str | Path, campaign_id: int) -> b
                         "file": filename,
                     }
                 )
+                if table.table == "camera_measurements":
+                    image_manifest_rows.extend(
+                        _add_camera_images(zip_handle, rows)
+                    )
+            if image_manifest_rows:
+                zip_handle.writestr(
+                    "images/images.csv",
+                    _image_manifest_csv(image_manifest_rows),
+                )
             zip_handle.writestr("manifest.csv", _manifest_csv(manifest_rows))
             zip_handle.writestr(
                 "experiments.csv",
                 _experiments_csv(conn, campaign_id),
             )
     return archive.getvalue()
+
+
+def _add_camera_images(
+    zip_handle: zipfile.ZipFile, rows: list[sqlite3.Row],
+) -> list[dict[str, Any]]:
+    """Bundle each camera measurement's image file into the archive.
+
+    ``camera_measurements.image_path`` is a server-local filesystem path;
+    the zip is the only artifact that leaves the machine, so the referenced
+    files must travel inside it. A missing source file is recorded in the
+    returned manifest rows instead of failing the whole export.
+    """
+    manifest: list[dict[str, Any]] = []
+    for row in rows:
+        source = Path(str(row["image_path"]))
+        entry = {
+            "measurement_id": row["id"],
+            "image_path": str(source),
+        }
+        if source.is_file():
+            arcname = f"images/camera_{row['id']}_{source.name}"
+            zip_handle.write(source, arcname)
+            entry["file"] = arcname
+            entry["status"] = "included"
+        else:
+            entry["file"] = ""
+            entry["status"] = "missing on server"
+        manifest.append(entry)
+    return manifest
+
+
+def _image_manifest_csv(rows: list[dict[str, Any]]) -> str:
+    out = io.StringIO()
+    writer = csv.DictWriter(
+        out, fieldnames=["measurement_id", "image_path", "file", "status"],
+    )
+    writer.writeheader()
+    writer.writerows(rows)
+    return out.getvalue()
 
 
 def export_campaign_asmi_zip(db_path: str | Path, campaign_id: int) -> bytes:
