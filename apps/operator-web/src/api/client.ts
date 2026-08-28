@@ -88,6 +88,8 @@ export const gantryApi = {
     request<import("../types").InstrumentSchemas>("/gantry/instrument-schemas"),
   getInstrumentMethods: () =>
     request<import("../types").InstrumentMeasurementMethods>("/gantry/instrument-methods"),
+  getInstrumentMethodParams: () =>
+    request<import("../types").InstrumentMethodParams>("/gantry/instrument-method-params"),
   get: (filename: string) =>
     request<import("../types").GantryResponse>(`/gantry/${filename}`),
   put: (filename: string, body: import("../types").GantryConfig) =>
