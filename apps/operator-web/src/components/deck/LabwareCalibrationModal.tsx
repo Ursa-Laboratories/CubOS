@@ -23,9 +23,11 @@ interface Props {
 }
 
 // Deck coordinates are the zero-offset instrument frame: the engine resolves
-// gantry targets as x + offset_x, y + offset_y, z + depth + tip_extension
-// (cubos.validation.bounds), so a position captured with a specific
-// instrument maps back by subtracting that instrument's terms.
+// gantry targets as x − offset_x, y − offset_y, z + depth + tip_extension
+// (cubos.gantry.instrument_mount.InstrumentedGantry.move and
+// cubos.validation.bounds agree on this), so a raw position captured with a
+// specific instrument maps back by ADDING its XY offsets and SUBTRACTING
+// its depth/tip terms.
 //
 // Those terms are snapshotted here at capture time, not re-read from live
 // state when resolving/saving: step 1's "Back" button returns to step 0
@@ -206,9 +208,11 @@ export default function LabwareCalibrationModal({
   const depth = Number(selectedInstrument?.depth ?? 0) || 0;
   const zCompensation = depth + (tipApplies && !tipLengthInvalid ? parsedTipLength : 0);
 
+  // Inverse of InstrumentedGantry.move's gantry = (x − offset_x, y − offset_y,
+  // z + depth + tip): deck XY adds the offsets back, deck Z subtracts them.
   const adjust = (raw: Coordinate3D, oX: number, oY: number, zComp: number): Coordinate3D => ({
-    x: roundMm(raw.x - oX),
-    y: roundMm(raw.y - oY),
+    x: roundMm(raw.x + oX),
+    y: roundMm(raw.y + oY),
     z: roundMm(raw.z - zComp),
   });
 
@@ -407,7 +411,7 @@ export default function LabwareCalibrationModal({
   const stepInvalid = parsedXyStep == null || parsedZStep == null;
 
   const compensationSummary = [
-    `XY offset −(${formatMm(offsetX)}, ${formatMm(offsetY)})`,
+    `XY offset +(${formatMm(offsetX)}, ${formatMm(offsetY)})`,
     `depth −${formatMm(depth)}`,
     ...(tipApplies && !tipLengthInvalid ? [`tip −${formatMm(parsedTipLength)}`] : []),
   ].join(", ");

@@ -228,8 +228,11 @@ describe("LabwareCalibrationModal", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     await user.click(screen.getByRole("button", { name: "Record A1" }));
-    // raw (100, 50, -30) − offsets (10, 5) − depth 20 − tip 60 = (90, 45, -110)
-    await waitFor(() => expect(screen.getByText(/90\.000, 45\.000, -110\.000/)).toBeInTheDocument());
+    // Deck frame inverts InstrumentedGantry.move (gantry = deck − offset,
+    // deck z = raw − depth − tip):
+    // raw (100, 50, -30) + offsets (10, 5) on XY, − depth 20 − tip 60 on Z
+    // = (110, 55, -110)
+    await waitFor(() => expect(screen.getByText(/110\.000, 55\.000, -110\.000/)).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "Record A2" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -240,10 +243,10 @@ describe("LabwareCalibrationModal", () => {
     const [filename, config] = onSaveDeck.mock.calls[0];
     expect(filename).toBe("demo_deck.yaml");
     const plate = config.labware.plate as WellPlateConfig;
-    expect(plate.calibration.a1).toEqual({ x: 90, y: 45, z: -110 });
+    expect(plate.calibration.a1).toEqual({ x: 110, y: 55, z: -110 });
     // A2's raw delta is dominated by +X, so it snaps to exactly one x_offset
     // pitch from A1 (the loader requires the step to equal the pitch).
-    expect(plate.calibration.a2).toEqual({ x: 105, y: 45 });
+    expect(plate.calibration.a2).toEqual({ x: 125, y: 55 });
     // Untouched labware rides along unchanged.
     expect(config.labware.s1).toEqual(vial());
     expect(config.labware.tips).toEqual(tipRack());
@@ -472,8 +475,9 @@ describe("LabwareCalibrationModal", () => {
 
     // Must still reflect the pipette's offset (10, 5) and depth (20) that
     // were active when the raw position was actually captured, not the
-    // camera's zero offset that's live at save time.
+    // camera's zero offset that's live at save time:
+    // raw (90, 80, -35) + XY offsets − depth = (100, 85, -55).
     const saved = onSaveDeck.mock.calls[0][1].labware.s1 as VialConfig;
-    expect(saved.location).toEqual({ x: 80, y: 75, z: -55 });
+    expect(saved.location).toEqual({ x: 100, y: 85, z: -55 });
   });
 });
