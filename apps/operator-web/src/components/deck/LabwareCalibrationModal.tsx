@@ -54,34 +54,40 @@ const TEMPLATE_PREFIX = "new:";
 
 type LabwareTemplate = { id: string; label: string; config: Record<string, unknown> };
 
-// Standard labware the modal can add to the deck. Geometry follows the
-// ANSI/SLAS (SBS) footprint where one exists; volumes are typical prefills,
-// all editable in the deck editor afterwards. Calibration always comes from
-// the recorded positions.
+// Standard labware the modal can add to the deck. Values mirror the backend
+// labware definitions registry (cubos/deck/labware/definitions) where an
+// entry exists — keep them in sync until the registry is exposed over the
+// API and these can be fetched instead. Everything is editable in the deck
+// editor afterwards; calibration always comes from the recorded positions.
 const LABWARE_TEMPLATES: Record<string, LabwareTemplate[]> = {
   well_plate: [
     {
       id: "sbs_96",
       label: "96-well SBS plate",
-      config: { type: "well_plate", model_name: "sbs_96_well_plate", rows: 8, columns: 12, x_offset: 9, y_offset: 9, length: 127.76, width: 85.48, capacity_ul: 360, working_volume_ul: 200 },
+      config: { type: "well_plate", model_name: "sbs_96_wellplate", rows: 8, columns: 12, x_offset: 9, y_offset: 9, length: 127.76, width: 85.47, height: 14.35, well_depth: 10.67, capacity_ul: 200, working_volume_ul: 150 },
     },
     {
       id: "sbs_384",
       label: "384-well SBS plate",
-      config: { type: "well_plate", model_name: "sbs_384_well_plate", rows: 16, columns: 24, x_offset: 4.5, y_offset: 4.5, length: 127.76, width: 85.48, capacity_ul: 112, working_volume_ul: 80 },
+      config: { type: "well_plate", model_name: "sbs_384_wellplate", rows: 16, columns: 24, x_offset: 4.5, y_offset: 4.5, length: 127.76, width: 85.47, capacity_ul: 112, working_volume_ul: 80 },
     },
     {
       id: "sbs_24",
       label: "24-well plate",
-      config: { type: "well_plate", model_name: "24_well_plate", rows: 4, columns: 6, x_offset: 19.3, y_offset: 19.3, length: 127.76, width: 85.48, capacity_ul: 3400, working_volume_ul: 2000 },
+      config: { type: "well_plate", model_name: "sbs_24_wellplate", rows: 4, columns: 6, x_offset: 19, y_offset: 19, length: 127.76, width: 85.47, height: 20.2, well_depth: 17.4, capacity_ul: 3400, working_volume_ul: 2000 },
     },
     {
       id: "sbs_6",
       label: "6-well plate",
-      config: { type: "well_plate", model_name: "6_well_plate", rows: 2, columns: 3, x_offset: 39.12, y_offset: 39.12, length: 127.76, width: 85.48, capacity_ul: 16800, working_volume_ul: 3000 },
+      config: { type: "well_plate", model_name: "sbs_6_wellplate", rows: 2, columns: 3, x_offset: 39.12, y_offset: 39.12, length: 127.76, width: 85.47, capacity_ul: 16800, working_volume_ul: 3000 },
     },
   ],
   tip_rack: [
+    {
+      id: "ursa_2x15",
+      label: "Ursa 2×15 tip rack (8.5 mm pitch)",
+      config: { type: "tip_rack", model_name: "panda_2x15_tip_rack", rows: 15, columns: 2, x_offset: 8.5, y_offset: 8.5, tip_length: 59.3 },
+    },
     {
       id: "tips_96",
       label: "96-tip rack (SBS, 9 mm pitch)",
