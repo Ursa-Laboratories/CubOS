@@ -81,7 +81,7 @@ def build_image_path(
 ) -> Path:
     """Build a collision-safe image path under the images root.
 
-    Layout: ``<root>/campaign_<id>/<label>_<YYYYmmdd-HHMMSS>.png`` (an
+    Layout: ``<root>/campaign_<id>/<label>_<YYYYmmdd-HHMMSS>.tiff`` (an
     ``adhoc`` directory when the run has no campaign), with a numeric
     suffix when the same second produces multiple captures.
     """
@@ -95,10 +95,10 @@ def build_image_path(
     stamp = time.strftime("%Y%m%d-%H%M%S")
     directory = root / group
     directory.mkdir(parents=True, exist_ok=True)
-    path = directory / f"{stem}_{stamp}.png"
+    path = directory / f"{stem}_{stamp}.tiff"
     counter = 1
     while path.exists():
-        path = directory / f"{stem}_{stamp}_{counter:03d}.png"
+        path = directory / f"{stem}_{stamp}_{counter:03d}.tiff"
         counter += 1
     return path
 
@@ -217,7 +217,8 @@ def image_well(
 
     * ``standard`` — one shot: descend to ``well.z + image_height``.
     * ``curvature`` — Z-stack: descend ``z_step_mm`` per plane for
-      ``z_steps`` planes; images are labeled ``{label}_z{z}mm_b{brightness}``.
+      ``z_steps`` planes; images are labeled ``{label}_z={absolute_z}mm_b{brightness}``,
+      where ``absolute_z`` is the deck-frame Z of that plane (well Z + offset).
 
     Lighting is part of the shot, not a separate step: ``light`` picks
     ``"off"`` (ambient), a lighting channel (e.g. ``"white"`` or
@@ -333,8 +334,9 @@ def image_well(
             if mode == "standard":
                 shot_label = base_label
             else:
-                z_text = f"{plane:.2f}".replace(".", "-")
-                shot_label = f"{base_label}_z{z_text}mm_b{level}"
+                absolute_z = coord.z + plane
+                z_text = f"{absolute_z:.3f}".replace(".", "-")
+                shot_label = f"{base_label}_z={z_text}mm_b{level}"
             if lights_off:
                 _capture_one(shot_label)
             elif _lights("set_channel", channel, level):
