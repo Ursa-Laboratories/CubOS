@@ -15,10 +15,13 @@ Sequencing is fixed and explicit for every decap/cap action:
 2. **engage** -- descend to ``vial.z + capper.engage_depth_mm`` (a
    labware-relative offset carried on the *instrument config*, not
    hardcoded here -- see ``CapperInstrument.engage_depth_mm``).
-3. **capture**/**release** -- actuate (``capture_cap``/``release_cap``) and
-   sensor-confirm (``read_cap_present``) the expected post-actuation state,
-   retrying up to ``capper.capture_retries`` times.
-4. **retract** -- ascend back to ``safe_z``.
+3. **actuate** -- ``capture_cap``/``release_cap`` at engage depth.
+4. **retract + confirm** -- ascend back to ``safe_z``, THEN sensor-confirm
+   (``read_cap_present``) the expected state, retrying (re-engage, actuate,
+   retract, read) up to ``capper.capture_retries`` times. The confirm must
+   happen after the retract: at engage depth the line-break beam is broken
+   by the cap whether it is held by the tool or sitting on the vial, so the
+   reading is meaningless until the tool has lifted clear.
 5. **park** -- move to the instrument's configured ``park_position`` at
    ``safe_z``, so a captured/just-released cap is never left hovering over
    open labware.
@@ -110,18 +113,32 @@ def _mark_cap_uncertain(
         )
 
 
-def _confirm_capture_or_release(
+def _actuate_retract_confirm(
+    context: "ProtocolContext",
     capper: CapperInstrument,
+    instrument: str,
     *,
+    x: float,
+    y: float,
+    engage_z: float,
     capturing: bool,
     command_label: str,
 ) -> None:
-    """Actuate then sensor-confirm, retrying up to ``capture_retries`` times.
+    """Engage, actuate, retract, then sensor-confirm; re-engage per retry.
+
+    The line-break sensor sits at the tool head and reads "beam broken"
+    whenever a cap is inside it -- held by the electromagnet, or simply
+    sitting on the vial the tool is still lowered over. At engage depth the
+    reading is therefore identical whether the actuation worked or not; only
+    after retracting to ``safe_z`` does it distinguish a held cap (decap
+    succeeded / cap failed) from no cap (cap succeeded / decap failed). The
+    source firmware's decapping/capping sequences confirmed after retract
+    for the same reason (see the pawduino vendor docstring).
 
     Fails closed (raises ``CapperError``) if the sensor never confirms the
-    expected post-actuation state -- covers both an outright timeout/command
+    expected post-retract state -- covers both an outright timeout/command
     error from the vendor driver and a reading that contradicts what was
-    just commanded.
+    just commanded. Gantry motion errors propagate to the caller unchanged.
     """
     expected = capturing
     verb = "capture" if capturing else "release"
@@ -129,6 +146,7 @@ def _confirm_capture_or_release(
     last_reading: Any = None
     last_error: BaseException | None = None
     for _attempt in range(attempts):
+        context.gantry.move(instrument, (x, y, engage_z))  # (re-)engage
         try:
             if capturing:
                 capper.capture_cap()
@@ -136,6 +154,12 @@ def _confirm_capture_or_release(
                 capper.release_cap()
             if capper.capture_settle_s > 0:
                 time.sleep(capper.capture_settle_s)
+        except CapperError as exc:
+            last_reading = None
+            last_error = exc
+            continue
+        context.gantry.move(instrument, (x, y, context.gantry.safe_z))  # retract
+        try:
             last_reading = capper.read_cap_present()
             last_error = None
         except CapperError as exc:
@@ -199,13 +223,15 @@ def _run_capper_sequence(
             )
             return
 
-    # Steps 1-3: approach, engage, capture/release.
+    # Steps 1-4: approach, engage, actuate, retract; sensor-confirm after
+    # the retract (re-engaging per retry) -- see _actuate_retract_confirm.
     try:
         context.gantry.move_to_labware(instrument, coord)  # approach
         engage_z = vial_z + capper.engage_depth_mm
-        context.gantry.move(instrument, (x, y, engage_z))  # engage
-        _confirm_capture_or_release(
-            capper, capturing=capturing, command_label=command_label,
+        _actuate_retract_confirm(
+            context, capper, instrument,
+            x=x, y=y, engage_z=engage_z,
+            capturing=capturing, command_label=command_label,
         )
     except BaseException as exc:
         _safe_retract(context, instrument, x, y)
@@ -217,16 +243,15 @@ def _run_capper_sequence(
             "further liquid handling involving this vial."
         ) from exc
 
-    # Steps 4-5: retract, park.
+    # Step 5: park (already at safe_z after the confirmed retract).
     try:
-        context.gantry.move(instrument, (x, y, context.gantry.safe_z))  # retract
         park_x, park_y = capper.park_position
         context.gantry.move(instrument, (park_x, park_y, context.gantry.safe_z))  # park
     except BaseException as exc:
         if operation_key is not None:
             _mark_cap_uncertain(context, operation_key, exc)
         raise ProtocolExecutionError(
-            f"{command_label} retract/park failed for {vial!r} after a "
+            f"{command_label} park failed for {vial!r} after a "
             f"successful {'capture' if capturing else 'release'}: "
             f"{type(exc).__name__}: {exc}. Reconciliation is required."
         ) from exc
