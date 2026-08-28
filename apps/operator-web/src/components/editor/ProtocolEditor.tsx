@@ -1356,7 +1356,9 @@ function MethodParamsFields({
     const id = `${idPrefix}-${keyPrefix}${field.name}`;
     const name = `${namePrefix}_${keyPrefix}${field.name}`;
     const label = `${argLabel(field.name)}${field.required ? " *" : ""}`;
-    if (field.type === "int" || field.type === "float") {
+    // Optional params surface as e.g. "float | None" — match the base type.
+    const isInt = /\bint\b/.test(field.type);
+    if (isInt || /\bfloat\b/.test(field.type)) {
       return (
         <OptionalNumberField
           key={id}
@@ -1364,11 +1366,11 @@ function MethodParamsFields({
           name={name}
           label={label}
           value={typeof fieldValue === "number" ? fieldValue : null}
-          onChange={(v) => setValue(v === null ? null : (field.type === "int" ? Math.round(v) : v))}
+          onChange={(v) => setValue(v === null ? null : (isInt ? Math.round(v) : v))}
         />
       );
     }
-    if (field.type === "bool") {
+    if (/\bbool\b/.test(field.type)) {
       return (
         <SmartSelectField
           key={id}
