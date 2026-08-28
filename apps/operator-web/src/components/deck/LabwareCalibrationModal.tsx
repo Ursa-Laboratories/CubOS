@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { gantryApi } from "../../api/client";
 import * as theme from "../../theme";
@@ -12,6 +12,7 @@ import type {
   LabwareConfig,
 } from "../../types";
 import JogPanel, { MIN_JOG_STEP } from "../gantry/JogPanel";
+import { createJogPacer, jogPaceMs } from "../gantry/jogPacing";
 
 interface Props {
   open: boolean;
@@ -337,10 +338,78 @@ export default function LabwareCalibrationModal({
     setStep(1);
   };
 
-  const jogOnce = (x: number, y: number, z: number) => {
-    if (!connected || busy) return;
-    gantryApi.jog(x, y, z).catch((err) => setError(errorMessage(err)));
-  };
+  // Hold-to-jog pump, mirroring GantryPositionWidget: distinct presses fire
+  // immediately, held repeats are paced to the segment's execution time,
+  // and release cancels whatever GRBL still has queued.
+  const jogHeld = useRef<{ x: number; y: number; z: number } | null>(null);
+  const jogPumpActive = useRef(false);
+  const jogRequestCount = useRef(0);
+  const jogPacer = useRef(createJogPacer()).current;
+
+  const jog = useCallback(async (x: number, y: number, z: number): Promise<boolean> => {
+    if (!connected || busy) return false;
+    jogRequestCount.current += 1;
+    try {
+      await gantryApi.jog(x, y, z);
+      return true;
+    } catch (err) {
+      setError(errorMessage(err));
+      return false;
+    }
+  }, [busy, connected]);
+
+  // The pump reads jog through a ref so an in-flight hold always uses the
+  // latest guards (connected/busy) instead of a stale closure.
+  const jogRef = useRef(jog);
+  useEffect(() => {
+    jogRef.current = jog;
+  }, [jog]);
+
+  const stopJog = useCallback(() => {
+    if (jogHeld.current === null) return;
+    jogHeld.current = null;
+    if (jogRequestCount.current > 1) {
+      gantryApi.jogCancel().catch(() => undefined);
+    }
+    jogRequestCount.current = 0;
+    jogPacer.wake();
+  }, [jogPacer]);
+
+  const startJog = useCallback((x: number, y: number, z: number) => {
+    const heldBefore = jogHeld.current !== null;
+    jogHeld.current = { x, y, z };
+    if (heldBefore && jogPumpActive.current) {
+      jogPacer.wake();
+      return;
+    }
+    if (!jogPumpActive.current) {
+      jogRequestCount.current = 0;
+    }
+    const first = jogRef.current(x, y, z);
+    if (jogPumpActive.current) return;
+    jogPumpActive.current = true;
+    const pump = async () => {
+      try {
+        let sent = { x, y, z };
+        let ok = await first;
+        while (ok && jogHeld.current) {
+          await jogPacer.sleep(jogPaceMs(sent.x, sent.y, sent.z));
+          const delta = jogHeld.current;
+          if (!delta) break;
+          sent = delta;
+          ok = await jogRef.current(delta.x, delta.y, delta.z);
+        }
+        if (!ok) {
+          jogHeld.current = null;
+        }
+      } finally {
+        jogPumpActive.current = false;
+      }
+    };
+    void pump();
+  }, [jogPacer]);
+
+  useEffect(() => () => stopJog(), [stopJog]);
 
   const recordTarget = async (target: Target) => {
     setBusy(true);
@@ -654,8 +723,8 @@ export default function LabwareCalibrationModal({
                       setZStep={setZStep}
                       disabled={!connected || busy}
                       alarmed={false}
-                      onStartJog={jogOnce}
-                      onStopJog={() => undefined}
+                      onStartJog={startJog}
+                      onStopJog={stopJog}
                       xy={xy}
                       z={z}
                       stepInvalid={stepInvalid}
