@@ -1116,7 +1116,7 @@ export default function CalibrationWizard({
                       )}
                     </div>
                     {nextInstrumentIsCamera && (
-                      <CameraPreview instrument={nextInstrumentToRecord} />
+                      <CameraPreview key={nextInstrumentToRecord} instrument={nextInstrumentToRecord} />
                     )}
                     {nextInstrumentIsCamera && (
                       <label style={{ ...fieldStyle, marginBottom: 12 }}>

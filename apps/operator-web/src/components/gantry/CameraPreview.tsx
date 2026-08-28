@@ -47,8 +47,6 @@ export default function CameraPreview({ instrument }: { instrument: string }) {
       }
     }
 
-    setStatus("loading");
-    setMessage(null);
     void tick();
 
     return () => {
