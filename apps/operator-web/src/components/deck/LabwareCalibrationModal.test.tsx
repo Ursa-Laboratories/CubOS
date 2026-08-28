@@ -431,4 +431,49 @@ describe("LabwareCalibrationModal", () => {
     expect(screen.getByText(/not connected/i)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Record Vial top center" })).toBeDisabled();
   });
+
+  it("keeps a recorded position's own instrument offset after Back changes the reference instrument", async () => {
+    // Regression test: step 1's "Back" button returns to step 0 without
+    // clearing already-recorded targets. Before this fix, the offset was
+    // re-read live at save time, so changing the reference instrument
+    // after recording (then continuing without re-recording) silently
+    // reinterpreted the already-recorded raw position with the NEW
+    // instrument's offset instead of the one active when it was captured.
+    const user = userEvent.setup();
+    stubPositions([{ x: 90, y: 80, z: -35 }]);
+    const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
+    render(
+      <LabwareCalibrationModal
+        open
+        onClose={() => undefined}
+        deck={deckResponse()}
+        gantry={gantryResponse(true)}
+        position={position()}
+        onSaveDeck={onSaveDeck}
+      />,
+    );
+
+    await user.selectOptions(screen.getByLabelText("Labware type"), "vial");
+    // Record with the pipette selected (non-zero offset/depth).
+    await user.selectOptions(screen.getByLabelText("Reference instrument"), "pipette");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Record Vial top center" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
+
+    // Go back and switch to the camera (zero offset) WITHOUT re-recording.
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    await user.selectOptions(screen.getByLabelText("Reference instrument"), "camera");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    // Back in step 1 with the position already recorded ("All positions
+    // set.") — Continue again to reach the save step.
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Save labware calibration" }));
+    await waitFor(() => expect(onSaveDeck).toHaveBeenCalledTimes(1));
+
+    // Must still reflect the pipette's offset (10, 5) and depth (20) that
+    // were active when the raw position was actually captured, not the
+    // camera's zero offset that's live at save time.
+    const saved = onSaveDeck.mock.calls[0][1].labware.s1 as VialConfig;
+    expect(saved.location).toEqual({ x: 80, y: 75, z: -55 });
+  });
 });

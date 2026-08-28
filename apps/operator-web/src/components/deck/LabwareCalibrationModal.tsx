@@ -26,7 +26,15 @@ interface Props {
 // gantry targets as x + offset_x, y + offset_y, z + depth + tip_extension
 // (cubos.validation.bounds), so a position captured with a specific
 // instrument maps back by subtracting that instrument's terms.
-type CapturedEntry = { raw: Coordinate3D } | { keep: true };
+//
+// Those terms are snapshotted here at capture time, not re-read from live
+// state when resolving/saving: step 1's "Back" button returns to step 0
+// without clearing already-recorded targets, so a reference-instrument or
+// tip change after recording some positions must not retroactively change
+// what those positions mean.
+type CapturedEntry =
+  | { raw: Coordinate3D; offsetX: number; offsetY: number; zCompensation: number; instrument: string }
+  | { keep: true };
 
 type ResolvedTarget = { point: Coordinate3D; kept: boolean };
 
@@ -198,10 +206,10 @@ export default function LabwareCalibrationModal({
   const depth = Number(selectedInstrument?.depth ?? 0) || 0;
   const zCompensation = depth + (tipApplies && !tipLengthInvalid ? parsedTipLength : 0);
 
-  const adjust = (raw: Coordinate3D): Coordinate3D => ({
-    x: roundMm(raw.x - offsetX),
-    y: roundMm(raw.y - offsetY),
-    z: roundMm(raw.z - zCompensation),
+  const adjust = (raw: Coordinate3D, oX: number, oY: number, zComp: number): Coordinate3D => ({
+    x: roundMm(raw.x - oX),
+    y: roundMm(raw.y - oY),
+    z: roundMm(raw.z - zComp),
   });
 
   const resolveTarget = (target: Target): ResolvedTarget | null => {
@@ -210,7 +218,9 @@ export default function LabwareCalibrationModal({
     if ("keep" in entry) {
       return target.stored ? { point: target.stored, kept: true } : null;
     }
-    return { point: adjust(entry.raw), kept: false };
+    // Use the offset/instrument snapshotted at capture time, not the
+    // (possibly since-changed) live selection — see CapturedEntry.
+    return { point: adjust(entry.raw, entry.offsetX, entry.offsetY, entry.zCompensation), kept: false };
   };
 
   useEffect(() => {
@@ -334,9 +344,16 @@ export default function LabwareCalibrationModal({
     try {
       const result = await gantryApi.getPosition();
       const raw = requireWorkPosition(result);
-      setCaptured((prev) => ({ ...prev, [target.id]: { raw } }));
+      // Snapshot the offset/instrument active right now — not read live
+      // later — so a later Back + instrument/tip change can't retroactively
+      // change what this position means (see CapturedEntry).
+      setCaptured((prev) => ({
+        ...prev,
+        [target.id]: { raw, offsetX, offsetY, zCompensation, instrument: selectedInstrumentName },
+      }));
       setStatusNote(
-        `Recorded ${target.label}: X=${raw.x.toFixed(3)} Y=${raw.y.toFixed(3)} Z=${raw.z.toFixed(3)} (gantry frame).`,
+        `Recorded ${target.label}: X=${raw.x.toFixed(3)} Y=${raw.y.toFixed(3)} Z=${raw.z.toFixed(3)} (gantry frame, ` +
+        `${selectedInstrumentName}${tipApplies ? " + tip" : ""}).`,
       );
     } catch (err) {
       setError(errorMessage(err));
