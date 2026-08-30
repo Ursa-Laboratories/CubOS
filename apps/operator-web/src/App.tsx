@@ -682,6 +682,9 @@ export default function App() {
             }}
             onLocalChange={setLocalDeck}
             onRefresh={refreshAll}
+            gantry={displayGantry}
+            position={gantryPosition.data ?? null}
+            isRunning={protocolRunActive}
           />
         </>
           )}
