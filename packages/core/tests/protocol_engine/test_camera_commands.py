@@ -84,7 +84,7 @@ class TestCapture:
     def test_capture_writes_file_and_returns_path(self, _images_dir):
         saved = capture(_context({"cam": _camera()}), instrument="cam",
                         label="hello")
-        assert saved.endswith(".png")
+        assert saved.endswith(".tiff")
         assert (_images_dir / "adhoc").exists()
 
     def test_capture_persists_against_position(self, tmp_path):
@@ -157,7 +157,9 @@ class TestImageWell:
                            image_height=30.0, lights="lights", label="b1",
                            mode="curvature", z_steps=3, z_step_mm=0.5)
         assert len(saved) == 3
-        assert any("z29-50mm" in path for path in saved)
+        # Labels encode the absolute deck-frame Z of each plane
+        # (WELL.z=26.0 + relative plane 29.5 = 55.5), not the relative offset.
+        assert any("z=55-500mm" in path for path in saved)
         planes = [
             entry[1][2] - WELL.z
             for entry in context.gantry.trace
@@ -228,7 +230,7 @@ class TestPathBuilder:
         first = build_image_path(context, "shot", "cam")
         first.touch()
         second = build_image_path(context, "shot", "cam")
-        assert second.name == "shot_frozen_001.png"
+        assert second.name == "shot_frozen_001.tiff"
 
 
 class TestPersistFailure:
@@ -349,3 +351,53 @@ class TestLightsAutoDiscovery:
         saved = image_well(context, camera="cam", well="plate.B1",
                            image_height=30.0, lights="none")
         assert len(saved) == 1
+
+    def test_brightness_out_of_range_raises(self):
+        with pytest.raises(ProtocolExecutionError, match="brightness"):
+            image_well(
+                _context({"cam": _camera(), "lights": _lights()}),
+                camera="cam", well="plate.B1", image_height=30.0,
+                lights="lights", brightness=150,
+            )
+
+    def test_unknown_light_channel_raises(self):
+        with pytest.raises(ProtocolExecutionError, match="unknown light"):
+            image_well(
+                _context({"cam": _camera(), "lights": _lights()}),
+                camera="cam", well="plate.B1", image_height=30.0,
+                lights="lights", light="ultraviolet",
+            )
+
+    def test_brightness_snaps_to_nearest_supported_level(self):
+        lights = _lights()
+        levels_used = []
+        original = lights.set_channel
+
+        def logging_set_channel(channel, brightness):
+            levels_used.append(brightness)
+            original(channel, brightness)
+
+        lights.set_channel = logging_set_channel
+        context = _context({"cam": _camera(), "lights": lights})
+
+        image_well(context, camera="cam", well="plate.B1", image_height=30.0,
+                  lights="lights", light="white", brightness=7)
+
+        # 7% isn't a supported white level; nearest supported is 5%.
+        assert levels_used == [5]
+
+    def test_light_off_still_captures_without_setting_channel(self):
+        lights = _lights()
+        original = lights.set_channel
+
+        def exploding_set_channel(channel, brightness):
+            raise AssertionError("set_channel should not be called when light='off'")
+
+        lights.set_channel = exploding_set_channel
+        context = _context({"cam": _camera(), "lights": lights})
+
+        saved = image_well(context, camera="cam", well="plate.B1",
+                           image_height=30.0, lights="lights", light="off")
+
+        assert len(saved) == 1
+        lights.set_channel = original

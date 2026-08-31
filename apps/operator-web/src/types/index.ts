@@ -337,6 +337,18 @@ export type InstrumentSchemas = Record<string, Record<string, InstrumentFieldInf
 
 export type InstrumentMeasurementMethods = Record<string, string[]>;
 
+export interface InstrumentMethodParamField {
+  name: string;
+  type: string;
+  required: boolean;
+  default: unknown;
+  fields: InstrumentMethodParamField[] | null;
+}
+
+// type -> method -> ordered method_kwargs parameter specs. A param with
+// non-null `fields` is a dataclass the engine builds from a nested mapping.
+export type InstrumentMethodParams = Record<string, Record<string, InstrumentMethodParamField[]>>;
+
 // Protocol
 
 export interface CommandArg {

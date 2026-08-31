@@ -13,6 +13,8 @@ import type {
   ProtocolResponse,
   ProtocolRunResponse,
   InstrumentMeasurementMethods,
+  InstrumentMethodParams,
+  InstrumentMethodParamField,
 } from "../../types";
 import { CoordinateField, NumberField, OptionalNumberField, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
@@ -37,6 +39,7 @@ interface Props {
   deck: DeckResponse;
   gantry: GantryResponse;
   instrumentMethods?: InstrumentMeasurementMethods;
+  instrumentMethodParams?: InstrumentMethodParams;
   steps: ProtocolStep[] | null;
   positions?: Record<string, number[]> | null;
   /** The last-saved (server-loaded) protocol, used to reset local edits
@@ -92,6 +95,7 @@ type ProtocolChoices = {
   positions: string[];
   instrumentTypes: Record<string, string>;
   instrumentMethods: InstrumentMeasurementMethods;
+  instrumentMethodParams: InstrumentMethodParams;
 };
 
 type EditablePosition = {
@@ -121,6 +125,11 @@ function defaultArgsForCommand(cmd: CommandInfo, choices: ProtocolChoices): Reco
       baseline_samples: 10,
       measure_with_return: false,
     };
+  } else {
+    const params = methodParamsForStep(args, choices);
+    if (params.length > 0) {
+      args.method_kwargs = defaultMethodKwargs(params);
+    }
   }
   return args;
 }
@@ -134,6 +143,7 @@ export default function ProtocolEditor({
   deck,
   gantry,
   instrumentMethods = {},
+  instrumentMethodParams = {},
   steps: loadedSteps,
   positions,
   baseline,
@@ -170,7 +180,7 @@ export default function ProtocolEditor({
   const [requestConfirm, confirmDialog] = useConfirm();
 
   const commandsByName = Object.fromEntries(commands.map((c) => [c.name, c]));
-  const choices = buildProtocolChoices(deck, gantry, positionRows, instrumentMethods);
+  const choices = buildProtocolChoices(deck, gantry, positionRows, instrumentMethods, instrumentMethodParams);
   const positionErrors = validatePositionRows(positionRows);
   const hasPositionErrors = positionErrors.length > 0;
 
@@ -220,6 +230,16 @@ export default function ProtocolEditor({
         updatedArgs.method = methods[0];
       }
     }
+    if (argName === "brightness" && value !== null) {
+      const parsed = Number(value);
+      if (Number.isFinite(parsed)) updatedArgs.brightness = parsed;
+    }
+    if (argName === "channel") {
+      const levels = LIGHTING_LEVELS[String(value)];
+      if (levels && !levels.includes(Number(updatedArgs.brightness))) {
+        updatedArgs.brightness = 0;
+      }
+    }
     if ((argName === "instrument" || argName === "method") && isAsmiIndentationStep(updatedArgs, choices)) {
       updatedArgs.method_kwargs = {
         step_size: 0.1,
@@ -231,7 +251,12 @@ export default function ProtocolEditor({
     }
     if ((argName === "instrument" || argName === "method") && !isAsmiIndentationStep(updatedArgs, choices)) {
       delete updatedArgs.indentation_limit_height;
-      delete updatedArgs.method_kwargs;
+      const params = methodParamsForStep(updatedArgs, choices);
+      if (params.length > 0) {
+        updatedArgs.method_kwargs = defaultMethodKwargs(params);
+      } else {
+        delete updatedArgs.method_kwargs;
+      }
     }
     next[i] = { ...next[i], args: updatedArgs };
     commit(next);
@@ -509,13 +534,25 @@ export default function ProtocolEditor({
                     );
                   }
                   if (arg.name === "method_kwargs") {
+                    if (isAsmiIndentationStep(step.args, choices)) {
+                      return (
+                        <MethodOptionsField
+                          key={arg.name}
+                          idPrefix={`step-${i}-method`}
+                          namePrefix={`step_${i}_method`}
+                          value={val}
+                          asmiIndentation
+                          onChange={(v) => updateStepArg(i, arg.name, v)}
+                        />
+                      );
+                    }
                     return (
-                      <MethodOptionsField
+                      <MethodParamsFields
                         key={arg.name}
                         idPrefix={`step-${i}-method`}
                         namePrefix={`step_${i}_method`}
+                        params={methodParamsForStep(step.args, choices)}
                         value={val}
-                        asmiIndentation={isAsmiIndentationStep(step.args, choices)}
                         onChange={(v) => updateStepArg(i, arg.name, v)}
                       />
                     );
@@ -903,6 +940,7 @@ function defaultArgValue(name: string, choices: ProtocolChoices, current: Record
     const instrument = String(current.instrument ?? choices.instruments[0] ?? "");
     return measurementMethodsForInstrument(instrument, choices)[0] ?? "measure";
   }
+  if (name === "light") return "white";
   return undefined;
 }
 
@@ -962,6 +1000,7 @@ function buildProtocolChoices(
   gantry: GantryResponse,
   protocolPositions: EditablePosition[],
   instrumentMethods: InstrumentMeasurementMethods,
+  instrumentMethodParams: InstrumentMethodParams,
 ): ProtocolChoices {
   const instruments = Object.keys(gantry.config.instruments);
   const instrumentTypes = Object.fromEntries(
@@ -974,7 +1013,7 @@ function buildProtocolChoices(
     ...deck.labware.flatMap(targetsForLabware),
     ...protocolPositions.map((position) => position.name.trim()),
   ]);
-  return { instruments, plates, positions, instrumentTypes, instrumentMethods };
+  return { instruments, plates, positions, instrumentTypes, instrumentMethods, instrumentMethodParams };
 }
 
 function targetsForLabware(item: LabwareResponse): string[] {
@@ -1023,13 +1062,60 @@ function optionsForArg(
   if (name === "plate") return choices.plates;
   if (isPositionArg(name)) return choices.positions;
   if (name === "method") return measurementMethodsForInstrument(String(args.instrument ?? ""), choices);
+  if (name === "channel") return Object.keys(LIGHTING_LEVELS);
+  if (name === "light") return ["off", ...Object.keys(LIGHTING_LEVELS)];
+  if (name === "brightness") {
+    // set_lights carries `channel`; image_well carries `light` (falling
+    // back to its mode default: standard→white, curvature→contact).
+    const channel = String(
+      args.channel
+      ?? (args.light && args.light !== "off" ? args.light : undefined)
+      ?? (args.mode === "curvature" ? "contact" : "white"),
+    );
+    const levels = LIGHTING_LEVELS[channel];
+    return levels ? levels.map(String) : [];
+  }
   return [];
 }
+
+// Pawduino imaging lights expose discrete brightness levels per channel
+// ("contact" = the red+blue LED pair); anything else is rejected by the
+// driver, so the editor offers only the supported values. 0 = channel off.
+// Mirrors cubos.instruments.lighting.vendors.pawduino._LEVELS — the sole
+// lighting vendor today; introspect from the backend if a second appears.
+const LIGHTING_LEVELS: Record<string, number[]> = {
+  white: [0, 5, 10, 15, 25, 50, 100],
+  contact: [0, 5, 10, 20, 30, 50],
+};
 
 function includeCurrentOption(options: string[], current: unknown): string[] {
   const value = String(current ?? "");
   if (!value || options.includes(value)) return options;
   return [value, ...options];
+}
+
+function methodParamsForStep(args: Record<string, unknown>, choices: ProtocolChoices): InstrumentMethodParamField[] {
+  const type = inferInstrumentType(String(args.instrument ?? ""), choices);
+  return choices.instrumentMethodParams[type]?.[String(args.method ?? "")] ?? [];
+}
+
+// Seed method_kwargs with each parameter's declared defaults so optional
+// values show up prefilled; required fields without defaults stay absent
+// (the engine rejects the step pre-motion with the field list if unfilled).
+function defaultMethodKwargs(params: InstrumentMethodParamField[]): Record<string, unknown> {
+  const kwargs: Record<string, unknown> = {};
+  for (const param of params) {
+    if (param.fields) {
+      const nested: Record<string, unknown> = {};
+      for (const field of param.fields) {
+        if (!field.required && field.default != null) nested[field.name] = field.default;
+      }
+      kwargs[param.name] = nested;
+    } else if (!param.required && param.default != null) {
+      kwargs[param.name] = param.default;
+    }
+  }
+  return kwargs;
 }
 
 function measurementMethodsForInstrument(instrument: string, choices: ProtocolChoices): string[] {
@@ -1084,6 +1170,7 @@ function isHiddenArgForStep(
   args: Record<string, unknown>,
   choices: ProtocolChoices,
 ): boolean {
+  if (argName === "brightness" && String(args.light ?? "") === "off") return true;
   return argName === "indentation_limit_height" && !isAsmiIndentationStep(args, choices);
 }
 
@@ -1277,6 +1364,114 @@ function MethodOptionsField({
         {detectSurface
           ? "Indentation limit height is measured from the detected surface (must be 0 or below)."
           : "Enable Detect surface to configure the surface-search parameters."}
+      </div>
+    </div>
+  );
+}
+
+function MethodParamsFields({
+  idPrefix,
+  namePrefix,
+  params,
+  value,
+  onChange,
+}: {
+  idPrefix: string;
+  namePrefix: string;
+  params: InstrumentMethodParamField[];
+  value: unknown;
+  onChange: (value: Record<string, unknown>) => void;
+}) {
+  if (params.length === 0) return null;
+  const kwargs = isRecord(value) ? value : {};
+
+  const renderField = (
+    field: InstrumentMethodParamField,
+    fieldValue: unknown,
+    setValue: (v: unknown) => void,
+    keyPrefix: string,
+  ) => {
+    const id = `${idPrefix}-${keyPrefix}${field.name}`;
+    const name = `${namePrefix}_${keyPrefix}${field.name}`;
+    const label = `${argLabel(field.name)}${field.required ? " *" : ""}`;
+    // Optional params surface as e.g. "float | None" — match the base type.
+    const isInt = /\bint\b/.test(field.type);
+    if (isInt || /\bfloat\b/.test(field.type)) {
+      return (
+        <OptionalNumberField
+          key={id}
+          id={id}
+          name={name}
+          label={label}
+          value={typeof fieldValue === "number" ? fieldValue : null}
+          onChange={(v) => setValue(v === null ? null : (isInt ? Math.round(v) : v))}
+        />
+      );
+    }
+    if (/\bbool\b/.test(field.type)) {
+      return (
+        <SmartSelectField
+          key={id}
+          id={id}
+          name={name}
+          label={label}
+          value={String(Boolean(fieldValue ?? field.default ?? false))}
+          options={["false", "true"]}
+          onChange={(v) => setValue(v === "true")}
+        />
+      );
+    }
+    return (
+      <TextField
+        key={id}
+        id={id}
+        name={name}
+        label={label}
+        value={String(fieldValue ?? "")}
+        onChange={(v) => setValue(v === "" ? null : v)}
+      />
+    );
+  };
+
+  return (
+    <div style={methodOptionsStyle}>
+      <div style={methodOptionsTitleStyle}>Method parameters</div>
+      {params.map((param) => {
+        if (param.fields) {
+          const nested = isRecord(kwargs[param.name]) ? kwargs[param.name] as Record<string, unknown> : {};
+          const setNested = (fieldName: string, v: unknown) => {
+            const nextNested = { ...nested };
+            if (v === null) {
+              delete nextNested[fieldName];
+            } else {
+              nextNested[fieldName] = v;
+            }
+            onChange({ ...kwargs, [param.name]: nextNested });
+          };
+          return (
+            <div key={param.name} style={methodOptionsGridStyle}>
+              {param.fields.map((field) =>
+                renderField(field, nested[field.name], (v) => setNested(field.name, v), `${param.name}-`))}
+            </div>
+          );
+        }
+        const setTop = (v: unknown) => {
+          const next = { ...kwargs };
+          if (v === null) {
+            delete next[param.name];
+          } else {
+            next[param.name] = v;
+          }
+          onChange(next);
+        };
+        return (
+          <div key={param.name} style={methodOptionsGridStyle}>
+            {renderField(param, kwargs[param.name], setTop, "")}
+          </div>
+        );
+      })}
+      <div style={methodOptionsHintStyle}>
+        Fields marked * are required by the selected method.
       </div>
     </div>
   );

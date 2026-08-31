@@ -27,6 +27,7 @@ from cubos.instruments.pipette.models import PIPETTE_MODELS
 from cubos.instruments.registry import (
     config_fields,
     list_measurement_methods,
+    list_measurement_method_params,
     get_supported_types,
     get_supported_vendors,
 )
@@ -351,6 +352,15 @@ def get_instrument_schemas() -> Dict[str, Dict[str, List[InstrumentFieldInfo]]]:
 def get_instrument_methods() -> Dict[str, List[str]]:
     return {
         type_key: list_measurement_methods(type_key)
+        for type_key in get_supported_types()
+    }
+
+
+@router.get("/instrument-method-params")
+def get_instrument_method_params() -> Dict[str, Dict[str, List[Dict[str, Any]]]]:
+    """Per instrument type, each measurement method's method_kwargs schema."""
+    return {
+        type_key: list_measurement_method_params(type_key)
         for type_key in get_supported_types()
     }
 

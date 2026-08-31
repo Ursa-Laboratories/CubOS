@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type { DeckResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, WellPlateHolderConfig, Coordinate3D, DeckConfig } from "../../types";
+import type { DeckResponse, GantryPosition, GantryResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, WellPlateHolderConfig, Coordinate3D, DeckConfig } from "../../types";
 import { CoordinateField, NumberField, OptionalNumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
+import LabwareCalibrationModal from "../deck/LabwareCalibrationModal";
 import RawYamlPanel from "./RawYamlPanel";
 import { useConfirm } from "../common/useConfirm";
 import * as theme from "../../theme";
@@ -24,6 +25,11 @@ interface Props {
    * where the deck is written. */
   dirty?: boolean;
   onRefresh: () => void;
+  /** Loaded gantry + live position, for the labware calibration modal.
+   * Calibration stays disabled until a gantry config is loaded. */
+  gantry?: GantryResponse | null;
+  position?: GantryPosition | null;
+  isRunning?: boolean;
 }
 
 const EMPTY_WELL_PLATE: WellPlateConfig = {
@@ -108,8 +114,9 @@ function labwareFromDeck(deck: DeckResponse | null): Record<string, LabwareConfi
   return obj;
 }
 
-export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, importedFrom, deck, baseline, onSave, onLocalChange, dirty, onRefresh }: Props) {
+export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, importedFrom, deck, baseline, onSave, onLocalChange, dirty, onRefresh, gantry = null, position = null, isRunning = false }: Props) {
   const [labware, setLabware] = useState<Record<string, LabwareConfig>>(() => labwareFromDeck(deck));
+  const [calibrateOpen, setCalibrateOpen] = useState(false);
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -158,6 +165,18 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
   const hasItems = Object.keys(labware).length > 0;
   const valid = hasItems && isValid(labware);
   const canSave = valid && (!!saveAs.trim() || !!selectedFile) && !saving;
+  const canCalibrateLabware = !!deck && !!gantry && !isRunning;
+  // The modal calibrates what the editor currently shows (including unsaved
+  // edits), so build its deck view from the local labware state.
+  const calibrationDeck: DeckResponse | null = deck
+    ? { ...deck, labware: Object.entries(labware).map(([key, config]) => ({ key, config, wells: null })) }
+    : null;
+
+  const handleCalibrationSave = async (filename: string, body: DeckConfig) => {
+    await Promise.resolve(onSave(filename, body));
+    setLabware(body.labware);
+    setSaveError(null);
+  };
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -199,6 +218,24 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
         </button>
         <button onClick={() => addLabware("vial")} style={addBtnStyle}>
           + Vial
+        </button>
+        <button
+          onClick={() => setCalibrateOpen(true)}
+          disabled={!canCalibrateLabware}
+          style={{
+            ...calibrateBtnStyle,
+            opacity: canCalibrateLabware ? 1 : 0.45,
+            cursor: canCalibrateLabware ? "pointer" : "not-allowed",
+          }}
+          title={canCalibrateLabware
+            ? "Open labware calibration"
+            : isRunning
+              ? "Protocol running"
+              : !deck
+                ? "Load a deck config first"
+                : "Load a gantry config first"}
+        >
+          Calibrate labware
         </button>
       </div>
 
@@ -274,6 +311,14 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
         )}
       </div>
       {confirmDialog}
+      <LabwareCalibrationModal
+        open={calibrateOpen}
+        onClose={() => setCalibrateOpen(false)}
+        deck={calibrationDeck}
+        gantry={gantry}
+        position={position}
+        onSaveDeck={handleCalibrationSave}
+      />
     </div>
   );
 }
@@ -459,6 +504,13 @@ const cardStyle: React.CSSProperties = {
 const addBtnStyle: React.CSSProperties = {
   ...theme.btn.secondary,
   ...theme.btnSmall,
+};
+
+const calibrateBtnStyle: React.CSSProperties = {
+  ...theme.btn.primary,
+  ...theme.btnSmall,
+  padding: "5px 16px",
+  marginLeft: "auto",
 };
 
 const removeBtnStyle: React.CSSProperties = {
