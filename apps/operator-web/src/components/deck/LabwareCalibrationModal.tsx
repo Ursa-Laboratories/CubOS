@@ -92,6 +92,11 @@ const LABWARE_TEMPLATES: Record<string, LabwareTemplate[]> = {
       label: "6-well plate",
       config: { type: "well_plate", model_name: "sbs_6_wellplate", rows: 2, columns: 3, x_offset: 39.12, y_offset: 39.12, length: 127.76, width: 85.47, capacity_ul: 16800, working_volume_ul: 3000 },
     },
+    {
+      id: "ursa_12",
+      label: "12-well plate (Ursa plate)",
+      config: { type: "well_plate", model_name: "ursa_12_well_plate", rows: 3, columns: 4, x_offset: 15, y_offset: 15, length: 127.76, width: 85.47 },
+    },
   ],
   tip_rack: [
     {
