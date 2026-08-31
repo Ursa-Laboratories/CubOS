@@ -1415,8 +1415,8 @@ function parseTipLength(value: string): number {
     throw new Error("Enter the tip length before recording a position calibrated with a tip attached.");
   }
   const length = Number(value);
-  if (!Number.isFinite(length) || length < 0) {
-    throw new Error("Tip length must be 0 or greater.");
+  if (!Number.isFinite(length) || length <= 0) {
+    throw new Error("Tip length must be greater than 0.");
   }
   return roundMm(length);
 }

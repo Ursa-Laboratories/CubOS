@@ -192,6 +192,20 @@ class TestCamera:
         )
         assert preview.json()["image_path"] != manual.json()["image_path"]
 
+    def test_preview_does_not_clobber_last_manual_capture(self, connected_session, images_dir):
+        app = create_app()
+        manual = api_request(
+            app, "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera"},
+        )
+        api_request(
+            app, "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera", "preview": True},
+        )
+        listing = api_request(app, "GET", "/api/v1/instruments/camera")
+        (entry,) = listing.json()
+        assert entry["last_image"] == manual.json()["image_path"]
+
     def test_camera_without_capture_support_returns_501(self, monkeypatch, images_dir):
         config = {
             "instruments": {

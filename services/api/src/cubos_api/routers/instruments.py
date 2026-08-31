@@ -21,7 +21,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from cubos.instruments.base_instrument import BaseInstrument
+from cubos.instruments.base_instrument import BaseInstrument, InstrumentError
 from cubos.instruments.camera.exceptions import CameraError
 from cubos.instruments.camera.interface import CameraInstrument
 from cubos.instruments.lighting.exceptions import LightingError
@@ -35,7 +35,13 @@ router = APIRouter(prefix="/api/v1/instruments", tags=["instruments"])
 
 _manual_instruments: Dict[str, BaseInstrument] = {}
 _manual_lock = threading.Lock()
+# Most recent capture of any kind (preview or manual) — feeds the live-preview
+# image fetch, which always wants whatever was just captured.
 _last_capture: Dict[str, str] = {}
+# Most recent *manual* (non-preview) capture — feeds CameraInfo.last_image,
+# which callers expect to be a deliberate archival capture, not a throwaway
+# preview frame overwritten every ~800ms while the wizard is open.
+_last_manual_capture: Dict[str, str] = {}
 _capture_locks: Dict[str, threading.Lock] = {}
 
 
@@ -93,6 +99,7 @@ def reset_manual_instruments() -> None:
                 pass
         _manual_instruments.clear()
         _last_capture.clear()
+        _last_manual_capture.clear()
         _capture_locks.clear()
 
 
@@ -117,7 +124,7 @@ def _build_instrument(name: str, entry: Dict[str, Any]) -> BaseInstrument:
         validate_instrument(type_key, vendor)
         cls = get_instrument_class(type_key, vendor)
         return cls(**kwargs)
-    except (ValueError, TypeError) as exc:
+    except (ValueError, TypeError, InstrumentError) as exc:
         raise HTTPException(400, f"Cannot build instrument {name!r}: {exc}") from exc
 
 
@@ -237,7 +244,7 @@ def list_cameras() -> List[CameraInfo]:
     for name, entry in _entries_of_type("camera").items():
         with _manual_lock:
             connected = name in _manual_instruments
-            last = _last_capture.get(name)
+            last = _last_manual_capture.get(name)
         infos.append(
             CameraInfo(
                 instrument=name,
@@ -278,12 +285,14 @@ def manual_capture(req: CaptureRequest) -> CaptureResponse:
         ) from exc
     with _manual_lock:
         _last_capture[req.instrument] = saved
+        if not req.preview:
+            _last_manual_capture[req.instrument] = saved
     return CaptureResponse(instrument=req.instrument, image_path=saved)
 
 
 @router.get("/camera/last-image")
 def last_image(instrument: str) -> FileResponse:
-    """Serve the most recent manual capture for *instrument*."""
+    """Serve the most recent capture (preview or manual) for *instrument*."""
     with _manual_lock:
         saved = _last_capture.get(instrument)
     if saved is None or not Path(saved).is_file():

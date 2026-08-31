@@ -253,7 +253,7 @@ describe("CalibrationWizard multi-instrument block height step", () => {
 
     const tipLength = screen.getByLabelText("Tip length (mm)");
     await user.type(tipLength, "-5");
-    expect(await screen.findByText(/Tip length must be 0 or greater/i)).toBeInTheDocument();
+    expect(await screen.findByText(/Tip length must be greater than 0/i)).toBeInTheDocument();
     expect(recordButton).toBeDisabled();
 
     await user.clear(tipLength);

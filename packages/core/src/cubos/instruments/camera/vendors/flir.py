@@ -301,18 +301,22 @@ class FlirCamera(CameraInstrument):
             raise CameraCaptureError("Cannot capture image: camera not connected.")
         try:
             self._acquirer.start()
-            try:
-                with self._acquirer.fetch(timeout=_GENTL_GRAB_TIMEOUT_S) as buffer:
-                    component = buffer.payload.components[0]
-                    return component.data.reshape(
-                        component.height, component.width, 3
-                    ).copy()
-            finally:
-                self._acquirer.stop()
         except Exception as exc:
             raise CameraCaptureError(
                 f"Error capturing image from FLIR camera: {exc}"
             ) from exc
+        try:
+            with self._acquirer.fetch(timeout=_GENTL_GRAB_TIMEOUT_S) as buffer:
+                component = buffer.payload.components[0]
+                return component.data.reshape(
+                    component.height, component.width, 3
+                ).copy()
+        except Exception as exc:
+            raise CameraCaptureError(
+                f"Error capturing image from FLIR camera: {exc}"
+            ) from exc
+        finally:
+            self._acquirer.stop()
 
     def _release_gentl_handles(self) -> None:
         if self._acquirer is not None:
