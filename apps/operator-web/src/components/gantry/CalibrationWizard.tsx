@@ -136,6 +136,21 @@ export default function CalibrationWizard({
   const nextTipLengthError = nextInstrumentTipAttached && nextInstrumentToRecord
     ? validateTipLength(tipLengths[nextInstrumentToRecord])
     : null;
+  // The lowest/reference instrument's block touch feeds directly into the Z
+  // working-volume bounds (see calculateSingleInstrumentZCalibration) for
+  // both flows, so it needs the same tip-attached compensation as any other
+  // pipette touch, not just the non-reference instruments recorded above.
+  const lowestInstrumentIsPipette = selectedLowest
+    ? config?.instruments[selectedLowest]?.type === "pipette"
+    : false;
+  const lowestTipAttached = lowestInstrumentIsPipette && !!tipAttached[selectedLowest];
+  const lowestTipLengthError = lowestTipAttached ? validateTipLength(tipLengths[selectedLowest]) : null;
+  const soleInstrument = !isMulti ? (instruments[0] ?? "") : "";
+  const soleInstrumentIsPipette = soleInstrument
+    ? config?.instruments[soleInstrument]?.type === "pipette"
+    : false;
+  const soleTipAttached = soleInstrumentIsPipette && !!tipAttached[soleInstrument];
+  const soleTipLengthError = soleTipAttached ? validateTipLength(tipLengths[soleInstrument]) : null;
   const readyForSave = isMulti
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(instruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
@@ -514,7 +529,9 @@ export default function CalibrationWizard({
     let pending = pendingSingleOrigin.current;
     if (!pending) {
       const height = parseBlockHeight(blockHeight);
-      const blockTouch = requirePosition(await gantryApi.getPosition());
+      const touchTipLength = soleTipAttached ? parseTipLength(tipLengths[soleInstrument] ?? "") : 0;
+      const rawTouch = requirePosition(await gantryApi.getPosition());
+      const blockTouch = { ...rawTouch, z: rawTouch.z - touchTipLength };
       // Set WPos before restoring soft limits: if setWorkCoordinates fails,
       // soft limits stay disabled so the operator can still jog freely and
       // retry. Once this succeeds, retries must not re-capture in the shifted
@@ -544,7 +561,9 @@ export default function CalibrationWizard({
     if (!pending) {
       const height = parseBlockHeight(blockHeight);
       const factoryZTravel = getFactoryZTravel(config);
-      const blockTouch = requirePosition(await gantryApi.getPosition());
+      const touchTipLength = isMulti && lowestTipAttached ? parseTipLength(tipLengths[selectedLowest] ?? "") : 0;
+      const rawTouch = requirePosition(await gantryApi.getPosition());
+      const blockTouch = { ...rawTouch, z: rawTouch.z - touchTipLength };
       const homeZ = isMulti
         ? requireCaptured(xyBounds, "Homed XY bounds")
         : requireCaptured(calibrationHome, "Home position");
@@ -968,6 +987,49 @@ export default function CalibrationWizard({
                     ? "Put the calibration block at the back-right corner of the deck. Jog the tool until it just touches the top of the block, then continue."
                     : "Put the calibration block at the front-left corner of the deck. Jog the tool until it just touches the top of the block, then continue."}
                 </p>
+                {soleInstrumentIsPipette && (
+                  <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
+                    If this pipette can't reach the block bare, attach a tip and touch the block with the tip
+                    instead. Enter the tip length below and it's subtracted so the calibrated Z frame still
+                    reflects the bare-nozzle position.
+                  </p>
+                )}
+                {soleInstrumentIsPipette && (
+                  <div style={{ margin: "12px 0" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Calibrating with a tip attached"
+                        checked={soleTipAttached}
+                        onChange={(event) => setTipAttached((prev) => ({
+                          ...prev,
+                          [soleInstrument]: event.target.checked,
+                        }))}
+                        disabled={controlsLocked}
+                      />
+                      <span style={labelStyle}>Calibrating with a tip attached</span>
+                    </label>
+                    {soleTipAttached && (
+                      <label style={{ ...fieldStyle, marginTop: 8 }}>
+                        <span style={labelStyle}>Tip length (mm)</span>
+                        <input
+                          aria-label="Tip length (mm)"
+                          value={tipLengths[soleInstrument] ?? ""}
+                          onChange={(event) => setTipLengths((prev) => ({
+                            ...prev,
+                            [soleInstrument]: event.target.value,
+                          }))}
+                          disabled={controlsLocked}
+                          inputMode="decimal"
+                          style={buttonStateStyle(inputStyle, controlsLocked)}
+                        />
+                        {soleTipLengthError && (
+                          <span style={{ color: theme.color.danger, fontSize: 12 }}>{soleTipLengthError}</span>
+                        )}
+                      </label>
+                    )}
+                  </div>
+                )}
                 <JogPanel
                   xyStep={xyStep}
                   zStep={zStep}
@@ -986,7 +1048,13 @@ export default function CalibrationWizard({
                   zBelowMin={zBelowMin}
                 />
                 <div style={actionRowStyle}>
-                  <button onClick={setSingleInstrumentOrigin} disabled={controlsLocked || !connected} style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected)}>Set origin and continue</button>
+                  <button
+                    onClick={setSingleInstrumentOrigin}
+                    disabled={controlsLocked || !connected || !!soleTipLengthError}
+                    style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !!soleTipLengthError)}
+                  >
+                    Set origin and continue
+                  </button>
                 </div>
               </div>
             )}
@@ -1052,6 +1120,49 @@ export default function CalibrationWizard({
                 <p style={instructionStyle}>
                   Keep the block where it is. Jog {selectedLowest || "the lowest instrument"} until it just touches the top of the block, then continue.
                 </p>
+                {lowestInstrumentIsPipette && (
+                  <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
+                    If this pipette can't reach the block bare, attach a tip and touch the block with the tip
+                    instead. Enter the tip length below and it's subtracted so the calibrated Z frame still
+                    reflects the bare-nozzle position.
+                  </p>
+                )}
+                {lowestInstrumentIsPipette && (
+                  <div style={{ margin: "12px 0" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        aria-label="Calibrating with a tip attached"
+                        checked={lowestTipAttached}
+                        onChange={(event) => setTipAttached((prev) => ({
+                          ...prev,
+                          [selectedLowest]: event.target.checked,
+                        }))}
+                        disabled={controlsLocked}
+                      />
+                      <span style={labelStyle}>Calibrating with a tip attached</span>
+                    </label>
+                    {lowestTipAttached && (
+                      <label style={{ ...fieldStyle, marginTop: 8 }}>
+                        <span style={labelStyle}>Tip length (mm)</span>
+                        <input
+                          aria-label="Tip length (mm)"
+                          value={tipLengths[selectedLowest] ?? ""}
+                          onChange={(event) => setTipLengths((prev) => ({
+                            ...prev,
+                            [selectedLowest]: event.target.value,
+                          }))}
+                          disabled={controlsLocked}
+                          inputMode="decimal"
+                          style={buttonStateStyle(inputStyle, controlsLocked)}
+                        />
+                        {lowestTipLengthError && (
+                          <span style={{ color: theme.color.danger, fontSize: 12 }}>{lowestTipLengthError}</span>
+                        )}
+                      </label>
+                    )}
+                  </div>
+                )}
                 <JogPanel
                   xyStep={xyStep}
                   zStep={zStep}
@@ -1070,7 +1181,11 @@ export default function CalibrationWizard({
                   zBelowMin={zBelowMin}
                 />
                 <div style={actionRowStyle}>
-                  <button onClick={setZ} disabled={controlsLocked || !connected || !xyOrigin} style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !xyOrigin)}>
+                  <button
+                    onClick={setZ}
+                    disabled={controlsLocked || !connected || !xyOrigin || !!lowestTipLengthError}
+                    style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !xyOrigin || !!lowestTipLengthError)}
+                  >
                     {`Set Z reference with ${selectedLowest} and continue`}
                   </button>
                 </div>
