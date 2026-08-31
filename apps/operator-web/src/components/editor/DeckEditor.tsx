@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { DeckResponse, GantryPosition, GantryResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, DeckConfig } from "../../types";
+import type { DeckResponse, GantryPosition, GantryResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, WellPlateHolderConfig, Coordinate3D, DeckConfig } from "../../types";
 import { CoordinateField, NumberField, OptionalNumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
 import ImportFromFile from "./ImportFromFile";
 import LabwareCalibrationModal from "../deck/LabwareCalibrationModal";
@@ -90,14 +90,20 @@ function isValid(labware: Record<string, LabwareConfig>): boolean {
 
 function isEditableDeckLabware(
   entry: LabwareConfig,
-): entry is WellPlateConfig | VialConfig | VialGridConfig | TipRackConfig | TipDisposalConfig {
+): entry is WellPlateConfig | VialConfig | VialGridConfig | TipRackConfig | TipDisposalConfig | WellPlateHolderConfig {
   return (
     entry.type === "well_plate" ||
     entry.type === "vial" ||
     entry.type === "vial_grid" ||
     entry.type === "tip_rack" ||
-    entry.type === "tip_disposal"
+    entry.type === "tip_disposal" ||
+    entry.type === "well_plate_holder"
   );
+}
+
+function toCoordinate3D(value: { x: number; y: number; z?: number } | null | undefined): Coordinate3D {
+  if (!value) return { x: 0, y: 0, z: 0 };
+  return { x: value.x, y: value.y, z: value.z ?? 0 };
 }
 
 function labwareFromDeck(deck: DeckResponse | null): Record<string, LabwareConfig> {
@@ -248,6 +254,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
               {entry.type === "vial_grid" && <VialGridFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
               {entry.type === "tip_rack" && <TipRackFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
               {entry.type === "tip_disposal" && <TipDisposalFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
+              {entry.type === "well_plate_holder" && <HolderFields entry={entry} onChange={(v) => updateLabware(key, v)} parentKey={key} />}
             </>
           ) : (
             <div style={unsupportedNoteStyle}>
@@ -339,6 +346,62 @@ function WellPlateFields({ entry, onChange, parentKey }: { entry: WellPlateConfi
         <NumberField id={`${parentKey}-capacity`} name={`${parentKey}_capacity`} label="Capacity (uL)" value={entry.capacity_ul} onChange={(v) => onChange({ ...entry, capacity_ul: v })} />
         <NumberField id={`${parentKey}-workingvol`} name={`${parentKey}_workingvol`} label="Working vol (uL)" value={entry.working_volume_ul} onChange={(v) => onChange({ ...entry, working_volume_ul: v })} />
       </div>
+    </div>
+  );
+}
+
+function HolderFields({ entry, onChange, parentKey }: { entry: WellPlateHolderConfig; onChange: (v: WellPlateHolderConfig) => void; parentKey: string }) {
+  const plate = entry.well_plate;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+      <CoordinateField
+        id={`${parentKey}-location`}
+        name={`${parentKey}_location`}
+        label="Location"
+        value={toCoordinate3D(entry.location)}
+        onChange={(v) => onChange({ ...entry, location: v })}
+        required
+      />
+      {plate ? (
+        <>
+          <div style={{ ...theme.mono, fontSize: 12, color: theme.color.textMuted, marginTop: 4 }}>Nested well plate</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <NumberField id={`${parentKey}-plate-rows`} name={`${parentKey}_plate_rows`} label="Rows" value={plate.rows} step={1} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, rows: v } })} required />
+            <NumberField id={`${parentKey}-plate-cols`} name={`${parentKey}_plate_cols`} label="Columns" value={plate.columns} step={1} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, columns: v } })} required />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <NumberField id={`${parentKey}-plate-length`} name={`${parentKey}_plate_length`} label="Length (mm)" value={plate.length ?? null} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, length: v } })} />
+            <NumberField id={`${parentKey}-plate-width`} name={`${parentKey}_plate_width`} label="Width (mm)" value={plate.width ?? null} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, width: v } })} />
+            <NumberField id={`${parentKey}-plate-height`} name={`${parentKey}_plate_height`} label="Height (mm)" value={plate.height ?? null} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, height: v } })} />
+          </div>
+          <CoordinateField
+            id={`${parentKey}-plate-a1`}
+            name={`${parentKey}_plate_a1`}
+            label="Calibration A1"
+            value={toCoordinate3D(plate.calibration.a1)}
+            onChange={(v) => onChange({ ...entry, well_plate: { ...plate, calibration: { ...plate.calibration, a1: v } } })}
+            required
+          />
+          <CoordinateField
+            id={`${parentKey}-plate-a2`}
+            name={`${parentKey}_plate_a2`}
+            label="Calibration A2"
+            value={toCoordinate3D(plate.calibration.a2)}
+            onChange={(v) => onChange({ ...entry, well_plate: { ...plate, calibration: { ...plate.calibration, a2: v } } })}
+            required
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <NumberField id={`${parentKey}-plate-xoffset`} name={`${parentKey}_plate_xoffset`} label="Well pitch X (mm)" value={plate.x_offset} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, x_offset: v } })} required />
+            <NumberField id={`${parentKey}-plate-yoffset`} name={`${parentKey}_plate_yoffset`} label="Well pitch Y (mm)" value={plate.y_offset} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, y_offset: v } })} required />
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <NumberField id={`${parentKey}-plate-capacity`} name={`${parentKey}_plate_capacity`} label="Capacity (uL)" value={plate.capacity_ul ?? null} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, capacity_ul: v } })} />
+            <NumberField id={`${parentKey}-plate-workingvol`} name={`${parentKey}_plate_workingvol`} label="Working vol (uL)" value={plate.working_volume_ul ?? null} onChange={(v) => onChange({ ...entry, well_plate: { ...plate, working_volume_ul: v } })} />
+          </div>
+        </>
+      ) : (
+        <div style={unsupportedNoteStyle}>No nested well plate on this holder — add one via Raw YAML.</div>
+      )}
     </div>
   );
 }

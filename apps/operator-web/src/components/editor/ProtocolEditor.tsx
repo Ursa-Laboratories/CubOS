@@ -86,6 +86,7 @@ const COMMAND_COLORS: Record<string, string> = {
   pick_up_tip: theme.color.success,
   drop_tip: theme.color.success,
   scan: theme.categorical.violet,
+  cure: theme.categorical.amber,
 };
 
 type ProtocolChoices = {
@@ -1180,7 +1181,9 @@ function uniqueStrings(items: string[]): string[] {
 function argLabel(name: string): string {
   const labels: Record<string, string> = {
     delay_s: "Delay (s)",
+    exposure_time: "Cure time (s)",
     indentation_limit_height: "Indentation limit height",
+    intensity: "Intensity (%)",
     interwell_scan_height: "Interwell scan height",
     measurement_height: "Measurement height",
     method: "Measurement",
