@@ -47,9 +47,14 @@ type PendingZReference = {
 
 const MIN_STEP = 0.001;
 const NON_CONTACT_TYPES = new Set(["camera"]);
+const FOLLOW_CAMERA_TYPES = new Set(["lighting"]);
 
 function isNonContactInstrument(type: string | undefined): boolean {
   return type != null && NON_CONTACT_TYPES.has(type);
+}
+
+function isFollowCameraInstrument(type: string | undefined): boolean {
+  return type != null && FOLLOW_CAMERA_TYPES.has(type);
 }
 
 export default function CalibrationWizard({
@@ -99,15 +104,23 @@ export default function CalibrationWizard({
   const config = gantry?.config ?? null;
   const originPolicy = config?.origin_policy ?? "deck_origin";
   const instruments = useMemo(() => Object.keys(config?.instruments ?? {}), [config]);
-  const nonContactInstruments = useMemo(
-    () => instruments.filter((name) => isNonContactInstrument(config?.instruments[name]?.type)),
+  const followCameraInstruments = useMemo(
+    () => instruments.filter((name) => isFollowCameraInstrument(config?.instruments[name]?.type)),
     [config, instruments],
   );
-  const contactInstruments = useMemo(
-    () => instruments.filter((name) => !nonContactInstruments.includes(name)),
-    [instruments, nonContactInstruments],
+  const calibratableInstruments = useMemo(
+    () => instruments.filter((name) => !followCameraInstruments.includes(name)),
+    [instruments, followCameraInstruments],
   );
-  const isMulti = instruments.length > 1;
+  const nonContactInstruments = useMemo(
+    () => calibratableInstruments.filter((name) => isNonContactInstrument(config?.instruments[name]?.type)),
+    [config, calibratableInstruments],
+  );
+  const contactInstruments = useMemo(
+    () => calibratableInstruments.filter((name) => !nonContactInstruments.includes(name)),
+    [calibratableInstruments, nonContactInstruments],
+  );
+  const isMulti = calibratableInstruments.length > 1;
   const connected = position?.connected ?? false;
   const status = position?.status ?? "";
   const rawIsAlarm = looksLikeAlarm(status);
@@ -121,8 +134,8 @@ export default function CalibrationWizard({
   const selectedReference = referenceInstrument || contactInstruments[0] || "";
   const selectedLowest = lowestInstrument || contactInstruments[0] || "";
   const instrumentSequence = useMemo(
-    () => unique([selectedReference, ...instruments]).filter((name) => name && name !== selectedLowest),
-    [instruments, selectedLowest, selectedReference],
+    () => unique([selectedReference, ...calibratableInstruments]).filter((name) => name && name !== selectedLowest),
+    [calibratableInstruments, selectedLowest, selectedReference],
   );
   const nextInstrumentToRecord = instrumentSequence.find((name) => !instrumentPositions[name]) ?? null;
   const nextInstrumentIsCamera = nextInstrumentToRecord ? nonContactInstruments.includes(nextInstrumentToRecord) : false;
@@ -152,7 +165,7 @@ export default function CalibrationWizard({
   const soleTipAttached = soleInstrumentIsPipette && !!tipAttached[soleInstrument];
   const soleTipLengthError = soleTipAttached ? validateTipLength(tipLengths[soleInstrument]) : null;
   const readyForSave = isMulti
-    ? !!zReference && !!zCalibration && allInstrumentPositionsReady(instruments, instrumentPositions, selectedReference, selectedLowest)
+    ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
   const controlsLocked = busy || !!alarmRecoveryMessage;
 
@@ -616,7 +629,7 @@ export default function CalibrationWizard({
     setInstrumentPositions(nextPositions);
     if (isCamera) {
       setStatusNote(`Recorded ${name}.`);
-      if (allInstrumentPositionsReady(instruments, nextPositions, selectedReference, selectedLowest)) {
+      if (allInstrumentPositionsReady(calibratableInstruments, nextPositions, selectedReference, selectedLowest)) {
         setStep(6);
       }
       return;
@@ -627,7 +640,7 @@ export default function CalibrationWizard({
         ? `Recorded ${name}. The gantry hit a limit while lifting and backed off.`
         : `Recorded ${name}.`,
     );
-    if (allInstrumentPositionsReady(instruments, nextPositions, selectedReference, selectedLowest)) {
+    if (allInstrumentPositionsReady(calibratableInstruments, nextPositions, selectedReference, selectedLowest)) {
       setStep(6);
     }
   });
@@ -1199,7 +1212,7 @@ export default function CalibrationWizard({
                   Keep the block where it is. Jog each instrument until it just touches the top of the block, then record it.
                 </p>
                 <div style={instrumentListStyle}>
-                  {instruments.map((name) => (
+                  {calibratableInstruments.map((name) => (
                     <div key={name} style={instrumentRowStyle}>
                       <strong>{name}</strong>
                       <span style={{ ...theme.mono, color: theme.color.textMuted }}>
@@ -1212,6 +1225,11 @@ export default function CalibrationWizard({
                     </div>
                   ))}
                 </div>
+                {followCameraInstruments.length > 0 && (
+                  <p style={instructionStyle}>
+                    {followCameraInstruments.join(", ")}: calibrated automatically with the camera.
+                  </p>
+                )}
                 {nextInstrumentToRecord ? (
                   <div style={activeInstrumentStyle}>
                     <div style={{ marginBottom: 10 }}>

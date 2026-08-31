@@ -444,6 +444,82 @@ describe("buildCalibratedConfig", () => {
     expect(withTip.instruments.pipette).toMatchObject({ depth: 18 });
   });
 
+  it("copies the camera calibration onto lighting instruments", () => {
+    const config = gantryConfig();
+    config.instruments.camera = {
+      type: "camera",
+      vendor: "raspberry_pi",
+      offset_x: 0,
+      offset_y: 0,
+      depth: 0,
+      offline: true,
+    };
+    config.instruments.lights = {
+      type: "lighting",
+      vendor: "pawduino",
+      offset_x: 5,
+      offset_y: 6,
+      depth: 7,
+      offline: true,
+    };
+
+    const calibrated = buildCalibratedConfig({
+      config,
+      measuredVolume: { x: 398.5, y: 299.25, z: 96.75 },
+      zMin: 0,
+      zMax: 110,
+      maxTravel: { x: 398.5, y: 299.25, z: 110 },
+      isMulti: true,
+      instruments: ["asmi", "camera", "lights"],
+      instrumentPositions: {
+        asmi: { x: 199, y: 149.5, z: 12.5 },
+        camera: { x: 211, y: 153.5, z: 35.5 },
+      },
+      referenceInstrument: "asmi",
+      lowestInstrument: "asmi",
+      cameraBlockDistances: { camera: 20 },
+    });
+
+    expect(calibrated.instruments.lights).toMatchObject({
+      offset_x: -12,
+      offset_y: -4,
+      depth: 3,
+    });
+  });
+
+  it("keeps lighting offsets untouched when the config has no camera", () => {
+    const config = gantryConfig();
+    config.instruments.lights = {
+      type: "lighting",
+      vendor: "pawduino",
+      offset_x: 5,
+      offset_y: 6,
+      depth: 7,
+      offline: true,
+    };
+
+    const calibrated = buildCalibratedConfig({
+      config,
+      measuredVolume: { x: 398.5, y: 299.25, z: 96.75 },
+      zMin: 0,
+      zMax: 110,
+      maxTravel: { x: 398.5, y: 299.25, z: 110 },
+      isMulti: true,
+      instruments: ["asmi", "lights"],
+      instrumentPositions: {
+        asmi: { x: 199, y: 149.5, z: 12.5 },
+      },
+      referenceInstrument: "asmi",
+      lowestInstrument: "asmi",
+    });
+
+    expect(calibrated.instruments.lights).toMatchObject({
+      offset_x: 5,
+      offset_y: 6,
+      depth: 7,
+    });
+  });
+
   it("requires a camera distance before saving calibrated offsets", () => {
     const config = gantryConfig();
     config.instruments.camera = {

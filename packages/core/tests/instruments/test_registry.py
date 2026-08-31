@@ -195,7 +195,7 @@ class TestLoadRegistry:
         registry = load_registry()
         for type_key, entry in registry["instruments"].items():
             assert "interface" in entry, f"{type_key} missing interface"
-            assert entry.get("calibration_mode") in {"contact", "non_contact"}
+            assert entry.get("calibration_mode") in {"contact", "non_contact", "follow_camera"}
             assert "vendors" in entry, f"{type_key} missing vendors"
             assert len(entry["vendors"]) > 0, f"{type_key} has empty vendors"
             for vendor_key, vendor in entry["vendors"].items():
@@ -466,6 +466,9 @@ class TestGetSupportedVendors:
 class TestGetCalibrationMode:
     def test_camera_is_non_contact(self):
         assert get_calibration_mode("camera") == "non_contact"
+
+    def test_lighting_follows_camera(self):
+        assert get_calibration_mode("lighting") == "follow_camera"
 
     def test_contact_is_default_for_regular_instruments(self):
         assert get_calibration_mode("asmi") == "contact"

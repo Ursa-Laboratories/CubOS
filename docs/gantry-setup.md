@@ -241,7 +241,9 @@ instruments:
 
 **`lighting` / `pawduino`** — the PANDA imaging lights (`white` ring +
 `contact` red/blue), driven by the `set_lights` protocol command and
-`image_well`. Non-positional: mount offsets stay zero. The capper and
+`image_well`. Calibration skips lighting instruments: they are co-mounted
+with the camera, so the calibrated camera offsets are copied onto them
+automatically. The capper and
 pipette share this Arduino — give every Pawduino-backed instrument the
 **same** `port`; the shared serial link opens it once and closes it when
 the last instrument disconnects:
