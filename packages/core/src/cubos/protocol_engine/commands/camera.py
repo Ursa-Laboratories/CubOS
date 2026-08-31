@@ -70,7 +70,7 @@ def _get_camera(context: "ProtocolContext", instrument: str) -> CameraInstrument
 
 
 def _safe_filename_part(value: str) -> str:
-    cleaned = re.sub(r"[^A-Za-z0-9._-]+", "-", value.strip())
+    cleaned = re.sub(r"[^A-Za-z0-9.=_-]+", "-", value.strip())
     return cleaned.strip("-") or "image"
 
 

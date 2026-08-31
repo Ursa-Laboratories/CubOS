@@ -16,6 +16,7 @@ from cubos.instruments.registry import (
     get_instrument_interface,
     get_supported_types,
     get_supported_vendors,
+    list_measurement_method_params,
     list_measurement_methods,
     load_registry,
     validate_instrument,
@@ -654,3 +655,52 @@ class TestValidateInstrument:
     def test_wrong_vendor_message_lists_allowed(self):
         with pytest.raises(ValueError, match="thorlabs"):
             validate_instrument("uvvis_ccs", "wrong_vendor")
+
+
+class TestListMeasurementMethodParams:
+
+    def test_dataclass_param_expands_to_its_fields(self):
+        params = list_measurement_method_params("potentiostat", vendor="emstat")
+        ocp = params["run_OCP"]
+        assert ocp == [
+            {
+                "name": "params",
+                "type": "OCPParams",
+                "required": True,
+                "default": None,
+                "fields": [
+                    {
+                        "name": "duration_s",
+                        "type": "float",
+                        "required": True,
+                        "default": None,
+                        "fields": None,
+                    },
+                    {
+                        "name": "sampling_interval_s",
+                        "type": "float",
+                        "required": False,
+                        "default": 0.1,
+                        "fields": None,
+                    },
+                ],
+            }
+        ]
+
+    def test_engine_injected_params_are_excluded(self):
+        params = list_measurement_method_params("asmi")
+        indentation = params["indentation"]
+        names = {spec["name"] for spec in indentation}
+        assert names.isdisjoint(
+            {"gantry", "well_z", "measurement_height", "indentation_limit_height"}
+        )
+        assert {"step_size", "force_limit"} <= names
+
+    def test_filters_by_vendor(self):
+        assert set(list_measurement_method_params("potentiostat", vendor="emstat")) == {
+            "run_CA", "run_CP", "run_CV", "run_OCP",
+        }
+
+    def test_unknown_type_raises(self):
+        with pytest.raises(ValueError, match="Unknown instrument type"):
+            list_measurement_method_params("nonexistent")
