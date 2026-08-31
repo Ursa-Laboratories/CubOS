@@ -158,7 +158,10 @@ def _actuate_retract_confirm(
             last_reading = None
             last_error = exc
             continue
-        context.gantry.move(instrument, (x, y, context.gantry.safe_z))  # retract
+        context.gantry.move(  # retract
+            instrument, (x, y, context.gantry.safe_z),
+            travel_z=context.gantry.multi_tool_safe_travel_z(instrument),
+        )
         try:
             last_reading = capper.read_cap_present()
             last_error = None
@@ -243,10 +246,17 @@ def _run_capper_sequence(
             "further liquid handling involving this vial."
         ) from exc
 
-    # Step 5: park (already at safe_z after the confirmed retract).
+    # Step 5: park (already at safe_z after the confirmed retract). Travels
+    # at the shared multi-tool ceiling, not just the capper's own safe_z --
+    # this XY leg carries every other mounted tool through the same
+    # airspace, and a height that only clears the capper's tip can still
+    # clip a tool that hangs lower/higher at that carriage position.
     try:
         park_x, park_y = capper.park_position
-        context.gantry.move(instrument, (park_x, park_y, context.gantry.safe_z))  # park
+        context.gantry.move(
+            instrument, (park_x, park_y, context.gantry.safe_z),
+            travel_z=context.gantry.multi_tool_safe_travel_z(instrument),
+        )  # park
     except BaseException as exc:
         if operation_key is not None:
             _mark_cap_uncertain(context, operation_key, exc)
@@ -272,10 +282,17 @@ def _safe_retract(context: "ProtocolContext", instrument: str, x: float, y: floa
     """Best-effort retract to safe_z after a failure at any sequence stage.
 
     Never raises: a retract failure is logged, not propagated, so it cannot
-    mask the original error that triggered it.
+    mask the original error that triggered it. Travels at the shared
+    multi-tool ceiling (see ``multi_tool_safe_travel_z``), not just
+    ``safe_z`` for *instrument* alone -- the physical position going into a
+    failure path is uncertain, so this takes the most conservative
+    available clearance rather than assuming XY hasn't drifted.
     """
     try:
-        context.gantry.move(instrument, (x, y, context.gantry.safe_z))
+        context.gantry.move(
+            instrument, (x, y, context.gantry.safe_z),
+            travel_z=context.gantry.multi_tool_safe_travel_z(instrument),
+        )
     except Exception:
         logger.exception(
             "Safe retract failed for instrument %r after a decap/cap error; "

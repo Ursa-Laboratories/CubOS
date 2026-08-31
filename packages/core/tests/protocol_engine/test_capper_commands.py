@@ -47,11 +47,14 @@ class FakeGantry:
         if self.move_to_labware_raises is not None:
             raise self.move_to_labware_raises
 
-    def move(self, instrument, position):
+    def move(self, instrument, position, travel_z=None):
         self._move_call_count += 1
         self.trace.append(("move", position))
         if self.move_raises_on_call == self._move_call_count:
             raise RuntimeError(f"injected mid-motion failure on move #{self._move_call_count}")
+
+    def multi_tool_safe_travel_z(self, instrument):
+        return self.safe_z
 
 
 def _write_deck(tmp_path, capped: bool = True):
@@ -174,9 +177,9 @@ class TestCapSequencing:
         current_z = {"z": SAFE_Z}
 
         class ZTrackingGantry(FakeGantry):
-            def move(self, instrument, position):
+            def move(self, instrument, position, travel_z=None):
                 current_z["z"] = position[2]
-                super().move(instrument, position)
+                super().move(instrument, position, travel_z=travel_z)
 
         def beam_read():
             capper.actuation_log.append("read_cap_present")

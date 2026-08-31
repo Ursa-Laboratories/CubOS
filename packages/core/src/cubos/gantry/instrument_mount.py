@@ -98,6 +98,28 @@ class InstrumentedGantry:
         (``measure``, ``scan``, ...) follow up with a raw ``move`` to
         descend to the per-labware action plane.
         """
+        instr = self._resolve_instrument(instrument)
+        x, y, z = self._resolve_position(labware)
+        self._validate_finite_xyz(x, y, z, instr.name)
+        travel_z = self.multi_tool_safe_travel_z(instr)
+        self.move(instr, (x, y, self.safe_z), travel_z=travel_z)
+
+    def multi_tool_safe_travel_z(self, instrument: str | BaseInstrument) -> float:
+        """Return the tip-space Z *instrument* should hold during XY travel.
+
+        This is ``self.safe_z`` bumped up to clear the mechanical ceiling
+        (``working_volume.z_max`` from the gantry config) when available, so
+        that XY translation clears every tool mounted on the head — not just
+        the active instrument. Every command that moves an instrument's XY
+        position away from a target it just engaged (retract-then-travel,
+        not just approach) should hold this Z, not the bare ``safe_z``: a
+        travel plane picked for only the active instrument's own clearance
+        can still clip a *different* mounted tool that hangs lower/higher
+        at that same carriage height.
+
+        Raises:
+            ValueError: ``self.safe_z`` is not configured.
+        """
         if self.safe_z is None:
             raise ValueError(
                 "InstrumentedGantry.safe_z is not set. Configure `cnc.safe_z` "
@@ -105,17 +127,11 @@ class InstrumentedGantry:
                 "`safe_z=...`."
             )
         instr = self._resolve_instrument(instrument)
-        x, y, z = self._resolve_position(labware)
-        self._validate_finite_xyz(x, y, z, instr.name)
         travel_z = self.safe_z
         ceiling = self._gantry_z_ceiling()
         if ceiling is not None:
-            # Travel with the carriage at the top of the working volume so
-            # every tool mounted on the head — not just the active
-            # instrument — clears the deck. safe_z remains the floor and the
-            # approach hover plane.
             travel_z = max(travel_z, ceiling - self._effective_depth(instr))
-        self.move(instr, (x, y, self.safe_z), travel_z=travel_z)
+        return travel_z
 
     def _gantry_z_ceiling(self) -> float | None:
         """Gantry-frame z_max from the controller config, if available."""
