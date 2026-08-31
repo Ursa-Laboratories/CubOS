@@ -44,6 +44,19 @@ function multiConfigWithCamera(): GantryConfig {
   return config;
 }
 
+function multiConfigWithCameraAndLights(): GantryConfig {
+  const config = multiConfigWithCamera();
+  config.instruments.lights = {
+    type: "lighting",
+    vendor: "pawduino",
+    offset_x: 0,
+    offset_y: 0,
+    depth: 0,
+    offline: true,
+  };
+  return config;
+}
+
 function lowTravelMultiConfig(): GantryConfig {
   const config = multiConfig();
   config.cnc.factory_z_travel_mm = 80;
@@ -190,6 +203,35 @@ describe("CalibrationWizard multi-instrument block height step", () => {
     await user.type(distance, "20");
 
     expect(recordButton).toBeEnabled();
+  });
+
+  it("skips lighting instruments and notes they follow the camera", async () => {
+    const user = userEvent.setup();
+    installFetch();
+    render(
+      <CalibrationWizard
+        open
+        onClose={() => undefined}
+        gantry={{ filename: "multi-lights.yaml", config: multiConfigWithCameraAndLights() }}
+        position={position()}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await advanceToBlockHeightStep(user);
+    await user.click(screen.getByRole("button", { name: "Continue" })); // -> Z reference
+    await user.click(await screen.findByRole("button", { name: "Set Z reference with asmi and continue" }));
+
+    expect(await screen.findByText("Record Instruments")).toBeInTheDocument();
+    expect(screen.getByText(/lights: calibrated automatically with the camera/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Record lights" })).not.toBeInTheDocument();
+
+    const distance = screen.getByLabelText("Distance from calibration block (mm)");
+    await user.type(distance, "20");
+    await user.click(screen.getByRole("button", { name: "Record camera" }));
+
+    // Recording the camera completes the sequence: lights never gets a step.
+    expect(await screen.findByRole("heading", { name: "Save" })).toBeInTheDocument();
   });
 
   it("retries a failed Z retract without re-zeroing in the shifted frame", async () => {
