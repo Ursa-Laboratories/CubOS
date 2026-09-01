@@ -380,6 +380,7 @@ def test_export_campaign_measurements_zip_includes_all_cubos_measurement_tables(
         assert set(archive.namelist()) == {
             "manifest.csv",
             "experiments.csv",
+            "images/images.csv",
             "measurements/uvvis_measurements.csv",
             "measurements/filmetrics_measurements.csv",
             "measurements/uv_curing_measurements.csv",

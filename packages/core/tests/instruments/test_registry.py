@@ -16,6 +16,7 @@ from cubos.instruments.registry import (
     get_instrument_interface,
     get_supported_types,
     get_supported_vendors,
+    list_measurement_method_params,
     list_measurement_methods,
     load_registry,
     validate_instrument,
@@ -194,7 +195,7 @@ class TestLoadRegistry:
         registry = load_registry()
         for type_key, entry in registry["instruments"].items():
             assert "interface" in entry, f"{type_key} missing interface"
-            assert entry.get("calibration_mode") in {"contact", "non_contact"}
+            assert entry.get("calibration_mode") in {"contact", "non_contact", "follow_camera"}
             assert "vendors" in entry, f"{type_key} missing vendors"
             assert len(entry["vendors"]) > 0, f"{type_key} has empty vendors"
             for vendor_key, vendor in entry["vendors"].items():
@@ -466,6 +467,9 @@ class TestGetCalibrationMode:
     def test_camera_is_non_contact(self):
         assert get_calibration_mode("camera") == "non_contact"
 
+    def test_lighting_follows_camera(self):
+        assert get_calibration_mode("lighting") == "follow_camera"
+
     def test_contact_is_default_for_regular_instruments(self):
         assert get_calibration_mode("asmi") == "contact"
 
@@ -654,3 +658,52 @@ class TestValidateInstrument:
     def test_wrong_vendor_message_lists_allowed(self):
         with pytest.raises(ValueError, match="thorlabs"):
             validate_instrument("uvvis_ccs", "wrong_vendor")
+
+
+class TestListMeasurementMethodParams:
+
+    def test_dataclass_param_expands_to_its_fields(self):
+        params = list_measurement_method_params("potentiostat", vendor="emstat")
+        ocp = params["run_OCP"]
+        assert ocp == [
+            {
+                "name": "params",
+                "type": "OCPParams",
+                "required": True,
+                "default": None,
+                "fields": [
+                    {
+                        "name": "duration_s",
+                        "type": "float",
+                        "required": True,
+                        "default": None,
+                        "fields": None,
+                    },
+                    {
+                        "name": "sampling_interval_s",
+                        "type": "float",
+                        "required": False,
+                        "default": 0.1,
+                        "fields": None,
+                    },
+                ],
+            }
+        ]
+
+    def test_engine_injected_params_are_excluded(self):
+        params = list_measurement_method_params("asmi")
+        indentation = params["indentation"]
+        names = {spec["name"] for spec in indentation}
+        assert names.isdisjoint(
+            {"gantry", "well_z", "measurement_height", "indentation_limit_height"}
+        )
+        assert {"step_size", "force_limit"} <= names
+
+    def test_filters_by_vendor(self):
+        assert set(list_measurement_method_params("potentiostat", vendor="emstat")) == {
+            "run_CA", "run_CP", "run_CV", "run_OCP",
+        }
+
+    def test_unknown_type_raises(self):
+        with pytest.raises(ValueError, match="Unknown instrument type"):
+            list_measurement_method_params("nonexistent")

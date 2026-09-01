@@ -385,3 +385,48 @@ def test_export_timestamp_preserves_existing_z():
 
 def test_export_timestamp_none_returns_empty_string():
     assert _export_timestamp(None) == ""
+
+def test_export_campaign_measurements_zip_bundles_camera_images(tmp_path):
+    """Camera measurements travel with their image bytes in the zip: a
+    file that still exists on disk is bundled under images/ and marked
+    "included"; a row whose file went missing is still listed, marked
+    "missing on server", rather than failing the whole export."""
+    db_path = tmp_path / "panda_data.db"
+    store = DataStore(db_path=db_path)
+    campaign_id = store.create_campaign(
+        description="Camera export test",
+        deck_config="deck.yaml",
+        gantry_config="gantry.yaml",
+        protocol_config="protocol.yaml",
+    )
+
+    present_image = tmp_path / "a1_20260830-120000.tiff"
+    present_image.write_bytes(b"fake-tiff-bytes")
+
+    store.log_experiment_measurement(
+        campaign_id=campaign_id, labware_key="plate", labware_name="plate",
+        well_id="A1", contents_json=None, result=str(present_image),
+    )
+    store.log_experiment_measurement(
+        campaign_id=campaign_id, labware_key="plate", labware_name="plate",
+        well_id="A2", contents_json=None,
+        result=str(tmp_path / "gone_20260830-120000.tiff"),
+    )
+
+    content = export_campaign_measurements_zip(db_path, campaign_id)
+
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        assert "images/images.csv" in archive.namelist()
+        present_arcname = f"images/camera_1_{present_image.name}"
+        assert present_arcname in archive.namelist()
+        assert archive.read(present_arcname) == b"fake-tiff-bytes"
+
+        manifest_rows = list(csv.DictReader(io.StringIO(
+            archive.read("images/images.csv").decode()
+        )))
+        assert len(manifest_rows) == 2
+        included, missing = manifest_rows
+        assert included["status"] == "included"
+        assert included["file"] == present_arcname
+        assert missing["status"] == "missing on server"
+        assert missing["file"] == ""
