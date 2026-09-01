@@ -51,8 +51,8 @@ instruments:
 - **Set `offline: true`** on an instrument to run without that hardware
   attached.
 
-Supported types: `asmi`, `capper`, `filmetrics`, `pipette`, `potentiostat`,
-`uv_curing`, `uvvis_ccs`, `camera`, `mounted_tool`.
+Supported types: `asmi`, `capper`, `filmetrics`, `lighting`, `pipette`,
+`potentiostat`, `uv_curing`, `uvvis_ccs`, `camera`, `mounted_tool`.
 
 Every instrument entry accepts these shared fields:
 
@@ -216,6 +216,48 @@ instruments:
     offset_x: 0.0
     offset_y: 0.0
     depth: 32.0
+```
+
+**`camera` / `flir`** (or `opencv`) — an acquiring camera for the `capture`
+and `image_well` protocol commands (see [Protocol YAML: Lighting and imaging
+commands](protocol-yaml.md#lighting-and-imaging-commands)). `flir` drives a
+FLIR camera through the proprietary Spinnaker/PySpin SDK (manual install
+from https://www.flir.com/products/spinnaker-sdk/); `opencv` drives a
+plain USB webcam (`camera_id: -1` auto-detects the first responsive index).
+Offline, both write placeholder PNGs so dry runs exercise the full
+capture/persistence path:
+
+```yaml
+instruments:
+  camera:
+    type: camera
+    vendor: flir
+    camera_id: 0
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 32.0
+```
+
+**`lighting` / `pawduino`** — the PANDA imaging lights (`white` ring +
+`contact` red/blue), driven by the `set_lights` protocol command and
+`image_well`. Calibration skips lighting instruments: they are co-mounted
+with the camera, so the calibrated camera offsets are copied onto them
+automatically. The capper and
+pipette share this Arduino — give every Pawduino-backed instrument the
+**same** `port`; the shared serial link opens it once and closes it when
+the last instrument disconnects:
+
+```yaml
+instruments:
+  lights:
+    type: lighting
+    vendor: pawduino
+    port: "COM8"
+    offline: true
+    offset_x: 0.0
+    offset_y: 0.0
+    depth: 0.0
 ```
 
 **`capper` / `pawduino`** — an electromagnet-actuated vial capper/decapper

@@ -175,14 +175,14 @@ describe("DeckEditor", () => {
         deck={{
           filename: "deck.yaml",
           labware: [
-            { key: "trash_1", config: { type: "tip_disposal", name: "Trash" }, wells: null },
+            { key: "holder_1", config: { type: "vial_holder", name: "Holder" }, wells: null },
           ],
         }}
       />,
     );
     expect(screen.getByText(/editing not supported/i)).toBeInTheDocument();
     expect(screen.getByText(/visualization updates after saving/i)).toBeInTheDocument();
-    expect(screen.getByText("tip_disposal")).toBeInTheDocument();
+    expect(screen.getByText("vial_holder")).toBeInTheDocument();
   });
 
   it("does not reuse a labware key after removing an earlier item", async () => {
@@ -271,7 +271,54 @@ describe("DeckEditor", () => {
     expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("Edited Plate")).toBeInTheDocument();
   });
+
+  it("disables labware calibration until a gantry is loaded", () => {
+    renderDeck();
+    expect(screen.getByRole("button", { name: "Calibrate labware" })).toBeDisabled();
+  });
+
+  it("opens the labware calibration modal from the deck tab", async () => {
+    const user = userEvent.setup();
+    renderDeck({ gantry: gantryFixture() });
+
+    const button = screen.getByRole("button", { name: "Calibrate labware" });
+    expect(button).toBeEnabled();
+    await user.click(button);
+
+    const dialog = screen.getByRole("dialog", { name: "Labware calibration" });
+    expect(dialog).toBeInTheDocument();
+    // The type dropdown is built from the deck's labware types.
+    expect(screen.getByLabelText("Labware type")).toHaveTextContent("Well plate");
+    expect(screen.getByLabelText("Labware type")).toHaveTextContent("Vial");
+  });
+
+  it("calibrates the editor's unsaved labware edits, not the last-saved deck", async () => {
+    const user = userEvent.setup();
+    renderDeck({ gantry: gantryFixture() });
+
+    await user.type(screen.getByDisplayValue("Plate A"), "!");
+    await user.click(screen.getByRole("button", { name: "Calibrate labware" }));
+    await user.selectOptions(screen.getByLabelText("Labware type"), "well_plate");
+
+    // The modal announces the two-point targets for the locally edited plate.
+    expect(screen.getByText("A1, A2")).toBeInTheDocument();
+  });
 });
+
+function gantryFixture() {
+  return {
+    filename: "gantry.yaml",
+    config: {
+      serial_port: "/dev/ttyUSB0",
+      gantry_type: "cub" as const,
+      cnc: { factory_z_travel_mm: 110 },
+      working_volume: { x_min: 0, x_max: 400, y_min: 0, y_max: 300, z_min: 0, z_max: 110 },
+      instruments: {
+        pipette: { type: "pipette", vendor: "opentrons", offset_x: 0, offset_y: 0, depth: 0 },
+      },
+    },
+  };
+}
 
 function baseProps() {
   return {

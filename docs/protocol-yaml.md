@@ -137,6 +137,9 @@ Commands available in YAML:
 - `clear_well`
 - `decap`
 - `cap`
+- `set_lights`
+- `capture`
+- `image_well`
 
 ### `home`
 
@@ -364,6 +367,75 @@ must currently be tracked `capped`.
 
 Replace the cap on `vial`. When durable tracking is active, the vial must
 currently be tracked `uncapped`.
+
+### Lighting and imaging commands
+
+`set_lights` drives a lighting instrument (`type: lighting`); `capture` and
+`image_well` drive a camera instrument (`type: camera`). See [Gantry Setup:
+Define Instruments](gantry-setup.md#define-instruments). At the end of every
+run — completed or aborted — all lighting channels are commanded off
+best-effort, so a failed protocol never leaves lights on over a sample.
+
+#### `set_lights`
+
+Set one lighting channel, or turn everything off. Two mutually exclusive
+forms:
+
+- `instrument` *(str, required)* — lighting instrument registered on the
+  gantry.
+- `channel` *(str)* + `brightness` *(int)* — turn a channel on at that
+  percentage. The level must be one the vendor supports exactly (the
+  Pawduino lights expose `white`: 5/10/15/25/50/100 and `contact`
+  (red+blue): 5/10/20/30/50); `brightness: 0` turns just that channel off.
+- `all_off: true` — turn every channel off. (Named `all_off` because YAML
+  parses a bare `off:` key as a boolean.)
+
+No motion. Lights the protocol turns on stay on until a later step or the
+end-of-run fail-safe turns them off.
+
+#### `capture`
+
+Take one image wherever the gantry currently is and save it under the
+images directory (`~/.cubos/images`, override with `CUBOS_IMAGES_DIR`),
+grouped by campaign. No motion of its own — compose with `move` and
+`set_lights`.
+
+- `instrument` *(str, required)* — camera instrument registered on the
+  gantry.
+- `label` *(str, optional)* — filename label for the saved image.
+- `position` *(str, optional)* — deck target the image belongs to. Used
+  only to record the image against that labware/well in the data store
+  (`camera_measurements`); it does not move the camera. Without it the
+  file is still saved but not recorded.
+
+A capture failure fails the step. Offline camera vendors write a real
+placeholder PNG so dry runs exercise the full file/persistence path.
+
+#### `image_well`
+
+The packaged well-imaging sequence: travel above the well at `safe_z`,
+descend to the imaging plane, light the well, capture, lights off, retract
+to `safe_z` — with lights-off and the retract guaranteed even on failure.
+
+- `camera` *(str, required)* — camera instrument.
+- `well` *(str, required)* — deck target of the well to image.
+- `image_height` *(float, required)* — labware-relative offset in mm above
+  the well's surface Z: the camera's focus standoff. Like every height
+  argument it lives on the command, never on labware or instrument config.
+- `lights` *(str, optional)* — lighting instrument. Defaults to the
+  gantry's lighting instrument when it has exactly one; pass a name to
+  disambiguate, or the literal `none` to image with ambient light.
+- `label` *(str, optional)* — filename label (defaults to the well target).
+- `mode` *(str, default `standard`)* — `standard` is one shot with white
+  lights at 5% (or `brightness`); `curvature` is a contact-angle Z-stack:
+  from `image_height` descend `z_step_mm` per plane for `z_steps` planes
+  (defaults 0.2 mm × 11) with contact lights at 50% (or `brightness`),
+  labeling each image `{label}_z{z}mm_b{brightness}`.
+- `brightness` *(int, optional)* — override the mode's default level.
+
+Capture and lighting failures **log and continue** (an image is never
+worth failing a run over) and the command returns the list of image paths
+actually saved. Motion failures still fail the run.
 
 ### Compound liquid commands
 
