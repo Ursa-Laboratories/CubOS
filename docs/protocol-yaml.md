@@ -228,8 +228,11 @@ deliberate follow-up.
 
 Pick up a tip from a tip-rack slot, record its length, and mark the slot consumed.
 
-- `position` *(str, required)* — tip-rack slot, including the explicit tip slot
-  (e.g. `tips.A1`).
+- `position` *(str, required)* — either an explicit tip slot (e.g. `tips.A1`)
+  or just the rack name (e.g. `tips`), which auto-selects the next available
+  tip in the rack's tip order as the rack is used up. Prefer the rack-only
+  form for protocols that don't need a specific slot; it lets a rack be
+  worked through run after run without manually advancing the slot.
 - `speed` *(float, default `50.0`)* — approach/pick-up speed.
 
 #### `aspirate`
