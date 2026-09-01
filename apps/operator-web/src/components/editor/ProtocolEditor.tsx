@@ -1,5 +1,4 @@
 import { useState } from "react";
-import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 import type {
   CommandInfo,
   CompositionSeedRow,
@@ -179,15 +178,6 @@ export default function ProtocolEditor({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [requestConfirm, confirmDialog] = useConfirm();
-  // Raw YAML mode: an alternate view of the same steps/positions state, so
-  // Save always goes through the identical onSave -> server-schema-validation
-  // path as the structured form (mirrors GantryEditor's raw mode). `rawText`
-  // only drives `steps`/`positionRows` forward when it parses to a mapping
-  // with a `protocol` list; an unparsable or malformed edit is held locally
-  // as `rawError` instead of corrupting the last-known-good state.
-  const [rawMode, setRawMode] = useState(false);
-  const [rawText, setRawText] = useState("");
-  const [rawError, setRawError] = useState<string | null>(null);
 
   const commandsByName = Object.fromEntries(commands.map((c) => [c.name, c]));
   const choices = buildProtocolChoices(deck, gantry, positionRows, instrumentMethods, instrumentMethodParams);
@@ -326,48 +316,6 @@ export default function ProtocolEditor({
     rowsToPositions(positionRows) ? { positions: rowsToPositions(positionRows), protocol: steps } : { protocol: steps }
   );
 
-  const enterRawMode = () => {
-    setRawText(stringifyYaml(buildConfig()));
-    setRawError(null);
-    setRawMode(true);
-  };
-
-  // Leaving raw mode while the text doesn't parse would either discard the
-  // operator's in-progress edit or silently fall back to the last-parsed
-  // state — both surprising. Block the switch until the YAML is valid again
-  // (or the operator discards).
-  const exitRawMode = () => {
-    if (rawError) return;
-    setRawMode(false);
-  };
-
-  const handleRawChange = (text: string) => {
-    setRawText(text);
-    let parsed: unknown;
-    try {
-      parsed = parseYaml(text);
-    } catch (err) {
-      setRawError(err instanceof Error ? err.message : String(err));
-      return;
-    }
-    if (!isRecord(parsed)) {
-      setRawError("Protocol YAML must be a mapping (key: value) at the top level.");
-      return;
-    }
-    if (!Array.isArray(parsed.protocol)) {
-      setRawError('Protocol YAML must have a "protocol" list of steps.');
-      return;
-    }
-    setRawError(null);
-    const nextSteps = parsed.protocol as ProtocolStep[];
-    const nextRows = positionsToRows(isRecord(parsed.positions) ? parsed.positions as Record<string, number[]> : null);
-    setSteps(nextSteps);
-    setPositionRows(nextRows);
-    setSaveError(null);
-    onLocalChange?.(nextSteps);
-    onPositionsChange?.(rowsToPositions(nextRows));
-  };
-
   const handleValidate = () => onValidate(buildConfig());
 
   const handleSave = async () => {
@@ -398,8 +346,6 @@ export default function ProtocolEditor({
     setSteps(baseline?.steps ? structuredClone(baseline.steps) : []);
     setPositionRows(positionsToRows(baseline?.positions));
     setSaveError(null);
-    setRawMode(false);
-    setRawError(null);
     onRefresh();
   };
 
@@ -410,7 +356,7 @@ export default function ProtocolEditor({
   // banner only points the user there rather than asking them to save
   // those configs from here.
   const otherDirty = unsavedConfigs.filter((name) => name !== "Protocol");
-  const canSave = hasSteps && (!!saveAs.trim() || !!selectedFile) && !saving && !hasPositionErrors && !(rawMode && !!rawError);
+  const canSave = hasSteps && (!!saveAs.trim() || !!selectedFile) && !saving && !hasPositionErrors;
   // "new"/"resume" both need an explicit, complete choice before Run is
   // enabled — resume specifically needs a picked state id. "none" (the
   // default) never blocks Run, so every pre-Feature-07 flow is unaffected.
@@ -474,39 +420,7 @@ export default function ProtocolEditor({
         <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import protocol config" selectedFile={selectedFile} />
       </div>
 
-      <div style={rawToggleRowStyle}>
-        <button
-          type="button"
-          onClick={() => (rawMode ? exitRawMode() : enterRawMode())}
-          disabled={rawMode && !!rawError}
-          style={rawModeToggleStyle}
-          title={rawMode && rawError ? "Fix the YAML error before switching back to the form" : undefined}
-        >
-          {rawMode ? "Back to form" : "Edit raw YAML"}
-        </button>
-      </div>
-
-      {rawMode ? (
-        <div style={cardStyle}>
-          <h4 style={{ ...sectionTitleStyle, margin: "0 0 8px" }}>Raw YAML</h4>
-          <textarea
-            aria-label="Raw protocol YAML"
-            value={rawText}
-            onChange={(e) => handleRawChange(e.target.value)}
-            spellCheck={false}
-            style={rawTextareaStyle}
-          />
-          {rawError && (
-            <div style={saveErrorStyle}>{rawError}</div>
-          )}
-          <div style={rawHintStyle}>
-            Saved through the same path as the form editor — the server re-validates this YAML against the
-            protocol schema before writing it to disk.
-          </div>
-        </div>
-      ) : (
-        <>
-          {!hasSteps && (
+      {!hasSteps && (
             <div style={emptyProtocolStyle}>
               Load a protocol or add steps.
             </div>
@@ -712,8 +626,6 @@ export default function ProtocolEditor({
               Add
             </button>
           </div>
-        </>
-      )}
 
       <div style={{ marginTop: 12 }}>
         {onFluidStateChoiceChange && (
@@ -1687,35 +1599,6 @@ const emptyNamedPositionsStyle: React.CSSProperties = {
 const positionErrorStyle: React.CSSProperties = {
   ...theme.notice.error,
   marginTop: 8,
-};
-
-const rawToggleRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  marginBottom: 8,
-};
-
-const rawModeToggleStyle: React.CSSProperties = {
-  ...theme.btn.secondary,
-  ...theme.btnSmall,
-};
-
-const rawTextareaStyle: React.CSSProperties = {
-  ...theme.input,
-  ...theme.mono,
-  width: "100%",
-  minHeight: 360,
-  resize: "vertical",
-  fontSize: 12,
-  lineHeight: 1.5,
-  whiteSpace: "pre",
-};
-
-const rawHintStyle: React.CSSProperties = {
-  marginTop: 8,
-  fontSize: 11,
-  color: theme.color.textMuted,
-  lineHeight: 1.45,
 };
 
 const emptyProtocolStyle: React.CSSProperties = {

@@ -683,8 +683,8 @@ describe("ProtocolEditor", () => {
   });
 });
 
-describe("ProtocolEditor raw YAML mode", () => {
-  it("shows the current protocol as YAML text and hides the structured form", async () => {
+describe("ProtocolEditor raw YAML panel", () => {
+  it("shows the current protocol as YAML text alongside the structured form", async () => {
     const user = userEvent.setup();
     renderProtocol({
       steps: STEPS,
@@ -693,21 +693,21 @@ describe("ProtocolEditor raw YAML mode", () => {
 
     await user.click(screen.getByRole("button", { name: "Edit raw YAML" }));
 
-    const textarea = screen.getByLabelText("Raw protocol YAML") as HTMLTextAreaElement;
-    expect(textarea.value).toContain("command: move");
+    const textarea = screen.getByLabelText("Raw YAML") as HTMLTextAreaElement;
+    expect(textarea.value).toContain("move:");
     expect(textarea.value).toContain("park_position");
-    // The structured form (named positions + step cards) is gone while raw
-    // mode is active — one editable source of truth at a time.
-    expect(screen.queryByText("Named Positions")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Step 1:/)).not.toBeInTheDocument();
+    // The panel is a supplement to the structured form, not a replacement —
+    // both are visible at once.
+    expect(screen.getByText("Named Positions")).toBeInTheDocument();
+    expect(screen.getByText(/Step 1:/)).toBeInTheDocument();
   });
 
-  it("edits flow from the raw textarea into steps/positions and back out on save", async () => {
+  it("applies edits from the raw textarea into steps/positions on Apply to form", async () => {
     const user = userEvent.setup();
     const props = renderProtocol({ steps: STEPS, positions: null });
 
     await user.click(screen.getByRole("button", { name: "Edit raw YAML" }));
-    const textarea = screen.getByLabelText("Raw protocol YAML");
+    const textarea = screen.getByLabelText("Raw YAML");
     const nextYaml = [
       "positions:",
       "  park_position:",
@@ -715,8 +715,7 @@ describe("ProtocolEditor raw YAML mode", () => {
       "    - 250",
       "    - 85",
       "protocol:",
-      "  - command: home",
-      "    args: {}",
+      "  - home: null",
       "",
     ].join("\n");
     // A raw YAML blob (with literal braces/brackets) is entered as one
@@ -724,6 +723,7 @@ describe("ProtocolEditor raw YAML mode", () => {
     // and `[` as special key-sequence syntax, which a real YAML document
     // will always contain.
     fireEvent.change(textarea, { target: { value: nextYaml } });
+    await user.click(screen.getByRole("button", { name: "Apply to form" }));
 
     expect(props.onLocalChange).toHaveBeenCalledWith([{ command: "home", args: {} }]);
     expect(props.onPositionsChange).toHaveBeenCalledWith({ park_position: [360, 250, 85] });
@@ -738,43 +738,40 @@ describe("ProtocolEditor raw YAML mode", () => {
     );
   });
 
-  it("blocks saving and switching back to the form while the YAML doesn't parse", async () => {
+  it("shows a parse error and does not apply when the YAML doesn't parse", async () => {
     const user = userEvent.setup();
-    renderProtocol({ steps: STEPS });
+    const props = renderProtocol({ steps: STEPS });
 
     await user.click(screen.getByRole("button", { name: "Edit raw YAML" }));
-    const textarea = screen.getByLabelText("Raw protocol YAML");
+    const textarea = screen.getByLabelText("Raw YAML");
     fireEvent.change(textarea, { target: { value: "protocol: [unterminated" } });
+    await user.click(screen.getByRole("button", { name: "Apply to form" }));
 
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
-    const backButton = screen.getByRole("button", { name: "Back to form" });
-    expect(backButton).toBeDisabled();
-    await user.click(backButton);
-    // Still in raw mode — the click was a no-op while invalid.
-    expect(screen.getByLabelText("Raw protocol YAML")).toBeInTheDocument();
+    expect(screen.getByText(/must be sufficiently indented/i)).toBeInTheDocument();
+    expect(props.onLocalChange).not.toHaveBeenCalled();
   });
 
-  it("rejects YAML missing a protocol list", async () => {
+  it("rejects YAML missing a protocol list without applying", async () => {
     const user = userEvent.setup();
-    renderProtocol({ steps: STEPS });
+    const props = renderProtocol({ steps: STEPS });
 
     await user.click(screen.getByRole("button", { name: "Edit raw YAML" }));
-    const textarea = screen.getByLabelText("Raw protocol YAML");
+    const textarea = screen.getByLabelText("Raw YAML");
     fireEvent.change(textarea, { target: { value: "positions: {}\n" } });
+    await user.click(screen.getByRole("button", { name: "Apply to form" }));
 
-    expect(screen.getByText(/must have a "protocol" list/i)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByText(/`protocol:` must be a list/i)).toBeInTheDocument();
+    expect(props.onLocalChange).not.toHaveBeenCalled();
   });
 
-  it("returns to the structured form once the YAML is valid again", async () => {
+  it("hides the textarea again on Hide raw YAML", async () => {
     const user = userEvent.setup();
     renderProtocol({ steps: STEPS });
 
     await user.click(screen.getByRole("button", { name: "Edit raw YAML" }));
-    await user.click(screen.getByRole("button", { name: "Back to form" }));
+    await user.click(screen.getByRole("button", { name: "Hide raw YAML" }));
 
-    expect(screen.queryByLabelText("Raw protocol YAML")).not.toBeInTheDocument();
-    expect(screen.getByText("Named Positions")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Raw YAML")).not.toBeInTheDocument();
   });
 });
 
