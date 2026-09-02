@@ -12,8 +12,10 @@ CubOS uses a +Z-up deck frame and labware-relative action heights.
   ``InstrumentedGantry.safe_z``.
 
 There is no inter-labware helper. Callers compose the motion explicitly:
-``context.gantry.move_to_labware`` (travels at ``safe_z``) followed by
-``context.gantry.move`` to descend to the per-labware action plane.
+``context.gantry.move_to_labware`` (lifts to the working-volume ceiling,
+travels XY, ends at ``safe_z``) followed by ``context.gantry.move`` to
+descend to the per-labware action plane. A raw ``move`` that changes XY
+without an explicit ``travel_z`` lifts to the same ceiling first.
 """
 
 from __future__ import annotations

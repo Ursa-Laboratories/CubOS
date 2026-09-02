@@ -277,12 +277,11 @@ instruments:
     offset_y: 5.1
     depth: 61.5
     engage_depth_mm: -15.0
-    park_position: [-10.0, -10.0]
     capture_retries: 2
     capture_settle_s: 1.0
 ```
 
-`engage_depth_mm`/`park_position`/`capture_retries`/`capture_settle_s` are
+`engage_depth_mm`/`capture_retries`/`capture_settle_s` are
 required, not driver defaults — every capper's decap/cap motion sequence
 comes entirely from this config, never hardcoded. `vendor: mock` is an
 offline-only in-memory simulation useful for dry runs without any Arduino

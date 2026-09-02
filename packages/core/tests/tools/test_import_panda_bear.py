@@ -646,7 +646,7 @@ def test_capper_mount_only_placeholder_upgraded_to_real_instrument(tmp_path):
     # Motion-sequence config is present (parameterizes decap/cap -- see
     # cubos.protocol_engine.commands.capper).
     assert isinstance(entry["engage_depth_mm"], float)
-    assert isinstance(entry["park_position"], list) and len(entry["park_position"]) == 2
+    assert "park_position" not in entry
     assert isinstance(entry["capture_retries"], int)
     assert isinstance(entry["capture_settle_s"], float)
 
