@@ -345,27 +345,25 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         self._loaded_volume_ul = 0.0
 
     def mix(
-        self, volume_ul: float, repetitions: int = 3, speed: float = 50.0
+        self,
+        volume_ul: float,
+        cycles: int = 3,
+        speed: float = 50.0,
+        *,
+        gantry: Any,
+        position: tuple[float, float, float],
+        lift_mm: float = 1.0,
     ) -> MixResult:
-        """Mix by repeated aspirate/dispense.
-
-        The Picus 2 has no atomic mix command, so this is a host-side loop.
-        A failure part-way leaves liquid in the tip, which the driver tries
-        to return before re-raising.
-        """
-        commanded = self._quantize(volume_ul)
-        if self._offline:
-            return MixResult(success=True, volume_ul=commanded, repetitions=repetitions)
-        completed = 0
+        """Two-height mix; a failure part-way leaves liquid in the tip,
+        which the driver tries to return before re-raising."""
         try:
-            for _ in range(int(repetitions)):
-                self.aspirate(commanded, speed)
-                self.dispense(commanded, speed)
-                completed += 1
+            return super().mix(
+                volume_ul, cycles, speed,
+                gantry=gantry, position=position, lift_mm=lift_mm,
+            )
         except Exception:
-            self._recover_interrupted_mix(completed, int(repetitions), speed)
+            self._recover_interrupted_mix(speed)
             raise
-        return MixResult(success=True, volume_ul=commanded, repetitions=repetitions)
 
     def pick_up_tip(self, speed: float = 50.0) -> None:
         """Record that a tip was seated.
@@ -467,9 +465,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         decimals = max(0, -int(math.floor(math.log10(increment))))
         return f"{volume_ul:.{decimals}f}"
 
-    def _recover_interrupted_mix(
-        self, completed: int, repetitions: int, speed: float,
-    ) -> None:
+    def _recover_interrupted_mix(self, speed: float) -> None:
         """Best-effort return of liquid left in the tip by a failed mix."""
         if self._loaded_volume_ul <= 0:
             return
@@ -477,9 +473,8 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             self.blowout(speed)
         except Exception as exc:  # noqa: BLE001 - the original error must win
             self.logger.warning(
-                "Mix failed at repetition %d/%d and blow-out recovery also "
-                "failed (%s); tip may still hold liquid",
-                completed + 1, repetitions, exc,
+                "Mix failed and blow-out recovery also failed (%s); "
+                "tip may still hold liquid", exc,
             )
 
     def _arm_motor_control(self, mode: int = 2) -> None:

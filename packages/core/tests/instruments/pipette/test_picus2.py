@@ -10,7 +10,7 @@ import json
 import pathlib
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 from cubos.instruments.base_instrument import BaseInstrument
 from cubos.instruments.pipette.interface import PipetteInstrument
@@ -360,12 +360,17 @@ class TestCommands:
         assert fake.sent("BLOW_OUT") == ["BLOW_OUT 0 5 1500"]
         assert pip.loaded_volume_ul == 0.0
 
-    def test_mix_is_a_host_side_loop(self):
+    def test_mix_is_a_host_side_two_height_loop(self):
         pip, fake = connected()
-        result = pip.mix(200.0, repetitions=3)
-        assert len(fake.sent("RUN_ASPIRATE")) == 3
-        assert len(fake.sent("RUN_DISPENSE")) == 3
-        assert result.repetitions == 3
+        gantry = MagicMock()
+        result = pip.mix(200.0, cycles=3, gantry=gantry, position=(1.0, 2.0, 3.0))
+        assert len(fake.sent("RUN_ASPIRATE")) == 6
+        assert len(fake.sent("RUN_DISPENSE")) == 6
+        assert result.cycles == 3
+        assert gantry.move.call_count == 6
+        assert gantry.move.call_args_list[0] == call(pip, (1.0, 2.0, 4.0))
+        assert gantry.move.call_args_list[1] == call(pip, (1.0, 2.0, 3.0))
+        assert pip.loaded_volume_ul == 0.0
 
     def test_pick_up_tip_sends_nothing_to_the_pipette(self):
         """Tip pickup is gantry motion; the cone is pressed onto the tip."""
@@ -490,7 +495,7 @@ class TestFailures:
 
         pip._send = flaky
         with pytest.raises(PipetteCommandError, match="dispense failed"):
-            pip.mix(200.0, repetitions=3)
+            pip.mix(200.0, cycles=3, gantry=MagicMock(), position=(0.0, 0.0, 0.0))
         assert fake.sent("BLOW_OUT"), "expected blow-out recovery"
 
     def test_health_check_false_when_disconnected(self):
@@ -516,7 +521,9 @@ class TestOffline:
         assert pip.aspirate(500.0).loaded_volume_ul == 500.0
         assert pip.dispense(500.0).loaded_volume_ul == 0.0
         pip.blowout()
-        assert pip.mix(200.0, repetitions=2).success
+        assert pip.mix(
+            200.0, cycles=2, gantry=MagicMock(), position=(0.0, 0.0, 0.0),
+        ).success
         pip.drop_tip()
         pip.disconnect()
 
@@ -659,7 +666,7 @@ class TestRobustness:
 
     def test_mix_recovery_is_skipped_when_the_tip_is_empty(self):
         pip, fake = connected()
-        pip._recover_interrupted_mix(0, 3, 50.0)
+        pip._recover_interrupted_mix(50.0)
         assert not fake.sent("BLOW_OUT")
 
     def test_parse_line_sorts_the_reply_grammar(self):
