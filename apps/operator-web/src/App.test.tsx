@@ -720,7 +720,6 @@ describe("CubOS editor interactions", () => {
     await user.click(await screen.findByRole("button", { name: "Calibrate" }));
 
     expect(screen.getByRole("dialog", { name: "Gantry calibration" })).toBeInTheDocument();
-    expect(screen.getByText(/single-instrument deck origin/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /XY origin/ })).not.toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -756,7 +755,7 @@ describe("CubOS editor interactions", () => {
         body: JSON.stringify({ x: 0, y: 0, z: 36.25 }),
       }),
     ));
-    expect(await screen.findByText("Origin set. Ready to measure and save.")).toBeInTheDocument();
+    expect(await screen.findByText("Origin set.")).toBeInTheDocument();
     expect(screen.queryByText(/Program GRBL soft-limit travel spans/)).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Done" })).not.toBeInTheDocument();
 
@@ -841,7 +840,7 @@ describe("CubOS editor interactions", () => {
     const setOrigin = await screen.findByRole("button", { name: "Set origin and continue" });
     await waitFor(() => expect(setOrigin).toBeEnabled());
     await user.click(setOrigin);
-    expect(await screen.findByText("Origin set. Ready to measure and save.")).toBeInTheDocument();
+    expect(await screen.findByText("Origin set.")).toBeInTheDocument();
     await user.click(within(screen.getByRole("dialog", { name: "Gantry calibration" })).getByRole("button", { name: "Save" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(

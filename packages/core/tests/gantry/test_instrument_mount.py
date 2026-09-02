@@ -374,3 +374,44 @@ class TestInstrumentedGantryMoveToLabware:
         instrumented_gantry = InstrumentedGantry(controller=gantry, instruments={"probe": instr})
         with pytest.raises(ValueError, match="non-finite"):
             instrumented_gantry.move("probe", (10.0, 20.0, float("nan")))
+
+
+# ─── Travel-ceiling tests ────────────────────────────────────────────────────
+
+class TestTravelCeiling:
+    def _controller_with_volume(self, z_max=167.848):
+        controller = _mock_gantry()
+        controller.config = {"working_volume": {"z_max": z_max}}
+        return controller
+
+    def test_travel_rides_working_volume_ceiling(self):
+        controller = self._controller_with_volume()
+        instr = _mock_instrument(depth=0.0)
+        ig = InstrumentedGantry(
+            controller=controller, instruments={"pipette": instr}, safe_z=97.848,
+        )
+        ig.move_to_labware("pipette", _mock_labware(z=46.0))
+        args, kwargs = controller.move_to.call_args
+        assert kwargs["travel_z"] == 167.848
+        assert args[2] == 97.848
+
+    def test_deep_instrument_still_travels_at_ceiling(self):
+        controller = self._controller_with_volume()
+        instr = _mock_instrument(depth=70.0)
+        ig = InstrumentedGantry(
+            controller=controller, instruments={"pipette": instr}, safe_z=97.848,
+        )
+        ig.move_to_labware("pipette", _mock_labware())
+        _, kwargs = controller.move_to.call_args
+        assert kwargs["travel_z"] == 167.848
+
+    def test_without_working_volume_falls_back_to_safe_z(self):
+        controller = _mock_gantry()
+        controller.config = {}
+        instr = _mock_instrument(depth=5.0)
+        ig = InstrumentedGantry(
+            controller=controller, instruments={"probe": instr}, safe_z=60.0,
+        )
+        ig.move_to_labware("probe", _mock_labware())
+        _, kwargs = controller.move_to.call_args
+        assert kwargs["travel_z"] == 65.0

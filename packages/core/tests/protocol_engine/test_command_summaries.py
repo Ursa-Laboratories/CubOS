@@ -114,6 +114,23 @@ class TestFormatters:
         assert "down to 0 µL" in _summaries.clear_well({"well": "p.A1"})
         assert "50 µL" in _summaries.clear_well({"well": "p.A1", "volume_ul": 50.0})
 
+    def test_cure_without_intensity(self):
+        summary = _summaries.cure(
+            {"instrument": "uv_curing", "position": "plate.A1", "exposure_time": 2.0}
+        )
+        assert summary == "uv_curing @ plate.A1   2.0s"
+
+    def test_cure_with_intensity(self):
+        summary = _summaries.cure(
+            {
+                "instrument": "uv_curing",
+                "position": "plate.A1",
+                "exposure_time": 2.0,
+                "intensity": 75.0,
+            }
+        )
+        assert summary == "uv_curing @ plate.A1   2.0s @ 75.0%"
+
     def test_transfer_notes_a_liquid_class(self):
         summary = _summaries.transfer(
             {

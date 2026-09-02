@@ -44,6 +44,24 @@ export interface VialConfig {
   working_volume_ul: number;
 }
 
+export interface VialGridConfig {
+  type: "vial_grid";
+  name: string;
+  model_name: string;
+  rows: number;
+  columns: number;
+  calibration: CalibrationPoints;
+  x_offset: number;
+  y_offset: number;
+  row_direction?: "positive" | "negative" | null;
+  vial_model_name?: string;
+  vial_height?: number | null;
+  vial_diameter?: number | null;
+  capacity_ul: number;
+  working_volume_ul: number;
+  [key: string]: unknown;
+}
+
 export interface TipRackConfig {
   type: "tip_rack";
   name: string;
@@ -51,6 +69,12 @@ export interface TipRackConfig {
   load_name?: string;
   rows?: number;
   columns?: number;
+  calibration?: CalibrationPoints;
+  pickup_z?: number;
+  drop_z?: number | null;
+  tip_length?: number;
+  x_offset?: number;
+  y_offset?: number;
   z_pickup?: number;
   z_drop?: number;
   tips?: Record<string, WellPosition>;
@@ -121,7 +145,7 @@ export type UnsupportedDeckConfig =
   | VialHolderConfig
   | TipDisposalConfig;
 
-export type LabwareConfig = WellPlateConfig | VialConfig | UnsupportedDeckConfig;
+export type LabwareConfig = WellPlateConfig | VialConfig | VialGridConfig | UnsupportedDeckConfig;
 
 export interface WellPosition {
   x: number;
@@ -312,6 +336,18 @@ export interface InstrumentFieldInfo {
 export type InstrumentSchemas = Record<string, Record<string, InstrumentFieldInfo[]>>;
 
 export type InstrumentMeasurementMethods = Record<string, string[]>;
+
+export interface InstrumentMethodParamField {
+  name: string;
+  type: string;
+  required: boolean;
+  default: unknown;
+  fields: InstrumentMethodParamField[] | null;
+}
+
+// type -> method -> ordered method_kwargs parameter specs. A param with
+// non-null `fields` is a dataclass the engine builds from a nested mapping.
+export type InstrumentMethodParams = Record<string, Record<string, InstrumentMethodParamField[]>>;
 
 // Protocol
 

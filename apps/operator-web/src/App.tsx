@@ -22,6 +22,7 @@ import {
   useInstrumentTypes,
   useInstrumentSchemas,
   useInstrumentMethods,
+  useInstrumentMethodParams,
 } from "./hooks/useGantryPosition";
 import RunPanel from "./components/run/RunPanel";
 import { useProtocolCommands, useProtocolConfigs, useProtocol, useSaveProtocol, useValidateProtocolSetup, useRunStatus } from "./hooks/useProtocol";
@@ -209,6 +210,7 @@ export default function App() {
   const instrumentTypes = useInstrumentTypes();
   const instrumentSchemas = useInstrumentSchemas();
   const instrumentMethods = useInstrumentMethods();
+  const instrumentMethodParams = useInstrumentMethodParams();
 
   const protocolCommands = useProtocolCommands();
   const protocolConfigs = useProtocolConfigs();
@@ -680,6 +682,9 @@ export default function App() {
             }}
             onLocalChange={setLocalDeck}
             onRefresh={refreshAll}
+            gantry={displayGantry}
+            position={gantryPosition.data ?? null}
+            isRunning={protocolRunActive}
           />
         </>
           )}
@@ -723,6 +728,7 @@ export default function App() {
             deck={(displayDeck ?? deckQuery.data)!}
             gantry={(displayGantry ?? gantryQuery.data)!}
             instrumentMethods={instrumentMethods.data ?? {}}
+            instrumentMethodParams={instrumentMethodParams.data ?? {}}
             steps={localProtocolSteps ?? protocolQuery.data?.steps ?? null}
             positions={localProtocolPositions !== undefined ? localProtocolPositions : protocolQuery.data?.positions ?? null}
             baseline={protocolQuery.data ?? null}
@@ -842,23 +848,25 @@ export default function App() {
   );
 
   const bottomRight = (
-    <GantryPositionWidget
-      position={gantryPosition.data ?? null}
-      workingVolume={workingVolume}
-      gantryFile={displayGantry ? gantryFile : null}
-      gantry={displayGantry}
-      isRunning={protocolRunActive}
-      onSaveCalibrated={async (filename, body) => {
-        const previousGantryFile = gantryFile;
-        const saved = await saveGantry.mutateAsync({ filename, body });
-        setGantryFile(saved.filename);
-        setLocalGantry(null);
-        if (previousGantryFile && saved.filename !== previousGantryFile) {
-          await gantryApi.disconnect();
-          await gantryApi.connect(saved.filename);
-        }
-      }}
-    />
+    <div>
+      <GantryPositionWidget
+        position={gantryPosition.data ?? null}
+        workingVolume={workingVolume}
+        gantryFile={displayGantry ? gantryFile : null}
+        gantry={displayGantry}
+        isRunning={protocolRunActive}
+        onSaveCalibrated={async (filename, body) => {
+          const previousGantryFile = gantryFile;
+          const saved = await saveGantry.mutateAsync({ filename, body });
+          setGantryFile(saved.filename);
+          setLocalGantry(null);
+          if (previousGantryFile && saved.filename !== previousGantryFile) {
+            await gantryApi.disconnect();
+            await gantryApi.connect(saved.filename);
+          }
+        }}
+      />
+    </div>
   );
 
   return (

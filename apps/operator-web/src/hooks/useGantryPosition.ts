@@ -52,6 +52,14 @@ export function useInstrumentMethods() {
   });
 }
 
+export function useInstrumentMethodParams() {
+  return useQuery({
+    queryKey: ["gantry", "instrument-method-params"],
+    queryFn: gantryApi.getInstrumentMethodParams,
+    staleTime: Infinity,
+  });
+}
+
 export function useGantry(filename: string | null) {
   return useQuery({
     queryKey: ["gantry", filename],
