@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import difflib
 import inspect
 from pathlib import Path
@@ -58,6 +59,16 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
     )
 
 
+logger = logging.getLogger(__name__)
+
+
+# Fields removed from a driver that older station configs still carry.
+# Dropped with a warning instead of failing the load.
+_DEPRECATED_FIELDS: Dict[str, frozenset[str]] = {
+    "capper": frozenset({"park_position"}),
+}
+
+
 def _instantiate_instruments(
     instrument_configs: Mapping[str, Mapping[str, Any]],
     *,
@@ -69,6 +80,14 @@ def _instantiate_instruments(
         type_key = kwargs.pop("type")
         vendor = kwargs.pop("vendor")
         validate_instrument(type_key, vendor)
+        for key in _DEPRECATED_FIELDS.get(type_key, ()):
+            if key in kwargs:
+                kwargs.pop(key)
+                logger.warning(
+                    "Instrument '%s' (%s/%s): YAML field '%s' is no longer used "
+                    "and was ignored; delete it from the gantry config.",
+                    name, type_key, vendor, key,
+                )
         if mock_mode:
             kwargs["offline"] = True
         cls = get_instrument_class(type_key, vendor)
