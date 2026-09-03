@@ -357,6 +357,13 @@ export const dataApi = {
     download(`/data/campaigns/${campaignId}/asmi.zip`),
 };
 
+export type LightingChannelInfo = {
+  instrument: string;
+  connected: boolean;
+  channels: Record<string, number[]>;
+  active: Record<string, number>;
+};
+
 // Manual instrument control (bring-up work, outside protocol runs)
 export const instrumentsApi = {
   captureCameraFrame: (instrument: string, preview = false) =>
@@ -364,6 +371,9 @@ export const instrumentsApi = {
       method: "POST",
       body: JSON.stringify({ instrument, preview }),
     }),
+  listLighting: () => request<LightingChannelInfo[]>("/instruments/lighting"),
+  setLights: (body: { instrument: string; channel?: string; brightness?: number; all_off?: boolean }) =>
+    request<LightingChannelInfo>("/instruments/lighting/set", { method: "POST", body: JSON.stringify(body) }),
   cameraLastImage: (instrument: string) =>
     // Cache-bust: repeated preview polls hit the same URL as the frame changes.
     download(`/instruments/camera/last-image?instrument=${encodeURIComponent(instrument)}&_=${Date.now()}`),

@@ -1,4 +1,5 @@
 import CameraPreview from "./components/gantry/CameraPreview";
+import LightingControls from "./components/gantry/LightingControls";
 import React, { useRef, useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import AppLayout from "./components/layout/AppLayout";
@@ -837,6 +838,9 @@ export default function App() {
             </p>
           ) : (
             <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
+              <div style={{ maxWidth: 960 }}>
+                <LightingControls />
+              </div>
               {cameraInstruments.map((name) => (
                 <div key={name} style={{ maxWidth: 960 }}>
                   <div style={{ fontSize: 12, color: theme.color.textMuted, marginBottom: 6 }}>{name}</div>
