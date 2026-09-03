@@ -224,7 +224,8 @@ export default function ProtocolEditor({
     } else {
       updatedArgs[argName] = value;
     }
-    if (argName === "instrument") {
+    const declaresMethod = commandsByName[next[i].command]?.args.some((a) => a.name === "method") ?? false;
+    if (argName === "instrument" && declaresMethod) {
       const methods = measurementMethodsForInstrument(String(value), choices);
       if (methods.length > 0 && !methods.includes(String(updatedArgs.method ?? ""))) {
         updatedArgs.method = methods[0];
