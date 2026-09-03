@@ -1,3 +1,4 @@
+import CameraPreview from "./components/gantry/CameraPreview";
 import React, { useRef, useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import AppLayout from "./components/layout/AppLayout";
@@ -97,7 +98,7 @@ const WORKING_DECK_FILENAME = "cub_deck.yaml";
 
 export default function App() {
   const qc = useQueryClient();
-  const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "State" | "Results">("Workflow");
+  const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "Camera" | "State" | "Results">("Workflow");
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
@@ -310,6 +311,13 @@ export default function App() {
 	  }, [localDeck, deckQuery.data, previewWells]);
 
   const displayGantry = localGantry ?? gantryQuery.data ?? null;
+  const cameraInstruments = useMemo(
+    () =>
+      Object.entries(displayGantry?.config.instruments ?? {})
+        .filter(([, entry]) => entry.type === "camera")
+        .map(([name]) => name),
+    [displayGantry],
+  );
   const gantryConnected = gantryPosition.data?.connected ?? false;
   const workingVolume: WorkingVolume | null = displayGantry?.config.working_volume ?? null;
   const yAxisMotion = displayGantry?.config.cnc?.y_axis_motion ?? "head";
@@ -535,6 +543,7 @@ export default function App() {
             // tab, and the run is what the operator navigates back to.
             ...(activeRunId ? (["Run"] as const) : []),
             "Visualize",
+            "Camera",
             "State",
             "Results",
           ] as const
@@ -817,6 +826,25 @@ export default function App() {
               yAxisMotion={yAxisMotion}
             />
           </div>
+        </div>
+      )}
+      {activeView === "Camera" && (
+        <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+          <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Camera</h3>
+          {cameraInstruments.length === 0 ? (
+            <p style={{ color: theme.color.textMuted, fontSize: 13 }}>
+              Connect a gantry config with a camera instrument to see a live view.
+            </p>
+          ) : (
+            <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
+              {cameraInstruments.map((name) => (
+                <div key={name} style={{ maxWidth: 960 }}>
+                  <div style={{ fontSize: 12, color: theme.color.textMuted, marginBottom: 6 }}>{name}</div>
+                  <CameraPreview instrument={name} />
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
       {activeView === "State" && <StatePanel />}
