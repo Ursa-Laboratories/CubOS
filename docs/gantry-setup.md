@@ -154,6 +154,13 @@ The pipette asks for on-screen confirmation before accepting host motor
 control; the driver satisfies that during `connect()` and, if it times out,
 fails with a message naming the softkey to press.
 
+Releasing motor control and the piston initialisation on connect both sweep
+the piston, which expels whatever is in the tip. If a run fails between an
+aspirate and its dispense, the driver therefore keeps the session open and
+armed instead of releasing it, and refuses to home, until the liquid has been
+dispensed or blown out (a one-step `blowout` protocol at a vial or the tip
+disposal works). The warning is logged as `Pipette still holds N uL`.
+
 **`potentiostat` / `admiral`** — Admiral SquidStat, addressed by serial port and
 channel number:
 

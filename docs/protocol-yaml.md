@@ -253,11 +253,13 @@ Move to a position and blow out.
 
 #### `mix`
 
-Move to a position and mix in place (repeated aspirate/dispense).
+Move to a position and mix between two heights. Each cycle aspirates at
+`height`, rises 1 mm to dispense and aspirate again, then returns to `height`
+to dispense.
 
 - `position` *(str, required)* — deck target.
 - `volume_ul` *(float, required)* — mix volume (µL).
-- `repetitions` *(int, default `3`)* — number of mix cycles.
+- `cycles` *(int, default `3`)* — number of mix cycles.
 - `speed` *(float, default `50.0`)* — mix speed.
 - `height` *(float, default `0.0`)* — engage offset.
 
@@ -442,7 +444,7 @@ actually saved. Motion failures still fail the run.
 reusable multi-step liquid-handling sequences by composing `transfer`/`mix`
 (they add no new preflight or journaling of their own — every safety guard,
 stroke split, and durable begin/complete step described under `transfer`
-above applies to each transfer they issue). `mix`'s existing `repetitions`
+above applies to each transfer they issue). `mix`'s existing `cycles`
 argument already covers "mix N times"; there is no separate compound mix
 command. Each also accepts `require_uncapped` (same contract as
 `transfer`'s — see [`transfer`](#transfer)), checked once up front before
