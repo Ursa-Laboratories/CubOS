@@ -1,5 +1,5 @@
 import pytest
-from unittest.mock import patch, MagicMock, PropertyMock
+from unittest.mock import patch, MagicMock, PropertyMock, call
 
 from cubos.instruments.base_instrument import BaseInstrument, InstrumentError
 from cubos.instruments.pipette.models import (
@@ -105,15 +105,15 @@ class TestAspirateResult:
 class TestMixResult:
 
     def test_creation(self):
-        result = MixResult(success=True, volume_ul=50.0, repetitions=3)
+        result = MixResult(success=True, volume_ul=50.0, cycles=3)
         assert result.success is True
         assert result.volume_ul == 50.0
-        assert result.repetitions == 3
+        assert result.cycles == 3
 
     def test_frozen(self):
-        result = MixResult(success=True, volume_ul=50.0, repetitions=3)
+        result = MixResult(success=True, volume_ul=50.0, cycles=3)
         with pytest.raises(AttributeError):
-            result.repetitions = 5
+            result.cycles = 5
 
 
 # --- Exception hierarchy tests ------------------------------------------------
@@ -438,16 +438,21 @@ class TestPipetteCommands:
 
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     @patch("cubos.instruments.controllers.pawduino.time.sleep")
-    def test_mix_returns_result(self, mock_sleep, mock_serial_cls):
+    def test_mix_cycles_between_two_heights(self, mock_sleep, mock_serial_cls):
         pip, _ = self._make_connected_pipette(
             mock_serial_cls, mock_sleep,
-            ["OK:{pos:36.0}\n"],
+            ["OK:{pos:36.0}\n", "OK:{pos:0.0}\n"] * 4,
         )
-        result = pip.mix(50.0, repetitions=5)
+        gantry = MagicMock()
+        result = pip.mix(50.0, cycles=2, gantry=gantry, position=(10.0, 20.0, 5.0))
         assert isinstance(result, MixResult)
         assert result.success is True
         assert result.volume_ul == 50.0
-        assert result.repetitions == 5
+        assert result.cycles == 2
+        assert gantry.move.call_args_list == [
+            call(pip, (10.0, 20.0, 6.0)),
+            call(pip, (10.0, 20.0, 5.0)),
+        ] * 2
 
     @patch("cubos.instruments.controllers.pawduino.serial.Serial")
     @patch("cubos.instruments.controllers.pawduino.time.sleep")
@@ -674,9 +679,16 @@ class TestOfflinePipette:
     def test_mix_returns_result(self):
         pip = OpentronsPipette(offline=True)
         pip.connect()
-        result = pip.mix(50.0, repetitions=5)
+        result = pip.mix(50.0, cycles=5, gantry=MagicMock(), position=(0.0, 0.0, 0.0))
         assert isinstance(result, MixResult)
-        assert result.repetitions == 5
+        assert result.cycles == 5
+        assert pip.get_status().position_mm == pytest.approx(pip._config.zero_position)
+
+    def test_mix_rejects_non_positive_cycles(self):
+        pip = OpentronsPipette(offline=True)
+        pip.connect()
+        with pytest.raises(ValueError, match="cycles"):
+            pip.mix(50.0, cycles=0, gantry=MagicMock(), position=(0.0, 0.0, 0.0))
 
     def test_get_status_returns_status(self):
         pip = OpentronsPipette(offline=True)

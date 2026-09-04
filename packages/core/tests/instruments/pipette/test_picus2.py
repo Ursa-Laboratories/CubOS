@@ -10,7 +10,7 @@ import json
 import pathlib
 
 import pytest
-from unittest.mock import patch
+from unittest.mock import MagicMock, call, patch
 
 from cubos.instruments.base_instrument import BaseInstrument
 from cubos.instruments.pipette.interface import PipetteInstrument
@@ -360,12 +360,17 @@ class TestCommands:
         assert fake.sent("BLOW_OUT") == ["BLOW_OUT 0 5 1500"]
         assert pip.loaded_volume_ul == 0.0
 
-    def test_mix_is_a_host_side_loop(self):
+    def test_mix_is_a_host_side_two_height_loop(self):
         pip, fake = connected()
-        result = pip.mix(200.0, repetitions=3)
-        assert len(fake.sent("RUN_ASPIRATE")) == 3
-        assert len(fake.sent("RUN_DISPENSE")) == 3
-        assert result.repetitions == 3
+        gantry = MagicMock()
+        result = pip.mix(200.0, cycles=3, gantry=gantry, position=(1.0, 2.0, 3.0))
+        assert len(fake.sent("RUN_ASPIRATE")) == 6
+        assert len(fake.sent("RUN_DISPENSE")) == 6
+        assert result.cycles == 3
+        assert gantry.move.call_count == 6
+        assert gantry.move.call_args_list[0] == call(pip, (1.0, 2.0, 4.0))
+        assert gantry.move.call_args_list[1] == call(pip, (1.0, 2.0, 3.0))
+        assert pip.loaded_volume_ul == 0.0
 
     def test_pick_up_tip_sends_nothing_to_the_pipette(self):
         """Tip pickup is gantry motion; the cone is pressed onto the tip."""
@@ -490,7 +495,7 @@ class TestFailures:
 
         pip._send = flaky
         with pytest.raises(PipetteCommandError, match="dispense failed"):
-            pip.mix(200.0, repetitions=3)
+            pip.mix(200.0, cycles=3, gantry=MagicMock(), position=(0.0, 0.0, 0.0))
         assert fake.sent("BLOW_OUT"), "expected blow-out recovery"
 
     def test_health_check_false_when_disconnected(self):
@@ -516,7 +521,9 @@ class TestOffline:
         assert pip.aspirate(500.0).loaded_volume_ul == 500.0
         assert pip.dispense(500.0).loaded_volume_ul == 0.0
         pip.blowout()
-        assert pip.mix(200.0, repetitions=2).success
+        assert pip.mix(
+            200.0, cycles=2, gantry=MagicMock(), position=(0.0, 0.0, 0.0),
+        ).success
         pip.drop_tip()
         pip.disconnect()
 
@@ -659,7 +666,7 @@ class TestRobustness:
 
     def test_mix_recovery_is_skipped_when_the_tip_is_empty(self):
         pip, fake = connected()
-        pip._recover_interrupted_mix(0, 3, 50.0)
+        pip._recover_interrupted_mix(50.0)
         assert not fake.sent("BLOW_OUT")
 
     def test_parse_line_sorts_the_reply_grammar(self):
@@ -769,3 +776,83 @@ class TestThroughTheEngine:
         assert capacity.max_volume == 1000.0
         # 1500 uL exceeds one stroke and splits evenly within the range.
         assert plan_strokes(1500.0, capacity) == [750.0, 750.0]
+
+
+# ─── Liquid hold across disconnect / reconnect ──────────────────────────────
+
+
+class TestLiquidHold:
+    """A run that fails with liquid in the tip must not expel it.
+
+    ``ENABLE_MOTOR_CONTROL 0`` and ``RUN_INIT`` both sweep the piston, so
+    neither may be sent while ``loaded_volume_ul`` is positive.
+    """
+
+    def test_disconnect_keeps_session_while_holding_liquid(self):
+        pip, fake = connected()
+        pip.aspirate(200.0)
+        pip.disconnect()
+        assert not fake.sent("ENABLE_MOTOR_CONTROL 0")
+        assert fake.is_open
+        assert pip.loaded_volume_ul == 200.0
+        assert pip.get_status().is_homed
+
+    def test_reconnect_while_holding_reuses_session_without_init(self):
+        pip, fake = connected()
+        pip.aspirate(200.0)
+        pip.disconnect()
+        pip.connect()
+        assert len(fake.sent("RUN_INIT")) == 1
+        assert pip.loaded_volume_ul == 200.0
+        # The operator can now return the liquid deliberately ...
+        pip.blowout()
+        assert pip.loaded_volume_ul == 0.0
+        # ... after which release proceeds as usual.
+        pip.disconnect()
+        assert fake.sent("ENABLE_MOTOR_CONTROL 0")
+        assert not fake.is_open
+
+    def test_reconnect_after_port_loss_skips_init_while_holding(self):
+        pip, fake = connected()
+        pip.aspirate(150.0)
+        fake.close()
+        fresh = FakePicusSerial()
+        with patch(
+            "cubos.instruments.pipette.vendors.sartorius.serial.Serial",
+            return_value=fresh,
+        ):
+            pip.connect()
+        assert not fresh.sent("RUN_INIT")
+        assert fresh.sent("ENABLE_MOTOR_CONTROL 2")
+        assert pip.loaded_volume_ul == 150.0
+        assert pip.get_status().is_homed
+
+    def test_reconnect_after_abort_rearms_without_init(self):
+        pip, fake = connected()
+        pip.aspirate(100.0)
+        pip._motor_control_lost = True
+        pip.disconnect()
+        assert fake.is_open
+        pip.connect()
+        assert len(fake.sent("ENABLE_MOTOR_CONTROL 2")) == 2
+        assert len(fake.sent("RUN_INIT")) == 1
+        assert pip.loaded_volume_ul == 100.0
+
+    def test_home_refuses_while_holding(self):
+        pip, fake = connected()
+        pip.aspirate(50.0)
+        before = list(fake.commands)
+        with pytest.raises(PipetteCommandError, match="still holds 50 uL"):
+            pip.home()
+        assert fake.commands == before
+        pip.dispense(50.0)
+        pip.home()
+        assert fake.sent("HOME")
+
+    def test_empty_tip_disconnects_normally(self):
+        pip, fake = connected()
+        pip.aspirate(100.0)
+        pip.dispense(100.0)
+        pip.disconnect()
+        assert fake.sent("ENABLE_MOTOR_CONTROL 0")
+        assert not fake.is_open

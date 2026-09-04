@@ -1,6 +1,7 @@
 """Generic pipette instrument interface."""
 
 from abc import abstractmethod
+from typing import Any
 
 from cubos.instruments.base_instrument import BaseInstrument
 from cubos.instruments.pipette.liquid_class import (
@@ -84,14 +85,37 @@ class PipetteInstrument(BaseInstrument):
     def blowout(self, speed: float = 50.0) -> None:
         """Move the plunger to the blowout position."""
 
-    @abstractmethod
     def mix(
         self,
         volume_ul: float,
-        repetitions: int = 3,
+        cycles: int = 3,
         speed: float = 50.0,
+        *,
+        gantry: Any,
+        position: tuple[float, float, float],
+        lift_mm: float = 1.0,
     ) -> MixResult:
-        """Aspirate and dispense repeatedly to mix a liquid."""
+        """Mix by cycling the tip between two heights in the liquid.
+
+        ``position`` is the tip ``(x, y, z)`` at the measurement height,
+        which the caller has already engaged. Each cycle aspirates there,
+        rises ``lift_mm`` to dispense and aspirate again, then returns to
+        the measurement height to dispense. The tip ends where it started
+        with nothing loaded.
+        """
+        if isinstance(cycles, bool) or not isinstance(cycles, int) or cycles <= 0:
+            raise ValueError(f"mix cycles must be a positive integer, got {cycles!r}.")
+        x, y, z = position
+        low = (x, y, z)
+        high = (x, y, z + lift_mm)
+        for _ in range(cycles):
+            self.aspirate(volume_ul, speed)
+            gantry.move(self, high)
+            self.dispense(volume_ul, speed)
+            self.aspirate(volume_ul, speed)
+            gantry.move(self, low)
+            self.dispense(volume_ul, speed)
+        return MixResult(success=True, volume_ul=volume_ul, cycles=cycles)
 
     @abstractmethod
     def pick_up_tip(self, speed: float = 50.0) -> None:

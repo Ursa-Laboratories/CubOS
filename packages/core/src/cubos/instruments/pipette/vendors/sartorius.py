@@ -181,6 +181,18 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         """Driver-tracked volume currently in the tip."""
         return self._loaded_volume_ul
 
+    @property
+    def _holding_liquid(self) -> bool:
+        return self._loaded_volume_ul > 0.0
+
+    def _warn_holding(self, action: str) -> None:
+        self.logger.warning(
+            "Pipette still holds %g uL from an interrupted run; %s so the "
+            "piston is not reset. Dispense or blow out before the next "
+            "initialisation.",
+            self._loaded_volume_ul, action,
+        )
+
     def set_attached_tip_extension(self, extension_mm: float) -> None:
         if (
             isinstance(extension_mm, bool)
@@ -205,6 +217,16 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             self._motor_control_lost = False
             self._loaded_volume_ul = 0.0
             self.logger.info("Picus 2 connected (offline)")
+            return
+        if self._holding_liquid and self._serial is not None and self._serial.is_open:
+            # The session was kept open by ``disconnect`` to hold the liquid;
+            # re-arm if control was lost, otherwise there is nothing to do.
+            if self._motor_control_lost:
+                self._motor_control_lost = False
+                self._send("AUTO 1", timeout=_QUERY_TIMEOUT)
+                self._arm_motor_control()
+            self._warn_holding("reusing the open session")
+            self._initialized = True
             return
         try:
             self._serial = serial.Serial(
@@ -231,21 +253,38 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             if self._verify_model:
                 self._verify_attached_model()
             self._check_battery()
-            self._send("RUN_INIT", timeout=_MOTION_TIMEOUT)
+            if self._holding_liquid:
+                self._warn_holding("skipping RUN_INIT on reconnect")
+            else:
+                self._send("RUN_INIT", timeout=_MOTION_TIMEOUT)
+                self._loaded_volume_ul = 0.0
         except Exception:
             self._close_serial()
             raise
 
         self._initialized = True
-        self._loaded_volume_ul = 0.0
         self.logger.info("Connected to %s on %s", self._config.name, self._port)
 
     def disconnect(self) -> None:
+        """Release the pipette, unless it still holds liquid.
+
+        Handing motor control back (``ENABLE_MOTOR_CONTROL 0``) and the
+        ``RUN_INIT`` of the next connect both drive the piston through its
+        reference sweep, which expels whatever is in the tip. A run that
+        fails between an aspirate and its dispense would otherwise dump the
+        liquid wherever the tool happens to be. While ``loaded_volume_ul``
+        is positive the session is kept open and armed so the operator can
+        dispense or blow out deliberately (a one-step ``blowout`` protocol
+        works); the next ``disconnect`` after that releases as usual.
+        """
         if self._offline:
             self._initialized = False
             self.logger.info("Picus 2 disconnected (offline)")
             return
         if self._serial is not None and self._serial.is_open:
+            if self._holding_liquid:
+                self._warn_holding("keeping motor control and the port open")
+                return
             try:
                 self._send("ENABLE_MOTOR_CONTROL 0", timeout=_QUERY_TIMEOUT)
             except (PipetteCommandError, PipetteTimeoutError,
@@ -284,6 +323,11 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             self._initialized = True
             self._loaded_volume_ul = 0.0
             return
+        if self._holding_liquid:
+            raise PipetteCommandError(
+                f"Refusing to home: the pipette still holds "
+                f"{self._loaded_volume_ul:g} uL. Dispense or blow out first."
+            )
         self._send(
             "RUN_INIT" if not self._initialized else "HOME",
             timeout=_MOTION_TIMEOUT,
@@ -345,27 +389,25 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         self._loaded_volume_ul = 0.0
 
     def mix(
-        self, volume_ul: float, repetitions: int = 3, speed: float = 50.0
+        self,
+        volume_ul: float,
+        cycles: int = 3,
+        speed: float = 50.0,
+        *,
+        gantry: Any,
+        position: tuple[float, float, float],
+        lift_mm: float = 1.0,
     ) -> MixResult:
-        """Mix by repeated aspirate/dispense.
-
-        The Picus 2 has no atomic mix command, so this is a host-side loop.
-        A failure part-way leaves liquid in the tip, which the driver tries
-        to return before re-raising.
-        """
-        commanded = self._quantize(volume_ul)
-        if self._offline:
-            return MixResult(success=True, volume_ul=commanded, repetitions=repetitions)
-        completed = 0
+        """Two-height mix; a failure part-way leaves liquid in the tip,
+        which the driver tries to return before re-raising."""
         try:
-            for _ in range(int(repetitions)):
-                self.aspirate(commanded, speed)
-                self.dispense(commanded, speed)
-                completed += 1
+            return super().mix(
+                volume_ul, cycles, speed,
+                gantry=gantry, position=position, lift_mm=lift_mm,
+            )
         except Exception:
-            self._recover_interrupted_mix(completed, int(repetitions), speed)
+            self._recover_interrupted_mix(speed)
             raise
-        return MixResult(success=True, volume_ul=commanded, repetitions=repetitions)
 
     def pick_up_tip(self, speed: float = 50.0) -> None:
         """Record that a tip was seated.
@@ -467,9 +509,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         decimals = max(0, -int(math.floor(math.log10(increment))))
         return f"{volume_ul:.{decimals}f}"
 
-    def _recover_interrupted_mix(
-        self, completed: int, repetitions: int, speed: float,
-    ) -> None:
+    def _recover_interrupted_mix(self, speed: float) -> None:
         """Best-effort return of liquid left in the tip by a failed mix."""
         if self._loaded_volume_ul <= 0:
             return
@@ -477,9 +517,8 @@ class SartoriusPicus2Pipette(PipetteInstrument):
             self.blowout(speed)
         except Exception as exc:  # noqa: BLE001 - the original error must win
             self.logger.warning(
-                "Mix failed at repetition %d/%d and blow-out recovery also "
-                "failed (%s); tip may still hold liquid",
-                completed + 1, repetitions, exc,
+                "Mix failed and blow-out recovery also failed (%s); "
+                "tip may still hold liquid", exc,
             )
 
     def _arm_motor_control(self, mode: int = 2) -> None:
