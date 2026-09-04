@@ -667,6 +667,67 @@ def test_image_well_known_well_passes():
     assert violations == []
 
 
+def test_cure_unknown_instrument_emits_violation():
+    instrumented_gantry, deck = _board_and_deck()
+    args = {
+        "instrument": "missing",
+        "position": "plate.A1",
+        "measurement_height": 0.0,
+        "exposure_time": 1.0,
+    }
+    protocol = _protocol(args, command_name="cure")
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert any("unknown instrument" in v.message for v in violations), violations
+
+
+@pytest.mark.parametrize("command_name", ["cap", "decap"])
+def test_cap_decap_unknown_instrument_emits_violation(command_name):
+    instrumented_gantry, deck = _board_and_deck_with_vial()
+    args = {"instrument": "missing", "vial": "vial"}
+    protocol = _protocol(args, command_name=command_name)
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert any("unknown instrument" in v.message for v in violations), violations
+
+
+def test_image_well_unknown_camera_emits_violation():
+    instrumented_gantry, deck = _board_and_deck()
+    args = {"camera": "missing", "well": "plate.A1", "image_height": 0.0}
+    protocol = _protocol(args, command_name="image_well")
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert any("unknown camera" in v.message for v in violations), violations
+
+
+def test_image_well_unknown_lights_instrument_emits_violation():
+    instrumented_gantry, deck = _board_and_deck()
+    args = {
+        "camera": "asmi",
+        "well": "plate.A1",
+        "image_height": 0.0,
+        "lights": "missing",
+    }
+    protocol = _protocol(args, command_name="image_well")
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert any("unknown lights instrument" in v.message for v in violations), violations
+
+
+def test_image_well_omitted_lights_passes():
+    instrumented_gantry, deck = _board_and_deck()
+    args = {"camera": "asmi", "well": "plate.A1", "image_height": 0.0, "lights": None}
+    protocol = _protocol(args, command_name="image_well")
+
+    violations = validate_protocol_semantics(protocol, instrumented_gantry, deck, _gantry_config())
+
+    assert violations == []
+
+
 @pytest.mark.parametrize("command_name,args", [
     ("pause", {"seconds": 0.1}),
     ("breakpoint", {"message": "continue"}),
