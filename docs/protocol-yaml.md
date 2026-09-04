@@ -230,8 +230,15 @@ deliberate follow-up.
 
 Pick up a tip from a tip-rack slot, record its length, and mark the slot consumed.
 
-- `position` *(str, required)* — tip-rack slot, including the explicit tip slot
-  (e.g. `tips.A1`).
+- `position` *(str, required)* — either an explicit tip slot (e.g. `tips.A1`)
+  or just the rack name (e.g. `tips`), which auto-selects the next available
+  tip in the rack's tip order as the rack is used up. Prefer the rack-only
+  form for protocols that don't need a specific slot; it lets a rack be
+  worked through within a run without manually advancing the slot. Tip
+  consumption only persists across separate runs when durable fluid tracking
+  is active (`context.fluid_state_id`); otherwise it's in-memory for that run
+  only, and a rerun starts from the first tip again — replace or refresh the
+  physical rack between runs in that case.
 - `speed` *(float, default `50.0`)* — approach/pick-up speed.
 
 #### `aspirate`
