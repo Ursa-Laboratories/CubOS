@@ -434,6 +434,38 @@ describe("ProtocolEditor", () => {
     ]);
   });
 
+  it("does not inject a method arg into commands that do not declare one", async () => {
+    const user = userEvent.setup();
+    const decap: CommandInfo = {
+      name: "decap",
+      description: "Decap",
+      args: [
+        { name: "instrument", type: "str", required: true, default: null },
+        { name: "vial", type: "str", required: true, default: null },
+      ],
+    };
+    const props = renderProtocol({
+      commands: [...COMMANDS, decap],
+      gantry: {
+        ...GANTRY,
+        config: {
+          ...GANTRY.config,
+          instruments: {
+            ...GANTRY.config.instruments,
+            capper: { type: "capper", vendor: "pawduino", offset_x: 0, offset_y: 0 },
+          },
+        },
+      },
+      steps: [{ command: "decap", args: { instrument: "asmi", vial: "plate_1.A1" } }],
+    });
+
+    await user.selectOptions(screen.getByRole("combobox", { name: /Instrument/ }), "capper");
+
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([
+      { command: "decap", args: { instrument: "capper", vial: "plate_1.A1" } },
+    ]);
+  });
+
   it("omits indentation_limit_height instead of saving an empty string when cleared, for measure", async () => {
     const user = userEvent.setup();
     const props = renderProtocol({
