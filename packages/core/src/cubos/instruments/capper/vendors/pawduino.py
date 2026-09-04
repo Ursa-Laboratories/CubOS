@@ -73,7 +73,6 @@ class PawduinoCapper(CapperInstrument):
         self,
         *,
         engage_depth_mm: float,
-        park_position: tuple,
         capture_retries: int = 2,
         capture_settle_s: float = 1.0,
         port: str = "",
@@ -88,7 +87,6 @@ class PawduinoCapper(CapperInstrument):
     ):
         super().__init__(
             engage_depth_mm=engage_depth_mm,
-            park_position=park_position,
             capture_retries=capture_retries,
             capture_settle_s=capture_settle_s,
             name=name, offset_x=offset_x, offset_y=offset_y,

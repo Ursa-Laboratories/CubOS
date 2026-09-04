@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import io
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -366,7 +367,8 @@ def test_export_campaign_results_csvs_writes_via_atomic_replace(monkeypatch, tmp
 
 
 def test_results_directory_is_gitignored():
-    assert "data/results/" in open(".gitignore", encoding="utf-8").read()
+    gitignore = Path(__file__).resolve().parents[4] / ".gitignore"
+    assert "data/results/" in gitignore.read_text(encoding="utf-8")
 
 
 def test_export_timestamp_converts_space_to_t_and_adds_z():

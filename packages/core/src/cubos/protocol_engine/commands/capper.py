@@ -22,9 +22,10 @@ Sequencing is fixed and explicit for every decap/cap action:
    happen after the retract: at engage depth the line-break beam is broken
    by the cap whether it is held by the tool or sitting on the vial, so the
    reading is meaningless until the tool has lifted clear.
-5. **park** -- move to the instrument's configured ``park_position`` at
-   ``safe_z``, so a captured/just-released cap is never left hovering over
-   open labware.
+
+The tool is left at ``safe_z`` above the vial. There is no lateral park
+leg: the next command's ``move_to_labware`` lifts to the multi-tool ceiling
+before any XY travel, and every raw XY move does the same.
 
 A timeout or a sensor reading that contradicts the expected state after all
 retries FAILS CLOSED: the tool is retracted to ``safe_z`` on a best-effort
@@ -243,19 +244,6 @@ def _run_capper_sequence(
             "further liquid handling involving this vial."
         ) from exc
 
-    # Step 5: park (already at safe_z after the confirmed retract).
-    try:
-        park_x, park_y = capper.park_position
-        context.gantry.move(instrument, (park_x, park_y, context.gantry.safe_z))  # park
-    except BaseException as exc:
-        if operation_key is not None:
-            _mark_cap_uncertain(context, operation_key, exc)
-        raise ProtocolExecutionError(
-            f"{command_label} park failed for {vial!r} after a "
-            f"successful {'capture' if capturing else 'release'}: "
-            f"{type(exc).__name__}: {exc}. Reconciliation is required."
-        ) from exc
-
     if operation_key is not None:
         try:
             context.data_store.complete_cap_operation(operation_key)
@@ -290,7 +278,7 @@ def decap(context: "ProtocolContext", instrument: str, vial: str) -> None:
 
     Approaches at ``safe_z``, engages at the instrument's configured
     ``engage_depth_mm``, captures the cap (sensor-confirmed, with retries),
-    retracts, and parks. When durable fluid/cap tracking is active
+    and retracts to ``safe_z``. When durable fluid/cap tracking is active
     (``context.fluid_state_id``), the vial must currently be tracked
     ``capped``; the operation is journaled with the same two-phase
     begin/complete pattern as tip pickups, and marked
@@ -305,7 +293,7 @@ def cap(context: "ProtocolContext", instrument: str, vial: str) -> None:
     """Replace the cap on *vial* using a capper instrument.
 
     Mirrors ``decap``: approach, engage, release (sensor-confirmed cap no
-    longer held), retract, park. When durable fluid/cap tracking is active,
+    longer held), retract. When durable fluid/cap tracking is active,
     the vial must currently be tracked ``uncapped``.
     """
     _run_capper_sequence(context, instrument, vial, capturing=False, command_label="cap")
