@@ -288,6 +288,10 @@ instruments:
     capture_settle_s: 1.0
 ```
 
+`park_position` is retired: `decap`/`cap` leave the tool at `safe_z` above
+the vial and the next command lifts before it travels. A config that still
+carries the key loads with a warning and the key is ignored; delete it.
+
 `engage_depth_mm`/`capture_retries`/`capture_settle_s` are
 required, not driver defaults — every capper's decap/cap motion sequence
 comes entirely from this config, never hardcoded. `vendor: mock` is an

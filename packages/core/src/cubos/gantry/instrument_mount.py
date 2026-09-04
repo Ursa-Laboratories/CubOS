@@ -137,6 +137,8 @@ class InstrumentedGantry:
         candidates = []
         if self.safe_z is not None:
             candidates.append(float(self.safe_z))
+        # The multi-tool guarantee needs working_volume.z_max on the controller
+        # config; without it only safe_z (the active tool's own clearance) applies.
         ceiling = self._gantry_z_ceiling()
         if ceiling is not None:
             candidates.append(ceiling - self._effective_depth(instr))
