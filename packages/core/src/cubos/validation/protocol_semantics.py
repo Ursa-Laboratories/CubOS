@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from cubos.gantry.instrument_mount import InstrumentedGantry
+from cubos.data.cap_state import CapStateError, resolve_cap_target
 from cubos.deck.deck import Deck
 from cubos.deck.labware.container_role import STOCK, WASTE
 from cubos.deck.labware.tip_rack import (
@@ -1783,6 +1784,130 @@ def _validate_asmi_indentation(
     return violations
 
 
+def _validate_instrument_reference(
+    *,
+    step_index: int,
+    command_name: str,
+    instrument: Any,
+    field_name: str,
+    instrumented_gantry: InstrumentedGantry,
+) -> list[ProtocolSemanticViolation]:
+    """Check that an instrument-name argument names a mounted instrument."""
+    if instrument not in instrumented_gantry.instruments:
+        return [_violation(
+            step_index,
+            command_name,
+            f"unknown {field_name} {instrument!r}. Available: "
+            f"{', '.join(sorted(instrumented_gantry.instruments.keys()))}.",
+        )]
+    return []
+
+
+def _validate_cure_command(
+    *,
+    step_index: int,
+    args: dict[str, Any],
+    instrumented_gantry: InstrumentedGantry,
+    deck: Deck,
+) -> list[ProtocolSemanticViolation]:
+    """Check ``cure``'s ``instrument``/``position`` resolve.
+
+    ``cure`` is a thin wrapper over ``measure``'s travel machinery but is
+    dispatched separately here (rather than through ``_validate_measure_command``)
+    because its instrument is a UV-curing device, not a sensor -- the ASMI
+    indentation/bounds machinery ``_validate_measure_command`` also runs
+    does not apply and would mislabel violations under a ``measure`` command
+    name.
+    """
+    instrument_violations = _validate_instrument_reference(
+        step_index=step_index,
+        command_name="cure",
+        instrument=args.get("instrument"),
+        field_name="instrument",
+        instrumented_gantry=instrumented_gantry,
+    )
+    if instrument_violations:
+        return instrument_violations
+    position = args.get("position")
+    try:
+        deck.resolve_coordinate(position)
+    except (KeyError, AttributeError, ValueError) as exc:
+        return [_violation(
+            step_index,
+            "cure",
+            f"position {position!r} cannot be resolved on the deck: {exc}",
+        )]
+    return []
+
+
+def _validate_cap_decap_command(
+    *,
+    step_index: int,
+    command_name: str,
+    args: dict[str, Any],
+    instrumented_gantry: InstrumentedGantry,
+    deck: Deck,
+) -> list[ProtocolSemanticViolation]:
+    """Check ``cap``/``decap``'s ``instrument``/``vial`` resolve."""
+    instrument_violations = _validate_instrument_reference(
+        step_index=step_index,
+        command_name=command_name,
+        instrument=args.get("instrument"),
+        field_name="instrument",
+        instrumented_gantry=instrumented_gantry,
+    )
+    if instrument_violations:
+        return instrument_violations
+    vial = args.get("vial")
+    try:
+        resolve_cap_target(deck, vial)
+    except CapStateError as exc:
+        return [_violation(
+            step_index,
+            command_name,
+            f"vial {vial!r} cannot be resolved on the deck: {exc}",
+        )]
+    return []
+
+
+def _validate_image_well_command(
+    *,
+    step_index: int,
+    args: dict[str, Any],
+    instrumented_gantry: InstrumentedGantry,
+    deck: Deck,
+) -> list[ProtocolSemanticViolation]:
+    """Check ``image_well``'s ``camera``/``lights``/``well`` resolve."""
+    violations = _validate_instrument_reference(
+        step_index=step_index,
+        command_name="image_well",
+        instrument=args.get("camera"),
+        field_name="camera",
+        instrumented_gantry=instrumented_gantry,
+    )
+    lights = args.get("lights")
+    if lights is not None:
+        violations.extend(_validate_instrument_reference(
+            step_index=step_index,
+            command_name="image_well",
+            instrument=lights,
+            field_name="lights instrument",
+            instrumented_gantry=instrumented_gantry,
+        ))
+    if violations:
+        return violations
+    well = args.get("well")
+    try:
+        deck.resolve_coordinate(well)
+    except (KeyError, AttributeError, ValueError) as exc:
+        return [_violation(
+            step_index,
+            "image_well",
+            f"well {well!r} cannot be resolved on the deck: {exc}",
+        )]
+    return []
+
+
 def validate_protocol_semantics(
     protocol: Protocol,
     instrumented_gantry: InstrumentedGantry,
@@ -1834,6 +1959,28 @@ def validate_protocol_semantics(
                 gantry=gantry,
                 current_poses=current_poses,
                 pipette_tip_extension=pipette_tip_state.tip_extension,
+            ))
+        elif step.command_name == "cure":
+            violations.extend(_validate_cure_command(
+                step_index=step.index,
+                args=step.args,
+                instrumented_gantry=instrumented_gantry,
+                deck=deck,
+            ))
+        elif step.command_name in ("cap", "decap"):
+            violations.extend(_validate_cap_decap_command(
+                step_index=step.index,
+                command_name=step.command_name,
+                args=step.args,
+                instrumented_gantry=instrumented_gantry,
+                deck=deck,
+            ))
+        elif step.command_name == "image_well":
+            violations.extend(_validate_image_well_command(
+                step_index=step.index,
+                args=step.args,
+                instrumented_gantry=instrumented_gantry,
+                deck=deck,
             ))
         else:
             pipette_violations, pipette_tip_state = _validate_pipette_command(
