@@ -312,6 +312,10 @@ applied and a rerun never re-applies committed liquid.
   (`reconciliation_required`, or never registered). Explicit opt-in only —
   never runs `decap` itself; a target with no durable cap state at all is
   not constrained by this check.
+- `blow_out` *(bool, default `false`)* — run the pipette's calibrated
+  blow-out motion once, right after the final stroke's dispense, to clear
+  any fluid left in the tip. Does not change the tracked dispense volume;
+  a blow-out failure is treated the same as a dispense failure.
 
 #### `serial_transfer`
 
