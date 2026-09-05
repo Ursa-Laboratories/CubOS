@@ -1,0 +1,135 @@
+name: Weekly release
+
+on:
+  schedule:
+    # Sundays at 08:00 UTC.
+    - cron: "0 8 * * 0"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      last_tag: ${{ steps.last_tag.outputs.last_tag }}
+      has_changes: ${{ steps.changes.outputs.has_changes }}
+      new_tag: ${{ steps.new_tag.outputs.new_tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Find last release tag
+        id: last_tag
+        run: |
+          last_tag="$(git tag --list 'v[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]*' --sort=-creatordate | head -n1)"
+          echo "last_tag=$last_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Skip if there are no commits since the last release
+        id: changes
+        run: |
+          last_tag="${{ steps.last_tag.outputs.last_tag }}"
+          if [[ -z "$last_tag" ]]; then
+            echo "No prior release tag found; will cut the first release."
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            count="$(git rev-list --count "$last_tag..HEAD")"
+            echo "$count commit(s) on main since $last_tag"
+            if [[ "$count" -eq 0 ]]; then
+              echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "has_changes=true" >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Compute this week's calver tag
+        id: new_tag
+        if: steps.changes.outputs.has_changes == 'true'
+        run: |
+          candidate="v$(date -u +%Y.%m.%d)"
+          # workflow_dispatch could run more than once on the same UTC day;
+          # append a numeric suffix rather than fail the release.
+          tag="$candidate"
+          suffix=2
+          while git rev-parse -q --verify "refs/tags/$tag" >/dev/null; do
+            tag="${candidate}.${suffix}"
+            suffix=$((suffix + 1))
+          done
+          echo "new_tag=$tag" >> "$GITHUB_OUTPUT"
+
+  test:
+    needs: check
+    if: needs.check.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install core and API dependencies
+        run: |
+          pip install -e "packages/core[dev]"
+          pip install -e "services/api[dev]"
+
+      - name: Run core tests
+        run: python -m pytest packages/core/tests -q
+
+      - name: Run API tests
+        run: python -m pytest services/api/tests -q
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/operator-web/package-lock.json
+
+      - name: Install locked frontend dependencies
+        working-directory: apps/operator-web
+        run: npm ci
+
+      - name: Test frontend
+        working-directory: apps/operator-web
+        run: npm run test -- --run
+
+      - name: Build frontend
+        working-directory: apps/operator-web
+        run: npm run build
+
+  release:
+    needs: [check, test]
+    if: needs.check.outputs.has_changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: main
+
+      - name: Create annotated tag and GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_TAG: ${{ needs.check.outputs.new_tag }}
+          LAST_TAG: ${{ needs.check.outputs.last_tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          if [[ -n "$LAST_TAG" ]]; then
+            notes="$(git log --oneline "$LAST_TAG"..HEAD)"
+          else
+            notes="$(git log --oneline)"
+          fi
+
+          git tag -a "$NEW_TAG" -m "CubOS $NEW_TAG" -m "$notes"
+          git push origin "$NEW_TAG"
+
+          gh release create "$NEW_TAG" \
+            --title "$NEW_TAG" \
+            --notes "$notes"

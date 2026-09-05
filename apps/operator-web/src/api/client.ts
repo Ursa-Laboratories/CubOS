@@ -7,6 +7,8 @@ export type SettingsResponse = {
 export type UpdateStatus = {
   current_sha: string;
   latest_sha: string;
+  current_ref: string | null;
+  latest_ref: string | null;
   commits_behind: number;
   update_available: boolean;
   checked_at: number;

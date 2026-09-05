@@ -68,6 +68,7 @@ class CubOSSettings(BaseSettings):
     expected_gantry_sha256: str | None = None
     expected_deck_sha256: str | None = None
     update_branch: str = "main"
+    update_mode: str = "tag"
     update_repo_dir: Path | None = None
     update_script: Path | None = None
     update_service: str = "cubos"

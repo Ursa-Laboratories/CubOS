@@ -37,6 +37,11 @@ class UpdateLaunchError(RuntimeError):
 class UpdateStatus(BaseModel):
     current_sha: str
     latest_sha: str
+    # Release tag names for display, populated only in "tag" update mode.
+    # current_ref is None whenever HEAD isn't exactly a released tag (e.g.
+    # a dev checkout ahead of the last release).
+    current_ref: str | None = None
+    latest_ref: str | None = None
     commits_behind: int
     update_available: bool
     checked_at: float
@@ -116,14 +121,12 @@ def check_for_update(*, refresh: bool = False) -> UpdateStatus:
         ):
             return _cache.model_copy(deep=True)
 
-        branch = get_settings().update_branch
+        settings = get_settings()
         try:
-            _git(repo, "fetch", "--quiet", "origin", branch)
-            latest_sha = _git(repo, "rev-parse", f"origin/{branch}")
-            commits_behind = int(
-                _git(repo, "rev-list", "--count", f"HEAD..origin/{branch}")
-            )
-            log_output = _git(repo, "log", "--oneline", f"HEAD..origin/{branch}")
+            if settings.update_mode == "tag":
+                status = _check_tag_update(repo, current_sha)
+            else:
+                status = _check_branch_update(repo, current_sha, settings.update_branch)
         except (
             subprocess.CalledProcessError,
             subprocess.TimeoutExpired,
@@ -132,17 +135,66 @@ def check_for_update(*, refresh: bool = False) -> UpdateStatus:
         ) as exc:
             return _failure_status(exc, current_sha=current_sha)
 
-        status = UpdateStatus(
-            current_sha=current_sha,
-            latest_sha=latest_sha,
-            commits_behind=commits_behind,
-            update_available=commits_behind > 0,
-            checked_at=time.time(),
-            summary=log_output.splitlines()[:10],
-            error=None,
-        )
         _cache = status
         return status.model_copy(deep=True)
+
+
+def _check_branch_update(repo: Path, current_sha: str, branch: str) -> UpdateStatus:
+    _git(repo, "fetch", "--quiet", "origin", branch)
+    latest_sha = _git(repo, "rev-parse", f"origin/{branch}")
+    commits_behind = int(_git(repo, "rev-list", "--count", f"HEAD..origin/{branch}"))
+    log_output = _git(repo, "log", "--oneline", f"HEAD..origin/{branch}")
+    return UpdateStatus(
+        current_sha=current_sha,
+        latest_sha=latest_sha,
+        commits_behind=commits_behind,
+        update_available=commits_behind > 0,
+        checked_at=time.time(),
+        summary=log_output.splitlines()[:10],
+        error=None,
+    )
+
+
+def _check_tag_update(repo: Path, current_sha: str) -> UpdateStatus:
+    _git(repo, "fetch", "--quiet", "--tags", "origin")
+    latest_tags = _git(
+        repo, "for-each-ref", "refs/tags", "--sort=-creatordate", "--format=%(refname:short)"
+    ).splitlines()
+    if not latest_tags:
+        return UpdateStatus(
+            current_sha=current_sha,
+            latest_sha=current_sha,
+            commits_behind=0,
+            update_available=False,
+            checked_at=time.time(),
+            summary=[],
+            error=None,
+        )
+
+    latest_tag = latest_tags[0]
+    latest_sha = _git(repo, "rev-parse", f"{latest_tag}^{{commit}}")
+    try:
+        current_ref: str | None = _git(repo, "describe", "--tags", "--exact-match", "HEAD")
+    except subprocess.CalledProcessError:
+        current_ref = None
+
+    commits_behind = 0
+    log_output = ""
+    if latest_sha != current_sha:
+        commits_behind = int(_git(repo, "rev-list", "--count", f"HEAD..{latest_tag}"))
+        log_output = _git(repo, "log", "--oneline", f"HEAD..{latest_tag}")
+
+    return UpdateStatus(
+        current_sha=current_sha,
+        latest_sha=latest_sha,
+        current_ref=current_ref,
+        latest_ref=latest_tag,
+        commits_behind=commits_behind,
+        update_available=latest_sha != current_sha,
+        checked_at=time.time(),
+        summary=log_output.splitlines()[:10],
+        error=None,
+    )
 
 
 def apply_update(target_sha: str) -> None:

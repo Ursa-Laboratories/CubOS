@@ -27,13 +27,18 @@ def _isolate_updater(tmp_path, monkeypatch):
     settings = get_settings()
     original_repo = settings.update_repo_dir
     original_script = settings.update_script
+    original_mode = settings.update_mode
     settings.update_repo_dir = None
     settings.update_script = None
+    # Individual tests opt into tag mode explicitly; most fixtures here drive
+    # branch-style git command sequences.
+    settings.update_mode = "branch"
     updater.reset_update_cache()
     yield
     updater.reset_update_cache()
     settings.update_repo_dir = original_repo
     settings.update_script = original_script
+    settings.update_mode = original_mode
 
 
 def _git_runner(*, behind: int = 2):
@@ -103,6 +108,97 @@ def test_get_update_status_returns_git_failure_as_data(monkeypatch):
     assert response.status_code == 200
     assert response.json()["update_available"] is False
     assert "network unavailable" in response.json()["error"]
+
+
+LATEST_TAG = "v2026.08.10"
+PREV_TAG = "v2026.08.03"
+
+
+def _git_tag_runner(*, behind: int = 2, exact_tag: str | None = None):
+    calls: list[tuple[str, ...]] = []
+
+    def run(command: list[str]) -> str:
+        calls.append(tuple(command))
+        args = command[3:]
+        if args == ["rev-parse", "HEAD"]:
+            return CURRENT_SHA
+        if args[:2] == ["fetch", "--quiet"]:
+            return ""
+        if args[:2] == ["for-each-ref", "refs/tags"]:
+            return f"{LATEST_TAG}\n{PREV_TAG}"
+        if args == ["rev-parse", f"{LATEST_TAG}^{{commit}}"]:
+            return LATEST_SHA if behind else CURRENT_SHA
+        if args == ["describe", "--tags", "--exact-match", "HEAD"]:
+            if exact_tag is None:
+                raise subprocess.CalledProcessError(1, command, stderr="no tag matches")
+            return exact_tag
+        if args[:2] == ["rev-list", "--count"]:
+            return str(behind)
+        if args[:2] == ["log", "--oneline"]:
+            return "2222222 second change\n1111111 first change" if behind else ""
+        raise AssertionError(f"unexpected git command: {command}")
+
+    return run, calls
+
+
+def test_get_update_status_tag_mode_reports_availability(monkeypatch):
+    get_settings().update_mode = "tag"
+    run, _ = _git_tag_runner(behind=2)
+    monkeypatch.setattr(updater, "_run_git", run)
+
+    response = api_request(create_app(), "GET", "/api/v1/system/update")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["current_sha"] == CURRENT_SHA
+    assert body["latest_sha"] == LATEST_SHA
+    assert body["latest_ref"] == LATEST_TAG
+    assert body["current_ref"] is None
+    assert body["commits_behind"] == 2
+    assert body["update_available"] is True
+    assert body["summary"] == ["2222222 second change", "1111111 first change"]
+    assert body["error"] is None
+
+
+def test_get_update_status_tag_mode_up_to_date(monkeypatch):
+    get_settings().update_mode = "tag"
+    run, _ = _git_tag_runner(behind=0, exact_tag=LATEST_TAG)
+    monkeypatch.setattr(updater, "_run_git", run)
+
+    response = api_request(create_app(), "GET", "/api/v1/system/update")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["latest_sha"] == CURRENT_SHA
+    assert body["current_ref"] == LATEST_TAG
+    assert body["latest_ref"] == LATEST_TAG
+    assert body["commits_behind"] == 0
+    assert body["update_available"] is False
+    assert body["summary"] == []
+
+
+def test_get_update_status_tag_mode_no_tags_yet(monkeypatch):
+    get_settings().update_mode = "tag"
+
+    def run(command: list[str]) -> str:
+        args = command[3:]
+        if args == ["rev-parse", "HEAD"]:
+            return CURRENT_SHA
+        if args[:2] == ["fetch", "--quiet"]:
+            return ""
+        if args[:2] == ["for-each-ref", "refs/tags"]:
+            return ""
+        raise AssertionError(f"unexpected git command: {command}")
+
+    monkeypatch.setattr(updater, "_run_git", run)
+
+    response = api_request(create_app(), "GET", "/api/v1/system/update")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["update_available"] is False
+    assert body["latest_ref"] is None
+    assert body["error"] is None
 
 
 def test_apply_update_rejects_active_run(monkeypatch):

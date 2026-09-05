@@ -1,7 +1,14 @@
 # CubOS Pi in-app updates
 
-The Operator UI checks `origin/main` for new CubOS revisions. When an operator
-chooses **Update & restart**, the API launches `update.sh` as a detached
+By default (`CUBOS_UPDATE_MODE=tag`) the Operator UI checks for the most
+recently tagged CubOS release (calver, e.g. `v2026.08.10`) rather than
+tracking `origin/main` HEAD directly — merging to `main` is not the same as
+releasing to appliances. Release tags are cut by the
+`.github/workflows/weekly-release.yml` scheduled workflow (Sundays), which
+skips quiet weeks with no new commits. Set `CUBOS_UPDATE_MODE=branch` to fall
+back to tracking `origin/main` HEAD directly (useful for development).
+
+When an operator chooses **Update & restart**, the API launches `update.sh` as a detached
 `cubos-update` systemd unit running as the service user (`cub`), never as
 root — repo code (git checkout, pip build hooks, npm scripts) must not
 execute with elevated privileges. Root is borrowed only for the single
@@ -45,11 +52,15 @@ sudo visudo -cf /etc/sudoers.d/cubos-update
 The API service supports these settings through its environment:
 
 ```ini
+CUBOS_UPDATE_MODE=tag
 CUBOS_UPDATE_BRANCH=main
 CUBOS_UPDATE_REPO_DIR=/home/cub/CubOS
 CUBOS_UPDATE_SCRIPT=/home/cub/CubOS/deploy/pi/update.sh
 CUBOS_UPDATE_SERVICE=cubos
 ```
+
+`CUBOS_UPDATE_BRANCH` only matters in `branch` mode; `tag` mode always
+resolves the latest tag regardless of branch.
 
 For a non-default script invocation, `update.sh` also accepts
 `CUBOS_REPO`, `CUBOS_VENV`, `CUBOS_SERVICE`, and `CUBOS_HEALTH_URL`. Update the
@@ -78,11 +89,13 @@ a detached session and appends output to `~/.cubos/update.log`.
 
 ## Manual rollback
 
-Find the last known-good revision in the updater journal, then run:
+Find the last known-good revision — in `tag` mode the update banner and
+journal name release tags (e.g. `v2026.08.03`) rather than raw SHAs; a tag
+name works anywhere a SHA does below — then run:
 
 ```bash
 cd /home/cub/CubOS
-git checkout --detach <previous-sha>
+git checkout --detach <previous-tag-or-sha>
 /home/cub/CubOS/.venv/bin/pip install -e packages/core -e services/api
 sudo systemctl restart cubos
 curl --fail http://127.0.0.1:8742/api/v1/health
