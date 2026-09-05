@@ -1,0 +1,121 @@
+name: Weekly Release
+
+# Deliberate release gate for the Pi in-app updater (see #284): merging to
+# main is not shipping to appliances. Tags the repo with a calver release
+# (vYYYY.MM.DD) once a week when there is something new to ship, after the
+# test suite passes. Appliances in tag mode (CUBOS_UPDATE_MODE=tag, the
+# default) only offer an update when a new tag lands here.
+
+on:
+  schedule:
+    - cron: "0 8 * * 0" # Sundays, 08:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Find last release tag and check for new commits
+        id: check
+        run: |
+          set -euo pipefail
+          git fetch --quiet --tags origin
+          LAST_TAG=$(git tag --list 'v[0-9][0-9][0-9][0-9].[0-9][0-9].[0-9][0-9]' | sort | tail -n1)
+          echo "last_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
+          if [[ -z "$LAST_TAG" ]]; then
+            COUNT=$(git rev-list --count HEAD)
+          else
+            COUNT=$(git rev-list --count "$LAST_TAG..HEAD")
+          fi
+          if [[ "$COUNT" -eq 0 ]]; then
+            echo "No commits since ${LAST_TAG:-repository start}; skipping release."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$COUNT commit(s) since ${LAST_TAG:-repository start}."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v5
+        if: steps.check.outputs.should_release == 'true'
+        with:
+          python-version: "3.12"
+
+      - uses: actions/setup-node@v4
+        if: steps.check.outputs.should_release == 'true'
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: apps/operator-web/package-lock.json
+
+      - name: Test core
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          pip install -e "packages/core[dev]"
+          python -m pytest packages/core/tests -q
+
+      - name: Test API
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          pip install -e packages/core
+          pip install -e "services/api[dev]"
+          python -m pytest services/api/tests -q
+
+      - name: Test client SDK
+        if: steps.check.outputs.should_release == 'true'
+        run: |
+          pip install -e "sdk/python[dev]"
+          python -m pytest sdk/python/tests -q
+
+      - name: Test and build the operator web app
+        if: steps.check.outputs.should_release == 'true'
+        working-directory: apps/operator-web
+        run: |
+          npm ci
+          npm run lint
+          npm run test -- --run
+          npm run build
+
+      - name: Compute release tag
+        if: steps.check.outputs.should_release == 'true'
+        id: new_tag
+        run: |
+          set -euo pipefail
+          NEW_TAG="v$(date -u +'%Y.%m.%d')"
+          if git rev-parse "$NEW_TAG" >/dev/null 2>&1; then
+            echo "Tag $NEW_TAG already exists; skipping release." >&2
+            echo "new_tag=" >> "$GITHUB_OUTPUT"
+          else
+            echo "new_tag=$NEW_TAG" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push release tag
+        if: steps.check.outputs.should_release == 'true' && steps.new_tag.outputs.new_tag != ''
+        env:
+          NEW_TAG: ${{ steps.new_tag.outputs.new_tag }}
+          LAST_TAG: ${{ steps.check.outputs.last_tag }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [[ -n "$LAST_TAG" ]]; then
+            git log --oneline "$LAST_TAG..HEAD" > release-notes.md
+          else
+            git log --oneline > release-notes.md
+          fi
+          git tag -a "$NEW_TAG" -m "CubOS $NEW_TAG"
+          git push origin "$NEW_TAG"
+
+      - name: Create GitHub release
+        if: steps.check.outputs.should_release == 'true' && steps.new_tag.outputs.new_tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NEW_TAG: ${{ steps.new_tag.outputs.new_tag }}
+        run: gh release create "$NEW_TAG" --title "$NEW_TAG" --notes-file release-notes.md
