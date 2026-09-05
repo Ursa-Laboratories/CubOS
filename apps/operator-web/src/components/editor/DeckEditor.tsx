@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import type { DeckResponse, GantryPosition, GantryResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, WellPlateHolderConfig, Coordinate3D, DeckConfig } from "../../types";
-import { Coordinate2DField, CoordinateField, NumberField, OptionalNumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
-import ImportFromFile from "./ImportFromFile";
+import { Coordinate2DField, CoordinateField, NumberField, OptionalNumberField, SaveButton, SaveTargetHint, SavedStatus, TextField, UnsavedNotice } from "./fields";
+import { useSaveShortcut } from "./saveHelpers";
+import ConfigFilePicker from "./ConfigFilePicker";
+import { normalizeYamlFilename } from "./field-utils";
 import LabwareCalibrationModal from "../deck/LabwareCalibrationModal";
 import RawYamlPanel from "./RawYamlPanel";
 import { useConfirm } from "../common/useConfirm";
@@ -12,6 +14,11 @@ interface Props {
   selectedFile: string | null;
   onSelectFile: (f: string) => void;
   onImportFile: (f: string) => void;
+  onNewFile?: () => void;
+  onDeleteFile?: (f: string) => void;
+  deleteDisabledReason?: string | null;
+  /** Last successful save on this tab, shown as a "Saved" acknowledgement. */
+  lastSaved?: { filename: string; at: Date } | null;
   importedFrom?: string | null;
   deck: DeckResponse | null;
   /** The last-saved (server-loaded) deck, used to reset local edits when
@@ -152,7 +159,7 @@ function labwareFromDeck(deck: DeckResponse | null): Record<string, LabwareConfi
   return obj;
 }
 
-export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, importedFrom, deck, baseline, onSave, onLocalChange, dirty, onRefresh, gantry = null, position = null, isRunning = false }: Props) {
+export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, onNewFile, onDeleteFile, deleteDisabledReason, lastSaved, importedFrom, deck, baseline, onSave, onLocalChange, dirty, onRefresh, gantry = null, position = null, isRunning = false }: Props) {
   const [labware, setLabware] = useState<Record<string, LabwareConfig>>(() => labwareFromDeck(deck));
   const [calibrateOpen, setCalibrateOpen] = useState(false);
   const [saveAs, setSaveAs] = useState("");
@@ -217,10 +224,14 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
     setSaveError(null);
   };
 
+  const saveAsFilename = normalizeYamlFilename(saveAs);
+  const saveAsExists = !!saveAsFilename && configs.includes(saveAsFilename);
+
   const handleSave = async () => {
     if (!canSave) return;
-    const filename = saveAs.trim() || selectedFile || "";
-    const normalized = filename.endsWith(".yaml") ? filename : `${filename}.yaml`;
+    const normalized = saveAsFilename || selectedFile || "";
+    if (!normalized) return;
+    if (saveAsExists && normalized !== selectedFile && !(await confirmOverwrite(normalized))) return;
     setSaving(true);
     try {
       await Promise.resolve(onSave(normalized, { labware }));
@@ -233,6 +244,15 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
       setSaving(false);
     }
   };
+
+  const confirmOverwrite = (filename: string) => requestConfirm({
+    title: "Overwrite file?",
+    message: `${filename} already exists. Overwrite it?`,
+    confirmLabel: "Overwrite",
+    danger: true,
+  });
+
+  useSaveShortcut(handleSave, canSave);
 
   const handleDiscard = async () => {
     const confirmed = await requestConfirm({
@@ -249,7 +269,18 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
 
   return (
     <div>
-      <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import deck config" selectedFile={importedFrom ?? selectedFile} />
+      <ConfigFilePicker
+        kind="Deck"
+        configs={configs}
+        selectedFile={importedFrom ?? selectedFile}
+        onSelectFile={onImportFile}
+        onNew={onNewFile}
+        onDelete={onDeleteFile}
+        deleteDisabledReason={deleteDisabledReason}
+        note={importedFrom && selectedFile
+          ? <>Opened as a working copy: edits save to <span style={theme.mono}>{selectedFile}</span>, not to {importedFrom}.</>
+          : undefined}
+      />
 
       <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
         {(Object.keys(ADDABLE_LABWARE) as AddableLabwareType[]).map((type) => (
@@ -329,8 +360,9 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
         {saveError && (
           <div style={saveErrorStyle}>Save failed: {saveError}</div>
         )}
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
+            aria-label="Save as filename"
             value={saveAs}
             onChange={(e) => setSaveAs(e.target.value)}
             placeholder={selectedFile ?? "my_deck.yaml"}
@@ -343,7 +375,9 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           {dirty && (
             <button onClick={handleDiscard} style={discardBtnStyle}>Discard changes</button>
           )}
+          {lastSaved && !dirty && <SavedStatus filename={lastSaved.filename} at={lastSaved.at} />}
         </div>
+        <SaveTargetHint saveAs={saveAsFilename} selectedFile={selectedFile} exists={saveAsExists} />
         {!hasItems && (
           <p style={hintTextStyle}>Add at least one labware item before saving.</p>
         )}

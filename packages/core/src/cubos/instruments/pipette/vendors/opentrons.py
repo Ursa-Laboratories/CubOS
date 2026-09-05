@@ -17,7 +17,6 @@ from cubos.instruments.pipette.exceptions import (
 from cubos.instruments.pipette.liquid_class import build_liquid_classes
 from cubos.instruments.pipette.models import (
     AspirateResult,
-    MixResult,
     PipetteStatus,
     PlungerPipetteConfig,
     PIPETTE_MODELS,
@@ -28,7 +27,6 @@ _CMD_MOVE_TO = 11
 _CMD_ASPIRATE = 12
 _CMD_DISPENSE = 13
 _CMD_STATUS = 14
-_CMD_MIX = 15
 _CMD_DRIP_STOP = 28
 
 # The firmware replies only after a motion completes, and plunger motion is
@@ -254,20 +252,6 @@ class OpentronsPipette(PipetteInstrument):
         self._send_command(
             _CMD_MOVE_TO, self._config.blowout_position, _FIRMWARE_DEFAULT_SPEED,
             timeout=_MOTION_TIMEOUT,
-        )
-
-    def mix(
-        self, volume_ul: float, repetitions: int = 3, speed: float = 50.0
-    ) -> MixResult:
-        self._validate_volume(volume_ul)
-        if not self._offline:
-            mm_travel = volume_ul * self._config.mm_to_ul
-            self._send_command(
-                _CMD_MIX, mm_travel, repetitions, _FIRMWARE_DEFAULT_SPEED,
-                timeout=_MOTION_TIMEOUT
-            )
-        return MixResult(
-            success=True, volume_ul=volume_ul, repetitions=repetitions
         )
 
     def pick_up_tip(self, speed: float = 50.0) -> None:

@@ -158,8 +158,10 @@ approach and ends **above** the target (no descent).
   list, or a deck-target string.
 - `travel_z` *(float, default `null`)* — transit Z for literal/named XYZ moves:
   lift/lower to `travel_z` at the current XY, travel XY, then move to `position`.
-  Applies **only** to literal/named targets; supplying it with a deck target is
-  an error.
+  When omitted and the move changes XY, the gantry lifts to the working-volume
+  ceiling (`max(safe_z, z_max - instrument depth)`) before XY travel so every
+  mounted tool clears the deck; a Z-only move is sent as-is. Applies **only**
+  to literal/named targets; supplying it with a deck target is an error.
 
 ### `measure`
 
@@ -228,8 +230,15 @@ deliberate follow-up.
 
 Pick up a tip from a tip-rack slot, record its length, and mark the slot consumed.
 
-- `position` *(str, required)* — tip-rack slot, including the explicit tip slot
-  (e.g. `tips.A1`).
+- `position` *(str, required)* — either an explicit tip slot (e.g. `tips.A1`)
+  or just the rack name (e.g. `tips`), which auto-selects the next available
+  tip in the rack's tip order as the rack is used up. Prefer the rack-only
+  form for protocols that don't need a specific slot; it lets a rack be
+  worked through within a run without manually advancing the slot. Tip
+  consumption only persists across separate runs when durable fluid tracking
+  is active (`context.fluid_state_id`); otherwise it's in-memory for that run
+  only, and a rerun starts from the first tip again — replace or refresh the
+  physical rack between runs in that case.
 - `speed` *(float, default `50.0`)* — approach/pick-up speed.
 
 #### `aspirate`
@@ -251,11 +260,13 @@ Move to a position and blow out.
 
 #### `mix`
 
-Move to a position and mix in place (repeated aspirate/dispense).
+Move to a position and mix between two heights. Each cycle aspirates at
+`height`, rises 1 mm to dispense and aspirate again, then returns to `height`
+to dispense.
 
 - `position` *(str, required)* — deck target.
 - `volume_ul` *(float, required)* — mix volume (µL).
-- `repetitions` *(int, default `3`)* — number of mix cycles.
+- `cycles` *(int, default `3`)* — number of mix cycles.
 - `speed` *(float, default `50.0`)* — mix speed.
 - `height` *(float, default `0.0`)* — engage offset.
 
@@ -344,8 +355,9 @@ Motion is fixed and built entirely from generic gantry primitives, never
 hardcoded per vial: **approach** at `safe_z` → **engage** at the
 instrument's configured `engage_depth_mm` (a labware-relative Z offset) →
 **capture**/**release** (sensor-confirmed, retried up to the instrument's
-`capture_retries`) → **retract** to `safe_z` → **park** at the
-instrument's configured `park_position`. A sensor timeout or a reading
+`capture_retries`) → **retract** to `safe_z`. The tool is left above the
+vial; the next command lifts to the working-volume ceiling before any XY
+travel. A sensor timeout or a reading
 that contradicts the expected post-actuation state after all retries
 fails closed: the tool retracts to `safe_z` on a best-effort basis, the
 command raises, and — when durable fluid/cap tracking is active (see
@@ -439,7 +451,7 @@ actually saved. Motion failures still fail the run.
 reusable multi-step liquid-handling sequences by composing `transfer`/`mix`
 (they add no new preflight or journaling of their own — every safety guard,
 stroke split, and durable begin/complete step described under `transfer`
-above applies to each transfer they issue). `mix`'s existing `repetitions`
+above applies to each transfer they issue). `mix`'s existing `cycles`
 argument already covers "mix N times"; there is no separate compound mix
 command. Each also accepts `require_uncapped` (same contract as
 `transfer`'s — see [`transfer`](#transfer)), checked once up front before

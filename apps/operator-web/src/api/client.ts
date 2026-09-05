@@ -70,6 +70,8 @@ export const deckApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  delete: (filename: string) =>
+    request<{ status: string; filename: string }>(`/deck/${filename}`, { method: "DELETE" }),
   previewWells: (config: import("../types").WellPlateConfig | import("../types").TipRackConfig) =>
     request<Record<string, import("../types").WellPosition>>("/deck/preview-wells", {
       method: "POST",
@@ -97,6 +99,8 @@ export const gantryApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  delete: (filename: string) =>
+    request<{ status: string; filename: string }>(`/gantry/${filename}`, { method: "DELETE" }),
   getPosition: () =>
     request<import("../types").GantryPosition>("/gantry/position"),
   connect: (filename: string) =>
@@ -232,6 +236,8 @@ export const protocolApi = {
       method: "PUT",
       body: JSON.stringify(body),
     }),
+  delete: (filename: string) =>
+    request<{ status: string; filename: string }>(`/protocol/${filename}`, { method: "DELETE" }),
   validate: (body: import("../types").ProtocolConfig) =>
     request<import("../types").ProtocolValidationResponse>(
       "/protocol/validate",

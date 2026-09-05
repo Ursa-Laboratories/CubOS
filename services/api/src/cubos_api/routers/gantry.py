@@ -35,7 +35,7 @@ from pydantic import BaseModel, ValidationError, model_validator
 
 from cubos_api.config import get_settings
 from cubos_api.models.gantry import GantryPosition, GantryResponse
-from cubos_api.services.yaml_io import list_configs, read_yaml, resolve_config_path, write_yaml
+from cubos_api.services.yaml_io import delete_config, list_configs, read_yaml, resolve_config_path, write_yaml
 
 router = APIRouter(prefix="/api/v1/gantry", tags=["gantry"])
 
@@ -707,6 +707,22 @@ def put_gantry(filename: str, body: dict) -> GantryResponse:
     if session is not None:
         session.refresh_connected_config(filename, config_dict)
     return get_gantry(filename)
+
+
+@router.delete("/{filename}")
+def delete_gantry(filename: str) -> dict:
+    if run_active():
+        raise HTTPException(409, "Cannot delete a gantry config while a protocol run is active")
+    session = current_session()
+    if session is not None and session.connected_gantry_filename == filename:
+        raise HTTPException(409, f"{filename} is the connected gantry config; disconnect before deleting it")
+    try:
+        delete_config(get_settings().configs_dir, "gantry", filename)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except FileNotFoundError:
+        raise HTTPException(404, f"Config not found: {filename}")
+    return {"status": "deleted", "filename": filename}
 
 
 def request_feed_hold_interrupt() -> None:

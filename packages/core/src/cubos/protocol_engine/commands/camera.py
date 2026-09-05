@@ -218,7 +218,8 @@ def image_well(
     * ``standard`` — one shot: descend to ``well.z + image_height``.
     * ``curvature`` — Z-stack: descend ``z_step_mm`` per plane for
       ``z_steps`` planes; images are labeled ``{label}_z={absolute_z}mm_b{brightness}``,
-      where ``absolute_z`` is the deck-frame Z of that plane (well Z + offset).
+      where ``absolute_z`` is the carriage WPos Z at that plane (well Z +
+      offset + camera depth), matching the gantry readout.
 
     Lighting is part of the shot, not a separate step: ``light`` picks
     ``"off"`` (ambient), a lighting channel (e.g. ``"white"`` or
@@ -334,8 +335,10 @@ def image_well(
             if mode == "standard":
                 shot_label = base_label
             else:
-                absolute_z = coord.z + plane
-                z_text = f"{absolute_z:.3f}".replace(".", "-")
+                # Label with the carriage WPos Z the operator sees on the
+                # gantry readout, not the deck-frame focal plane.
+                wpos_z = coord.z + plane + context.gantry.instruments[camera].effective_depth
+                z_text = f"{wpos_z:.3f}".replace(".", "-")
                 shot_label = f"{base_label}_z={z_text}mm_b{level}"
             if lights_off:
                 _capture_one(shot_label)
