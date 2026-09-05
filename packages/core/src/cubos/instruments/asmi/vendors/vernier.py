@@ -327,12 +327,15 @@ class VernierASMI(ASMIInstrument):
 
         With ``detect_surface`` the probe first coarse-searches downward
         from the measurement plane until the baseline-corrected force
-        changes by more than ``surface_force_threshold``, backs off one
-        ``surface_search_step``, and anchors ``indentation_limit_height``
-        to that detected surface. Search samples are not recorded in the
-        measurement list — only the detected surface is reported in the
-        result. The search aborts with :class:`ASMICommandError` if no
-        surface is found within ``surface_search_max_travel`` mm.
+        changes by more than ``surface_force_threshold`` on two
+        consecutive reads at the same position (a crossing that doesn't
+        hold on re-read is treated as sensor noise and the search
+        continues), backs off one ``surface_search_step``, and anchors
+        ``indentation_limit_height`` to that detected surface. Search
+        samples are not recorded in the measurement list — only the
+        detected surface is reported in the result. The search aborts
+        with :class:`ASMICommandError` if no surface is found within
+        ``surface_search_max_travel`` mm.
         """
         _step_size, _force_limit, _baseline_samples = (
             self._resolve_indentation_settings(
@@ -528,12 +531,18 @@ class VernierASMI(ASMIInstrument):
     ) -> tuple[float, float]:
         """Coarse-step down from ``action_z`` until the surface is felt.
 
+        A threshold crossing must hold on an immediate re-read at the same
+        position before it's accepted as the surface; a crossing that
+        doesn't repeat is treated as sensor noise and the coarse search
+        continues downward from there (see #332 — a single noisy reading
+        was enough to false-lock the old single-sample check).
+
         Returns ``(surface_z, trigger_force_n)`` where ``surface_z`` is one
         search step above the trigger height (clamped to ``action_z``) and
         the gantry has been backed off to it. Search readings are not part
         of the measurement record. Raises :class:`ASMICommandError` when
-        the corrected force never exceeds ``force_threshold`` before the
-        search floor ``action_z - max_travel``.
+        the corrected force never exceeds ``force_threshold`` on two
+        consecutive reads before the search floor ``action_z - max_travel``.
         """
         floor_z = action_z - max_travel
         max_steps = _step_count_bound(action_z, floor_z, search_step)
@@ -550,20 +559,30 @@ class VernierASMI(ASMIInstrument):
             force = self.get_force_reading()
             corrected = force - baseline_avg
             if abs(corrected) > force_threshold:
+                confirm_corrected = self.get_force_reading() - baseline_avg
+                if abs(confirm_corrected) <= force_threshold:
+                    self.logger.info(
+                        "Threshold crossing at Z=%.3f mm (dF=%.4f N) did "
+                        "not hold on re-read (dF=%.4f N); treating as "
+                        "noise and continuing search.",
+                        coords["z"], corrected, confirm_corrected,
+                    )
+                    continue
                 surface_z = min(coords["z"] + search_step, action_z)
                 self.logger.info(
-                    "Surface detected at Z=%.3f mm (dF=%.4f N); "
-                    "backing off to %.3f mm",
-                    coords["z"], corrected, surface_z,
+                    "Surface detected at Z=%.3f mm (dF=%.4f N, confirmed "
+                    "%.4f N); backing off to %.3f mm",
+                    coords["z"], corrected, confirm_corrected, surface_z,
                 )
                 self._move_z(gantry, cur_x, cur_y, surface_z)
-                return surface_z, corrected
+                return surface_z, confirm_corrected
 
         raise ASMICommandError(
             f"Surface not detected within {max_travel:g} mm below the "
-            f"measurement plane (corrected force never exceeded "
-            f"{force_threshold:g} N). Check surface_force_threshold, "
-            "surface_search_max_travel, or the well's calibrated Z."
+            f"measurement plane (corrected force never sustained "
+            f"{force_threshold:g} N across two consecutive reads). Check "
+            "surface_force_threshold, surface_search_max_travel, or the "
+            "well's calibrated Z."
         )
 
     @staticmethod

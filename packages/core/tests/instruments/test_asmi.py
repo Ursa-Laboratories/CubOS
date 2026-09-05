@@ -386,6 +386,77 @@ class TestASMISurfaceDetection(unittest.TestCase):
                 if s["direction"] == "up"]
         self.assertAlmostEqual(up_z[-1], result["surface_z_mm"], places=6)
 
+    def test_transient_spike_is_rejected_and_search_continues(self):
+        """A single noisy reading over threshold must not lock the
+        surface — only a crossing confirmed on re-read is accepted."""
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+        reads_at_spike_z = {"n": 0}
+        spike_z = 8.0
+
+        def force_reading():
+            z = gantry._z
+            if z <= self.SURFACE_Z:
+                return self.CONTACT_FORCE
+            if z == spike_z:
+                reads_at_spike_z["n"] += 1
+                # First read spikes above threshold (sensor noise); the
+                # confirmation re-read at the same Z reports it's gone.
+                return self.CONTACT_FORCE if reads_at_spike_z["n"] == 1 else 0.0
+            return 0.0
+
+        with patch.object(asmi, "get_baseline_force", return_value=(0.0, 0.0)), \
+             patch.object(asmi, "get_force_reading", side_effect=force_reading):
+            result = asmi.indentation(
+                gantry,
+                well_z=0.0,
+                measurement_height=10.0,
+                indentation_limit_height=-1.0,
+                step_size=0.5,
+                force_limit=100.0,
+                baseline_samples=1,
+                detect_surface=True,
+                surface_search_step=1.0,
+                surface_force_threshold=0.01,
+                surface_search_max_travel=8.0,
+            )
+
+        # The Z=8 crossing was checked and rejected (2 reads: trigger + confirm).
+        self.assertEqual(reads_at_spike_z["n"], 2)
+        # The real, sustained surface at Z=6 is what gets detected.
+        self.assertAlmostEqual(result["surface_z_mm"], 7.0, places=6)
+        self.assertAlmostEqual(result["surface_trigger_force_n"],
+                               self.CONTACT_FORCE, places=6)
+
+    def test_unconfirmed_crossings_still_raise_if_never_sustained(self):
+        """If every threshold crossing fails to hold on re-read, the
+        search must still exhaust max_travel and raise, not false-lock."""
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+        call_count = {"n": 0}
+
+        def force_reading():
+            # Every read alternates above/below threshold, so no crossing
+            # is ever confirmed by an immediate re-read at the same Z.
+            call_count["n"] += 1
+            return self.CONTACT_FORCE if call_count["n"] % 2 == 1 else 0.0
+
+        with patch.object(asmi, "get_baseline_force", return_value=(0.0, 0.0)), \
+             patch.object(asmi, "get_force_reading", side_effect=force_reading):
+            with self.assertRaises(ASMICommandError):
+                asmi.indentation(
+                    gantry,
+                    well_z=0.0,
+                    measurement_height=10.0,
+                    indentation_limit_height=-1.0,
+                    step_size=0.5,
+                    baseline_samples=1,
+                    detect_surface=True,
+                    surface_search_step=1.0,
+                    surface_force_threshold=0.01,
+                    surface_search_max_travel=3.0,
+                )
+
     def test_no_surface_within_max_travel_raises(self):
         asmi = self._make_online_asmi()
         gantry = _FakeOnlineGantry(start_z=10.0)
