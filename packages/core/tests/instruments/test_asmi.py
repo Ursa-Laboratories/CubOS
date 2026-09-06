@@ -457,6 +457,75 @@ class TestASMISurfaceDetection(unittest.TestCase):
                     surface_search_max_travel=3.0,
                 )
 
+    def test_surface_search_aborts_immediately_on_hard_force_limit(self):
+        """A reading past the hard `force_limit` safety cutoff must abort
+        immediately, even though it also crosses `surface_force_threshold`
+        — it must not be routed through the noise-confirmation path, which
+        could otherwise let a real, over-limit contact be second-guessed
+        away as noise and stepped through."""
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+        reads = {"n": 0}
+
+        def force_reading():
+            reads["n"] += 1
+            return 5.0  # far past both surface_force_threshold and force_limit
+
+        with patch.object(asmi, "get_baseline_force", return_value=(0.0, 0.0)), \
+             patch.object(asmi, "get_force_reading", side_effect=force_reading):
+            with self.assertRaises(ASMICommandError):
+                asmi.indentation(
+                    gantry,
+                    well_z=0.0,
+                    measurement_height=10.0,
+                    indentation_limit_height=-1.0,
+                    step_size=0.5,
+                    force_limit=1.0,
+                    baseline_samples=1,
+                    detect_surface=True,
+                    surface_search_step=1.0,
+                    surface_force_threshold=0.01,
+                    surface_search_max_travel=8.0,
+                )
+
+        # Aborted on the very first reading — never reached (or needed) the
+        # noise-confirmation re-read.
+        self.assertEqual(reads["n"], 1)
+
+    def test_surface_search_aborts_on_hard_force_limit_at_confirmation_read(self):
+        """A crossing that's modest on the trigger read but spikes past the
+        hard `force_limit` on the confirmation re-read must still abort —
+        the confirmation read is a real physical measurement too, not
+        exempt from the safety cutoff just because it's a second check."""
+        asmi = self._make_online_asmi()
+        gantry = _FakeOnlineGantry(start_z=10.0)
+        reads = {"n": 0}
+
+        def force_reading():
+            reads["n"] += 1
+            # Trigger read: just over surface_force_threshold, under
+            # force_limit. Confirmation read: spikes past force_limit.
+            return 0.05 if reads["n"] == 1 else 5.0
+
+        with patch.object(asmi, "get_baseline_force", return_value=(0.0, 0.0)), \
+             patch.object(asmi, "get_force_reading", side_effect=force_reading):
+            with self.assertRaises(ASMICommandError):
+                asmi.indentation(
+                    gantry,
+                    well_z=0.0,
+                    measurement_height=10.0,
+                    indentation_limit_height=-1.0,
+                    step_size=0.5,
+                    force_limit=1.0,
+                    baseline_samples=1,
+                    detect_surface=True,
+                    surface_search_step=1.0,
+                    surface_force_threshold=0.01,
+                    surface_search_max_travel=8.0,
+                )
+
+        self.assertEqual(reads["n"], 2)
+
     def test_no_surface_within_max_travel_raises(self):
         asmi = self._make_online_asmi()
         gantry = _FakeOnlineGantry(start_z=10.0)

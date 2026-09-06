@@ -408,6 +408,7 @@ class VernierASMI(ASMIInstrument):
                 action_z=action_z,
                 search_step=_search_step,
                 force_threshold=_search_threshold,
+                force_limit=_force_limit,
                 max_travel=_search_max_travel,
                 baseline_avg=baseline_avg,
             )
@@ -526,6 +527,7 @@ class VernierASMI(ASMIInstrument):
         action_z: float,
         search_step: float,
         force_threshold: float,
+        force_limit: float,
         max_travel: float,
         baseline_avg: float,
     ) -> tuple[float, float]:
@@ -537,12 +539,20 @@ class VernierASMI(ASMIInstrument):
         continues downward from there (see #332 — a single noisy reading
         was enough to false-lock the old single-sample check).
 
+        ``force_limit`` is the hard safety cutoff (same value the fine
+        descent enforces): any single reading past it aborts immediately,
+        independent of the noise-confirmation heuristic above — a real,
+        sustained contact must never be re-classified as noise and stepped
+        through just because the very next read happens to fall back under
+        ``force_threshold``.
+
         Returns ``(surface_z, trigger_force_n)`` where ``surface_z`` is one
         search step above the trigger height (clamped to ``action_z``) and
         the gantry has been backed off to it. Search readings are not part
         of the measurement record. Raises :class:`ASMICommandError` when
         the corrected force never exceeds ``force_threshold`` on two
-        consecutive reads before the search floor ``action_z - max_travel``.
+        consecutive reads before the search floor ``action_z - max_travel``,
+        or immediately when a reading exceeds ``force_limit``.
         """
         floor_z = action_z - max_travel
         max_steps = _step_count_bound(action_z, floor_z, search_step)
@@ -558,8 +568,22 @@ class VernierASMI(ASMIInstrument):
             coords = gantry.get_coordinates()
             force = self.get_force_reading()
             corrected = force - baseline_avg
+            if abs(corrected) > force_limit:
+                raise ASMICommandError(
+                    f"Force limit exceeded during surface search: "
+                    f"{corrected:.4f} N > {force_limit:g} N at "
+                    f"Z={coords['z']:.3f} mm. Aborting immediately — this "
+                    "is the hard safety cutoff, independent of the "
+                    "surface-detection noise confirmation."
+                )
             if abs(corrected) > force_threshold:
                 confirm_corrected = self.get_force_reading() - baseline_avg
+                if abs(confirm_corrected) > force_limit:
+                    raise ASMICommandError(
+                        f"Force limit exceeded during surface search "
+                        f"confirmation re-read: {confirm_corrected:.4f} N "
+                        f"> {force_limit:g} N at Z={coords['z']:.3f} mm."
+                    )
                 if abs(confirm_corrected) <= force_threshold:
                     self.logger.info(
                         "Threshold crossing at Z=%.3f mm (dF=%.4f N) did "
