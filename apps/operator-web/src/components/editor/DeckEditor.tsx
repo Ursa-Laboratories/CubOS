@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
-import type { DeckResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, WellPlateHolderConfig, Coordinate3D, DeckConfig } from "../../types";
-import { CoordinateField, NumberField, OptionalNumberField, SaveButton, TextField, UnsavedNotice } from "./fields";
-import ImportFromFile from "./ImportFromFile";
+import type { DeckResponse, GantryPosition, GantryResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, WellPlateHolderConfig, Coordinate3D, DeckConfig } from "../../types";
+import { CoordinateField, NumberField, OptionalNumberField, SaveButton, SaveTargetHint, SavedStatus, TextField, UnsavedNotice } from "./fields";
+import { useSaveShortcut } from "./saveHelpers";
+import ConfigFilePicker from "./ConfigFilePicker";
+import { normalizeYamlFilename } from "./field-utils";
+import LabwareCalibrationModal from "../deck/LabwareCalibrationModal";
 import RawYamlPanel from "./RawYamlPanel";
 import { useConfirm } from "../common/useConfirm";
 import * as theme from "../../theme";
@@ -11,6 +14,11 @@ interface Props {
   selectedFile: string | null;
   onSelectFile: (f: string) => void;
   onImportFile: (f: string) => void;
+  onNewFile?: () => void;
+  onDeleteFile?: (f: string) => void;
+  deleteDisabledReason?: string | null;
+  /** Last successful save on this tab, shown as a "Saved" acknowledgement. */
+  lastSaved?: { filename: string; at: Date } | null;
   importedFrom?: string | null;
   deck: DeckResponse | null;
   /** The last-saved (server-loaded) deck, used to reset local edits when
@@ -24,6 +32,11 @@ interface Props {
    * where the deck is written. */
   dirty?: boolean;
   onRefresh: () => void;
+  /** Loaded gantry + live position, for the labware calibration modal.
+   * Calibration stays disabled until a gantry config is loaded. */
+  gantry?: GantryResponse | null;
+  position?: GantryPosition | null;
+  isRunning?: boolean;
 }
 
 const EMPTY_WELL_PLATE: WellPlateConfig = {
@@ -108,8 +121,9 @@ function labwareFromDeck(deck: DeckResponse | null): Record<string, LabwareConfi
   return obj;
 }
 
-export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, importedFrom, deck, baseline, onSave, onLocalChange, dirty, onRefresh }: Props) {
+export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, onNewFile, onDeleteFile, deleteDisabledReason, lastSaved, importedFrom, deck, baseline, onSave, onLocalChange, dirty, onRefresh, gantry = null, position = null, isRunning = false }: Props) {
   const [labware, setLabware] = useState<Record<string, LabwareConfig>>(() => labwareFromDeck(deck));
+  const [calibrateOpen, setCalibrateOpen] = useState(false);
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -158,11 +172,27 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
   const hasItems = Object.keys(labware).length > 0;
   const valid = hasItems && isValid(labware);
   const canSave = valid && (!!saveAs.trim() || !!selectedFile) && !saving;
+  const canCalibrateLabware = !!deck && !!gantry && !isRunning;
+  // The modal calibrates what the editor currently shows (including unsaved
+  // edits), so build its deck view from the local labware state.
+  const calibrationDeck: DeckResponse | null = deck
+    ? { ...deck, labware: Object.entries(labware).map(([key, config]) => ({ key, config, wells: null })) }
+    : null;
+
+  const handleCalibrationSave = async (filename: string, body: DeckConfig) => {
+    await Promise.resolve(onSave(filename, body));
+    setLabware(body.labware);
+    setSaveError(null);
+  };
+
+  const saveAsFilename = normalizeYamlFilename(saveAs);
+  const saveAsExists = !!saveAsFilename && configs.includes(saveAsFilename);
 
   const handleSave = async () => {
     if (!canSave) return;
-    const filename = saveAs.trim() || selectedFile || "";
-    const normalized = filename.endsWith(".yaml") ? filename : `${filename}.yaml`;
+    const normalized = saveAsFilename || selectedFile || "";
+    if (!normalized) return;
+    if (saveAsExists && normalized !== selectedFile && !(await confirmOverwrite(normalized))) return;
     setSaving(true);
     try {
       await Promise.resolve(onSave(normalized, { labware }));
@@ -175,6 +205,15 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
       setSaving(false);
     }
   };
+
+  const confirmOverwrite = (filename: string) => requestConfirm({
+    title: "Overwrite file?",
+    message: `${filename} already exists. Overwrite it?`,
+    confirmLabel: "Overwrite",
+    danger: true,
+  });
+
+  useSaveShortcut(handleSave, canSave);
 
   const handleDiscard = async () => {
     const confirmed = await requestConfirm({
@@ -191,7 +230,18 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
 
   return (
     <div>
-      <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import deck config" selectedFile={importedFrom ?? selectedFile} />
+      <ConfigFilePicker
+        kind="Deck"
+        configs={configs}
+        selectedFile={importedFrom ?? selectedFile}
+        onSelectFile={onImportFile}
+        onNew={onNewFile}
+        onDelete={onDeleteFile}
+        deleteDisabledReason={deleteDisabledReason}
+        note={importedFrom && selectedFile
+          ? <>Opened as a working copy: edits save to <span style={theme.mono}>{selectedFile}</span>, not to {importedFrom}.</>
+          : undefined}
+      />
 
       <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
         <button onClick={() => addLabware("well_plate")} style={addBtnStyle}>
@@ -199,6 +249,24 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
         </button>
         <button onClick={() => addLabware("vial")} style={addBtnStyle}>
           + Vial
+        </button>
+        <button
+          onClick={() => setCalibrateOpen(true)}
+          disabled={!canCalibrateLabware}
+          style={{
+            ...calibrateBtnStyle,
+            opacity: canCalibrateLabware ? 1 : 0.45,
+            cursor: canCalibrateLabware ? "pointer" : "not-allowed",
+          }}
+          title={canCalibrateLabware
+            ? "Open labware calibration"
+            : isRunning
+              ? "Protocol running"
+              : !deck
+                ? "Load a deck config first"
+                : "Load a gantry config first"}
+        >
+          Calibrate labware
         </button>
       </div>
 
@@ -254,8 +322,9 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
         {saveError && (
           <div style={saveErrorStyle}>Save failed: {saveError}</div>
         )}
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <input
+            aria-label="Save as filename"
             value={saveAs}
             onChange={(e) => setSaveAs(e.target.value)}
             placeholder={selectedFile ?? "my_deck.yaml"}
@@ -268,12 +337,22 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           {dirty && (
             <button onClick={handleDiscard} style={discardBtnStyle}>Discard changes</button>
           )}
+          {lastSaved && !dirty && <SavedStatus filename={lastSaved.filename} at={lastSaved.at} />}
         </div>
+        <SaveTargetHint saveAs={saveAsFilename} selectedFile={selectedFile} exists={saveAsExists} />
         {!hasItems && (
           <p style={hintTextStyle}>Add at least one well plate or vial before saving.</p>
         )}
       </div>
       {confirmDialog}
+      <LabwareCalibrationModal
+        open={calibrateOpen}
+        onClose={() => setCalibrateOpen(false)}
+        deck={calibrationDeck}
+        gantry={gantry}
+        position={position}
+        onSaveDeck={handleCalibrationSave}
+      />
     </div>
   );
 }
@@ -459,6 +538,13 @@ const cardStyle: React.CSSProperties = {
 const addBtnStyle: React.CSSProperties = {
   ...theme.btn.secondary,
   ...theme.btnSmall,
+};
+
+const calibrateBtnStyle: React.CSSProperties = {
+  ...theme.btn.primary,
+  ...theme.btnSmall,
+  padding: "5px 16px",
+  marginLeft: "auto",
 };
 
 const removeBtnStyle: React.CSSProperties = {

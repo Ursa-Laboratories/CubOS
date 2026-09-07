@@ -162,3 +162,62 @@ class TestCamera:
         finally:
             gantry_router.end_run()
         assert response.status_code == 409
+
+    def test_preview_capture_overwrites_one_fixed_file(self, connected_session, images_dir):
+        """Live-preview polling shouldn't pile up a new PNG on disk every tick."""
+        app = create_app()
+        first = api_request(
+            app, "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera", "preview": True},
+        )
+        second = api_request(
+            app, "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera", "preview": True},
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        assert first.json()["image_path"] == second.json()["image_path"]
+        manual_dir = images_dir / "manual"
+        assert list(manual_dir.glob("*.png")) == [manual_dir / "camera_preview.png"]
+
+    def test_preview_and_manual_captures_are_independent_files(self, connected_session, images_dir):
+        app = create_app()
+        preview = api_request(
+            app, "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera", "preview": True},
+        )
+        manual = api_request(
+            app, "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera"},
+        )
+        assert preview.json()["image_path"] != manual.json()["image_path"]
+
+    def test_preview_does_not_clobber_last_manual_capture(self, connected_session, images_dir):
+        app = create_app()
+        manual = api_request(
+            app, "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera"},
+        )
+        api_request(
+            app, "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera", "preview": True},
+        )
+        listing = api_request(app, "GET", "/api/v1/instruments/camera")
+        (entry,) = listing.json()
+        assert entry["last_image"] == manual.json()["image_path"]
+
+    def test_camera_without_capture_support_returns_501(self, monkeypatch, images_dir):
+        config = {
+            "instruments": {
+                "camera": {"type": "camera", "vendor": "mount_only", "offline": True},
+            }
+        }
+        session = SimpleNamespace(connected=True, connected_gantry_config=config)
+        monkeypatch.setattr(instruments_router, "_require_session", lambda: session)
+
+        response = api_request(
+            create_app(), "POST", "/api/v1/instruments/camera/capture",
+            json={"instrument": "camera", "preview": True},
+        )
+        assert response.status_code == 501
+        assert "does not support capture" in response.json()["detail"]

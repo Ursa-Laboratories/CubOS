@@ -36,7 +36,8 @@ def move(
         travel_z:   Optional raw transit Z for literal/named XYZ moves.
                     When set, the gantry first moves Z to ``travel_z`` at
                     the current XY, then moves XY at that Z, then finishes
-                    at ``position``.
+                    at ``position``. When omitted and the move changes XY,
+                    the gantry lifts to the working-volume ceiling first.
     """
     if isinstance(position, (list, tuple)):
         target = tuple(position)

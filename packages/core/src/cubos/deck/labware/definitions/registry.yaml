@@ -70,3 +70,8 @@ labware:
     module: cubos.deck.labware.well_plate
     class_name: WellPlate
     config: sbs_24_wellplate/SBS24WellPlate.yaml
+
+  ursa_12_well_plate:
+    module: cubos.deck.labware.well_plate
+    class_name: WellPlate
+    config: ursa_12_well_plate/12WellPlate.yaml

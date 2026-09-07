@@ -86,7 +86,7 @@ instruments:
 
   lighting:
     interface: cubos.instruments.lighting.interface.LightingInstrument
-    calibration_mode: non_contact
+    calibration_mode: follow_camera
     vendors:
       pawduino:
         module: cubos.instruments.lighting.vendors.pawduino

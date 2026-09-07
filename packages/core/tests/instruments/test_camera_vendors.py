@@ -8,6 +8,7 @@ import pytest
 
 from cubos.instruments.camera.exceptions import (
     CameraCaptureError,
+    CameraConfigError,
     CameraConnectionError,
 )
 from cubos.instruments.camera.interface import CameraInstrument
@@ -71,6 +72,36 @@ class TestHardwareGuards:
         camera = FlirCamera(offline=False)
         with pytest.raises(CameraCaptureError, match="not connected"):
             camera.capture(save_path="/tmp/never.png")
+
+    def test_unknown_backend_rejected(self):
+        with pytest.raises(CameraConfigError, match="Unknown FLIR backend"):
+            FlirCamera(backend="webrtc")
+
+    def test_gentl_backend_offline_lifecycle(self, tmp_path):
+        # FLIR/Point Grey is the vendor; pyspin vs gentl is just the SDK
+        # binding, so the offline placeholder path must work identically
+        # for both.
+        camera = FlirCamera(backend="gentl", offline=True)
+        camera.connect()
+        assert camera.health_check() is True
+        saved = camera.capture(save_path=str(tmp_path / "shot.png"))
+        _assert_valid_png(tmp_path / "shot.png")
+        camera.disconnect()
+
+    def test_gentl_connect_without_harvesters_raises_import_error(self):
+        if FlirCamera.is_available(backend="gentl"):
+            pytest.skip("harvesters installed in this environment")
+        camera = FlirCamera(backend="gentl", offline=False)
+        with pytest.raises(ImportError):
+            camera.connect()
+
+    def test_gentl_requires_cti_path(self, monkeypatch):
+        monkeypatch.delenv("SPINNAKER_GENTL64_CTI", raising=False)
+        monkeypatch.setitem(sys.modules, "harvesters", SimpleNamespace())
+        monkeypatch.setitem(sys.modules, "harvesters.core", SimpleNamespace(Harvester=lambda: None))
+        camera = FlirCamera(backend="gentl", offline=False)
+        with pytest.raises(CameraConfigError, match="gentl_cti_path"):
+            camera.connect()
 
 
 # --- Hardware paths via fake SDK modules --------------------------------------
@@ -331,6 +362,200 @@ class TestFlirHardwarePath:
         camera.connect()
         with pytest.raises(ImportError):
             camera.capture(save_path=str(tmp_path / "x.png"))
+
+
+class FakePixelFormatValue:
+    def __init__(self):
+        self.value = None
+
+
+class FakeGentlNodeMap:
+    def __init__(self):
+        self.PixelFormat = FakePixelFormatValue()
+
+
+class FakeGentlRemoteDevice:
+    def __init__(self):
+        self.node_map = FakeGentlNodeMap()
+
+
+class FakeGentlComponent:
+    def __init__(self, height=2, width=3, data="RAW_DATA"):
+        self.height = height
+        self.width = width
+        self.data = FakeGentlArray(data)
+
+
+class FakeGentlArray:
+    """Stands in for the numpy array ``component.data`` really is."""
+
+    def __init__(self, marker):
+        self.marker = marker
+
+    def reshape(self, height, width, channels):
+        return FakeGentlArray((self.marker, "reshaped", height, width, channels))
+
+    def copy(self):
+        return (self.marker, "copied")
+
+
+class FakeGentlPayload:
+    def __init__(self, components):
+        self.components = components
+
+
+class FakeGentlBuffer:
+    def __init__(self, components):
+        self.payload = FakeGentlPayload(components)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc_info):
+        return False
+
+
+class FakeImageAcquirer:
+    def __init__(self, buffer=None, fetch_raises=None):
+        self.remote_device = FakeGentlRemoteDevice()
+        self.buffer = buffer or FakeGentlBuffer([FakeGentlComponent()])
+        self.fetch_raises = fetch_raises
+        self.started = False
+        self.destroyed = False
+
+    def start(self):
+        self.started = True
+
+    def stop(self):
+        self.started = False
+
+    def fetch(self, timeout=None):
+        if self.fetch_raises:
+            raise self.fetch_raises
+        return self.buffer
+
+    def destroy(self):
+        self.destroyed = True
+
+
+class FakeHarvester:
+    def __init__(self, device_info_list=None, acquirer=None):
+        self.device_info_list = device_info_list if device_info_list is not None else ["cam0"]
+        self.acquirer = acquirer or FakeImageAcquirer()
+        self.files_added = []
+        self.reset_called = False
+
+    def add_file(self, path):
+        self.files_added.append(path)
+
+    def update(self):
+        pass
+
+    def create(self, index):
+        return self.acquirer
+
+    def reset(self):
+        self.reset_called = True
+
+
+def _install_fake_harvesters(monkeypatch, harvester):
+    """Stub both `harvesters` and `harvesters.core` — `import harvesters.core`
+    needs the parent package resolvable too, not just the submodule."""
+    core = SimpleNamespace(Harvester=lambda: harvester)
+    monkeypatch.setitem(sys.modules, "harvesters", SimpleNamespace(core=core))
+    monkeypatch.setitem(sys.modules, "harvesters.core", core)
+
+
+class TestFlirGentlHardwarePath:
+    def test_missing_harvesters_raises_import_error(self, monkeypatch):
+        monkeypatch.setitem(sys.modules, "harvesters", None)
+        monkeypatch.setitem(sys.modules, "harvesters.core", None)
+        camera = FlirCamera(backend="gentl", offline=False)
+        with pytest.raises(ImportError):
+            camera.connect()
+        assert FlirCamera.is_available(backend="gentl") is False
+
+    def test_connect_capture_disconnect(self, monkeypatch, tmp_path):
+        acquirer = FakeImageAcquirer()
+        harvester = FakeHarvester(acquirer=acquirer)
+        _install_fake_harvesters(monkeypatch, harvester)
+        monkeypatch.setitem(sys.modules, "cv2", FakeCv2())
+
+        camera = FlirCamera(
+            camera_id=0, backend="gentl", gentl_cti_path="/opt/spinnaker/Spinnaker_GenTL.cti",
+            offline=False,
+        )
+        camera.connect()
+        assert camera.health_check() is True
+        assert FlirCamera.is_available(backend="gentl") is True
+        assert acquirer.remote_device.node_map.PixelFormat.value == "RGB8"
+        assert harvester.files_added == ["/opt/spinnaker/Spinnaker_GenTL.cti"]
+
+        saved = camera.capture(save_path=str(tmp_path / "shot.png"))
+        assert saved == str(tmp_path / "shot.png")
+        assert (tmp_path / "shot.png").read_bytes() == b"fake-image"
+        assert acquirer.started is False  # stop() ran after fetch
+
+        camera.disconnect()
+        assert camera.health_check() is False
+        assert acquirer.destroyed is True
+        assert harvester.reset_called is True
+
+    def test_connect_no_cameras(self, monkeypatch):
+        harvester = FakeHarvester(device_info_list=[])
+        _install_fake_harvesters(monkeypatch, harvester)
+        camera = FlirCamera(
+            backend="gentl", gentl_cti_path="/opt/spinnaker/Spinnaker_GenTL.cti", offline=False,
+        )
+        with pytest.raises(CameraConnectionError, match="No FLIR cameras"):
+            camera.connect()
+        assert harvester.reset_called is True
+
+    def test_connect_out_of_range_id_falls_back_to_first(self, monkeypatch):
+        acquirer = FakeImageAcquirer()
+        harvester = FakeHarvester(device_info_list=["cam0"], acquirer=acquirer)
+        _install_fake_harvesters(monkeypatch, harvester)
+        camera = FlirCamera(
+            camera_id=7, backend="gentl", gentl_cti_path="/opt/spinnaker/Spinnaker_GenTL.cti",
+            offline=False,
+        )
+        camera.connect()
+        assert camera.health_check() is True
+
+    def test_connect_uses_env_var_when_no_explicit_path(self, monkeypatch):
+        monkeypatch.setenv("SPINNAKER_GENTL64_CTI", "/env/Spinnaker_GenTL.cti")
+        harvester = FakeHarvester()
+        _install_fake_harvesters(monkeypatch, harvester)
+        camera = FlirCamera(backend="gentl", offline=False)
+        camera.connect()
+        assert harvester.files_added == ["/env/Spinnaker_GenTL.cti"]
+
+    def test_capture_fetch_error(self, monkeypatch, tmp_path):
+        acquirer = FakeImageAcquirer(fetch_raises=RuntimeError("usb gone"))
+        harvester = FakeHarvester(acquirer=acquirer)
+        _install_fake_harvesters(monkeypatch, harvester)
+        monkeypatch.setitem(sys.modules, "cv2", FakeCv2())
+        camera = FlirCamera(
+            backend="gentl", gentl_cti_path="/opt/spinnaker/Spinnaker_GenTL.cti", offline=False,
+        )
+        camera.connect()
+        with pytest.raises(CameraCaptureError, match="usb gone"):
+            camera.capture(save_path=str(tmp_path / "x.png"))
+        assert acquirer.started is False  # stop() still ran
+
+    def test_disconnect_survives_teardown_errors(self, monkeypatch):
+        class ExplodingAcquirer(FakeImageAcquirer):
+            def destroy(self):
+                raise RuntimeError("destroy boom")
+
+        harvester = FakeHarvester(acquirer=ExplodingAcquirer())
+        _install_fake_harvesters(monkeypatch, harvester)
+        camera = FlirCamera(
+            backend="gentl", gentl_cti_path="/opt/spinnaker/Spinnaker_GenTL.cti", offline=False,
+        )
+        camera.connect()
+        camera.disconnect()  # must not raise
+        assert harvester.reset_called is True
 
 
 class TestOpenCVHardwarePath:
