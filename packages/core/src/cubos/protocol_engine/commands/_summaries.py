@@ -125,7 +125,7 @@ def mix(args: Dict[str, Any]) -> str:
     return _join(
         str(args["position"]),
         _volume(args["volume_ul"]),
-        f"{args.get('repetitions', 3)}x",
+        f"{args.get('cycles', 3)}x",
     )
 
 

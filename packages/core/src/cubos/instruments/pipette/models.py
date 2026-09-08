@@ -77,11 +77,11 @@ class AspirateResult:
 
 @dataclass(frozen=True)
 class MixResult:
-    """Result of a mix (repeated aspirate/dispense) operation."""
+    """Result of a mix (repeated two-height aspirate/dispense) operation."""
 
     success: bool
     volume_ul: float
-    repetitions: int
+    cycles: int
 
 
 # ── Pipette model registry ───────────────────────────────────────────────────

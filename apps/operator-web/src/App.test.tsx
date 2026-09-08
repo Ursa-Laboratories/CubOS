@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -411,6 +411,15 @@ function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
       return new Response("Not found", { status: 404 });
     }
 
+    const collection = kind === "deck" ? state.decks : kind === "gantry" ? state.gantries : kind === "protocol" ? state.protocols : null;
+    if (collection && method === "DELETE") {
+      if (!(filename in collection)) return new Response(JSON.stringify({ detail: `Config not found: ${filename}` }), { status: 404 });
+      delete collection[filename];
+      return jsonResponse({ status: "deleted", filename });
+    }
+    if (collection && method === "GET" && !(filename in collection)) {
+      return new Response(JSON.stringify({ detail: `Config not found: ${filename}` }), { status: 404 });
+    }
     if (kind === "deck") {
       if (method === "GET") return jsonResponse(state.decks[filename]);
       if (method === "PUT") {
@@ -466,9 +475,9 @@ async function waitForSettingsLoad() {
 }
 
 async function loadRequiredProtocolDependencies(user: ReturnType<typeof userEvent.setup>) {
-  await importConfig(user, "Import gantry config", "cubos.yaml");
+  await importConfig(user, "Gantry config", "cubos.yaml");
   await user.click(screen.getByRole("button", { name: "Deck" }));
-  await importConfig(user, "Import deck config", "deck.yaml");
+  await importConfig(user, "Deck config", "deck.yaml");
 }
 
 async function connectGantry(user: ReturnType<typeof userEvent.setup>) {
@@ -482,6 +491,7 @@ async function returnToWorkflowTab(user: ReturnType<typeof userEvent.setup>) {
 
 describe("CubOS editor interactions", () => {
   beforeEach(() => {
+    localStorage.clear();
     installFetchMock(createState());
   });
 
@@ -559,7 +569,7 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     expect(await screen.findByLabelText("Travel Z")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Browse" }));
@@ -576,7 +586,7 @@ describe("CubOS editor interactions", () => {
     await waitForSettingsLoad();
 
     await user.click(screen.getByRole("button", { name: "Deck" }));
-    await importConfig(user, "Import deck config", "deck.yaml");
+    await importConfig(user, "Deck config", "deck.yaml");
     const nameField = await screen.findByDisplayValue("Deck Plate");
     await user.clear(nameField);
     await user.type(nameField, "Edited Plate");
@@ -601,7 +611,7 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     const serialPort = await screen.findByLabelText("Serial port");
     expect(serialPort).toHaveValue("");
 
@@ -619,7 +629,7 @@ describe("CubOS editor interactions", () => {
     await waitForSettingsLoad();
 
     await user.click(screen.getByRole("button", { name: "Deck" }));
-    await importConfig(user, "Import deck config", "deck.yaml");
+    await importConfig(user, "Deck config", "deck.yaml");
     const nameField = await screen.findByDisplayValue("Deck Plate");
     expect(nameField).toHaveValue("Deck Plate");
 
@@ -640,7 +650,7 @@ describe("CubOS editor interactions", () => {
     await waitForSettingsLoad();
 
     await user.click(screen.getByRole("button", { name: "Deck" }));
-    await importConfig(user, "Import deck config", "deck.yaml");
+    await importConfig(user, "Deck config", "deck.yaml");
 
     expect(await screen.findByDisplayValue("Deck Plate")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByPlaceholderText("cub_deck.yaml")).toBeInTheDocument());
@@ -658,7 +668,7 @@ describe("CubOS editor interactions", () => {
     await waitForSettingsLoad();
 
     await user.click(screen.getByRole("button", { name: "Deck" }));
-    await importConfig(user, "Import deck config", "deck.yaml");
+    await importConfig(user, "Deck config", "deck.yaml");
     expect(await screen.findByText("A1: (10, 20, 30)")).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Calibration A1 X"));
@@ -672,7 +682,7 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     const portField = await screen.findByLabelText("Port *");
     expect(portField).toHaveValue("/dev/ttyUSB0");
 
@@ -692,7 +702,7 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     expect(await screen.findByLabelText("Serial port")).toBeInTheDocument();
     await user.type(screen.getByPlaceholderText("cubos.yaml"), "qa_new_gantry");
     await user.click(screen.getByRole("button", { name: "Save" }));
@@ -716,7 +726,7 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     await user.click(await screen.findByRole("button", { name: "Calibrate" }));
 
     expect(screen.getByRole("dialog", { name: "Gantry calibration" })).toBeInTheDocument();
@@ -788,7 +798,7 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     await user.click(await screen.findByRole("button", { name: "Calibrate" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Home gantry" }));
@@ -807,7 +817,7 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     await user.click(await screen.findByRole("button", { name: "Calibrate" }));
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Home gantry" }));
@@ -828,7 +838,7 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     await user.click(await screen.findByRole("button", { name: "Calibrate" }));
 
     const outputYaml = screen.getByLabelText("Output YAML");
@@ -869,7 +879,7 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     const travelZField = await screen.findByLabelText("Travel Z");
     expect(travelZField).toHaveValue("3");
     const parkYField = await screen.findByLabelText("park coordinates Y");
@@ -902,7 +912,7 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Add Position" }));
     const nameField = await screen.findByLabelText("Position 2 name");
 
@@ -933,7 +943,7 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Validate" }));
 
     await waitFor(() => expect(screen.getByText("Protocol is valid.")).toBeInTheDocument());
@@ -959,7 +969,7 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Validate" }));
     expect(await screen.findByText("Protocol is valid.")).toBeInTheDocument();
 
@@ -1000,7 +1010,7 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Validate" }));
 
     expect(await screen.findByText("validator unavailable")).toBeInTheDocument();
@@ -1033,7 +1043,7 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Validate" }));
 
     expect(await screen.findByText("step 2: unknown position")).toBeInTheDocument();
@@ -1048,7 +1058,7 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     const runButton = await screen.findByRole("button", { name: "Run Protocol" });
 
     expect(runButton).toBeDisabled();
@@ -1070,7 +1080,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
 
     // A GRBL-settings mismatch must not block running or surface a
     // "calibration needed" banner: commissioning machines legitimately
@@ -1097,7 +1107,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
 
     // Gantry is connected and nothing edited yet: Run is allowed.
     const runButton = await screen.findByRole("button", { name: "Run Protocol" });
@@ -1167,7 +1177,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
     // The Run view reports the failure where the operator already is.
@@ -1208,7 +1218,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
     await returnToWorkflowTab(user);
@@ -1251,7 +1261,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
 
     // No run yet: an empty Run view would be a dead tab.
     expect(screen.queryByRole("button", { name: "Run" })).toBeNull();
@@ -1286,7 +1296,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
 
     // The operator stays in the Run view when it finishes, so the outcome
@@ -1334,7 +1344,7 @@ describe("CubOS editor interactions", () => {
     // The protocol itself is untouched, but Run executes the saved deck
     // file, so the unsaved deck edit must still block running.
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
 
     const banner = await screen.findByRole("alert");
     expect(banner).toHaveTextContent(/Unsaved changes/i);
@@ -1354,7 +1364,7 @@ describe("CubOS editor interactions", () => {
     await waitForSettingsLoad();
 
     await user.click(screen.getByRole("button", { name: "Deck" }));
-    await importConfig(user, "Import deck config", "deck.yaml");
+    await importConfig(user, "Deck config", "deck.yaml");
     const nameField = await screen.findByDisplayValue("Deck Plate");
 
     // No prompt before editing.
@@ -1374,7 +1384,7 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     await screen.findByLabelText("Serial port");
 
     // GRBL fields are hidden until Advanced settings is expanded.
@@ -1436,21 +1446,164 @@ describe("CubOS editor interactions", () => {
     await waitForSettingsLoad();
 
     await user.click(screen.getByRole("button", { name: "Deck" }));
-    await importConfig(user, "Import deck config", "deck.yaml");
+    await importConfig(user, "Deck config", "deck.yaml");
     const nameField = await screen.findByDisplayValue("Deck Plate");
     await user.clear(nameField);
     await user.type(nameField, "Edited Plate");
 
     // Cancelling the confirm keeps the edits and the current file.
-    await importConfig(user, "Import deck config", "deck2.yaml");
+    await importConfig(user, "Deck config", "deck2.yaml");
     expect(await screen.findByRole("alertdialog")).toHaveTextContent("cub_deck.yaml");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByDisplayValue("Edited Plate")).toBeInTheDocument();
 
     // Confirming discards the edit and switches to the newly imported file.
-    await importConfig(user, "Import deck config", "deck2.yaml");
+    await importConfig(user, "Deck config", "deck2.yaml");
     await user.click(await screen.findByRole("button", { name: "Discard" }));
     expect(await screen.findByDisplayValue("Second Deck Plate")).toBeInTheDocument();
+  });
+
+  it("restores the active tab and loaded configs after a reload", async () => {
+    const user = userEvent.setup();
+    const state = createState();
+    installFetchMock(state);
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Protocol config", "move.yaml");
+    await screen.findByLabelText("Travel Z");
+    cleanup();
+
+    installFetchMock(state);
+    renderApp();
+    await waitForSettingsLoad();
+    expect(await screen.findByLabelText("Travel Z")).toHaveValue("3");
+    expect(screen.getByRole("combobox", { name: "Protocol config" })).toHaveValue("move.yaml");
+    await user.click(screen.getByRole("button", { name: "Gantry" }));
+    expect(await screen.findByRole("combobox", { name: "Gantry config" })).toHaveValue("cubos.yaml");
+    await user.click(screen.getByRole("button", { name: "Deck" }));
+    expect(await screen.findByRole("combobox", { name: "Deck config" })).toHaveValue("deck.yaml");
+  });
+
+  it("drops a restored selection whose file no longer exists", async () => {
+    localStorage.setItem(
+      "cubos-workspace:/mock/CubOS/configs",
+      JSON.stringify({ activeTab: "Gantry", gantryFile: "gone.yaml", deckFile: null, protocolFile: null, deckImportedFrom: null }),
+    );
+    renderApp();
+    await waitForSettingsLoad();
+    expect(await screen.findByText("gone.yaml was not found in the config directory.")).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Gantry config" })).toHaveValue("");
+    expect(screen.queryByText(/Gantry load failed/)).not.toBeInTheDocument();
+  });
+
+  it("deletes a config after confirmation and clears the selection", async () => {
+    const user = userEvent.setup();
+    const state = createState();
+    state.protocols["scratch.yaml"] = { ...state.protocols["move.yaml"], filename: "scratch.yaml" };
+    const fetchMock = installFetchMock(state);
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Protocol config", "scratch.yaml");
+    await screen.findByLabelText("Travel Z");
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("Delete scratch.yaml from the config directory?");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/protocol/scratch.yaml", expect.objectContaining({ method: "DELETE" }));
+
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete" }));
+    expect(await screen.findByText("Deleted scratch.yaml.")).toBeInTheDocument();
+    expect(state.protocols["scratch.yaml"]).toBeUndefined();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Protocol config" })).toHaveValue(""));
+    expect(screen.queryByRole("option", { name: "scratch.yaml" })).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Travel Z")).not.toBeInTheDocument();
+  });
+
+  it("keeps protocol edits when deck changes are discarded", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState());
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Protocol config", "move.yaml");
+    const travelZField = await screen.findByLabelText("Travel Z");
+    await user.clear(travelZField);
+    await user.type(travelZField, "42");
+
+    await user.click(screen.getByRole("button", { name: "Deck" }));
+    const deckNameField = await screen.findByDisplayValue("Deck Plate");
+    await user.clear(deckNameField);
+    await user.type(deckNameField, "Edited Plate");
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    await user.click(await screen.findByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.getByDisplayValue("Deck Plate")).toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    expect(await screen.findByLabelText("Travel Z")).toHaveValue("42");
+  });
+
+  it("starts a new protocol from the picker and confirms before dropping edits", async () => {
+    const user = userEvent.setup();
+    installFetchMock(createState());
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Protocol config", "move.yaml");
+    const travelZField = await screen.findByLabelText("Travel Z");
+    await user.clear(travelZField);
+    await user.type(travelZField, "42");
+
+    await user.click(screen.getByRole("button", { name: "New" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("start a new protocol");
+    await user.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByLabelText("Travel Z")).not.toBeInTheDocument());
+    expect(screen.getByRole("combobox", { name: "Protocol config" })).toHaveValue("");
+    expect(screen.getByText("Load a protocol or add steps.")).toBeInTheDocument();
+  });
+
+  it("acknowledges a save-as under the new filename", async () => {
+    const user = userEvent.setup();
+    const state = createState();
+    installFetchMock(state);
+    renderApp();
+    await waitForSettingsLoad();
+    await importConfig(user, "Gantry config", "cubos.yaml");
+    await screen.findByLabelText("Serial port");
+
+    await user.type(screen.getByRole("textbox", { name: "Save as filename" }), "copy_of_cubos");
+    expect(screen.getByText(/Save writes/)).toHaveTextContent("copy_of_cubos.yaml as a new file.");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(state.gantries["copy_of_cubos.yaml"]).toBeDefined());
+    expect(await screen.findByRole("status", { name: "" })).toHaveTextContent("Saved copy_of_cubos.yaml");
+    expect(screen.getByRole("combobox", { name: "Gantry config" })).toHaveValue("copy_of_cubos.yaml");
+  });
+
+  it("asks before save-as overwrites an existing config", async () => {
+    const user = userEvent.setup();
+    const state = createState();
+    state.gantries["other.yaml"] = { ...state.gantries["cubos.yaml"], filename: "other.yaml" };
+    installFetchMock(state);
+    renderApp();
+    await waitForSettingsLoad();
+    await importConfig(user, "Gantry config", "cubos.yaml");
+    await screen.findByLabelText("Serial port");
+
+    await user.type(screen.getByRole("textbox", { name: "Save as filename" }), "other");
+    expect(screen.getByText(/Save writes/)).toHaveTextContent("already exists and will be overwritten");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("other.yaml already exists. Overwrite it?");
+    await user.click(screen.getByRole("button", { name: "Overwrite" }));
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Gantry config" })).toHaveValue("other.yaml"));
   });
 
   it("guards discarding unsaved gantry edits when switching the imported file", async () => {
@@ -1464,20 +1617,20 @@ describe("CubOS editor interactions", () => {
     renderApp();
     await waitForSettingsLoad();
 
-    await importConfig(user, "Import gantry config", "cubos.yaml");
+    await importConfig(user, "Gantry config", "cubos.yaml");
     const serialPort = await screen.findByLabelText("Serial port");
     await user.type(serialPort, "-edited");
 
     // Cancelling the confirm keeps the edits and the current file. (The
     // field now shows a per-field amber "*" since it differs from the
     // saved baseline, so match loosely.)
-    await importConfig(user, "Import gantry config", "cubos2.yaml");
+    await importConfig(user, "Gantry config", "cubos2.yaml");
     expect(await screen.findByRole("alertdialog")).toHaveTextContent("Discard unsaved gantry changes?");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByLabelText(/^Serial port/)).toHaveValue("-edited");
 
     // Confirming discards the edit and switches to the newly imported file.
-    await importConfig(user, "Import gantry config", "cubos2.yaml");
+    await importConfig(user, "Gantry config", "cubos2.yaml");
     await user.click(await screen.findByRole("button", { name: "Discard" }));
     await waitFor(() => expect(screen.getByLabelText("Serial port")).toHaveValue("/dev/ttyUSB-second"));
   });
@@ -1496,19 +1649,19 @@ describe("CubOS editor interactions", () => {
     await loadRequiredProtocolDependencies(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     const travelZField = await screen.findByLabelText("Travel Z");
     await user.clear(travelZField);
     await user.type(travelZField, "77");
 
     // Cancelling the confirm keeps the edits and the current file.
-    await importConfig(user, "Import protocol config", "move2.yaml");
+    await importConfig(user, "Protocol config", "move2.yaml");
     expect(await screen.findByRole("alertdialog")).toHaveTextContent("Discard unsaved protocol changes?");
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByLabelText("Travel Z")).toHaveValue("77");
 
     // Confirming discards the edit and switches to the newly imported file.
-    await importConfig(user, "Import protocol config", "move2.yaml");
+    await importConfig(user, "Protocol config", "move2.yaml");
     await user.click(await screen.findByRole("button", { name: "Discard" }));
     await waitFor(() => expect(screen.getByLabelText("Travel Z")).toHaveValue("9"));
   });
@@ -1524,7 +1677,7 @@ describe("CubOS editor interactions", () => {
     expect(cleanEvent.defaultPrevented).toBe(false);
 
     await user.click(screen.getByRole("button", { name: "Deck" }));
-    await importConfig(user, "Import deck config", "deck.yaml");
+    await importConfig(user, "Deck config", "deck.yaml");
     const nameField = await screen.findByDisplayValue("Deck Plate");
     await user.type(nameField, "!");
 
@@ -1562,7 +1715,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     const runButton = await screen.findByRole("button", { name: "Run Protocol" });
     await waitFor(() => expect(runButton).toBeEnabled());
 
@@ -1593,7 +1746,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(screen.getByRole("radio", { name: "Resume existing state" }));
     await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
 
@@ -1649,7 +1802,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(screen.getByRole("radio", { name: "Resume existing state" }));
     await user.selectOptions(screen.getByLabelText("Fluid state to resume"), "5");
     await user.click(await screen.findByRole("button", { name: "Run Protocol" }));
@@ -1667,7 +1820,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(screen.getByRole("radio", { name: "New fluid state" }));
 
     await user.click(screen.getByRole("button", { name: "Add container" }));
@@ -1707,7 +1860,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(screen.getByRole("radio", { name: "New fluid state" }));
     await user.type(screen.getByLabelText("Label for the new fluid state"), "empty seed");
 
@@ -1734,7 +1887,7 @@ describe("CubOS editor interactions", () => {
     await connectGantry(user);
 
     await user.click(screen.getByRole("button", { name: "Protocol" }));
-    await importConfig(user, "Import protocol config", "move.yaml");
+    await importConfig(user, "Protocol config", "move.yaml");
     await user.click(screen.getByRole("radio", { name: "New fluid state" }));
 
     await user.click(screen.getByRole("button", { name: "Add container" }));

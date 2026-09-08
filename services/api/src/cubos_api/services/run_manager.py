@@ -316,6 +316,11 @@ class RunManager:
                     step_observer=step_observer,
                 )
             else:
+                # Manual bring-up handles (Camera view preview, lighting) hold
+                # the vendor device open; the run's own instruments must be
+                # able to claim it.
+                from cubos_api.routers.instruments import reset_manual_instruments
+                reset_manual_instruments()
                 raw_result = gantry_router.run_protocol_on_session(
                     gantry_path=str(directory / "gantry.yaml"),
                     deck_path=str(directory / "deck.yaml"),

@@ -20,7 +20,7 @@ from cubos.instruments.capper.vendors.pawduino import PawduinoCapper
 
 
 def _mock_capper(**overrides):
-    kwargs = dict(engage_depth_mm=-10.0, park_position=(0.0, 0.0))
+    kwargs = dict(engage_depth_mm=-10.0)
     kwargs.update(overrides)
     return MockCapper(**kwargs)
 
@@ -34,25 +34,15 @@ class TestCapperInterfaceConfig:
 
     def test_stores_config(self):
         capper = _mock_capper(
-            engage_depth_mm=-12.5, park_position=(3.0, 4.0),
-            capture_retries=5, capture_settle_s=0.25,
+            engage_depth_mm=-12.5, capture_retries=5, capture_settle_s=0.25,
         )
         assert capper.engage_depth_mm == -12.5
-        assert capper.park_position == (3.0, 4.0)
         assert capper.capture_retries == 5
         assert capper.capture_settle_s == 0.25
 
     def test_rejects_non_finite_engage_depth(self):
         with pytest.raises(CapperConfigError):
             _mock_capper(engage_depth_mm=float("nan"))
-
-    def test_rejects_non_finite_park_position(self):
-        with pytest.raises(CapperConfigError):
-            _mock_capper(park_position=(float("inf"), 0.0))
-
-    def test_rejects_bad_park_position_shape(self):
-        with pytest.raises(CapperConfigError):
-            _mock_capper(park_position=(0.0, 0.0, 0.0))
 
     def test_rejects_negative_capture_retries(self):
         with pytest.raises(CapperConfigError):
@@ -140,7 +130,7 @@ class TestMockCapper:
 
 class TestPawduinoCapperOffline:
     def _make(self, **overrides):
-        kwargs = dict(engage_depth_mm=-10.0, park_position=(0.0, 0.0), offline=True)
+        kwargs = dict(engage_depth_mm=-10.0, offline=True)
         kwargs.update(overrides)
         return PawduinoCapper(**kwargs)
 
@@ -189,7 +179,7 @@ class TestPawduinoCapperSerial:
         mock_serial_cls.return_value = mock_ser
 
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         capper.connect()
         mock_serial_cls.assert_called_once_with(
@@ -203,7 +193,7 @@ class TestPawduinoCapperSerial:
         mock_serial_cls.side_effect = real_serial.SerialException("port busy")
 
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         with pytest.raises(CapperConnectionError, match="Cannot open serial"):
             capper.connect()
@@ -214,7 +204,7 @@ class TestPawduinoCapperSerial:
         mock_ser = self._make_mock_serial(["OK:Electromagnet on\n"])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         self._attach_link(capper, mock_ser)
         capper.capture_cap()
@@ -227,7 +217,7 @@ class TestPawduinoCapperSerial:
         mock_ser = self._make_mock_serial(["OK:Electromagnet off\n"])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         self._attach_link(capper, mock_ser)
         capper.release_cap()
@@ -240,7 +230,7 @@ class TestPawduinoCapperSerial:
         mock_ser = self._make_mock_serial(['OK:{"value1":1}\n'])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         self._attach_link(capper, mock_ser)
         assert capper.read_cap_present() is True
@@ -253,7 +243,7 @@ class TestPawduinoCapperSerial:
         mock_ser = self._make_mock_serial(['OK:{"value1":0}\n'])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         self._attach_link(capper, mock_ser)
         assert capper.read_cap_present() is False
@@ -264,7 +254,7 @@ class TestPawduinoCapperSerial:
         mock_ser = self._make_mock_serial(["ERR:jam\n"])
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         self._attach_link(capper, mock_ser)
         with pytest.raises(CapperCommandError, match="jam"):
@@ -279,7 +269,7 @@ class TestPawduinoCapperSerial:
         mock_ser.readline.return_value = b""
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
             command_timeout=0.05,
         )
         self._attach_link(capper, mock_ser)
@@ -288,7 +278,7 @@ class TestPawduinoCapperSerial:
 
     def test_command_error_when_not_connected(self):
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         with pytest.raises(CapperCommandError, match="Not connected"):
             capper.capture_cap()
@@ -327,7 +317,7 @@ class TestPawduinoCapperLinkLifecycle:
         )
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         capper.connect()
         capper.disconnect()
@@ -343,7 +333,7 @@ class TestPawduinoCapperLinkLifecycle:
         )
         mock_serial_cls.return_value = mock_ser
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         with pytest.raises(CapperConnectionError, match="did not respond"):
             capper.connect()
@@ -352,7 +342,7 @@ class TestPawduinoCapperLinkLifecycle:
 
     def test_empty_port_rejected(self):
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="",
+            engage_depth_mm=-10.0, port="",
         )
         with pytest.raises(CapperConnectionError, match="non-empty"):
             capper.connect()
@@ -376,7 +366,7 @@ class TestPawduinoCapperLinkLifecycle:
         mock_serial_cls.return_value = mock_ser
 
         capper = PawduinoCapper(
-            engage_depth_mm=-10.0, park_position=(0.0, 0.0), port="/dev/ttyUSB0",
+            engage_depth_mm=-10.0, port="/dev/ttyUSB0",
         )
         pipette = OpentronsPipette(port="/dev/ttyUSB0")
         capper.connect()

@@ -64,20 +64,21 @@ def _engage(
     *,
     command_label: str,
     height: float = 0.0,
-) -> float:
+) -> tuple[float, float, float]:
     """Wrap ``engage_at_labware`` so configuration errors surface as
     ``ProtocolExecutionError`` instead of bare ``ValueError``s — matching
     how ``measure`` and ``scan`` handle their command boundary.
 
     Pipette commands default to the resolved labware coordinate
     (``height=0``). ``height`` is a labware-relative
-    offset in the same convention as ``measurement_height`` for measure/scan."""
+    offset in the same convention as ``measurement_height`` for measure/scan.
+    Returns the engaged tip ``(x, y, z)``."""
     try:
-        _, action_z = engage_at_labware(
+        x, y, _, action_z = engage_at_labware(
             context, "pipette", position,
             measurement_height=height, command_label=command_label,
         )
-        return action_z
+        return x, y, action_z
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
 
@@ -170,7 +171,7 @@ def _begin_tracked_mix(
     *,
     position: str,
     volume_ul: float,
-    repetitions: int,
+    cycles: int,
     speed: float,
     height: float,
 ) -> tuple[str, bool]:
@@ -182,7 +183,7 @@ def _begin_tracked_mix(
             operation_key,
             target,
             volume_ul,
-            repetitions,
+            cycles,
             speed,
             height,
             campaign_id=context.campaign_id,
@@ -352,11 +353,12 @@ def mix(
     context: ProtocolContext,
     position: str,
     volume_ul: float,
-    repetitions: int = 3,
+    cycles: int = 3,
     speed: float = 50.0,
     height: float = 0.0,
 ) -> Any:
-    """Move pipette to *position*, then mix."""
+    """Move pipette to *position* at *height*, then mix ``cycles`` times
+    between that height and 1 mm above it."""
     tracked = _tracked_fluid_state(context)
     pipette = _get_pipette(context)
     operation_key = None
@@ -365,7 +367,7 @@ def mix(
             context,
             position=position,
             volume_ul=volume_ul,
-            repetitions=repetitions,
+            cycles=cycles,
             speed=speed,
             height=height,
         )
@@ -376,8 +378,10 @@ def mix(
             context.notify_step("step_skipped", reason=_ALREADY_APPLIED)
             return None
     try:
-        _engage(context, position, command_label="mix", height=height)
-        result = pipette.mix(volume_ul, repetitions, speed)
+        tip = _engage(context, position, command_label="mix", height=height)
+        result = pipette.mix(
+            volume_ul, cycles, speed, gantry=context.gantry, position=tip,
+        )
     except BaseException as exc:
         if operation_key is not None:
             _mark_transfer_uncertain(context, operation_key, exc)
@@ -1190,7 +1194,7 @@ def rinse_well(
             with _substep_scope(context, f"{cycle_scope}:mix"):
                 mix(
                     context, well, mix_volume_ul or volume_ul,
-                    repetitions=mix_repetitions, speed=speed,
+                    cycles=mix_repetitions, speed=speed,
                     height=well_height or 0.0,
                 )
         resolved_waste = _resolve_waste_target(
