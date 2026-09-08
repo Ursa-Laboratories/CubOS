@@ -122,7 +122,7 @@ def measure(
         raise
 
     try:
-        well_z, action_z = engage_at_labware(
+        _, _, well_z, action_z = engage_at_labware(
             context, instrument, position,
             measurement_height=measurement_height,
             command_label="measure",
