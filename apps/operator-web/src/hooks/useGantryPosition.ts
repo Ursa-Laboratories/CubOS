@@ -79,3 +79,14 @@ export function useSaveGantry() {
     },
   });
 }
+
+export function useDeleteGantry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (filename: string) => gantryApi.delete(filename),
+    onSuccess: (_data, filename) => {
+      qc.removeQueries({ queryKey: ["gantry", filename] });
+      qc.invalidateQueries({ queryKey: ["gantry", "configs"] });
+    },
+  });
+}

@@ -6,7 +6,7 @@ import cubos.instruments.registry as registry_module
 from cubos.instruments.asmi.models import ASMIStatus, MeasurementResult
 from cubos.instruments.asmi.interface import ASMIInstrument
 from cubos.instruments.base_instrument import BaseInstrument
-from cubos.instruments.pipette.models import AspirateResult, MixResult, PipetteStatus
+from cubos.instruments.pipette.models import AspirateResult, PipetteStatus
 from cubos.instruments.pipette.interface import PipetteInstrument
 from cubos.instruments.registry import (
     FieldSpec,
@@ -116,14 +116,6 @@ class FakeCustomerPipette(PipetteInstrument):
 
     def blowout(self, speed: float = 50.0) -> None:
         pass
-
-    def mix(
-        self,
-        volume_ul: float,
-        repetitions: int = 3,
-        speed: float = 50.0,
-    ) -> MixResult:
-        return MixResult(success=True, volume_ul=volume_ul, repetitions=repetitions)
 
     def pick_up_tip(self, speed: float = 50.0) -> None:
         pass

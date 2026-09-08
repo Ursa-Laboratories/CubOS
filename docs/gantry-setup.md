@@ -154,6 +154,13 @@ The pipette asks for on-screen confirmation before accepting host motor
 control; the driver satisfies that during `connect()` and, if it times out,
 fails with a message naming the softkey to press.
 
+Releasing motor control and the piston initialisation on connect both sweep
+the piston, which expels whatever is in the tip. If a run fails between an
+aspirate and its dispense, the driver therefore keeps the session open and
+armed instead of releasing it, and refuses to home, until the liquid has been
+dispensed or blown out (a one-step `blowout` protocol at a vial or the tip
+disposal works). The warning is logged as `Pipette still holds N uL`.
+
 **`potentiostat` / `admiral`** — Admiral SquidStat, addressed by serial port and
 channel number:
 
@@ -277,12 +284,15 @@ instruments:
     offset_y: 5.1
     depth: 61.5
     engage_depth_mm: -15.0
-    park_position: [-10.0, -10.0]
     capture_retries: 2
     capture_settle_s: 1.0
 ```
 
-`engage_depth_mm`/`park_position`/`capture_retries`/`capture_settle_s` are
+`park_position` is retired: `decap`/`cap` leave the tool at `safe_z` above
+the vial and the next command lifts before it travels. A config that still
+carries the key loads with a warning and the key is ignored; delete it.
+
+`engage_depth_mm`/`capture_retries`/`capture_settle_s` are
 required, not driver defaults — every capper's decap/cap motion sequence
 comes entirely from this config, never hardcoded. `vendor: mock` is an
 offline-only in-memory simulation useful for dry runs without any Arduino
