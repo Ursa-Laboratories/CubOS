@@ -36,15 +36,21 @@ export default function Scene({run,time,view}:{run:Run|null;time:number;view:str
  tray('plate',(run?.deck_metadata?.plate.height??15)-5,cream)
  for(const p of points.plate??[]){cyl(bed,3.8,7,p.x-145,60+p.z-3,90-p.y,glass);const well=cyl(bed,3,1,p.x-145,60+p.z-7,90-p.y,material('#c5d5d6',.05,.23));well.userData.surface=60+p.z-4;wellMeshes.set(p.id,well)}
  const sideExit=run?.deck_metadata?.tips.side_exit
+ const rackInward=!!sideExit&&sideExit.exit_x<(points.tips?.[0]?.x??0)
  const tipLength=run?.deck_metadata?.tips.tip_length??25
  if(sideExit){
    const location=run?.deck_metadata?.tips.location??{x:150,y:20,z:0}
    new STLLoader().load(new URL('./assets/ColorMatching_TipHolder.stl',import.meta.url).href,geometry=>{
-     // CAD base Y=-63; open end Z=-120. Rotate to an upright +X opening.
-     geometry.applyMatrix4(new THREE.Matrix4().set(0,0,-1,location.x-145,0,1,0,123+location.z,1,0,0,6-location.y,0,0,0,1))
+     // CAD base Y=-63; open end Z=-120. Match the configured exit side.
+     const inward=sideExit.exit_x<location.x
+     geometry.applyMatrix4(inward
+       ? new THREE.Matrix4().set(0,0,1,location.x-25,0,1,0,123+location.z,-1,0,0,90-location.y,0,0,0,1)
+       : new THREE.Matrix4().set(0,0,-1,location.x-145,0,1,0,123+location.z,1,0,0,6-location.y,0,0,0,1))
      geometry.computeVertexNormals();const mesh=new THREE.Mesh(geometry,cream);mesh.castShadow=true;mesh.receiveShadow=true;bed.add(mesh)
    })
+   const a1=points.tips?.[0];if(a1)bed.add(label('A1',a1.x-145,60+a1.z+12,90-a1.y,7))
    const p=points.tips?.[11];if(p){
+     bed.add(label('A12 · first pickup',p.x-145,60+p.z+12,90-p.y,9))
      const bottom=p.z-tipLength;const lift=bottom+sideExit.lift_mm
      const path=[new THREE.Vector3(p.x-145,60+bottom,90-p.y),new THREE.Vector3(p.x-145,60+lift,90-p.y),new THREE.Vector3(sideExit.exit_x-145,60+lift,90-p.y)]
      const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(path),new THREE.LineBasicMaterial({color:'#ffb85c',depthTest:false}));line.renderOrder=10;bed.add(line)
@@ -79,7 +85,7 @@ export default function Scene({run,time,view}:{run:Run|null;time:number;view:str
  for(const [id,mesh]of wellMeshes){(mesh.material as THREE.MeshStandardMaterial).color.set(state.wells[id]?.color??'#c5d5d6');mesh.position.y=mesh.userData.surface-(state.wells[id]?0:3)}
  for(const [id,mesh]of tipMeshes)mesh.visible=!state.used.has(id);
  fov.visible=state.current?.kind==='capture';
- if(live.current.view!==lastView){lastView=live.current.view;camera.position.set(...(lastView==='rack'?[275,260,300]:lastView==='top'?[0,680,1]:lastView==='front'?[0,220,660]:[530,420,570]) as [number,number,number]);controls.target.set(...(lastView==='rack'?[110,130,0]:[0,120,0]) as [number,number,number])}
+ if(live.current.view!==lastView){lastView=live.current.view;camera.position.set(...(lastView==='rack'?(rackInward?[-170,240,310]:[275,260,300]):lastView==='top'?[0,680,1]:lastView==='front'?[0,220,660]:[530,420,570]) as [number,number,number]);controls.target.set(...(lastView==='rack'?(rackInward?[35,120,0]:[110,130,0]):[0,120,0]) as [number,number,number])}
  controls.update();renderer.render(scene,camera);frame=requestAnimationFrame(tick)}tick()
  return()=>{cancelAnimationFrame(frame);observer.disconnect();controls.dispose();scene.traverse(o=>{const mesh=o as THREE.Mesh;if(mesh.geometry)mesh.geometry.dispose();if(mesh.material){for(const m of Array.isArray(mesh.material)?mesh.material:[mesh.material]){if('map'in m)(m as THREE.MeshBasicMaterial).map?.dispose();m.dispose()}}});renderer.dispose();renderer.domElement.remove()}
  },[sceneKey])

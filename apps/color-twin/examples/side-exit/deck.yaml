@@ -55,12 +55,12 @@ labware:
     columns: 12
     calibration:
       a1:
-        x: 157
-        y: 98
+        x: 263
+        y: 26
         z: 70
       a2:
-        x: 167
-        y: 98
+        x: 253
+        y: 26
         z: 70
     x_offset: 10
     y_offset: 10
@@ -71,7 +71,7 @@ labware:
     height: 63
     side_exit:
       lift_mm: 30
-      exit_x: 280
+      exit_x: 140
   waste:
     type: vial
     name: Virtual tip waste

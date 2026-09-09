@@ -5,7 +5,7 @@ protocol:
 - move:
     instrument: pipette
     position:
-    - 280
+    - 140
     - 130
     - 30
     travel_z: 30
@@ -21,7 +21,7 @@ protocol:
 - move:
     instrument: pipette
     position:
-    - 280
+    - 140
     - 130
     - 30
     travel_z: 30
@@ -37,7 +37,7 @@ protocol:
 - move:
     instrument: pipette
     position:
-    - 280
+    - 140
     - 130
     - 30
     travel_z: 30

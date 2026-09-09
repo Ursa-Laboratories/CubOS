@@ -24,7 +24,8 @@ def test_side_exit_native_color_protocol_no_hardware(monkeypatch):
         lift,exit=moves[-2:]
         assert lift['end'][2]-lift['start'][2]==30
         assert lift['end'][:2]==lift['start'][:2]
-        assert exit['end'][0]==280
+        assert exit['end'][0]==140
+        assert exit['end'][0]<exit['start'][0]
         assert exit['end'][1:]==exit['start'][1:]
     assert all(0<=e['end'][2]<=56 for e in r['events'] if e['kind']=='move')
     assert all(sum(a!=b for a,b in zip(e['start'],e['end']))==1 for e in r['events'] if e['kind']=='move')
@@ -57,3 +58,19 @@ def test_blocked_tip_and_repeated_slot_rejected():
         else: steps[4]['pick_up_tip']['position']=target
         b['protocol_yaml']=yaml.safe_dump({'protocol':steps})
         with pytest.raises(ValueError,match='blocked|consumed'):run(b)
+
+
+def test_inward_rack_slot_geometry_and_corridor():
+    r=run(bundle())
+    points={p['id']:p for p in r['points']['tips']}
+    assert points['tips.A1']=={'id':'tips.A1','x':263,'y':26,'z':70}
+    assert points['tips.A2']=={'id':'tips.A2','x':253,'y':26,'z':70}
+    assert points['tips.A12']=={'id':'tips.A12','x':153,'y':26,'z':70}
+    assert points['tips.H12']=={'id':'tips.H12','x':153,'y':96,'z':70}
+    rack=r['deck_metadata']['tips']
+    assert rack['location']=={'x':150,'y':20,'z':0}
+    assert (rack['length'],rack['width'],rack['height'])==(120,84,63)
+    for step in (1,5,9):
+        moves=[e for e in r['events'] if e['kind']=='move' and e['step']==step]
+        assert all(e['start'][0]==e['end'][0]==140 for e in moves)
+        assert moves[-1]['end']==[140,130,30]
