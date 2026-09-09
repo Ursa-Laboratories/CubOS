@@ -150,7 +150,7 @@ export default function DeckVisualization({
         </text>
       )}
 
-      {/* Deck group — shifts in Y when in bed mode */}
+      {/* Apply the bed-frame shift to labware and tool coordinates together. */}
       <g transform={isBedMode ? `translate(0, ${deckTranslateY})` : undefined}>
         {deck?.labware.map((item) => {
           if (item.config.type === "well_plate") {
@@ -308,7 +308,6 @@ export default function DeckVisualization({
           }
           return null;
         })}
-      </g>
 
       {instruments &&
         Object.entries(instruments).map(([key, inst]) => (
@@ -323,6 +322,7 @@ export default function DeckVisualization({
             machineYRange={visualYRange}
           />
         ))}
+      </g>
 
       {markerPosition && (
         <GantryMarker

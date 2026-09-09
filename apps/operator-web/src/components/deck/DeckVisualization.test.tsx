@@ -347,3 +347,39 @@ describe("DeckVisualization", () => {
     expect(screen.getByTestId("deck-visualization").outerHTML).not.toContain("NaN");
   });
 });
+
+
+describe("mounted tools in the moving-bed view", () => {
+  it.each(["head", "bed"] as const)("keeps the zero-offset pipette on HEAD in %s mode", (mode) => {
+    const instruments = {
+      pipette: { type: "pipette", vendor: "sartorius", offset_x: 0, offset_y: 0, depth: -70 },
+      camera: { type: "camera", vendor: "opencv", offset_x: 0, offset_y: -46.5, depth: -114.964 },
+    };
+    const makePosition = (y: number) => ({
+      connected: true, status: "Idle", calibration_active: false,
+      x: 159.396, y, z: 55.04, work_x: 159.396, work_y: y, work_z: 55.04,
+    });
+    const props = { deck: null, instruments, yAxisMotion: mode };
+    const { rerender } = render(<DeckVisualization {...props} gantryPosition={makePosition(74.194)} />);
+    let cameraSeparation: number | undefined;
+    for (const y of [74.194, 20]) {
+      rerender(<DeckVisualization {...props} gantryPosition={makePosition(y)} />);
+      const head = screen.getByText("HEAD").parentElement!.querySelector('circle[r="4"]')!;
+      const pipette = screen.getByText("pipette").parentElement!.querySelector("rect")!;
+      expect(pipette.querySelector("title")).toHaveTextContent(`pipette (pipette) at (159.4, ${y.toFixed(1)})`);
+      const camera = screen.getByText("camera").parentElement!.querySelector("rect")!;
+      const projectedCenter = (rect: Element) => {
+        const transform = rect.closest("g[transform]")?.getAttribute("transform") ?? "";
+        const translateY = Number(transform.match(/translate\(0, ([^)]+)\)/)?.[1] ?? 0);
+        return { x: Number(rect.getAttribute("x")) + 7, y: Number(rect.getAttribute("y")) + 7 + translateY };
+      };
+      const tip = projectedCenter(pipette);
+      expect(tip.x).toBeCloseTo(Number(head.getAttribute("cx")), 5);
+      expect(tip.y).toBeCloseTo(Number(head.getAttribute("cy")), 5);
+      const separation = projectedCenter(camera).y - tip.y;
+      expect(separation).toBeGreaterThan(0);
+      if (cameraSeparation !== undefined) expect(separation).toBeCloseTo(cameraSeparation, 5);
+      cameraSeparation = separation;
+    }
+  });
+});

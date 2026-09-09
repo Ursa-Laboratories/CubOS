@@ -290,3 +290,7 @@ rather than indexing `well_attributes` directly.
 
     Replace the example paths with the gantry, deck, and protocol YAML files
     for your setup.
+
+## Moving-bed visualization
+
+For `cnc.y_axis_motion: bed`, the picture holds HEAD at a fixed display Y and shifts the deck underneath it. Mounted-tool markers use that same visual frame: a pipette with zero X/Y offsets sits on HEAD, while a front-mounted camera stays at its calibrated offset. Marker tooltips still report the actual deck-frame coordinates. This display transform does not change motion commands or calibration values.
