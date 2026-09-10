@@ -504,7 +504,6 @@ def transfer(
     destination_height: Optional[float] = None,
     liquid_class: Optional[str] = None,
     require_uncapped: Optional[List[str]] = None,
-    blow_out: bool = False,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*.
 
@@ -559,12 +558,12 @@ def transfer(
     hardware receives whatever correction is calibrated to actually deliver
     it.
 
-    ``blow_out`` (default ``False``) runs the pipette's calibrated blow-out
-    motion once, right after the *final* stroke's dispense -- clearing any
-    fluid left in the tip after the transfer is otherwise complete, rather
-    than after every stroke of a multi-stroke transfer. It does not change
-    the tracked dispense volume; a blow-out failure is treated the same as
-    a dispense failure (the stroke is marked ``reconciliation_required``).
+    Every transfer runs the pipette's calibrated blow-out motion once,
+    right after the *final* stroke's dispense -- clearing any fluid left in
+    the tip after the transfer is otherwise complete, rather than after
+    every stroke of a multi-stroke transfer. It does not change the
+    tracked dispense volume; a blow-out failure is treated the same as a
+    dispense failure (the stroke is marked ``reconciliation_required``).
     """
     _require_uncapped(context, require_uncapped, command_label="transfer")
 
@@ -707,7 +706,7 @@ def transfer(
                 tracked=tracked,
                 stroke_index=stroke_index,
                 stroke_count=stroke_count,
-                blow_out=blow_out and stroke_index == stroke_count - 1,
+                blow_out=stroke_index == stroke_count - 1,
             )
     finally:
         context.active_substep = previous_substep

@@ -229,19 +229,10 @@ class TestStrokeSplitting:
         assert sum(pipette.aspirate_volumes) == pytest.approx(1400.0)
 
 
-# ─── Optional blow-out after the final stroke ────────────────────────────────
+# ─── Blow-out after the final stroke (always runs, not opt-in) ──────────────
 
 
 class TestBlowOutOnFinalStroke:
-
-    def test_default_never_blows_out(self, tracked_env):
-        deck, store, state_id, campaign_id = tracked_env
-        pipette = RecordingPipette()
-        context = _make_context(deck, store, state_id, campaign_id, pipette)
-
-        transfer(context, source="source", destination="dest", volume_ul=50.0)
-
-        assert pipette.blowout_calls == []
 
     def test_single_stroke_transfer_blows_out_once_after_dispense(self, tracked_env):
         deck, store, state_id, campaign_id = tracked_env
@@ -250,7 +241,7 @@ class TestBlowOutOnFinalStroke:
 
         transfer(
             context, source="source", destination="dest", volume_ul=50.0,
-            speed=30.0, blow_out=True,
+            speed=30.0,
         )
 
         assert pipette.blowout_calls == [30.0]
@@ -263,10 +254,7 @@ class TestBlowOutOnFinalStroke:
         pipette = RecordingPipette()
         context = _make_context(deck, store, state_id, campaign_id, pipette)
 
-        transfer(
-            context, source="source", destination="dest", volume_ul=600.0,
-            blow_out=True,
-        )
+        transfer(context, source="source", destination="dest", volume_ul=600.0)
 
         assert len(pipette.aspirate_volumes) >= 2
         assert pipette.blowout_calls == [50.0]

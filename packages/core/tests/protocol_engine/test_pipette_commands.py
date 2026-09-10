@@ -841,17 +841,7 @@ class TestTransferCommand:
         pip.aspirate.assert_called_once_with(100.0, 50.0)
         pip.dispense.assert_called_once_with(100.0, 50.0)
 
-    def test_blow_out_defaults_to_false(self):
-        from cubos.protocol_engine.commands.pipette import transfer
-
-        ctx = _mock_context_multi_resolve()
-        pip = ctx.gantry.instruments["pipette"]
-
-        transfer(ctx, source="plate_1.A1", destination="plate_1.B1", volume_ul=100.0)
-
-        pip.blowout.assert_not_called()
-
-    def test_blow_out_true_calls_blowout_with_speed_after_dispense(self):
+    def test_transfer_always_blows_out_with_speed_after_dispense(self):
         from cubos.protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
@@ -863,7 +853,7 @@ class TestTransferCommand:
 
         transfer(
             ctx, source="plate_1.A1", destination="plate_1.B1", volume_ul=100.0,
-            speed=40.0, blow_out=True,
+            speed=40.0,
         )
 
         pip.blowout.assert_called_once_with(40.0)
