@@ -160,11 +160,7 @@ def plan_motion(
             )
         direct_blockers.update(blockers)
 
-    if (
-        scope.allowed_fixture_names
-        or scope.allowed_corridor_names
-        or scope.allowed_tool_names
-    ):
+    if scope.allowed_fixture_names or scope.allowed_corridor_names:
         raise NoRouteError(
             "No collision-free direct axis order exists for the scoped access move."
         )

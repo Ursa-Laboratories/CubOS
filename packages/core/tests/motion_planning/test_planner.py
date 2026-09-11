@@ -100,6 +100,27 @@ def test_obstacle_edge_detour_is_selected_when_both_direct_orders_are_blocked():
     assert plan.segments[-1].end == Point3D(9, 9, 5)
 
 
+def test_tool_attribution_alone_still_allows_obstacle_edge_detours():
+    scene = _scene(
+        _box("x-first-blocker", 4, 6, 0, 2, 4, 6),
+        _box("y-first-blocker", 0, 2, 4, 6, 4, 6),
+    )
+
+    plan = plan_motion(
+        scene,
+        Point3D(1, 1, 5),
+        Point3D(9, 9, 5),
+        access=AccessScope(allowed_tool_names=("pipette",)),
+    )
+
+    assert plan.strategy == "detour:x-first-blocker:pipette:x_min"
+    assert [segment.axis for segment in plan.segments] == ["x", "y", "x"]
+    assert all(
+        segment.access.allowed_tool_names == ("pipette",)
+        for segment in plan.segments
+    )
+
+
 def test_full_width_barrier_fails_closed_when_no_bounded_route_exists():
     scene = _scene(_box("barrier", 4, 6, 0, 10, 0, 20))
 

@@ -1,33 +1,59 @@
-# CubOS color simulation
+# CubOS Color Twin
 
-A local, simulation-only viewer that executes native CubOS fluid-handling protocols against virtual instruments. The side-exit example uses a 1000 µL pipette profile, 70 mm attached tips and 56 mm usable Z travel.
+The Color Twin is a localhost, simulation-only viewer for native CubOS YAML
+protocols. The routing review at the top of the page has exactly three named
+cases:
 
-## Run
+1. **Ordinary vertical transfer** — the legacy and planner paths use vertical
+   access in a roomy reference scene and must produce the same liquid result.
+2. **Saved deck · A1 side exit** — the byte-preserved user deck is registered
+   with its calibrated 2 × 6 stock holder. The native protocol picks up from
+   exposed `tips.A1`; core access metadata performs the 30 mm lift and exits
+   through the negative-X edge before fluid handling.
+3. **Saved deck · Y-first waste detour** — the same saved deck registers the
+   nominal 120 × 84 × 63 mm rack obstacle with a conservative 124 mm registered
+   X envelope. The planner chooses a Y-first clear
+   corridor when traveling toward waste. The UI shows the serialized shared
+   plan and the execution segment stream when core exposes both.
 
-From the CubOS repository root, using this checkout's virtual environment:
+`examples/saved-user/deck.yaml` is an exact copy of
+`CubOS-local-configs/picus1000-color-matching/deck/deck.yaml`. New routing
+geometry is additive: it lives in each profile's `motion` labware metadata and
+the deck-level `motion_planning.clearance_mm`. The derived side-exit profile
+retains all saved coordinates and requests an 8 mm clearance from the nominal
+rack edge at X=139.456 mm. Core derives the final exit coordinate from the
+registered rack and every mounted-tool envelope (currently X=122.456 mm in
+the serialized plan); the original `exit_x: 140` remains unchanged in the
+provenance copy.
+
+Run from the CubOS repository root with the checkout's environment:
 
 ```sh
-python -m pip install -e 'packages/core[dev]' fastapi uvicorn httpx
-npm ci --prefix apps/color-twin
-npm run build --prefix apps/color-twin
-PYTHONPATH=packages/core/src:apps/color-twin python -m uvicorn sim.server:app --host 127.0.0.1 --port 8753
+PYTHONPATH=packages/core/src:apps/color-twin python -m uvicorn sim.server:app --host 127.0.0.1 --port 8760
 ```
 
-Open <http://127.0.0.1:8753/?profile=side-exit>. Choose **Rack close-up**, then **Review first pickup at 1×**. The **A / B** buttons pause after the 30 mm lift and X-only withdrawal. Play the entire protocol to transfer three colors into A1, mix, discard the tips and capture a synthetic color observation. **Run BO campaign** generates recipes and fills additional wells.
+Open `http://127.0.0.1:8760/`. Playback, seeking, route phase labels, obstacle
+geometry, planned paths and native execution traces are offline previews. No
+serial port, protocol execution on hardware, Pi deployment or private photo is
+used. Nominal CAD envelopes, attached-tip radius, camera geometry and saved
+coordinates still require physical fit, collision, Z-stroke and measurement
+validation.
 
-Inputs are in `examples/side-exit/`. Download edited YAML or export the complete run through the UI. The earlier illustrative 120 µL profile is available without the query parameter.
+The BO color experiment remains available beside the routing review. Its
+synthetic RGB values are illustrative and do not represent measured chemistry.
 
-## What the example verifies
-
-The simulator uses CubOS loaders, protocol handlers, deck resolution, mounted-tool offsets, bounds and semantic validators. Gantry movements follow CubOS's separate axis moves. Virtual instruments track tip consumption, liquid capacity, stock depletion and mixture volumes. The scene displays the original rack STL; its provenance and orientation are documented in `src/assets/README.md`.
-
-No serial connection or hardware API is used. This is an uncalibrated geometric/protocol preview: engagement Z, mounted extension, camera offsets and deck anchors require physical measurement. The constant-feed playback does not emulate GRBL firmware, acceleration, alarms or emergency stops. Colors use a synthetic absorbance model, not measured chemistry. The demo's explicit Y corridor and waste position must be calibrated for a real setup.
-
-See [side-exit rack support](../../docs/side-exit-tip-rack.md) for the YAML fields, coordinate math and operator test procedure. Physical validation is pending.
-
-## Tests
+Tests:
 
 ```sh
 PYTHONPATH=packages/core/src:apps/color-twin python -m pytest apps/color-twin/tests -q
 npm run build --prefix apps/color-twin
+```
+
+Export all three bundles, serialized core plans, execution traces, comparison
+results, initial poses, assumptions and the saved-deck hash to a reviewable
+artifact (including editable YAML under each demo folder and the ordinary
+legacy/planned comparison folders):
+
+```sh
+PYTHONPATH=packages/core/src:apps/color-twin python -m sim.export_demos --output /tmp/cubos-routing-evidence
 ```

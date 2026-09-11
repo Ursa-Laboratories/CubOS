@@ -6,7 +6,7 @@ import { stateAt, type Run } from './types'
 
 export default function Scene({run,time,view}:{run:Run|null;time:number;view:string}){
  const host=useRef<HTMLDivElement>(null);const live=useRef({run,time,view});live.current={run,time,view}
- const sceneKey=JSON.stringify([run?.points,run?.mounts,run?.deck_metadata])
+ const sceneKey=JSON.stringify([run?.points,run?.mounts,run?.deck_metadata,run?.route?.source,run?.route?.segments,run?.route?.fixtures])
  useEffect(()=>{
  if(!host.current)return
  const element=host.current;const scene=new THREE.Scene();scene.background=new THREE.Color('#132128');scene.fog=new THREE.Fog('#132128',750,1500)
@@ -31,16 +31,16 @@ export default function Scene({run,time,view}:{run:Run|null;time:number;view:str
  label('GENMITSU  /  3018',0,27,187,15)
  const bed=new THREE.Group();scene.add(bed);box(bed,300,8,180,0,55,0,steel)
  for(let x=-135;x<=135;x+=27)for(let z=-75;z<=75;z+=30)cyl(bed,1.7,1,x,59.5,z,dark)
- const points=run?.points??{};const wellMeshes=new Map<string,THREE.Mesh>();const tipMeshes=new Map<string,THREE.Mesh>();
+ const points=run?.points??{};const planned=run?.route?.source==='core-motion-plan';const wellMeshes=new Map<string,THREE.Mesh>();const tipMeshes=new Map<string,THREE.Mesh>();const obstacleMeshes=new Map<string,THREE.Mesh>();
  function tray(key:string,height:number,mat:THREE.Material){const ps=points[key]??[];if(!ps.length)return;const xs=ps.map(p=>p.x-145),zs=ps.map(p=>90-p.y);const minx=Math.min(...xs),maxx=Math.max(...xs),minz=Math.min(...zs),maxz=Math.max(...zs);box(bed,maxx-minx+24,height,maxz-minz+23,(minx+maxx)/2,60+height/2,(minz+maxz)/2,mat);return {minx,maxx,minz,maxz}}
- tray('plate',(run?.deck_metadata?.plate.height??15)-5,cream)
+ if(!planned)tray('plate',(run?.deck_metadata?.plate.height??15)-5,cream)
  for(const p of points.plate??[]){cyl(bed,3.8,7,p.x-145,60+p.z-3,90-p.y,glass);const well=cyl(bed,3,1,p.x-145,60+p.z-7,90-p.y,material('#c5d5d6',.05,.23));well.userData.surface=60+p.z-4;wellMeshes.set(p.id,well)}
  const sideExit=run?.deck_metadata?.tips.side_exit
  const rackInward=!!sideExit&&sideExit.exit_x<(points.tips?.[0]?.x??0)
  const tipLength=run?.deck_metadata?.tips.tip_length??25
  if(sideExit){
    const location=run?.deck_metadata?.tips.location??{x:150,y:20,z:0}
-   new STLLoader().load(new URL('./assets/ColorMatching_TipHolder.stl',import.meta.url).href,geometry=>{
+   if(!run?.route?.fixtures?.length)new STLLoader().load(new URL('./assets/ColorMatching_TipHolder.stl',import.meta.url).href,geometry=>{
      // CAD base Y=-63; open end Z=-120. Match the configured exit side.
      const inward=sideExit.exit_x<location.x
      geometry.applyMatrix4(inward
@@ -49,22 +49,29 @@ export default function Scene({run,time,view}:{run:Run|null;time:number;view:str
      geometry.computeVertexNormals();const mesh=new THREE.Mesh(geometry,cream);mesh.castShadow=true;mesh.receiveShadow=true;bed.add(mesh)
    })
    const a1=points.tips?.[0];if(a1)bed.add(label('A1',a1.x-145,60+a1.z+12,90-a1.y,7))
-   const p=points.tips?.[11];if(p){
-     bed.add(label('A12 · first pickup',p.x-145,60+p.z+12,90-p.y,9))
-     const bottom=p.z-tipLength;const lift=bottom+sideExit.lift_mm
-     const path=[new THREE.Vector3(p.x-145,60+bottom,90-p.y),new THREE.Vector3(p.x-145,60+lift,90-p.y),new THREE.Vector3(sideExit.exit_x-145,60+lift,90-p.y)]
-     const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints(path),new THREE.LineBasicMaterial({color:'#ffb85c',depthTest:false}));line.renderOrder=10;bed.add(line)
-   }
+   const p=points.tips?.[0];if(p)bed.add(label('A1 · first pickup',p.x-145,60+p.z+12,90-p.y,9))
    const waste=run?.deck_metadata?.waste.location
    if(waste){cyl(bed,11,40,waste.x-145,80,90-waste.y,cream);cyl(bed,9,1,waste.x-145,101,90-waste.y,dark)}
  }else{
    const rack=tray('tips',(points.tips?.[0]?.z??45)-10,cream)
    if(rack)for(let row=0;row<9;row++)box(bed,rack.maxx-rack.minx+24,11,1.3,(rack.minx+rack.maxx)/2,60+(points.tips?.[0]?.z??45)-4,rack.minz-5+row*9,cream)
  }
+ // Draw the exact route supplied by the runtime.  These segments are kept in
+ // scene coordinates so the path remains visible while the moving bed shifts.
+ for(const segment of run?.route?.segments??[]){
+   const [a,b]=[segment.start,segment.end].map(([x,y,z])=>new THREE.Vector3(x-145,60+z,90-y))
+   const axes=(segment.axes??'').toUpperCase();const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([a,b]),new THREE.LineBasicMaterial({color:axes.includes('Y')?'#9fd4ac':axes.includes('X')?'#ffb85c':'#8dc8e3',depthTest:false}));line.renderOrder=12;bed.add(line)
+ }
+ const obstacle=material('#d27e66',.05,.7,.2)
+ for(const fixture of run?.route?.fixtures??[]){
+   const {minimum:min,maximum:max}=fixture
+   const mesh=box(bed,max.x-min.x,max.z-min.z,max.y-min.y,(min.x+max.x)/2-145,60+(min.z+max.z)/2,90-(min.y+max.y)/2,obstacle);obstacleMeshes.set(fixture.name,mesh)
+   if(!fixture.name.includes('.tip.')){const marker=label(fixture.name,(min.x+max.x)/2-145,60+max.z+5,90-(min.y+max.y)/2,5);bed.add(marker)}
+ }
  for(const p of points.tips??[]){const tip=cyl(bed,2.8,tipLength,p.x-145,60+p.z-tipLength/2,90-p.y,glass,.3);tipMeshes.set(p.id,tip)}
- tray('stocks',24,cream)
+ if(!planned)tray('stocks',24,cream)
  const stockColors=['#df244b','#f1ca25','#246ddd']
- for(const [i,p] of (points.stocks??[]).entries()){cyl(bed,8,27,p.x-145,60+p.z-12,90-p.y,glass);if(i<3)cyl(bed,6.5,17,p.x-145,60+p.z-17,90-p.y,material(stockColors[i],0,.3,.85));cyl(bed,8,3,p.x-145,60+p.z+3,90-p.y,white)}
+ if(!planned)for(const [i,p] of (points.stocks??[]).entries()){cyl(bed,8,27,p.x-145,60+p.z-12,90-p.y,glass);if(i<3)cyl(bed,6.5,17,p.x-145,60+p.z-17,90-p.y,material(stockColors[i],0,.3,.85));cyl(bed,8,3,p.x-145,60+p.z+3,90-p.y,white)}
  const carriage=new THREE.Group();scene.add(carriage);box(carriage,55,76,35,0,232,-15,teal)
  for(const x of [-16,16])cyl(carriage,3,155,x,210,9,steel)
  box(carriage,42,26,40,0,299,-5,black);box(carriage,44,5,42,0,283,-5,steel)
@@ -83,7 +90,8 @@ export default function Scene({run,time,view}:{run:Run|null;time:number;view:str
  const resize=()=>{const {width,height}=element.getBoundingClientRect();renderer.setSize(width,height);camera.aspect=width/height;camera.updateProjectionMatrix()};const observer=new ResizeObserver(resize);observer.observe(element);resize()
  let frame=0,lastView='orbit';function tick(){const state=stateAt(live.current.run,live.current.time);head.position.set(state.pose[0]-145,60+state.pose[2],-17);bed.position.z=state.pose[1]-90;carriage.position.x=state.pose[0]-145;tip.visible=state.tip>0;tip.scale.y=state.tip/25;tip.position.y=-state.tip/2
  for(const [id,mesh]of wellMeshes){(mesh.material as THREE.MeshStandardMaterial).color.set(state.wells[id]?.color??'#c5d5d6');mesh.position.y=mesh.userData.surface-(state.wells[id]?0:3)}
- for(const [id,mesh]of tipMeshes)mesh.visible=!state.used.has(id);
+ for(const [id,mesh]of tipMeshes)mesh.visible=!planned&&!state.used.has(id);
+ for(const [name,mesh]of obstacleMeshes)mesh.visible=!(name.includes('.tip.')&&state.used.has(name.replace('.tip.','.')));
  fov.visible=state.current?.kind==='capture';
  if(live.current.view!==lastView){lastView=live.current.view;camera.position.set(...(lastView==='rack'?(rackInward?[-170,240,310]:[275,260,300]):lastView==='top'?[0,680,1]:lastView==='front'?[0,220,660]:[530,420,570]) as [number,number,number]);controls.target.set(...(lastView==='rack'?(rackInward?[35,120,0]:[110,130,0]):[0,120,0]) as [number,number,number])}
  controls.update();renderer.render(scene,camera);frame=requestAnimationFrame(tick)}tick()

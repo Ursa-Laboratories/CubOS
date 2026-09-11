@@ -41,7 +41,7 @@ def distance(a, b):
 
 
 class World:
-    def __init__(self, event_sink=None, step_sink=None):
+    def __init__(self, event_sink=None, step_sink=None, stock_palette=None):
         self.event_sink = event_sink
         self.step_sink = step_sink
         self.events = []
@@ -49,8 +49,11 @@ class World:
         self.step = -1
         self.command = 'ready'
         self.context = None
-        self.fluids = {s['target']: [4000.0 if i == j else 0.0 for i in range(len(STOCKS))] for j,s in enumerate(STOCKS)}
+        self.stock_palette = list(stock_palette or STOCKS)
+        self.channels = len(STOCKS)
+        self.fluids = {}
         self.consumed_tips = set()
+        self.routing = {}
 
     def emit(self, kind, duration=0.3, **payload):
         event = {'kind': kind, 't': self.time, 'duration': duration, 'step': self.step, 'command': self.command, **payload}
@@ -202,8 +205,116 @@ class SimCamera(CameraInstrument):
         return f'simulation://capture/{target}'
 
 
+def _event_route(events, routing):
+    """Serialize the actual movement events as route segments for the UI.
+
+    When a newer core exposes MotionPlan, ``execute`` replaces this derived
+    view with its ``to_dict`` result.  The fallback remains the exact segment
+    stream emitted by the native protocol runtime, never an illustrated path.
+    """
+    segments = []
+    for event in events:
+        if event.get('kind') != 'move' or not event.get('start') or not event.get('end'):
+            continue
+        delta = [b - a for a, b in zip(event['start'], event['end'])]
+        axes = ''.join(axis for axis, value in zip('XYZ', delta) if abs(value) > 1e-7)
+        segments.append({
+            'index': len(segments), 'step': event.get('step', -1),
+            'phase': 'travel', 'start': event['start'], 'end': event['end'],
+            'axes': axes or 'none', 'duration': event.get('duration', 0),
+            'command': event.get('command', ''), 'reason': 'native runtime segment',
+        })
+    return {
+        'schema_version': 'labware-routing/v1',
+        'source': 'native-runtime-events',
+        'planner_enabled': bool(routing.get('planner_enabled', False)),
+        'strategy': 'legacy',
+        'axis_order': [],
+        'reason': 'legacy native movement',
+        'segments': segments,
+    }
+
+
+def _shared_plan_dict(context):
+    """Find a serialized MotionPlan exposed by a newer core runtime.
+
+    The simulator deliberately does not calculate a second route. Core
+    preflight stores immutable plans per protocol step on the context; those
+    exact serialized plans are the sole source for planned path display.
+    """
+    candidates = []
+    prepared_steps = getattr(context, 'planned_motion_steps', {})
+    for step_index in sorted(prepared_steps):
+        prepared = prepared_steps[step_index]
+        for plan in prepared.plans:
+            value = plan.to_dict()
+            value['_step'] = step_index
+            candidates.append(value)
+    if not candidates:
+        candidates = context.serialized_motion_plans()
+    plans = []
+    for candidate in candidates:
+        value = candidate if isinstance(candidate, dict) else candidate.to_dict()
+        if isinstance(value, dict) and isinstance(value.get('segments'), list):
+            plans.append(copy.deepcopy(value))
+    if not plans:
+        return None
+    if len(plans) == 1:
+        return plans[0]
+    combined = copy.deepcopy(plans[0])
+    combined['segments'] = [
+        {**segment, **({'_step': plan['_step']} if '_step' in plan else {})}
+        for plan in plans for segment in plan.get('segments', [])
+    ]
+    combined['state_changes'] = [change for plan in plans for change in plan.get('state_changes', [])]
+    combined['strategies'] = [plan.get('strategy') for plan in plans]
+    combined['strategy'] = 'sequence'
+    combined['reason'] = '; '.join(dict.fromkeys(str(plan.get('reason', '')).strip() for plan in plans if plan.get('reason')))
+    return combined
+
+
+def _route_with_shared_plan(events, routing, context, *, check_parity=True):
+    executed = _event_route(events, routing)
+    planned = _shared_plan_dict(context)
+    if planned is None:
+        if getattr(context.deck, 'planning_enabled', False):
+            raise RuntimeError('Motion planning is enabled for this demo, but the core MotionPlan was not produced.')
+        return executed
+    segments = planned.get('segments', [])
+    normalized = []
+    for index, segment in enumerate(segments):
+        item = dict(segment)
+        item.setdefault('index', index)
+        if '_step' in item:
+            item['step'] = item.pop('_step')
+        for key in ('start', 'end'):
+            point = item.get(key)
+            if isinstance(point, dict):
+                item[key] = [point.get('x'), point.get('y'), point.get('z')]
+        item.setdefault('axes', item.get('axis', ''))
+        normalized.append(item)
+    planned['segments'] = normalized
+    planned['source'] = 'core-motion-plan'
+    planned['execution_segments'] = executed['segments']
+    # Compare only the exact carriage endpoints, keeping extra core phase
+    # labels and state changes available for display.
+    planned_endpoints = [(tuple(item.get('start', ())), tuple(item.get('end', ()))) for item in normalized]
+    executed_endpoints = [(tuple(item.get('start', ())), tuple(item.get('end', ()))) for item in executed['segments']]
+    planned['parity'] = {'segments_equal': planned_endpoints == executed_endpoints, 'checked': check_parity}
+    if check_parity and getattr(context.deck, 'planning_enabled', False) and not planned['parity']['segments_equal']:
+        raise RuntimeError('Core MotionPlan and simulator execution segments differ; refusing to present a routed run.')
+    scene = getattr(getattr(context, 'routing_session', None), 'base_scene', None)
+    if scene is not None:
+        planned['fixtures'] = [fixture.to_dict() for fixture in scene.fixtures]
+    planned.setdefault('strategy', executed['strategy'])
+    planned.setdefault('reason', '')
+    planned.setdefault('axis_order', [segment.get('axes', '') for segment in normalized])
+    return planned
+
+
 def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
-            ready_sink=None, step_sink=None, initial_position=None, validate_only=False):
+            ready_sink=None, step_sink=None, initial_position=None, validate_only=False,
+            routing=None):
     with TemporaryDirectory(prefix='cubos-twin-') as directory:
         paths = []
         for name, content in zip(('gantry','deck','protocol'),(gantry_yaml,deck_yaml,protocol_yaml)):
@@ -224,6 +335,7 @@ def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
                 for field in ('volume_ul','cycles'):
                     if field in args and (not isinstance(args[field], (int,float)) or not math.isfinite(args[field]) or not 0 < args[field] <= (4000 if field == 'volume_ul' else 100)):
                         raise ValueError(f'{field} exceeds the supported simulation range.')
+        routing_metadata = routing or (yaml.safe_load(deck_yaml) or {}).get('motion_planning', {})
         config = load_gantry_from_yaml_safe(paths[0])
         if set(config.instruments) != {'pipette','camera'}:
             raise ValueError('This scene requires exactly the pipette and camera instruments.')
@@ -234,13 +346,14 @@ def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
         if config.instruments['pipette'].get('liquid_classes'):
             raise ValueError('Liquid-class corrections are not yet modeled by this simulator.')
         deck_metadata = yaml.safe_load(deck_yaml)['labware']
-        expected = {'plate': ('well_plate',8,12), 'stocks': ('vial_grid',2,3), 'tips': ('tip_rack',8,12)}
+        expected = {'plate': ('well_plate',8,12), 'stocks': ('vial_grid',2,None), 'tips': ('tip_rack',8,12)}
         if set(deck_metadata) not in (set(expected), set(expected) | {'waste'}):
             raise ValueError('The photo scene requires plate, stocks, and tips labware keys.')
         for key,(kind,rows,columns) in expected.items():
             entry = deck_metadata[key]
-            if (entry.get('type'),entry.get('rows'),entry.get('columns')) != (kind,rows,columns):
-                raise ValueError(f'{key} must remain a {rows} × {columns} {kind} for this scene.')
+            if entry.get('type') != kind or entry.get('rows') != rows or (columns is not None and entry.get('columns') != columns) or (key == 'stocks' and entry.get('columns') not in (3, 6)):
+                shape = f'{rows} × {columns}' if columns is not None else '2 × 3 or 2 × 6'
+                raise ValueError(f'{key} must remain a {shape} {kind} for this scene.')
             if key != 'tips':
                 for field in ('capacity_ul','working_volume_ul'):
                     value = entry.get(field)
@@ -258,10 +371,17 @@ def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
                 raise ValueError(f'Unsupported simulation command: {step.command_name}. Supported: {sorted(allowed)}')
             if step.command_name == 'measure' and (step.args.get('instrument') != 'camera' or step.args.get('method') != 'capture'):
                 raise ValueError('Only synthetic camera capture measurements are supported.')
-        world = World(event_sink, step_sink)
+        transfer_sources = []
+        for raw_step in flat_steps:
+            args = next(iter(raw_step.values())) if isinstance(raw_step, dict) else {}
+            if isinstance(args, dict) and isinstance(args.get('source'), str) and args['source'] not in transfer_sources:
+                transfer_sources.append(args['source'])
+        stock_palette = [dict(STOCKS[i % len(STOCKS)], target=target) for i, target in enumerate(transfer_sources)] or list(STOCKS)
+        world = World(event_sink, step_sink, stock_palette=stock_palette)
         world.deck_metadata = deck_metadata
         initial_volume = min(4000, deck_metadata['stocks']['working_volume_ul'])
-        world.fluids = {stock['target']: [initial_volume if i == j else 0.0 for i in range(len(STOCKS))] for j,stock in enumerate(STOCKS)}
+        world.fluids = {stock['target']: [initial_volume if i == j % len(STOCKS) else 0.0 for i in range(len(STOCKS))] for j,stock in enumerate(stock_palette)}
+        world.routing = routing_metadata
         controller = SimController(world, config.working_volume)
         if initial_position is not None:
             if not config.working_volume.contains(*initial_position):
@@ -273,7 +393,8 @@ def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
             raw = config.instruments[name]
             mount = {k:raw.get(k,0) for k in ('offset_x','offset_y','depth')}
             instruments[name] = cls(world, name=name, **mount, **({'max_volume': 1000 if raw.get('pipette_model') == 'simulation_1000ul' else 120} if name == 'pipette' else {}))
-        gantry = InstrumentedGantry(controller, instruments, safe_z=config.resolved_safe_z)
+        gantry = InstrumentedGantry(controller, instruments, safe_z=config.resolved_safe_z,
+                                    motion_envelopes=getattr(config, 'motion_envelopes', None))
         violations = validate_protocol_motion_bounds(config,protocol,deck,gantry)
         violations += validate_protocol_semantics(protocol,gantry,deck,config)
         if violations: raise ValueError('; '.join(str(v) for v in violations))
@@ -290,13 +411,23 @@ def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
         result = {'events': [], 'duration': 0, 'steps': len(protocol.steps), 'points': points,
                   'fluids': world.fluid_snapshot(), 'deck_metadata': deck_metadata,
                   'mounts': copy.deepcopy(config.instruments), 'initial_position': start_position,
+                  'routing': routing_metadata,
                   'plan': [{'index': s.index, 'command': s.command_name,
                             'summary': s.command_name.replace('_', ' '), 'args': s.args}
                            for s in protocol.steps]}
         if validate_only:
+            if getattr(deck, 'planning_enabled', False):
+                from cubos.protocol_engine.routing import prepare_planning_context
+                prepare_planning_context(protocol, context)
+                result['route'] = _route_with_shared_plan([], routing_metadata, context, check_parity=False)
+            else:
+                result['route'] = {'schema_version': 'labware-routing/v1', 'source': 'not-executed',
+                                   'planner_enabled': False, 'segments': []}
             return result
         if ready_sink is not None:
             ready_sink(result)
         protocol.execute(context)
+        route = _route_with_shared_plan(world.events, routing_metadata, context)
         return {**result, 'events': world.events, 'duration': world.time,
-                'fluids': world.fluid_snapshot()}
+                'fluids': world.fluid_snapshot(), 'route': route,
+                'plan': [{**item, 'route_segments': [s for s in route['segments'] if s.get('step') == item['index']]} for item in result['plan']]}

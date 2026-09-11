@@ -298,6 +298,76 @@ def test_consumed_tip_is_absent_from_later_unscoped_transit_scene(monkeypatch) -
     assert all("tips.tip.A1" not in names for names in observed_fixture_sets)
 
 
+def test_native_move_executes_cached_intermediate_detour_when_both_direct_orders_block() -> None:
+    def tall_blocker(name, x, y):
+        value = _vial(name, x, y)
+        value["motion"]["box"] = {
+            "anchor": "location",
+            "offset": {"x": -5, "y": -5, "z": -40},
+            "size": {"x": 10, "y": 10, "z": 140},
+        }
+        return value
+
+    deck = _build_deck_from_raw({
+        "motion_planning": {"clearance_mm": 1},
+        "labware": {
+            "blocks_x_first": tall_blocker("blocks x first", 60, 20),
+            "blocks_y_first": tall_blocker("blocks y first", 20, 60),
+        },
+    })
+    config = GantryConfig(
+        serial_port="offline",
+        gantry_type=GantryType.CUB,
+        factory_z_travel_mm=100,
+        working_volume=WorkingVolume(0, 100, 0, 100, 0, 80),
+        safe_z=80,
+        instruments={"pipette": {"type": "pipette", "vendor": "fake"}},
+        motion_envelopes={
+            "pipette": {
+                "box": {
+                    "offset": {"x": -2, "y": -2, "z": 0},
+                    "size": {"x": 4, "y": 4, "z": 20},
+                },
+                "attached_tip_radius_mm": 1,
+            }
+        },
+    )
+    controller = FakeController()
+    controller.coords = {"x": 20.0, "y": 20.0, "z": 80.0}
+    pipette = FakePipette()
+    pipette.depth = 0.0
+    gantry = InstrumentedGantry(
+        controller,
+        {"pipette": pipette},
+        safe_z=80,
+        motion_envelopes=config.motion_envelopes,
+    )
+    context = ProtocolContext(gantry=gantry, deck=deck, gantry_config=config)
+    protocol = compile_protocol([
+        CommandCall("move", {
+            "instrument": "pipette",
+            "position": [80, 80, 80],
+        }),
+    ])
+
+    protocol.execute(context)
+
+    plan = context.motion_plans[0]
+    assert "detour:" in plan.strategy
+    assert len(plan.segments) == 3
+    assert [move[:3] for move in controller.moves] == [
+        (segment.end.x, segment.end.y, segment.end.z)
+        for segment in plan.segments
+    ]
+    assert all(move[3] is None for move in controller.moves)
+    assert all(
+        segment.access.allowed_tool_names == ("pipette",)
+        and not segment.access.allowed_fixture_names
+        and not segment.access.allowed_corridor_names
+        for segment in plan.segments
+    )
+
+
 def _write_planned_move_files(tmp_path):
     gantry = tmp_path / "gantry.yaml"
     gantry.write_text("""
