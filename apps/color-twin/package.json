@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1 --port 5175",
-    "build": "tsc -b && vite build"
+    "build": "tsc -b && vite build",
+    "test:render": "node --test tests-js/rackGeometry.test.ts"
   },
   "dependencies": {
     "react": "^19.2.0",

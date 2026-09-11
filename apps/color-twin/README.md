@@ -16,6 +16,10 @@ cases:
    corridor when traveling toward waste. The UI shows the serialized shared
    plan and the execution segment stream when core exposes both.
 
+The default view shows solid labware. Turn on **Collision geometry** to inspect
+the planner's conservative obstacle envelopes over those models. This display
+toggle keeps the current playback position and does not change the route.
+
 `examples/saved-user/deck.yaml` is an exact copy of
 `CubOS-local-configs/picus1000-color-matching/deck/deck.yaml`. New routing
 geometry is additive: it lives in each profile's `motion` labware metadata and
@@ -39,13 +43,13 @@ used. Nominal CAD envelopes, attached-tip radius, camera geometry and saved
 coordinates still require physical fit, collision, Z-stroke and measurement
 validation.
 
-The BO color experiment remains available beside the routing review. Its
-synthetic RGB values are illustrative and do not represent measured chemistry.
+The synthetic RGB values are illustrative and do not represent measured chemistry.
 
 Tests:
 
 ```sh
 PYTHONPATH=packages/core/src:apps/color-twin python -m pytest apps/color-twin/tests -q
+npm run test:render --prefix apps/color-twin
 npm run build --prefix apps/color-twin
 ```
 
