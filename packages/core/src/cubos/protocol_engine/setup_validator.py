@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 _log = logging.getLogger(__name__)
 
@@ -42,6 +42,7 @@ class SetupValidationResult:
     passed: bool
     errors: tuple[str, ...] = ()
     stage: ValidationStage = "validation"
+    motion_plans: tuple[dict[str, Any], ...] = ()
 
 def _labware_summary(deck: Deck) -> list[str]:
     """Return one-line summaries for each piece of labware."""
@@ -309,6 +310,35 @@ def run_setup_validation(
             out("  OK")
         out()
 
+    serialized_motion_plans: tuple[dict[str, Any], ...] = ()
+    if not errors and getattr(deck, "planning_enabled", False) is True:
+        out("Validating collision-aware motion plans...")
+        try:
+            from cubos.protocol_engine.routing import prepare_planning_context
+            from cubos.protocol_engine.runtime import ProtocolContext
+
+            offline_gantry.move_to(vol.x_max, vol.y_max, vol.z_max)
+            planning_context = ProtocolContext(
+                gantry=instrumented_gantry,
+                deck=deck,
+                positions=protocol.positions,
+                gantry_config=gantry_config,
+            )
+            prepare_planning_context(protocol, planning_context)
+            serialized_motion_plans = tuple(
+                planning_context.serialized_motion_plans()
+            )
+            out(
+                "  OK "
+                f"({len(serialized_motion_plans)} immutable plan(s), nominal "
+                f"initial carriage pose=({vol.x_max}, {vol.y_max}, {vol.z_max}))"
+            )
+        except Exception as exc:
+            error = f"collision-aware planning: {type(exc).__name__}: {exc}"
+            errors.append(error)
+            out(f"  FAIL - {error}")
+        out()
+
     out(SEPARATOR)
     if errors:
         out(f"RESULT: FAIL - {len(errors)} violation(s) found")
@@ -327,6 +357,7 @@ def run_setup_validation(
         output="\n".join(lines),
         passed=True,
         stage="validation",
+        motion_plans=serialized_motion_plans,
     )
 __all__ = [
     "SetupValidationResult",

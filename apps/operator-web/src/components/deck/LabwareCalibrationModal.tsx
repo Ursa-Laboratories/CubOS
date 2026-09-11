@@ -467,7 +467,12 @@ export default function LabwareCalibrationModal({
         ? ({ ...(selectedItem.config as unknown as Record<string, unknown>), name: trimmedName } as unknown as LabwareConfig)
         : activeConfig;
       labware[targetKey] = buildUpdatedLabware(base, targets, resolveTarget);
-      await onSaveDeck(deck.filename, { labware });
+      await onSaveDeck(deck.filename, {
+        labware,
+        ...(deck.motion_planning != null
+          ? { motion_planning: structuredClone(deck.motion_planning) }
+          : {}),
+      });
       onClose();
     } catch (err) {
       setError(errorMessage(err));

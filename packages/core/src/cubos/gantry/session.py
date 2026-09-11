@@ -675,7 +675,19 @@ class GantrySession:
                     fluid_state_id=fluid_state_id,
                     step_observer=step_observer,
                 )
-                gantry.prepare_for_protocol_run()
+                planning_enabled = (
+                    getattr(getattr(context, "deck", None), "planning_enabled", False)
+                    is True
+                )
+                if planning_enabled:
+                    status = gantry.get_status()
+                    if status != "Idle" and not status.startswith("<Idle|"):
+                        raise GantrySessionHealthCheckError(
+                            "Planning-enabled execution requires an Idle controller; "
+                            f"observed {status!r}. No motion was attempted."
+                        )
+                else:
+                    gantry.prepare_for_protocol_run()
                 context.gantry.connect_instruments()
                 if not gantry.is_healthy():
                     raise GantrySessionHealthCheckError(
