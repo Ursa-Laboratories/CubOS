@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { DeckResponse, GantryPosition, GantryResponse, LabwareConfig, WellPlateConfig, VialConfig, VialGridConfig, TipRackConfig, TipDisposalConfig, WellPlateHolderConfig, Coordinate3D, DeckConfig } from "../../types";
-import { CoordinateField, NumberField, OptionalNumberField, SaveButton, SaveTargetHint, SavedStatus, TextField, UnsavedNotice } from "./fields";
+import { Coordinate2DField, CoordinateField, NumberField, OptionalNumberField, SaveButton, SaveTargetHint, SavedStatus, TextField, UnsavedNotice } from "./fields";
 import { useSaveShortcut } from "./saveHelpers";
 import ConfigFilePicker from "./ConfigFilePicker";
 import { normalizeYamlFilename } from "./field-utils";
@@ -68,6 +68,44 @@ const EMPTY_VIAL: VialConfig = {
   capacity_ul: 1500.0,
   working_volume_ul: 1200.0,
 };
+
+// Calibration A2 must sit exactly one pitch from A1 along one axis
+// (loader validates the step magnitude against x_offset/y_offset).
+const EMPTY_TIP_RACK: TipRackConfig = {
+  type: "tip_rack",
+  name: "",
+  model_name: "tip_rack",
+  rows: 8,
+  columns: 12,
+  pickup_z: 43.0,
+  drop_z: 34.0,
+  tip_length: 59.3,
+  calibration: {
+    a1: { x: 100.0, y: 50.0 },
+    a2: { x: 109.0, y: 50.0 },
+  },
+  x_offset: 9.0,
+  y_offset: 9.0,
+};
+
+const EMPTY_TIP_DISPOSAL: TipDisposalConfig = {
+  type: "tip_disposal",
+  name: "",
+  model_name: "tip_disposal",
+  location: { x: 300.0, y: 120.0, z: 38.0 },
+  length: 198.0,
+  width: 62.0,
+  height: 30.0,
+};
+
+const ADDABLE_LABWARE = {
+  well_plate: { label: "+ Well Plate", prefix: "wellplate", template: EMPTY_WELL_PLATE },
+  vial: { label: "+ Vial", prefix: "vial", template: EMPTY_VIAL },
+  tip_rack: { label: "+ Tip Rack", prefix: "tiprack", template: EMPTY_TIP_RACK },
+  tip_disposal: { label: "+ Tip Disposal", prefix: "tipdisposal", template: EMPTY_TIP_DISPOSAL },
+} as const;
+
+type AddableLabwareType = keyof typeof ADDABLE_LABWARE;
 
 function buildDeckResponse(
   labware: Record<string, LabwareConfig>,
@@ -151,20 +189,21 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
     syncViz(next);
   };
 
-  const addLabware = (type: "well_plate" | "vial") => {
+  const addLabware = (type: AddableLabwareType) => {
+    const { prefix, template } = ADDABLE_LABWARE[type];
     // Find the next free index rather than always using
     // `count + 1` — removing an earlier item and adding a new one could
     // otherwise land on a key that's still in use (e.g. wellplate_2),
     // silently replacing that labware's calibration with a blank template.
     let idx = Object.keys(labware).length + 1;
-    let key = type === "well_plate" ? `wellplate_${idx}` : `vial_${idx}`;
+    let key = `${prefix}_${idx}`;
     while (labware[key]) {
       idx += 1;
-      key = type === "well_plate" ? `wellplate_${idx}` : `vial_${idx}`;
+      key = `${prefix}_${idx}`;
     }
-    const template = type === "well_plate" ? structuredClone(EMPTY_WELL_PLATE) : structuredClone(EMPTY_VIAL);
-    template.name = key; // Pre-fill with ID
-    const next = { ...labware, [key]: template };
+    const created: LabwareConfig = structuredClone(template);
+    created.name = key; // Pre-fill with ID
+    const next = { ...labware, [key]: created };
     setLabware(next);
     syncViz(next);
   };
@@ -243,13 +282,12 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           : undefined}
       />
 
-      <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
-        <button onClick={() => addLabware("well_plate")} style={addBtnStyle}>
-          + Well Plate
-        </button>
-        <button onClick={() => addLabware("vial")} style={addBtnStyle}>
-          + Vial
-        </button>
+      <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
+        {(Object.keys(ADDABLE_LABWARE) as AddableLabwareType[]).map((type) => (
+          <button key={type} onClick={() => addLabware(type)} style={addBtnStyle}>
+            {ADDABLE_LABWARE[type].label}
+          </button>
+        ))}
         <button
           onClick={() => setCalibrateOpen(true)}
           disabled={!canCalibrateLabware}
@@ -341,7 +379,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
         </div>
         <SaveTargetHint saveAs={saveAsFilename} selectedFile={selectedFile} exists={saveAsExists} />
         {!hasItems && (
-          <p style={hintTextStyle}>Add at least one well plate or vial before saving.</p>
+          <p style={hintTextStyle}>Add at least one labware item before saving.</p>
         )}
       </div>
       {confirmDialog}
@@ -483,18 +521,21 @@ function VialGridFields({ entry, onChange, parentKey }: { entry: VialGridConfig;
 }
 
 function TipRackFields({ entry, onChange, parentKey }: { entry: TipRackConfig; onChange: (v: TipRackConfig) => void; parentKey: string }) {
-  const a1 = entry.calibration?.a1 ?? { x: 0, y: 0, z: 0 };
-  const a2 = entry.calibration?.a2 ?? { x: 0, y: 0, z: 0 };
-  const setCal = (point: "a1" | "a2", v: { x: number; y: number; z: number }) =>
-    onChange({ ...entry, calibration: { a1, a2, ...entry.calibration, [point]: v } });
+  const a1 = entry.calibration?.a1 ?? { x: 0, y: 0 };
+  const a2 = entry.calibration?.a2 ?? { x: 0, y: 0 };
+  // Calibration inputs are XY-only: every tip's Z comes from pickup_z, so
+  // the editor never writes a misleading calibration z. An existing z on a
+  // calibration point is preserved untouched.
+  const setCal = (point: "a1" | "a2", v: { x: number; y: number }) =>
+    onChange({ ...entry, calibration: { a1, a2, ...entry.calibration, [point]: { ...(point === "a1" ? a1 : a2), ...v } } });
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <div style={{ display: "flex", gap: 8 }}>
         <NumberField id={`${parentKey}-rows`} name={`${parentKey}_rows`} label="Rows" value={entry.rows ?? 0} step={1} onChange={(v) => onChange({ ...entry, rows: v })} required />
         <NumberField id={`${parentKey}-cols`} name={`${parentKey}_cols`} label="Columns" value={entry.columns ?? 0} step={1} onChange={(v) => onChange({ ...entry, columns: v })} required />
       </div>
-      <CoordinateField id={`${parentKey}-a1`} name={`${parentKey}_a1`} label="Calibration A1 (tip top)" value={a1} onChange={(v) => setCal("a1", v)} required />
-      <CoordinateField id={`${parentKey}-a2`} name={`${parentKey}_a2`} label="Calibration A2" value={a2} onChange={(v) => setCal("a2", v)} required />
+      <Coordinate2DField id={`${parentKey}-a1`} name={`${parentKey}_a1`} label="Calibration A1 (tip top)" value={{ x: a1.x, y: a1.y }} onChange={(v) => setCal("a1", v)} required />
+      <Coordinate2DField id={`${parentKey}-a2`} name={`${parentKey}_a2`} label="Calibration A2" value={{ x: a2.x, y: a2.y }} onChange={(v) => setCal("a2", v)} required />
       <div style={{ display: "flex", gap: 8 }}>
         <NumberField id={`${parentKey}-xoffset`} name={`${parentKey}_xoffset`} label="Tip pitch A1->A2 (mm)" value={entry.x_offset ?? 0} onChange={(v) => onChange({ ...entry, x_offset: v })} required />
         <NumberField id={`${parentKey}-yoffset`} name={`${parentKey}_yoffset`} label="Row pitch (mm)" value={entry.y_offset ?? 0} onChange={(v) => onChange({ ...entry, y_offset: v })} required />
@@ -509,7 +550,7 @@ function TipRackFields({ entry, onChange, parentKey }: { entry: TipRackConfig; o
 }
 
 function TipDisposalFields({ entry, onChange, parentKey }: { entry: TipDisposalConfig; onChange: (v: TipDisposalConfig) => void; parentKey: string }) {
-  const location = (entry.location ?? { x: 0, y: 0, z: 0 }) as { x: number; y: number; z: number };
+  const location = toCoordinate3D(entry.location);
   const setLocation = (v: { x: number; y: number; z: number }) => {
     const next: TipDisposalConfig = { ...entry, location: v };
     const slots = entry.slots as Record<string, { location?: unknown }> | undefined;
@@ -522,6 +563,11 @@ function TipDisposalFields({ entry, onChange, parentKey }: { entry: TipDisposalC
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
       <CoordinateField id={`${parentKey}-location`} name={`${parentKey}_location`} label="Drop point (tip-end height)" value={location} onChange={setLocation} required />
+      <div style={{ display: "flex", gap: 8 }}>
+        <OptionalNumberField id={`${parentKey}-length`} name={`${parentKey}_length`} label="Length (mm)" value={entry.length} onChange={(v) => onChange({ ...entry, length: v })} />
+        <OptionalNumberField id={`${parentKey}-width`} name={`${parentKey}_width`} label="Width (mm)" value={entry.width} onChange={(v) => onChange({ ...entry, width: v })} />
+        <OptionalNumberField id={`${parentKey}-height`} name={`${parentKey}_height`} label="Height (mm)" value={entry.height} onChange={(v) => onChange({ ...entry, height: v })} />
+      </div>
     </div>
   );
 }
