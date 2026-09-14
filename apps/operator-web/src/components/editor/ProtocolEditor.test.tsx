@@ -119,6 +119,46 @@ function renderProtocol(overrides: Partial<React.ComponentProps<typeof ProtocolE
 }
 
 describe("ProtocolEditor", () => {
+  it("adds Rinse with a potentiostat and vial choices and saves the selected depth", async () => {
+    const user = userEvent.setup();
+    const rinse: CommandInfo = {
+      name: "rinse", description: "Dip the potentiostat three times",
+      args: [
+        { name: "instrument", type: "str", required: true, default: null },
+        { name: "vial", type: "str", required: true, default: null },
+        { name: "measurement_height", type: "float", required: true, default: null },
+      ],
+    };
+    const props = renderProtocol({
+      commands: [...COMMANDS, rinse], steps: [],
+      gantry: { ...GANTRY, config: { ...GANTRY.config, instruments: {
+        ...GANTRY.config.instruments,
+        pstat: { type: "potentiostat", vendor: "mock", offset_x: 0, offset_y: 0 },
+      } } },
+      deck: { ...DECK, labware: [...DECK.labware, {
+        key: "rinse_vial", wells: null,
+        config: { type: "vial", name: "Rinse water", model_name: "4ml", height: 30, diameter: 10, location: { x: 10, y: 10, z: 20 }, capacity_ul: 4000, working_volume_ul: 3000 },
+      }, {
+        key: "holder", wells: null,
+        config: { type: "vial_holder", name: "Rinse holder" },
+        positions: { vial_1: { x: 30, y: 10, z: 20 } },
+      }] },
+    });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Add step" }), "rinse");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    const instrument = screen.getByRole("combobox", { name: /Instrument/ });
+    expect(instrument).toHaveValue("pstat");
+    expect(instrument.querySelectorAll("option")).toHaveLength(1);
+    const vial = screen.getByRole("combobox", { name: /Vial/ });
+    expect(vial).toHaveValue("rinse_vial");
+    expect(vial.querySelectorAll("option")).toHaveLength(2);
+    await user.selectOptions(vial, "holder.vial_1");
+    fireEvent.change(screen.getByLabelText(/Measurement height/), { target: { value: "-5" } });
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([
+      { command: "rinse", args: { instrument: "pstat", vial: "holder.vial_1", measurement_height: -5 } },
+    ]);
+  });
+
   it("shows the empty state when no steps are loaded", () => {
     renderProtocol({ steps: null });
     expect(screen.getByText("Load a protocol or add steps.")).toBeInTheDocument();
