@@ -100,6 +100,7 @@ type ProtocolChoices = {
   instruments: string[];
   plates: string[];
   positions: string[];
+  vials: string[];
   instrumentTypes: Record<string, string>;
   instrumentMethods: InstrumentMeasurementMethods;
   instrumentMethodParams: InstrumentMethodParams;
@@ -116,7 +117,7 @@ type EditablePosition = {
 function defaultArgsForCommand(cmd: CommandInfo, choices: ProtocolChoices): Record<string, unknown> {
   const args: Record<string, unknown> = {};
   for (const a of cmd.args) {
-    const contextual = defaultArgValue(a.name, choices, args);
+    const contextual = defaultArgValue(a.name, choices, args, cmd.name);
     if (contextual !== undefined) {
       args[a.name] = contextual;
     } else if (a.required) {
@@ -547,7 +548,7 @@ export default function ProtocolEditor({
                         return null;
                       }
                       const val = step.args[arg.name];
-                      const contextualOptions = optionsForArg(arg.name, step.args, choices);
+                      const contextualOptions = optionsForArg(arg.name, step.args, choices, step.command);
                       const argOptions = contextualOptions.length > 0
                         ? includeCurrentOption(contextualOptions, val)
                         : [];
@@ -967,7 +968,9 @@ export default function ProtocolEditor({
   );
 }
 
-function defaultArgValue(name: string, choices: ProtocolChoices, current: Record<string, unknown>): unknown {
+function defaultArgValue(name: string, choices: ProtocolChoices, current: Record<string, unknown>, command?: string): unknown {
+  if (command === "rinse" && name === "instrument") return choices.instruments.find((instrument) => choices.instrumentTypes[instrument] === "potentiostat") ?? "";
+  if (command === "rinse" && name === "vial") return choices.vials[0] ?? "";
   if (name === "instrument") return choices.instruments[0] ?? "";
   if (name === "plate") return choices.plates[0] ?? "";
   if (isPositionArg(name)) return choices.positions[0] ?? "";
@@ -1048,7 +1051,10 @@ function buildProtocolChoices(
     ...deck.labware.flatMap(targetsForLabware),
     ...protocolPositions.map((position) => position.name.trim()),
   ]);
-  return { instruments, plates, positions, instrumentTypes, instrumentMethods, instrumentMethodParams };
+  const vials = uniqueStrings(deck.labware
+    .filter((item) => ["vial", "vial_grid", "vial_holder"].includes(item.config.type))
+    .flatMap(targetsForLabware));
+  return { instruments, plates, positions, vials, instrumentTypes, instrumentMethods, instrumentMethodParams };
 }
 
 function targetsForLabware(item: LabwareResponse): string[] {
@@ -1092,7 +1098,10 @@ function optionsForArg(
   name: string,
   args: Record<string, unknown>,
   choices: ProtocolChoices,
+  command?: string,
 ): string[] {
+  if (command === "rinse" && name === "instrument") return choices.instruments.filter((instrument) => choices.instrumentTypes[instrument] === "potentiostat");
+  if (command === "rinse" && name === "vial") return choices.vials;
   if (name === "instrument") return choices.instruments;
   if (name === "plate") return choices.plates;
   if (isPositionArg(name)) return choices.positions;
