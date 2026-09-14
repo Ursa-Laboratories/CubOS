@@ -45,6 +45,7 @@ function createState(): ApiState {
     decks: {
       "deck.yaml": {
         filename: "deck.yaml",
+        motion_planning: { clearance_mm: 2 },
         labware: [
           {
             key: "plate_1",
@@ -65,6 +66,15 @@ function createState(): ApiState {
               y_offset: 9,
               capacity_ul: 200,
               working_volume_ul: 150,
+              motion: {
+                box: {
+                  anchor: "A1",
+                  offset: { x: -4, y: -3, z: 0 },
+                  size: { x: 20, y: 30, z: 10 },
+                },
+                occupied_tip_radius_mm: 4.5,
+                access: { transfer: { strategy: "vertical" } },
+              },
             },
             wells: null,
           },
@@ -125,6 +135,7 @@ function jsonResponse(body: unknown): Response {
 function toDeckResponse(filename: string, body: DeckConfig): DeckResponse {
   return {
     filename,
+    ...(body.motion_planning !== undefined ? { motion_planning: body.motion_planning } : {}),
     labware: Object.entries(body.labware).map(([key, config]) => ({
       key,
       config,
@@ -658,6 +669,10 @@ describe("CubOS editor interactions", () => {
       state.decks["cub_deck.yaml"]?.labware.map(({ key, config }) => ({ key, config })),
     ).toEqual(
       state.decks["deck.yaml"]?.labware.map(({ key, config }) => ({ key, config })),
+    );
+    expect(state.decks["cub_deck.yaml"]?.motion_planning).toEqual({ clearance_mm: 2 });
+    expect(state.decks["cub_deck.yaml"]?.labware[0].config.motion).toEqual(
+      state.decks["deck.yaml"]?.labware[0].config.motion,
     );
   });
 

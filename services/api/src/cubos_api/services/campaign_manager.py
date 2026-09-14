@@ -232,7 +232,11 @@ class CampaignManager:
                         if len(record.trials) >= spec.stop.max_trials:
                             self._finish(record, "completed", "trial_budget")
                             return
-                        if spec.stop.max_seconds and time.time() - record.created_at >= spec.stop.max_seconds:
+                        if (
+                            record.trials
+                            and spec.stop.max_seconds
+                            and time.time() - record.created_at >= spec.stop.max_seconds
+                        ):
                             self._finish(record, "completed", "time_budget")
                             return
                 if paused:

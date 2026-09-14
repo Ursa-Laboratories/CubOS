@@ -36,6 +36,85 @@ class _YamlCalibrationPoints(BaseModel):
     a2: _YamlPoint3D
 
 
+class RoutingVector3Yaml(BaseModel):
+    """Finite XYZ vector used by opt-in motion-planning geometry."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    x: float
+    y: float
+    z: float
+
+
+class RoutingBoxYaml(BaseModel):
+    """Axis-aligned fixture box registered in a labware's A1 frame."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    anchor: Literal["A1", "location"] = "A1"
+    offset: RoutingVector3Yaml
+    size: RoutingVector3Yaml
+
+    @model_validator(mode="after")
+    def _validate_positive_size(self) -> "RoutingBoxYaml":
+        if self.size.x <= 0 or self.size.y <= 0 or self.size.z <= 0:
+            raise ValueError("motion-planning box size x/y/z must all be positive.")
+        return self
+
+
+class VerticalAccessYaml(BaseModel):
+    """Default access strategy: approach and depart along deck Z."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    strategy: Literal["vertical"] = "vertical"
+
+
+class SideExitAccessYaml(BaseModel):
+    """Attach at the target, lift the carriage, then leave one box edge."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    strategy: Literal["side_exit"]
+    lift_mm: float = Field(..., ge=30)
+    exit_edge: Literal["x_min", "x_max", "y_min", "y_max"]
+    clearance_mm: float = Field(default=0.0, ge=0)
+
+
+RoutingAccessYaml = Annotated[
+    Union[VerticalAccessYaml, SideExitAccessYaml],
+    Field(discriminator="strategy"),
+]
+RoutingOperation = Literal["move", "pick_up_tip", "transfer", "mix", "drop_tip"]
+
+
+class RoutingFixtureYaml(BaseModel):
+    """Collision geometry and operation-scoped access for one labware entry."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    box: RoutingBoxYaml
+    occupied_tip_radius_mm: Optional[float] = Field(default=None, gt=0)
+    access: Dict[RoutingOperation, RoutingAccessYaml] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_side_exit_scope(self) -> "RoutingFixtureYaml":
+        for operation, policy in self.access.items():
+            if isinstance(policy, SideExitAccessYaml) and operation != "pick_up_tip":
+                raise ValueError(
+                    "side_exit is supported only for pick_up_tip in routing v1."
+                )
+        return self
+
+
+class MotionPlanningYaml(BaseModel):
+    """Presence opts a deck into centralized collision-aware routing."""
+
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    clearance_mm: float = Field(default=2.0, ge=0)
+
+
 class WellPlateYamlEntry(BaseModel):
     """Strict schema for one well plate in deck labware."""
 
@@ -67,6 +146,7 @@ class WellPlateYamlEntry(BaseModel):
     # Volume — optional metadata.
     capacity_ul: Optional[float] = None
     working_volume_ul: Optional[float] = None
+    motion: Optional[RoutingFixtureYaml] = None
 
     @property
     def a1_point(self) -> _YamlPoint3D:
@@ -134,6 +214,7 @@ class VialGridYamlEntry(BaseModel):
     # Uniformly applied to every vial in the grid, mirroring vial_role/
     # vial_solution (see cubos.deck.labware.vial.Vial.capped).
     vial_capped: Optional[bool] = None
+    motion: Optional[RoutingFixtureYaml] = None
 
     @property
     def a1_point(self) -> _YamlPoint3D:
@@ -203,6 +284,7 @@ class VialYamlEntry(BaseModel):
     solution: Optional[str] = None
     allowed_solutions: Optional[List[str]] = None
     capped: Optional[bool] = None
+    motion: Optional[RoutingFixtureYaml] = None
 
     @field_validator("role")
     def _validate_role_field(cls, value: Optional[str]) -> Optional[str]:
@@ -350,6 +432,7 @@ class _BaseHolderYamlEntry(BaseModel):
     height: Optional[float] = Field(default=None, gt=0)
     labware_support_height: Optional[float] = Field(default=None, gt=0)
     labware_seat_height_from_bottom: Optional[float] = Field(default=None, gt=0)
+    motion: Optional[RoutingFixtureYaml] = None
 
 
 class TipRackYamlEntry(_BaseHolderYamlEntry):
@@ -412,6 +495,7 @@ class WallYamlEntry(BaseModel):
     name: str
     corner_1: _YamlPoint3D
     corner_2: _YamlPoint3D
+    motion: Optional[RoutingFixtureYaml] = None
 
     @model_validator(mode="after")
     def _validate_explicit_z(self) -> "WallYamlEntry":
@@ -482,13 +566,14 @@ Consumers can validate a single labware config or inspect
 
 
 class DeckYamlSchema(BaseModel):
-    """Root deck YAML schema: only 'labware' key allowed."""
+    """Root deck YAML schema, optionally including collision-aware routing."""
 
     model_config = ConfigDict(extra="forbid")
 
     labware: Dict[str, LabwareYamlEntry] = Field(
         ..., description="Mapping of labware key to well_plate or vial entry."
     )
+    motion_planning: Optional[MotionPlanningYaml] = None
 
     @model_validator(mode="after")
     def _validate_labware_keys(self) -> "DeckYamlSchema":

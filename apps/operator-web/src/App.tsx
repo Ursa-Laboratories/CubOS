@@ -469,7 +469,12 @@ export default function App() {
       );
       await saveDeck.mutateAsync({
         filename: WORKING_DECK_FILENAME,
-        body: { labware },
+        body: {
+          labware,
+          ...(importedDeck.motion_planning != null
+            ? { motion_planning: structuredClone(importedDeck.motion_planning) }
+            : {}),
+        },
       });
       setDeckFile(WORKING_DECK_FILENAME);
       setDeckImportedFrom(filename);
