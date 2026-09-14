@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -8,6 +9,7 @@ from cubos.deck.loader import _build_deck_from_raw
 from cubos.gantry.gantry_config import GantryConfig, GantryType, WorkingVolume
 from cubos.gantry.gantry import Gantry
 from cubos.gantry.instrument_mount import InstrumentedGantry
+from cubos.instruments.camera.interface import CameraInstrument
 from cubos.protocol_engine.compiler import CommandCall, compile_protocol
 from cubos.protocol_engine.errors import ProtocolExecutionError
 from cubos.protocol_engine.runtime import ProtocolContext
@@ -62,6 +64,30 @@ class FakePipette:
         self.actions.append(f"dispense:{volume_ul}")
 
 
+class FakeCamera(CameraInstrument):
+    def __init__(self) -> None:
+        super().__init__(
+            name="camera", offset_x=0.0, offset_y=-10.0, depth=-20.0,
+            offline=True,
+        )
+        self.captures: list[str] = []
+
+    def connect(self) -> None:
+        pass
+
+    def disconnect(self) -> None:
+        pass
+
+    def health_check(self) -> bool:
+        return True
+
+    def capture(self, *args, **kwargs) -> str:
+        path = str(kwargs["save_path"])
+        Path(path).write_bytes(b"fake-image")
+        self.captures.append(path)
+        return path
+
+
 def _vial(name: str, x: float, y: float, *, size: float = 10) -> dict:
     return {
         "type": "vial",
@@ -81,7 +107,9 @@ def _vial(name: str, x: float, y: float, *, size: float = 10) -> dict:
     }
 
 
-def _context(*, blocker: bool = False) -> tuple[ProtocolContext, FakeController, FakePipette]:
+def _context(
+    *, blocker: bool = False, with_camera: bool = False,
+) -> tuple[ProtocolContext, FakeController, FakePipette]:
     labware = {
         "tips": {
             "type": "tip_rack",
@@ -124,28 +152,40 @@ def _context(*, blocker: bool = False) -> tuple[ProtocolContext, FakeController,
         "motion_planning": {"clearance_mm": 1},
         "labware": labware,
     })
+    instruments = {"pipette": FakePipette()}
+    instrument_configs = {"pipette": {"type": "pipette", "vendor": "fake"}}
+    motion_envelopes = {
+        "pipette": {
+            "box": {
+                "offset": {"x": -2, "y": -2, "z": 0},
+                "size": {"x": 4, "y": 4, "z": 20},
+            },
+            "attached_tip_radius_mm": 1,
+        }
+    }
+    if with_camera:
+        instruments["camera"] = FakeCamera()
+        instrument_configs["camera"] = {"type": "camera", "vendor": "fake"}
+        motion_envelopes["camera"] = {
+            "box": {
+                "offset": {"x": -2, "y": -2, "z": 0},
+                "size": {"x": 4, "y": 4, "z": 20},
+            },
+        }
     config = GantryConfig(
         serial_port="offline",
         gantry_type=GantryType.CUB,
         factory_z_travel_mm=80,
         working_volume=WorkingVolume(0, 120, 0, 100, 0, 80),
         safe_z=80,
-        instruments={"pipette": {"type": "pipette", "vendor": "fake"}},
-        motion_envelopes={
-            "pipette": {
-                "box": {
-                    "offset": {"x": -2, "y": -2, "z": 0},
-                    "size": {"x": 4, "y": 4, "z": 20},
-                },
-                "attached_tip_radius_mm": 1,
-            }
-        },
+        instruments=instrument_configs,
+        motion_envelopes=motion_envelopes,
     )
     controller = FakeController()
-    pipette = FakePipette()
+    pipette = instruments["pipette"]
     gantry = InstrumentedGantry(
         controller,
-        {"pipette": pipette},
+        instruments,
         safe_z=80,
         motion_envelopes=config.motion_envelopes,
     )
@@ -163,6 +203,29 @@ def _native_protocol():
         CommandCall("mix", {"position": "destination", "volume_ul": 50, "cycles": 1}),
         CommandCall("drop_tip", {"position": "waste"}),
     ])
+
+
+def _camera_capture_protocol():
+    calls = [CommandCall("pick_up_tip", {"position": "tips.A1"})]
+    for index in range(1, 4):
+        calls.extend([
+            CommandCall("transfer", {
+                "source": "source",
+                "destination": "destination",
+                "volume_ul": 100,
+            }),
+            CommandCall("move", {
+                "instrument": "camera",
+                "position": "destination",
+            }),
+            CommandCall("capture", {
+                "instrument": "camera",
+                "position": "destination",
+                "label": f"destination_after_dispense_{index}",
+            }),
+        ])
+    calls.append(CommandCall("drop_tip", {"position": "waste"}))
+    return compile_protocol(calls)
 
 
 def test_native_planned_commands_execute_preflighted_exact_segments() -> None:
@@ -208,6 +271,101 @@ def test_unsupported_command_rejects_before_earlier_supported_movement() -> None
 
     with pytest.raises(ProtocolExecutionError, match=r"step 1 \(home\)"):
         protocol.execute(context)
+
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+def test_measure_remains_unsupported_for_planning_before_prior_movement() -> None:
+    context, controller, pipette = _context()
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall("measure", {
+            "instrument": "pipette",
+            "position": "destination",
+            "measurement_height": 0.0,
+        }),
+    ])
+
+    with pytest.raises(ProtocolExecutionError, match=r"step 1 \(measure\)"):
+        protocol.execute(context)
+
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+@pytest.mark.parametrize("instrument", ["pipette", "missing"])
+def test_invalid_planned_capture_rejects_before_prior_movement(instrument) -> None:
+    context, controller, pipette = _context(with_camera=True)
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall("capture", {"instrument": instrument}),
+    ])
+
+    with pytest.raises(ProtocolExecutionError, match="capture instrument"):
+        protocol.execute(context)
+
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+def test_invalid_capture_position_rejects_before_prior_movement() -> None:
+    context, controller, pipette = _context(with_camera=True)
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall("capture", {
+            "instrument": "camera",
+            "position": "missing.A1",
+        }),
+    ])
+
+    with pytest.raises(ProtocolExecutionError, match="missing.A1"):
+        protocol.execute(context)
+
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+def test_transfer_camera_capture_cycles_use_safe_tool_handoffs(
+    tmp_path,
+) -> None:
+    context, controller, pipette = _context(with_camera=True)
+    context.image_output_dir = tmp_path / "images"
+    protocol = _camera_capture_protocol()
+
+    results = protocol.execute(context)
+
+    camera = context.gantry.instruments["camera"]
+    assert len(camera.captures) == 3
+    assert len(set(camera.captures)) == 3
+    assert all(Path(path).is_file() for path in camera.captures)
+    assert [results[index] for index in (3, 6, 9)] == camera.captures
+    for capture_index in (3, 6, 9):
+        assert context.planned_motion_steps[capture_index].plans == ()
+    for move_index in (2, 5, 8):
+        segments = context.planned_motion_steps[move_index].plans[0].segments
+        departure = segments[0]
+        assert departure.axis == "z"
+        assert departure.access.allowed_fixture_names == ("destination",)
+        assert departure.access.allowed_tool_names == ("pipette",)
+        assert departure.tool_state.instrument == "pipette"
+        assert departure.tool_state.attached_tip_extension_mm == 20
+        assert any(
+            segment.access.allowed_tool_names == ("camera",)
+            for segment in segments[1:]
+        )
+    assert len(controller.moves) == sum(
+        len(plan.segments) for plan in context.motion_plans
+    )
+    assert pipette.actions.count("dispense:100.0") == 3
+
+
+def test_later_unroutable_camera_move_rejects_before_pickup() -> None:
+    context, controller, pipette = _context(with_camera=True)
+    context.gantry.instruments["camera"].offset_x = -100.0
+
+    with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+        _camera_capture_protocol().execute(context)
 
     assert controller.moves == []
     assert pipette.actions == []

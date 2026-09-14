@@ -5,7 +5,7 @@ import hashlib
 import yaml
 
 from sim.demos import SAVED_USER_DECK, _ordinary_motion_metadata, _saved_gantry, _with_motion, demos, get_demo
-from sim.runtime import execute
+from sim.runtime import SimCamera, execute
 from sim.server import compare_ordinary
 from cubos.deck.loader import load_deck_from_yaml_safe
 
@@ -112,3 +112,80 @@ def test_planning_preview_matches_execution_plan_without_events():
     run = execute(bundle['gantry_yaml'], bundle['deck_yaml'], bundle['protocol_yaml'], routing=bundle['routing'], initial_position=bundle['initial_position'])
     assert preview['events'] == []
     assert [(s['start'], s['end']) for s in preview['route']['segments']] == [(s['start'], s['end']) for s in run['route']['segments']]
+
+
+def _native_capture_bundle():
+    bundle = get_demo('saved-side-exit').bundle()
+    raw = yaml.safe_load(bundle['protocol_yaml'])
+    steps = []
+    capture_index = 0
+    for step in raw['protocol']:
+        steps.append(step)
+        if 'transfer' not in step:
+            continue
+        capture_index += 1
+        steps.extend([
+            {'move': {'instrument': 'camera', 'position': 'plate.A1'}},
+            {'capture': {
+                'instrument': 'camera',
+                'position': 'plate.A1',
+                'label': f'plate-A1-after-{capture_index * 100}ul',
+            }},
+        ])
+    bundle['protocol_yaml'] = yaml.safe_dump(raw | {'protocol': steps}, sort_keys=False)
+    return bundle
+
+
+def test_routed_native_captures_observe_each_dispense(monkeypatch):
+    bundle = _native_capture_bundle()
+    calls = []
+    native_capture = SimCamera.capture
+
+    def recording_capture(self, save_path=None):
+        assert save_path is not None
+        path = Path(save_path)
+        assert path.parent.parent.name == 'images'
+        assert not path.exists()
+        saved = native_capture(self, save_path=save_path)
+        assert not path.exists()
+        calls.append(path)
+        return saved
+
+    monkeypatch.setattr(SimCamera, 'capture', recording_capture)
+    result = execute(
+        bundle['gantry_yaml'], bundle['deck_yaml'], bundle['protocol_yaml'],
+        routing=bundle['routing'], initial_position=bundle['initial_position'],
+    )
+
+    captures = [event for event in result['events'] if event['kind'] == 'capture']
+    assert [event['target'] for event in captures] == ['plate.A1'] * 3
+    assert [event['volume'] for event in captures] == [100, 200, 300]
+    assert [path.name.split('_', 1)[0] for path in calls] == [
+        'plate-A1-after-100ul', 'plate-A1-after-200ul', 'plate-A1-after-300ul',
+    ]
+    assert [event['reference'].rsplit('/', 1)[-1] for event in captures] == [
+        path.name for path in calls
+    ]
+    assert result['route']['source'] == 'core-motion-plan'
+    assert result['route']['parity'] == {'segments_equal': True, 'checked': True}
+
+
+def test_routed_native_capture_preview_does_not_capture_or_write(monkeypatch):
+    import cubos.protocol_engine.commands.camera as camera_commands
+
+    bundle = _native_capture_bundle()
+
+    def unexpected_call(*args, **kwargs):
+        raise AssertionError('preview attempted to capture or allocate an image path')
+
+    monkeypatch.setattr(SimCamera, 'capture', unexpected_call)
+    monkeypatch.setattr(camera_commands, 'build_image_path', unexpected_call)
+    preview = execute(
+        bundle['gantry_yaml'], bundle['deck_yaml'], bundle['protocol_yaml'],
+        routing=bundle['routing'], initial_position=bundle['initial_position'],
+        validate_only=True,
+    )
+
+    assert preview['events'] == []
+    assert preview['route']['source'] == 'core-motion-plan'
+    assert preview['route']['parity'] == {'segments_equal': False, 'checked': False}

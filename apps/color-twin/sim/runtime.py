@@ -198,11 +198,21 @@ class SimCamera(CameraInstrument):
     def connect(self): pass
     def disconnect(self): pass
     def health_check(self): return True
-    def capture(self):
+    def capture(self, save_path=None):
         target = self.world.target()
         parts = self.world.fluids.get(target, [0]*len(STOCKS))
-        self.world.emit('capture', duration=1, target=target, color=mixture(parts), volume=sum(parts))
-        return f'simulation://capture/{target}'
+        color = mixture(parts)
+        volume = sum(parts)
+        reference = f'simulation://capture/{target}'
+        if save_path is not None:
+            # Preserve the native command's collision-safe requested name
+            # without pretending the synthetic observation is a TIFF file.
+            reference = f'{reference}/{Path(save_path).name}'
+        self.world.emit(
+            'capture', duration=1, target=target, color=color, volume=volume,
+            reference=reference,
+        )
+        return reference
 
 
 def _event_route(events, routing):
@@ -324,12 +334,12 @@ def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
             paths.append(path)
         raw_protocol = yaml.safe_load(protocol_yaml)
         flat_steps = raw_protocol.get('protocol') if isinstance(raw_protocol, dict) else None
-        allowed = {'pick_up_tip','drop_tip','transfer','mix','measure','move'}
+        allowed = {'pick_up_tip','drop_tip','transfer','mix','measure','move','capture'}
         if not isinstance(flat_steps, list) or not 1 <= len(flat_steps) <= 400:
             raise ValueError('Provide 1–400 flat protocol steps.')
         for raw_step in flat_steps:
             if not isinstance(raw_step, dict) or len(raw_step) != 1 or next(iter(raw_step)) not in allowed:
-                raise ValueError('Unsupported simulation command; use flat pick_up_tip, drop_tip, transfer, mix, measure, or move steps.')
+                raise ValueError('Unsupported simulation command; use flat pick_up_tip, drop_tip, transfer, mix, measure, move, or capture steps.')
             args = next(iter(raw_step.values()))
             if isinstance(args, dict):
                 for field in ('volume_ul','cycles'):
@@ -364,7 +374,7 @@ def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
         validate_working_volume_origin(config)
         deck = load_deck_from_yaml_safe(paths[1], factory_z_travel_mm=config.factory_z_travel_mm)
         protocol = load_protocol_from_yaml_safe(paths[2])
-        allowed = {'pick_up_tip','drop_tip','transfer','mix','measure','move'}
+        allowed = {'pick_up_tip','drop_tip','transfer','mix','measure','move','capture'}
         if len(protocol.steps)>400: raise ValueError('At most 400 steps per simulation.')
         for step in protocol.steps:
             if step.command_name not in allowed:
@@ -398,7 +408,11 @@ def execute(gantry_yaml, deck_yaml, protocol_yaml, *, event_sink=None,
         violations = validate_protocol_motion_bounds(config,protocol,deck,gantry)
         violations += validate_protocol_semantics(protocol,gantry,deck,config)
         if violations: raise ValueError('; '.join(str(v) for v in violations))
-        context = ProtocolContext(gantry=gantry,deck=deck,gantry_config=config,positions=protocol.positions,step_observer=world)
+        context = ProtocolContext(
+            gantry=gantry, deck=deck, gantry_config=config,
+            positions=protocol.positions, step_observer=world,
+            image_output_dir=Path(directory) / 'images',
+        )
         world.context = context
         points = {}
         for key,item in deck.labware.items():

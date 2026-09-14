@@ -41,7 +41,9 @@ motion:
 
 Instrument boxes are relative to the bare tool's calibrated TCP. Positive deck Z points up; a pipette body is above its nozzle, and an attached tip extends below it. Optional `motion_envelope.additional_boxes` represents a narrow nozzle and wider body without moving the collision geometry away from the tool axis. The planner checks every part, including inactive mounted instruments.
 
-The initial supported commands are `move`, `pick_up_tip`, `transfer`, `mix`, and `drop_tip`. Planning-enabled protocols containing unsupported commands or durable fluid-state resume fail explicitly. Decks without the opt-in retain the existing execution path. This branch does not change active-learning campaign behavior.
+The supported commands are `move`, `pick_up_tip`, `transfer`, `mix`, `drop_tip`, and the non-moving camera `capture` command. Planning-enabled protocols containing unsupported commands or durable fluid-state resume fail explicitly. Decks without the opt-in retain the existing execution path. This branch does not change active-learning campaign behavior.
+
+To photograph a well, use `move` with the camera and well target, then `capture` with that same well as its image attribution. The move aligns the camera at the carriage travel ceiling; capture itself does not move the machine. A transition from an engaged pipette first withdraws that pipette through its own access corridor, then travels with all mounted tools checked. Images use the existing timestamped, collision-safe names under `~/.cubos/images` (or `CUBOS_IMAGES_DIR`) and are associated with the run's campaign and well. Simulation supplies a separate temporary image directory.
 
 Configuration is checked before instrument connection. Runtime plans are built from the observed carriage pose before actuation; offline previews identify their assumed starting pose. Planned movement uses an exact axis-segment executor, and failures do not trigger an automatic retract.
 

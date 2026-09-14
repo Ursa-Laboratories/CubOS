@@ -7,6 +7,7 @@ import math
 from typing import Any, Iterable, Mapping
 
 from cubos.deck.labware.tip_rack import TipRack, resolve_tip_rack_slot
+from cubos.instruments.camera.interface import CameraInstrument
 from cubos.motion_planning import (
     AABB,
     AccessScope,
@@ -28,7 +29,7 @@ from .errors import ProtocolExecutionError
 
 
 SUPPORTED_PLANNED_COMMANDS = frozenset({
-    "move", "pick_up_tip", "transfer", "mix", "drop_tip",
+    "move", "pick_up_tip", "transfer", "mix", "drop_tip", "capture",
 })
 
 
@@ -102,6 +103,28 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
                 _motion_for(context.deck, _fixture_key(context.deck, args["destination"]))
             elif step.command_name in {"mix", "drop_tip"}:
                 _motion_for(context.deck, _fixture_key(context.deck, args["position"]))
+            elif step.command_name == "capture":
+                instrument_name = args["instrument"]
+                try:
+                    instrument = context.gantry.instruments[instrument_name]
+                except KeyError as exc:
+                    raise InvalidGeometryError(
+                        f"Unknown planned capture instrument {instrument_name!r}."
+                    ) from exc
+                if not isinstance(instrument, CameraInstrument):
+                    raise InvalidGeometryError(
+                        f"Planned capture instrument {instrument_name!r} is a "
+                        f"{type(instrument).__name__}, not a CameraInstrument."
+                    )
+                if args.get("position") is not None:
+                    position = args["position"]
+                    try:
+                        context.deck.resolve_coordinate(position)
+                    except (KeyError, ValueError, TypeError, AttributeError) as exc:
+                        raise InvalidGeometryError(
+                            f"Planned capture position {position!r} cannot be "
+                            f"resolved: {exc}"
+                        ) from exc
     except (KeyError, ValueError, TypeError) as exc:
         if isinstance(exc, ProtocolExecutionError):
             raise
@@ -200,6 +223,7 @@ class RoutingSession:
         )
         state = ToolState("pipette" if extension else None, extension)
         current_target: str | None = None
+        current_instrument: str | None = None
         consumed: set[str] = set()
         self._preview_consumed: set[str] = set()
         prepared: dict[int, PreparedMotionStep] = {}
@@ -209,18 +233,25 @@ class RoutingSession:
             args = step.args
             if command == "move":
                 plan, current = self._plan_move(
-                    current, current_target=current_target, tool_state=state, **args,
+                    current,
+                    current_target=current_target,
+                    current_instrument=current_instrument,
+                    tool_state=state,
+                    **args,
                 )
                 value = PreparedMotionStep(command, (plan,), {})
                 current_target = None
+                current_instrument = args["instrument"]
             elif command == "pick_up_tip":
                 value, current, state, current_target, consumed = self._plan_pickup(
                     current,
                     position=args["position"],
                     tool_state=state,
                     current_target=current_target,
+                    current_instrument=current_instrument,
                     consumed=consumed,
                 )
+                current_instrument = "pipette"
             elif command == "transfer":
                 stroke_count = _transfer_stroke_count(self.context, args)
                 value, current, current_target = self._plan_transfer(
@@ -232,7 +263,9 @@ class RoutingSession:
                     stroke_count=stroke_count,
                     tool_state=state,
                     current_target=current_target,
+                    current_instrument=current_instrument,
                 )
+                current_instrument = "pipette"
             elif command == "mix":
                 value, current, current_target = self._plan_mix(
                     current,
@@ -241,13 +274,21 @@ class RoutingSession:
                     cycles=int(args.get("cycles", 3)),
                     tool_state=state,
                     current_target=current_target,
+                    current_instrument=current_instrument,
                 )
+                current_instrument = "pipette"
             elif command == "drop_tip":
                 value, current, state, current_target = self._plan_drop(
                     current,
                     position=args["position"],
                     tool_state=state,
                     current_target=current_target,
+                    current_instrument=current_instrument,
+                )
+                current_instrument = "pipette"
+            elif command == "capture":
+                value = PreparedMotionStep(
+                    command, (), {"instrument": args["instrument"]},
                 )
             else:
                 raise InvalidGeometryError(f"Unsupported planned command {command!r}.")
@@ -263,6 +304,7 @@ class RoutingSession:
         position: Any,
         travel_z: float | None = None,
         current_target: str | None,
+        current_instrument: str | None,
         tool_state: ToolState,
     ) -> tuple[MotionPlan, Point3D]:
         if travel_z is not None:
@@ -291,6 +333,7 @@ class RoutingSession:
         plan = self._approach(
             current, end, instrument, tool_state,
             previous_target=current_target,
+            previous_instrument=current_instrument,
             command="move", phase="transit", final_target=target_fixture,
         )
         return plan, end
@@ -302,6 +345,7 @@ class RoutingSession:
         position: str,
         tool_state: ToolState,
         current_target: str | None,
+        current_instrument: str | None,
         consumed: set[str],
     ) -> tuple[PreparedMotionStep, Point3D, ToolState, str | None, set[str]]:
         if tool_state.attached_tip_extension_mm:
@@ -350,6 +394,7 @@ class RoutingSession:
             entrance = self._approach(
                 current, approach, "pipette", bare,
                 previous_target=current_target,
+                previous_instrument=current_instrument,
                 command="pick_up_tip", phase="approach", consumed=consumed,
             )
             ingress = self._plan(
@@ -390,6 +435,7 @@ class RoutingSession:
             entrance = self._approach(
                 current, hover, "pipette", bare,
                 previous_target=current_target,
+                previous_instrument=current_instrument,
                 command="pick_up_tip", phase="approach", consumed=consumed,
             )
             ingress = self._plan(
@@ -448,6 +494,7 @@ class RoutingSession:
         stroke_count: int,
         tool_state: ToolState,
         current_target: str | None,
+        current_instrument: str | None,
     ) -> tuple[PreparedMotionStep, Point3D, str]:
         if tool_state.attached_tip_extension_mm <= 0:
             raise InvalidGeometryError("transfer requires an attached pipette tip.")
@@ -457,15 +504,18 @@ class RoutingSession:
             source_plan, current = self._plan_engage(
                 current, source, source_height, "pipette", tool_state,
                 command="transfer", operation="aspirate", previous_target=previous_target,
+                previous_instrument=current_instrument,
             )
             plans.append(source_plan)
             source_key = _fixture_key(self.context.deck, source)
             destination_plan, current = self._plan_engage(
                 current, destination, destination_height, "pipette", tool_state,
                 command="transfer", operation="dispense", previous_target=source_key,
+                previous_instrument="pipette",
             )
             plans.append(destination_plan)
             previous_target = _fixture_key(self.context.deck, destination)
+            current_instrument = "pipette"
         return PreparedMotionStep("transfer", tuple(plans), {"stroke_count": stroke_count}), current, previous_target
 
     def _plan_mix(
@@ -477,12 +527,14 @@ class RoutingSession:
         cycles: int,
         tool_state: ToolState,
         current_target: str | None,
+        current_instrument: str | None,
     ) -> tuple[PreparedMotionStep, Point3D, str]:
         if tool_state.attached_tip_extension_mm <= 0:
             raise InvalidGeometryError("mix requires an attached pipette tip.")
         engage, current = self._plan_engage(
             current, position, height, "pipette", tool_state,
             command="mix", operation="engage", previous_target=current_target,
+            previous_instrument=current_instrument,
         )
         fixture_key = _fixture_key(self.context.deck, position)
         plans = [engage]
@@ -500,12 +552,14 @@ class RoutingSession:
         position: str,
         tool_state: ToolState,
         current_target: str | None,
+        current_instrument: str | None,
     ) -> tuple[PreparedMotionStep, Point3D, ToolState, None]:
         if tool_state.attached_tip_extension_mm <= 0:
             raise InvalidGeometryError("drop_tip requires an attached pipette tip.")
         ingress, engage = self._plan_engage(
             current, position, 0.0, "pipette", tool_state,
             command="drop_tip", operation="engage", previous_target=current_target,
+            previous_instrument=current_instrument,
         )
         bare = ToolState()
         fixture_key = _fixture_key(self.context.deck, position)
@@ -545,6 +599,7 @@ class RoutingSession:
         command: str,
         operation: str,
         previous_target: str | None,
+        previous_instrument: str | None,
     ) -> tuple[MotionPlan, Point3D]:
         coordinate = self.context.deck.resolve_coordinate(position)
         fixture_key = _fixture_key(self.context.deck, position)
@@ -555,6 +610,7 @@ class RoutingSession:
         approach = self._approach(
             current, hover, instrument, tool_state,
             previous_target=previous_target,
+            previous_instrument=previous_instrument,
             command=command, phase=f"{operation}_approach",
         )
         ingress = self._plan(hover, end, instrument, tool_state, (fixture_key,), command, operation)
@@ -568,6 +624,7 @@ class RoutingSession:
         tool_state: ToolState,
         *,
         previous_target: str | None,
+        previous_instrument: str | None,
         command: str,
         phase: str,
         final_target: str | None = None,
@@ -582,7 +639,7 @@ class RoutingSession:
         hover = Point3D(end.x, end.y, ceiling)
         pieces = [
             self._plan(
-                current, lifted, instrument, tool_state,
+                current, lifted, previous_instrument or instrument, tool_state,
                 (previous_target,) if previous_target else (),
                 command, f"{phase}_departure", consumed=consumed,
             ),

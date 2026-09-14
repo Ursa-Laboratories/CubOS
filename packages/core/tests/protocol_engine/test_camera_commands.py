@@ -232,6 +232,16 @@ class TestPathBuilder:
         second = build_image_path(context, "shot", "cam")
         assert second.name == "shot_frozen_001.tiff"
 
+    def test_context_image_output_dir_overrides_process_default(self, tmp_path):
+        from cubos.protocol_engine.commands.camera import build_image_path
+
+        context = _context({})
+        context.image_output_dir = tmp_path / "run-artifacts" / "images"
+
+        path = build_image_path(context, "shot", "cam")
+
+        assert path.parent == context.image_output_dir / "adhoc"
+
 
 class TestPersistFailure:
     def test_persist_failure_logs_and_continues(self, tmp_path):

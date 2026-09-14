@@ -85,7 +85,12 @@ def build_image_path(
     ``adhoc`` directory when the run has no campaign), with a numeric
     suffix when the same second produces multiple captures.
     """
-    root = default_images_dir()
+    configured_root = getattr(context, "image_output_dir", None)
+    root = (
+        Path(configured_root).expanduser()
+        if configured_root is not None
+        else default_images_dir()
+    )
     group = (
         f"campaign_{context.campaign_id}"
         if context.campaign_id is not None
@@ -160,6 +165,14 @@ def capture(
         position:   Optional deck target the image belongs to (persistence
                     attribution only).
     """
+    if getattr(context.deck, "planning_enabled", False) is True:
+        from ..routing import prepared_step
+
+        planned = prepared_step(context, "capture")
+        if planned.data["instrument"] != instrument:
+            raise ProtocolExecutionError(
+                "Planned capture instrument does not match the active step."
+            )
     camera = _get_camera(context, instrument)
     path = build_image_path(context, label, instrument)
     try:

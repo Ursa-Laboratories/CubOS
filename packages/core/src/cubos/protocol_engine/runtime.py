@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
@@ -40,6 +41,7 @@ class ProtocolContext:
     routing_session: Any = None
     planned_motion_steps: Dict[int, Any] = field(default_factory=dict)
     motion_plans: list[Any] = field(default_factory=list)
+    image_output_dir: str | Path | None = None
 
     def serialized_motion_plans(self) -> list[dict[str, Any]]:
         """Return the exact immutable plans consumed by runtime/simulation."""
