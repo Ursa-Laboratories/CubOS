@@ -150,50 +150,21 @@ Policy](gantry.md#origin-policy)). No arguments.
 
 ### `rinse`
 
-Rinse a potentiostat probe by dipping it into an uncapped vial exactly three
-times. Select **Rinse** in the protocol editor, choose the potentiostat and
-vial, and set the immersion height. This is a motion step; it does not start
-an electrochemical measurement.
+Dip a potentiostat probe into an uncapped vial three times, withdrawing to
+`safe_z` after each dip.
 
-- `instrument` *(str, required)* — the mounted potentiostat name.
-- `vial` *(str, required)* — a single vial, including a nested holder path
-  such as `vial_holder.vial_1`, or an individual vial-grid position.
-- `measurement_height` *(float, required)* — a finite, negative offset in
-  millimeters below the calibrated vial rim. Choose a depth that submerges
-  the probe in the actual rinse liquid while clearing the vial bottom.
-  CubOS does not infer liquid level from vial capacity.
+- `instrument` *(str, required)* — mounted potentiostat name.
+- `vial` *(str, required)* — vial path, including holder or grid positions.
+- `measurement_height` *(float, required)* — negative offset in mm below the
+  calibrated vial rim; choose a depth that reaches the liquid and clears the bottom.
 
 ```yaml
 protocol:
   - rinse:
       instrument: potentiostat
       vial: vial_holder.vial_1
-      measurement_height: -5  # Example only: verify depth on your setup.
+      measurement_height: -5
 ```
-
-A runnable example is in
-`packages/core/configs/protocol/sterling/rinse.yaml`. Validate it offline:
-
-```bash
-python -m cubos.tools.validate_setup \
-  packages/core/configs/gantry/cub_xl_sterling.yaml \
-  packages/core/configs/deck/sterling_deck.yaml \
-  packages/core/configs/protocol/sterling/rinse.yaml
-```
-
-Each cycle approaches above the vial at the gantry's configured `safe_z`,
-descends to `vial rim Z + measurement_height`, and withdraws to `safe_z`.
-After the third withdrawal the probe remains above the vial. No soak delay
-or electrical technique is applied. A movement failure stops the command;
-it does not automatically retry the dip or resume motion.
-
-Before the first physical run, verify the potentiostat mounting offset,
-vial-rim calibration, uncapped vial, liquid level, bottom clearance, and
-travel clearance. Run offline setup validation with the actual gantry,
-deck, and rinse protocol files. With an operator at the stop control, run
-the single rinse step and observe exactly three immersions and withdrawals,
-no contact with the rim or bottom, and the final position above the vial.
-Physical validation is required before relying on this motion on a station.
 
 ### `move`
 
