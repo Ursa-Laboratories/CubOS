@@ -313,6 +313,11 @@ applied and a rerun never re-applies committed liquid.
   never runs `decap` itself; a target with no durable cap state at all is
   not constrained by this check.
 
+Every `transfer` runs the pipette's calibrated blow-out motion once, right
+after the final stroke's dispense, to clear any fluid left in the tip. Does
+not change the tracked dispense volume; a blow-out failure is treated the
+same as a dispense failure.
+
 #### `serial_transfer`
 
 Transfer from one source to each well along a plate row or column, with per-well
