@@ -20,8 +20,22 @@ PROTOCOL = """protocol:
 """
 
 
+class ControlledClock:
+    def __init__(self):
+        self.value = 100.0
+
+    def time(self):
+        return self.value
+
+    def sleep(self, seconds):
+        time.sleep(seconds)
+
+    def advance(self, seconds):
+        self.value += seconds
+
+
 class FakeRuns:
-    def __init__(self, outcomes=None, hold=False, fail_indices=None):
+    def __init__(self, outcomes=None, hold=False, fail_indices=None, on_complete=None):
         self.records = {}
         self.outcomes = list(outcomes or [1.0])
         self.submissions = []
@@ -29,6 +43,7 @@ class FakeRuns:
         self.owner = None
         self.hold = hold
         self.fail_indices = set(fail_indices or ())
+        self.on_complete = on_complete
         import threading
         self.release_event = threading.Event()
 
@@ -65,6 +80,8 @@ class FakeRuns:
                 self.release_event.wait(10)
             else:
                 time.sleep(0.01)
+            if self.on_complete is not None:
+                self.on_complete(index)
             record.state = "succeeded"
             if index in self.fail_indices:
                 record.state = "failed"
@@ -205,14 +222,47 @@ def test_patience_stops_after_min_improvement(tmp_path):
     assert len(final.trials) == 2
 
 
-def test_time_budget_is_checked_between_trials(tmp_path):
-    settings, spec = _setup(tmp_path, max_trials=4, max_seconds=0.001)
-    runs = FakeRuns([2, 1])
+def test_time_budget_is_checked_between_trials(tmp_path, monkeypatch):
+    import cubos_api.services.campaign_manager as campaign_manager_module
+
+    clock = ControlledClock()
+    monkeypatch.setattr(campaign_manager_module, "time", clock)
+    settings, spec = _setup(tmp_path, max_trials=4, max_seconds=0.5)
+    runs = FakeRuns(
+        [2, 1],
+        on_complete=lambda index: clock.advance(1.0) if index == 0 else None,
+    )
     manager = CampaignManager(settings, runs, validator=lambda *args: None, poll_interval=0.005)
     cid = manager.start(spec).campaign_id
     final = wait_for(manager, cid, lambda r: r.state == "completed")
     assert final.stop_reason == "time_budget"
     assert len(final.trials) == 1
+
+
+def test_expired_time_budget_stops_before_first_trial(tmp_path, monkeypatch):
+    import cubos_api.services.campaign_manager as campaign_manager_module
+
+    clock = ControlledClock()
+    monkeypatch.setattr(campaign_manager_module, "time", clock)
+    settings, spec = _setup(tmp_path, max_trials=4, max_seconds=0.5)
+    runs = FakeRuns([2, 1])
+    manager = CampaignManager(settings, runs, validator=lambda *args: None, poll_interval=0.005)
+    original_save = manager._save
+    initial_record_saved = False
+
+    def save_and_expire(record):
+        nonlocal initial_record_saved
+        original_save(record)
+        if not initial_record_saved:
+            initial_record_saved = True
+            clock.advance(1.0)
+
+    monkeypatch.setattr(manager, "_save", save_and_expire)
+    cid = manager.start(spec).campaign_id
+    final = wait_for(manager, cid, lambda r: r.state == "completed")
+    assert final.stop_reason == "time_budget"
+    assert final.trials == []
+    assert runs.submissions == []
 
 
 def test_native_failure_stops_without_next_trial_and_releases_owner(tmp_path):
