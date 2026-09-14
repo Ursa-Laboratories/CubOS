@@ -16,8 +16,10 @@ import type {
   InstrumentMethodParams,
   InstrumentMethodParamField,
 } from "../../types";
-import { CoordinateField, NumberField, OptionalNumberField, TextField, UnsavedNotice } from "./fields";
-import ImportFromFile from "./ImportFromFile";
+import { CoordinateField, NumberField, OptionalNumberField, SaveTargetHint, SavedStatus, TextField, UnsavedNotice } from "./fields";
+import { useSaveShortcut } from "./saveHelpers";
+import ConfigFilePicker from "./ConfigFilePicker";
+import { normalizeYamlFilename } from "./field-utils";
 import RawYamlPanel from "./RawYamlPanel";
 import { useConfirm } from "../common/useConfirm";
 import {
@@ -35,6 +37,11 @@ interface Props {
   selectedFile: string | null;
   onSelectFile: (f: string) => void;
   onImportFile: (f: string) => void;
+  onNewFile?: () => void;
+  onDeleteFile?: (f: string) => void;
+  deleteDisabledReason?: string | null;
+  /** Last successful save on this tab, shown as a "Saved" acknowledgement. */
+  lastSaved?: { filename: string; at: Date } | null;
   commands: CommandInfo[];
   deck: DeckResponse;
   gantry: GantryResponse;
@@ -139,6 +146,10 @@ export default function ProtocolEditor({
   selectedFile,
   onSelectFile,
   onImportFile,
+  onNewFile,
+  onDeleteFile,
+  deleteDisabledReason,
+  lastSaved,
   commands,
   deck,
   gantry,
@@ -319,10 +330,21 @@ export default function ProtocolEditor({
 
   const handleValidate = () => onValidate(buildConfig());
 
+  const saveAsFilename = normalizeYamlFilename(saveAs);
+  const saveAsExists = !!saveAsFilename && configs.includes(saveAsFilename);
+
   const handleSave = async () => {
-    const filename = saveAs.trim() || selectedFile || "";
-    if (!filename || saving || hasPositionErrors) return;
-    const normalized = filename.endsWith(".yaml") ? filename : filename + ".yaml";
+    const normalized = saveAsFilename || selectedFile || "";
+    if (!normalized || saving || hasPositionErrors) return;
+    if (saveAsExists && normalized !== selectedFile) {
+      const ok = await requestConfirm({
+        title: "Overwrite file?",
+        message: `${normalized} already exists. Overwrite it?`,
+        confirmLabel: "Overwrite",
+        danger: true,
+      });
+      if (!ok) return;
+    }
     setSaving(true);
     try {
       await Promise.resolve(onSave(normalized, buildConfig()));
@@ -358,6 +380,7 @@ export default function ProtocolEditor({
   // those configs from here.
   const otherDirty = unsavedConfigs.filter((name) => name !== "Protocol");
   const canSave = hasSteps && (!!saveAs.trim() || !!selectedFile) && !saving && !hasPositionErrors;
+  useSaveShortcut(handleSave, canSave);
   // "new"/"resume" both need an explicit, complete choice before Run is
   // enabled — resume specifically needs a picked state id. "none" (the
   // default) never blocks Run, so every pre-Feature-07 flow is unaffected.
@@ -418,7 +441,15 @@ export default function ProtocolEditor({
   return (
     <div>
       <div style={protocolPickerStyle}>
-        <ImportFromFile configs={configs} onSelectFile={onImportFile} label="Import protocol config" selectedFile={selectedFile} />
+        <ConfigFilePicker
+          kind="Protocol"
+          configs={configs}
+          selectedFile={selectedFile}
+          onSelectFile={onImportFile}
+          onNew={onNewFile}
+          onDelete={onDeleteFile}
+          deleteDisabledReason={deleteDisabledReason}
+        />
       </div>
 
       {!hasSteps && (
@@ -863,6 +894,7 @@ export default function ProtocolEditor({
         )}
         <div style={protocolActionBarStyle}>
           <input
+            aria-label="Save as filename"
             value={saveAs}
             onChange={(e) => setSaveAs(e.target.value)}
             placeholder={selectedFile ?? "my_protocol.yaml"}
@@ -883,6 +915,7 @@ export default function ProtocolEditor({
             {protocolDirty && (
               <button onClick={handleDiscard} style={discardBtnStyle}>Discard changes</button>
             )}
+            {lastSaved && !protocolDirty && <SavedStatus filename={lastSaved.filename} at={lastSaved.at} />}
             {isRunning && (
               <button
                 onClick={onCancelRun}
@@ -902,6 +935,7 @@ export default function ProtocolEditor({
             </button>
           </div>
         </div>
+        <SaveTargetHint saveAs={saveAsFilename} selectedFile={selectedFile} exists={saveAsExists} />
 
         {!hasSteps && (
           <p style={hintTextStyle}>Add at least one step before saving.</p>
