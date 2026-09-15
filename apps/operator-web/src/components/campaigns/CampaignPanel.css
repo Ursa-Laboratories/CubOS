@@ -1,6 +1,10 @@
 .campaign-panel { display:flex; flex-direction:column; gap:14px; padding:16px; max-width:1100px; }
 .campaign-header,.campaign-actions,.campaign-grid,.campaign-toolbar { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
 .campaign-header { justify-content:space-between; border-bottom:1px solid var(--z-border); padding-bottom:12px; }
+.campaign-preset-bar { display:grid; grid-template-columns:minmax(180px,1.2fr) auto minmax(150px,.8fr) minmax(150px,.8fr) auto auto; gap:8px; align-items:end; padding:10px; border:1px solid var(--z-border); border-radius:7px; background:var(--z-surface-sunken); }
+.campaign-preset-bar label { display:flex; flex-direction:column; gap:4px; color:var(--z-text-muted); font-size:11px; }
+.campaign-preset-bar input,.campaign-preset-bar select { min-width:0; padding:7px 8px; color:var(--z-ink); background:var(--z-surface); border:1px solid var(--z-border-strong); border-radius:6px; }
+.campaign-preset-bar>span { grid-column:1 / -1; color:var(--z-text-muted); font-size:11px; }
 .campaign-title { margin:0; font-size:16px; color:var(--z-ink); }
 .campaign-subtitle,.campaign-note,.campaign-meta { color:var(--z-text-muted); font-size:12px; }
 .campaign-grid { align-items:stretch; }
@@ -22,6 +26,7 @@
 .campaign-chart { height:100px; display:flex; gap:4px; align-items:flex-end; padding:8px 4px; background:var(--z-surface-sunken); border:1px solid var(--z-border); border-radius:6px; }
 .campaign-bar { flex:1; min-width:5px; background:var(--z-accent); opacity:.8; border-radius:3px 3px 0 0; }
 @media (max-width:650px) { .campaign-fields { grid-template-columns:1fr; } }
+@media (max-width:900px) { .campaign-preset-bar { grid-template-columns:1fr 1fr; } .campaign-preset-bar>span { grid-column:1 / -1; } }
 
 .campaign-template-select { padding:9px 12px; color:var(--z-ink); background:var(--z-surface-sunken); border:1px solid var(--z-border); border-radius:7px; font:inherit; }
 .campaign-monitor { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:12px; border-left:3px solid var(--z-accent); background:var(--z-surface-sunken); font-size:13px; }

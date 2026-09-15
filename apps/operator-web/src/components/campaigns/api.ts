@@ -1,4 +1,4 @@
-import type { CameraMonitorStatus, CampaignRecord, CampaignSpec, ColorCampaignSetup, ColorTargetRun } from "./types";
+import type { CameraMonitorStatus, CampaignPresetResponse, CampaignPresetSummary, CampaignRecord, CampaignSpec, ColorCampaignSetup, ColorSetupDraft, ColorTargetRun } from "./types";
 
 const base = "/api/v1/campaigns";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -30,6 +30,13 @@ export const campaignApi = {
   prepareColor: (body: ColorCampaignSetup) => post<CampaignSpec>("/color-setup", body),
   attachFluidState: (id: string | number, fluidStateId: number, reconciliationNote: string) =>
     post<CampaignRecord>(`/${id}/fluid-state`, { fluid_state_id: fluidStateId, reconciliation_note: reconciliationNote }),
+  listPresets: () => request<CampaignPresetSummary[]>("/presets"),
+  getPreset: (filename: string) => request<CampaignPresetResponse>(`/presets/${encodeURIComponent(filename)}`),
+  savePreset: (filename: string, name: string, spec: CampaignSpec, colorSetup: ColorSetupDraft) =>
+    request<CampaignPresetResponse>(`/presets/${encodeURIComponent(filename)}`, {
+      method: "PUT",
+      body: JSON.stringify({ name, spec, color_setup: colorSetup }),
+    }),
 };
 
 const cameraMonitorBase = "/api/v1/instruments/camera/monitor";

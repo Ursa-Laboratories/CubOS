@@ -213,6 +213,62 @@ class CampaignStateBinding(CampaignModel):
     reconciliation_note: str = Field(min_length=1, max_length=1000)
 
 
+class ColorCampaignPresetDraft(CampaignModel):
+    target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
+    red_source: str = Field(default="stocks.A1", min_length=1, max_length=160)
+    yellow_source: str = Field(default="stocks.A2", min_length=1, max_length=160)
+    blue_source: str = Field(default="stocks.A3", min_length=1, max_length=160)
+    candidate_wells: list[str] = Field(min_length=1, max_length=32)
+    camera_instrument: str = Field(default="camera", min_length=1, max_length=80)
+    roi_fraction: float = Field(default=0.5, gt=0, le=1)
+    image_height: float | None = None
+
+    @field_validator("candidate_wells")
+    @classmethod
+    def unique_candidate_wells(cls, value: list[str]):
+        if len(set(value)) != len(value):
+            raise ValueError("Candidate wells must be unique")
+        return value
+
+    @model_validator(mode="after")
+    def target_is_not_a_candidate(self):
+        if self.target_well in self.candidate_wells:
+            raise ValueError("Target well cannot also be a candidate well")
+        return self
+
+
+class CampaignPresetSaveRequest(CampaignModel):
+    name: str = Field(min_length=1, max_length=120)
+    spec: CampaignSpec
+    color_setup: ColorCampaignPresetDraft | None = None
+
+
+class CampaignPresetDocument(CampaignModel):
+    schema_version: Literal["cubos.campaign-preset.v1"] = "cubos.campaign-preset.v1"
+    name: str = Field(min_length=1, max_length=120)
+    spec: CampaignSpec
+    color_setup: ColorCampaignPresetDraft | None = None
+    requires_fresh_state: Literal[True] = True
+    requires_fresh_target: Literal[True] = True
+
+    @model_validator(mode="after")
+    def excludes_runtime_evidence(self):
+        if self.spec.fluid_state_id is not None:
+            raise ValueError("Campaign presets cannot retain a fluid-state ID")
+        return self
+
+
+class CampaignPresetResponse(CampaignModel):
+    filename: str
+    preset: CampaignPresetDocument
+
+
+class CampaignPresetSummary(CampaignModel):
+    filename: str
+    name: str
+    modified_at: float
+
+
 class CampaignRecord(CampaignModel):
     campaign_id: str
     spec: CampaignSpec

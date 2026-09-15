@@ -14,6 +14,8 @@ from cubos.protocol_engine.commands.camera import default_images_dir
 from cubos_api.config import get_settings
 from cubos_api.models.campaigns import (
     CampaignRecord, CampaignSpec, CampaignStateBinding, CampaignSubmission,
+    CampaignPresetDocument, CampaignPresetResponse, CampaignPresetSaveRequest,
+    CampaignPresetSummary,
     ColorCampaignSetup, ColorTargetReanalysisRequest, ColorTargetRequest,
     Observation,
 )
@@ -22,9 +24,25 @@ from cubos_api.models.state import RunStateSelection
 from cubos_api.services.color_campaign import build_color_campaign, target_protocol
 from cubos_api.services.campaign_manager import get_campaign_manager
 from cubos_api.services.run_manager import RunConflictError, get_run_manager
-from cubos_api.services.yaml_io import resolve_config_path
+from cubos_api.services.yaml_io import (
+    list_configs, read_yaml, resolve_config_path, safe_filename, write_yaml,
+)
 
 router = APIRouter(prefix="/api/v1/campaigns", tags=["active-learning"])
+
+
+def _campaign_preset_directory() -> Path:
+    directory = get_settings().configs_dir / "campaign"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _campaign_preset_path(filename: str) -> Path:
+    filename = safe_filename(filename)
+    if not filename.endswith(".yaml"):
+        raise ValueError("Campaign preset filename must end in .yaml")
+    _campaign_preset_directory()
+    return resolve_config_path(get_settings().configs_dir, "campaign", filename)
 
 
 def _target_measurement(record: RunRecord) -> dict:
@@ -400,6 +418,62 @@ def prepare_color_campaign(body: ColorCampaignSetup):
         raise
     except (ValueError, OSError) as exc:
         raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
+
+
+@router.get("/presets", response_model=list[CampaignPresetSummary])
+def list_campaign_presets():
+    _campaign_preset_directory()
+    summaries = []
+    for filename in list_configs(get_settings().configs_dir, "campaign"):
+        path = _campaign_preset_path(filename)
+        try:
+            preset = CampaignPresetDocument.model_validate(read_yaml(path))
+        except (ValueError, OSError) as exc:
+            raise HTTPException(
+                400, f"Invalid campaign preset {filename!r}: {exc}",
+            ) from exc
+        summaries.append(CampaignPresetSummary(
+            filename=filename,
+            name=preset.name,
+            modified_at=path.stat().st_mtime,
+        ))
+    return summaries
+
+
+@router.get("/presets/{filename}", response_model=CampaignPresetResponse)
+def get_campaign_preset(filename: str):
+    try:
+        path = _campaign_preset_path(filename)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not path.is_file():
+        raise HTTPException(404, f"Campaign preset not found: {filename}")
+    try:
+        preset = CampaignPresetDocument.model_validate(read_yaml(path))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, f"Invalid campaign preset {filename!r}: {exc}") from exc
+    return CampaignPresetResponse(filename=filename, preset=preset)
+
+
+@router.put("/presets/{filename}", response_model=CampaignPresetResponse)
+def save_campaign_preset(filename: str, body: CampaignPresetSaveRequest):
+    """Save an editable template without runtime state or target evidence."""
+    try:
+        path = _campaign_preset_path(filename)
+        preset = CampaignPresetDocument(
+            name=body.name,
+            spec=body.spec.model_copy(
+                deep=True, update={"fluid_state_id": None},
+            ),
+            color_setup=body.color_setup.model_copy(deep=True)
+            if body.color_setup is not None else None,
+        )
+        write_yaml(path, preset.model_dump(mode="json"))
+    except (ValueError, OSError) as exc:
+        raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
+    # TODO(iter): test strict preset round trips, path rejection, and runtime
+    # evidence clearing after the quick operator preset iteration.
+    return CampaignPresetResponse(filename=filename, preset=preset)
 
 
 @router.post("", response_model=CampaignRecord, status_code=202)

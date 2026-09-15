@@ -50,6 +50,29 @@ export interface ColorTargetRun {
   result: unknown; error: string | null;
 }
 
+export interface ColorSetupDraft {
+  target_well: string;
+  red_source: string;
+  yellow_source: string;
+  blue_source: string;
+  candidate_wells: string[];
+  camera_instrument: string;
+  roi_fraction: number;
+  image_height: number | null;
+}
+
+export interface CampaignPreset {
+  schema_version: "cubos.campaign-preset.v1";
+  name: string;
+  spec: CampaignSpec;
+  color_setup: ColorSetupDraft | null;
+  requires_fresh_state: true;
+  requires_fresh_target: true;
+}
+
+export interface CampaignPresetSummary { filename: string; name: string; modified_at: number }
+export interface CampaignPresetResponse { filename: string; preset: CampaignPreset }
+
 export interface CameraMonitorStatus {
   instrument: string;
   state: "stopped" | "running" | "failed";

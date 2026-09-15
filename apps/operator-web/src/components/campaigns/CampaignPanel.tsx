@@ -8,6 +8,7 @@ import { campaignApi } from "./api";
 import type {
   CampaignBinding,
   CampaignPanelProps,
+  CampaignPresetSummary,
   CampaignRecord,
   CampaignSpec,
   ColorTargetRun,
@@ -19,6 +20,11 @@ import type { NormalizedPoint } from "../gantry/cameraGeometry";
 const EDITOR_KEY = "cubos.active-learning.campaign-editor";
 const TARGET_REVIEW_KEY = "cubos.active-learning.target-review";
 const TERMINAL = new Set(["completed", "stopped", "failed", "interrupted"]);
+
+function normalizePresetFilename(value: string): string {
+  const trimmed = value.trim();
+  return trimmed && !trimmed.toLowerCase().endsWith(".yaml") ? `${trimmed}.yaml` : trimmed;
+}
 
 interface BindingChoice extends CampaignBinding {
   command: string;
@@ -408,6 +414,15 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   }, [protocolSteps]);
   const [restoredReview] = useState(restoredTargetReview);
   const [spec, setSpec] = useState<CampaignSpec>(() => restoredSpec(props));
+  const [presets, setPresets] = useState<CampaignPresetSummary[]>([]);
+  const [selectedPreset, setSelectedPreset] = useState("");
+  const [presetFilename, setPresetFilename] = useState("");
+  const [presetName, setPresetName] = useState("");
+  const [presetBusy, setPresetBusy] = useState(false);
+  const [presetMessage, setPresetMessage] = useState<string | null>(null);
+  const [presetError, setPresetError] = useState<string | null>(null);
+  const [presetNeedsFreshTarget, setPresetNeedsFreshTarget] = useState(false);
+  const [presetExpectedFiles, setPresetExpectedFiles] = useState<{ gantry: string; deck: string } | null>(null);
   const files = useRef({ gantryFile, deckFile, protocolFile });
   const [records, setRecords] = useState<CampaignRecord[]>([]);
   const [selected, setSelected] = useState<CampaignRecord | null>(null);
@@ -430,7 +445,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [targetRunId, setTargetRunId] = useState<string | null>(restoredReview?.runId ?? null);
   const [targetMeasurement, setTargetMeasurement] = useState<Record<string, unknown> | null>(restoredReview?.measurement ?? null);
   const [targetExpectedCenter, setTargetExpectedCenter] = useState<NormalizedPoint | null>(restoredReview?.selectedCenter ?? null);
-  const visibleTargetLab = targetLab ?? (protocolTargetProfileId ? protocolTargetLab : null);
+  const visibleTargetLab = presetNeedsFreshTarget ? null : targetLab ?? (protocolTargetProfileId ? protocolTargetLab : null);
   const [targetBusy, setTargetBusy] = useState(false);
   const [targetStatus, setTargetStatus] = useState<string | null>(null);
   const [targetError, setTargetError] = useState<string | null>(null);
@@ -454,8 +469,19 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     && typeof targetWellZ === "number" && typeof cameraDepth === "number"
     ? targetWellZ + numericCaptureHeight + cameraDepth
     : null;
+  const presetConfigMismatch = presetExpectedFiles !== null
+    && (presetExpectedFiles.gantry !== gantryFile || presetExpectedFiles.deck !== deckFile);
 
   useEffect(() => localStorage.setItem(EDITOR_KEY, JSON.stringify(spec)), [spec]);
+  const refreshPresets = useCallback(async () => {
+    try {
+      const next = await campaignApi.listPresets();
+      setPresets(Array.isArray(next) ? next.filter((item) => typeof item?.filename === "string") : []);
+    } catch (caught) {
+      setPresetError(caught instanceof Error ? caught.message : String(caught));
+    }
+  }, []);
+  useEffect(() => { void refreshPresets(); }, [refreshPresets]);
   useEffect(() => {
     if (!targetRunId || !targetMeasurement) {
       localStorage.removeItem(TARGET_REVIEW_KEY);
@@ -526,7 +552,93 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     )) {
       issues.push("Each parameter needs valid limits, a positive step, and a binding.");
     }
+    if (presetNeedsFreshTarget) {
+      issues.push("Loaded setup requires a fresh accepted target and a newly reconciled fluid state before use.");
+    }
+    if (presetConfigMismatch && presetExpectedFiles) {
+      issues.push(`Select gantry ${presetExpectedFiles.gantry} and deck ${presetExpectedFiles.deck} before using this setup.`);
+    }
     return issues;
+  };
+
+  // TODO(iter): test preset YAML save/load and fresh target/state invalidation after the deferred hardware iteration.
+  const savePreset = async () => {
+    const filename = normalizePresetFilename(presetFilename);
+    const name = presetName.trim() || spec.name.trim();
+    if (!filename || !name) {
+      setPresetError("Enter a setup filename and name before saving.");
+      return;
+    }
+    const imageHeight = captureImageHeight.trim() === "" ? null : Number(captureImageHeight);
+    if (imageHeight !== null && !Number.isFinite(imageHeight)) {
+      setPresetError("Capture image height must be a finite number or blank.");
+      return;
+    }
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetMessage(null);
+    try {
+      const response = await campaignApi.savePreset(filename, name, spec, {
+        target_well: targetWell,
+        red_source: redSource,
+        yellow_source: yellowSource,
+        blue_source: blueSource,
+        candidate_wells: candidateText.split(/[\n,]/).map((value) => value.trim()).filter(Boolean),
+        camera_instrument: cameraInstrument,
+        roi_fraction: roiFraction,
+        image_height: imageHeight,
+      });
+      setSelectedPreset(response.filename);
+      setPresetFilename(response.filename);
+      setPresetName(response.preset.name);
+      setPresetMessage(`Saved reusable setup ${response.filename}. Target evidence and fluid inventory were not stored.`);
+      await refreshPresets();
+    } catch (caught) {
+      setPresetError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setPresetBusy(false);
+    }
+  };
+
+  const loadPreset = async () => {
+    if (!selectedPreset) return;
+    setPresetBusy(true);
+    setPresetError(null);
+    setPresetMessage(null);
+    try {
+      const response = await campaignApi.getPreset(selectedPreset);
+      const loaded = response.preset;
+      setSpec({ ...loaded.spec, fluid_state_id: null });
+      if (loaded.color_setup) {
+        setTargetWell(loaded.color_setup.target_well);
+        setRedSource(loaded.color_setup.red_source);
+        setYellowSource(loaded.color_setup.yellow_source);
+        setBlueSource(loaded.color_setup.blue_source);
+        setCandidateText(loaded.color_setup.candidate_wells.join(", "));
+        setCameraInstrument(loaded.color_setup.camera_instrument);
+        setRoiFraction(loaded.color_setup.roi_fraction);
+        setCaptureImageHeight(loaded.color_setup.image_height === null ? "" : String(loaded.color_setup.image_height));
+      }
+      setTargetRunId(null);
+      setTargetMeasurement(null);
+      setTargetExpectedCenter(null);
+      setTargetLab(null);
+      setTargetRun(null);
+      setTargetError(null);
+      setTargetStatus("Loaded setup. Capture and accept a fresh target, then select or create a reconciled fluid state.");
+      setValidated(false);
+      setValidation([]);
+      setPresetIssues([]);
+      setPresetNeedsFreshTarget(true);
+      setPresetExpectedFiles({ gantry: loaded.spec.gantry_file, deck: loaded.spec.deck_file });
+      setPresetFilename(response.filename);
+      setPresetName(loaded.name);
+      setPresetMessage(`Loaded ${response.filename}. No run was started.`);
+    } catch (caught) {
+      setPresetError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setPresetBusy(false);
+    }
   };
   const validate = async () => {
     setBusy(true);
@@ -579,6 +691,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     setValidated(false);
   };
   const readTargetAndPrepare = async () => {
+    if (presetConfigMismatch && presetExpectedFiles) {
+      setTargetError(`Select gantry ${presetExpectedFiles.gantry} and deck ${presetExpectedFiles.deck} before capturing this setup's target.`);
+      return;
+    }
     if (!gantryFile || !deckFile) {
       setError("Select the station gantry and deck before reading the target.");
       return;
@@ -638,6 +754,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   };
 
   const buildFromAcceptedTarget = async () => {
+    if (presetConfigMismatch && presetExpectedFiles) {
+      setError(`Select gantry ${presetExpectedFiles.gantry} and deck ${presetExpectedFiles.deck} before building this setup.`);
+      return;
+    }
     if (!gantryFile || !deckFile || !targetRunId || !targetMeasurement || !targetExpectedCenter) return;
     const lab = numericTriplet(targetMeasurement.lab);
     const profile = objectValue(targetMeasurement.processing_profile);
@@ -673,10 +793,22 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         mock_mode: spec.mock_mode,
       });
       setTargetLab(lab);
-      setSpec(prepared);
+      setSpec((current) => ({
+        ...prepared,
+        name: current.name,
+        parameters: current.parameters,
+        objective: current.objective,
+        optimizer: current.optimizer,
+        stop: current.stop,
+        sum_constraint: current.sum_constraint,
+        mock_mode: current.mock_mode,
+        fluid_state_id: current.fluid_state_id,
+      }));
       setPresetIssues([]);
       setValidation([]);
       setValidated(false);
+      setPresetNeedsFreshTarget(false);
+      setPresetExpectedFiles(null);
       setTargetStatus(`Target read from ${targetWell}. Campaign protocol ${prepared.protocol_file} is ready to validate.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -723,10 +855,34 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         <div className="campaign-actions">
           <button type="button" style={theme.btn.secondary} onClick={() => void validate()} disabled={busy}>Validate</button>
           {validated && <span className="campaign-success">Validated</span>}
-          <button type="button" style={theme.btn.primary} onClick={() => void start()} disabled={busy || !!disabledReason}>Start campaign</button>
+          <button type="button" style={theme.btn.primary} onClick={() => void start()} disabled={busy || !!disabledReason || presetNeedsFreshTarget || presetConfigMismatch} title={presetNeedsFreshTarget ? "Capture a fresh target and reconcile fluid/tip state before starting" : presetConfigMismatch ? "Select the preset's saved gantry and deck first" : undefined}>Start campaign</button>
         </div>
       </div>
       {disabledReason && <div className="campaign-banner campaign-info">{disabledReason}</div>}
+      <div className="campaign-preset-bar" aria-label="Reusable campaign setup">
+        <label>Saved setup
+          <select aria-label="Saved campaign setup" value={selectedPreset} onChange={(event) => {
+            setSelectedPreset(event.target.value);
+            const summary = presets.find((item) => item.filename === event.target.value);
+            if (summary) {
+              setPresetFilename(summary.filename);
+              setPresetName(summary.name);
+            }
+          }}>
+            <option value="">Choose saved YAML…</option>
+            {presets.map((item) => <option key={item.filename} value={item.filename}>{item.name} · {item.filename}</option>)}
+          </select>
+        </label>
+        <button type="button" style={theme.btn.secondary} onClick={() => void loadPreset()} disabled={!selectedPreset || presetBusy || targetBusy}>Load setup</button>
+        <label>Setup filename<input aria-label="Campaign setup filename" value={presetFilename} onChange={(event) => setPresetFilename(event.target.value)} placeholder="lab-color-campaign.yaml" /></label>
+        <label>Setup name<input aria-label="Campaign setup name" value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder={spec.name || "LAB color campaign"} /></label>
+        <button type="button" style={theme.btn.secondary} onClick={() => void savePreset()} disabled={presetBusy}>{presetBusy ? "Working…" : "Save setup"}</button>
+        <button type="button" onClick={() => void refreshPresets()} disabled={presetBusy}>Refresh</button>
+        <span>Saved YAML excludes target-image evidence and live fluid/tip state.</span>
+      </div>
+      {presetMessage && <div className="campaign-banner campaign-success" role="status">{presetMessage}</div>}
+      {presetError && <div className="campaign-banner campaign-error" role="alert">{presetError}</div>}
+      {presetConfigMismatch && presetExpectedFiles && <div className="campaign-banner campaign-error" role="alert">This setup requires gantry <code>{presetExpectedFiles.gantry}</code> and deck <code>{presetExpectedFiles.deck}</code>. Select those files before capturing a fresh target. Current selection: <code>{gantryFile ?? "none"}</code> · <code>{deckFile ?? "none"}</code>.</div>}
       {selected && (
         <div className="campaign-monitor" role="status">
           <strong>{selected.state.replaceAll("_", " ")}</strong>
@@ -765,10 +921,11 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         <p className="campaign-note">After capture, select the intended well center on the saved image. Computer vision may locate a well-like circle near it, but cannot verify the well identity.</p>
         <div className="campaign-color-limits">50–200 µL per dye · 300 µL total · 5 µL grid · six simplex starts · ΔE00 target ≤ 3</div>
         <div className="campaign-actions">
-          <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>{targetBusy ? "Capturing target…" : `Capture ${targetWell} target for review`}</button>
+          <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason || presetConfigMismatch}>{targetBusy ? "Capturing target…" : `Capture ${targetWell} target for review`}</button>
           {visibleTargetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${visibleTargetLab[0]}% ${visibleTargetLab[1]} ${visibleTargetLab[2]})` }} />Target Lab {visibleTargetLab.map((value) => value.toFixed(4)).join(", ")}</span>}
           {visibleTargetLab && protocolFile && <span className="campaign-note">Accepted target will be saved in {protocolFile} with its processing profile.</span>}
-          {!visibleTargetLab && protocolTargetLab && <span className="campaign-note">The loaded protocol contains a legacy reference Lab without accepted processing-profile provenance. Capture a new target before use.</span>}
+          {presetNeedsFreshTarget && <span className="campaign-note">Loaded setup intentionally cleared target evidence. Capture and accept a fresh reference before use.</span>}
+          {!presetNeedsFreshTarget && !visibleTargetLab && protocolTargetLab && <span className="campaign-note">The loaded protocol contains a legacy reference Lab without accepted processing-profile provenance. Capture a new target before use.</span>}
           {targetStatus && <span className="campaign-note">{targetStatus}</span>}
         </div>
         <div className="campaign-capture-setup">
@@ -813,7 +970,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       )}
       {targetRunId && targetMeasurement?.measurement_status === "accepted" && (
         <div className="campaign-actions">
-          <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || !targetExpectedCenter || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign from accepted target</button>
+          <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || !targetExpectedCenter || presetConfigMismatch || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign from accepted target</button>
           {!spec.mock_mode && spec.fluid_state_id === null && <span className="campaign-note">Create or select a reconciled fluid state before building a real color campaign.</span>}
         </div>
       )}
