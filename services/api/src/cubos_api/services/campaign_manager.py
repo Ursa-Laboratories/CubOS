@@ -26,7 +26,6 @@ from cubos_api.services.yaml_io import resolve_config_path
 
 log = logging.getLogger(__name__)
 TERMINAL = {"completed", "stopped", "failed", "interrupted"}
-FLUID_COMMANDS = {"pick_up_tip", "drop_tip", "transfer", "serial_transfer", "mix", "aspirate", "blowout", "rinse_well", "flush_pipette", "purge_pipette", "clear_well"}
 
 
 class CampaignManager:
@@ -97,9 +96,6 @@ class CampaignManager:
         raw = spec.model_dump()
         validate_template(protocol, raw)
         self.runs._validate_bundle(gantry, deck, protocol)
-        steps = yaml.safe_load(protocol)["protocol"]
-        if not spec.mock_mode and spec.fluid_state_id is None and any(next(iter(s)) in FLUID_COMMANDS for s in steps):
-            raise ValueError("Real fluid-handling campaigns require an existing fluid-state ID. Create and seed it in State first.")
         parameters = self._suggest(spec, [])
         seen_tips = set()
         for index in range(spec.stop.max_trials):

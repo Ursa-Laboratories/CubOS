@@ -608,7 +608,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
             <label className="campaign-field">Objective path<input aria-label="Objective result path" value={spec.objective.path} onChange={(event) => update("objective", { ...spec.objective, path: event.target.value })} placeholder="results.0.value" /></label>
             <label className="campaign-field">Direction<select aria-label="Objective direction" value={spec.objective.direction} onChange={(event) => update("objective", { ...spec.objective, direction: event.target.value as "minimize" | "maximize" })}><option value="minimize">Minimize</option><option value="maximize">Maximize</option></select></label>
             <label className="campaign-field">Objective type<select aria-label="Objective mode" value={spec.objective.mode} onChange={(event) => update("objective", { ...spec.objective, mode: event.target.value as "result" | "manual" })}><option value="result">Protocol result</option><option value="manual">Manual observation</option></select></label>
-            <label className="campaign-field">Fluid state ID<input aria-label="Fluid state ID" type="number" value={spec.fluid_state_id ?? ""} onChange={(event) => update("fluid_state_id", event.target.value ? Number(event.target.value) : null)} /></label>
+            <label className="campaign-field">Fluid state ID (optional)<input aria-label="Fluid state ID" type="number" value={spec.fluid_state_id ?? ""} onChange={(event) => update("fluid_state_id", event.target.value ? Number(event.target.value) : null)} /></label>
           </div>
         </div>
         <div className="campaign-card">
