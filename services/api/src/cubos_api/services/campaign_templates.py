@@ -184,7 +184,7 @@ def compile_trial(protocol_yaml: str, spec: dict[str, Any], parameters: dict[str
 
 def extract_result_objective(result: Any, path: str) -> float:
     """Extract one explicitly addressed finite numeric result value."""
-    value = result if path == "" else _lookup(result, path, label="objective")
+    value = result if path == "" else _lookup_result(result, path, label="objective")
     if isinstance(value, bool) or not isinstance(value, Real) or not math.isfinite(float(value)):
         raise TemplateError("objective must resolve to a finite numeric value")
     return float(value)
@@ -195,7 +195,9 @@ def extract_result_context(result: Any, path: str) -> dict[str, Any] | None:
     if not path or "." not in path:
         parent = result
     else:
-        parent = _lookup(result, path.rsplit(".", 1)[0], label="objective context")
+        parent = _lookup_result(
+            result, path.rsplit(".", 1)[0], label="objective context"
+        )
     if not isinstance(parent, Mapping):
         return None
     allowed = {
@@ -204,3 +206,13 @@ def extract_result_context(result: Any, path: str) -> dict[str, Any] | None:
     }
     payload = {key: parent[key] for key in allowed if key in parent}
     return payload or None
+
+
+def _lookup_result(result: Any, path: str, *, label: str) -> Any:
+    """Read a result path from mock lists or wrapped hardware results."""
+    try:
+        return _lookup(result, path, label=label)
+    except TemplateError:
+        if isinstance(result, Mapping) and isinstance(result.get("results"), list):
+            return _lookup(result["results"], path, label=label)
+        raise
