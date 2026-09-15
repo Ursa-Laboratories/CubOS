@@ -107,9 +107,7 @@ export default function App() {
   const qc = useQueryClient();
   const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "State" | "Results">("Workflow");
   const [activeTab, setActiveTab] = useState("Gantry");
-  const [workflowMode, setWorkflowMode] = useState<"single" | "campaign">(() =>
-    localStorage.getItem("cubos.workflow-mode") === "campaign" ? "campaign" : "single");
-  React.useEffect(() => { localStorage.setItem("cubos.workflow-mode", workflowMode); }, [workflowMode]);
+  const [stationOpen, setStationOpen] = useState(true);
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
@@ -124,6 +122,7 @@ export default function App() {
   const [isRunning, setIsRunning] = useState(false);
   const [isCancelingRun, setIsCancelingRun] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [configNotices, setConfigNotices] = useState<{ gantry: string | null; deck: string | null; protocol: string | null }>({
     gantry: null,
     deck: null,
@@ -154,8 +153,7 @@ export default function App() {
     const saved = loadWorkspaceState(dir);
     if (saved.activeTab) {
       setActiveTab(saved.activeTab);
-      if (saved.activeTab === "Protocol") setWorkflowMode("single");
-      if (saved.activeTab === "Active Learning") setWorkflowMode("campaign");
+      setStationOpen(saved.activeTab !== "Active Learning");
     }
     setGantryFile(saved.gantryFile);
     setDeckFile(saved.deckFile);
@@ -167,11 +165,12 @@ export default function App() {
   React.useEffect(() => {
     settingsApi.get()
       .then((s) => {
+        setConnectionError(null);
         const dir = configDirFromSettings(s);
         setConfigDir(dir);
         restoreWorkspace(dir);
       })
-      .catch((err) => console.error("Failed to load settings:", err));
+      .catch((err) => setConnectionError(`Settings could not be loaded: ${errorMessage(err)}`));
   }, []);
 
   const applyConfigDir = async (selectedPath: string): Promise<boolean> => {
@@ -276,6 +275,33 @@ export default function App() {
   const gantryPosition = useGantryPosition(true);
   const experimentData = useExperimentData();
   const fluidStates = useFluidStates();
+  const configConnectionErrors = [
+    connectionError,
+    gantryConfigs.isError ? `Gantry configs: ${errorMessage(gantryConfigs.error)}` : null,
+    deckConfigs.isError ? `Deck configs: ${errorMessage(deckConfigs.error)}` : null,
+    protocolConfigs.isError ? `Protocol configs: ${errorMessage(protocolConfigs.error)}` : null,
+    fluidStates.isError ? `Fluid states: ${errorMessage(fluidStates.error)}` : null,
+  ].filter((message): message is string => message !== null);
+  const retryOperatorConnection = async () => {
+    setConnectionError(null);
+    try {
+      const settings = await settingsApi.get();
+      const dir = configDirFromSettings(settings);
+      if (configDir === null) {
+        setConfigDir(dir);
+        restoreWorkspace(dir);
+      }
+      await Promise.all([
+        gantryConfigs.refetch(),
+        deckConfigs.refetch(),
+        protocolConfigs.refetch(),
+        gantryPosition.refetch(),
+        fluidStates.refetch(),
+      ]);
+    } catch (error) {
+      setConnectionError(`CubOS could not be reached: ${errorMessage(error)}`);
+    }
+  };
 
   // Local working copies of each editor's edits, kept in App state so
   // they survive tab switches (each editor unmounts on tab-away, which
@@ -805,20 +831,21 @@ export default function App() {
     >
       {activeView === "Workflow" && (
         <>
-          <div aria-label="Execution mode" style={{ display: "flex", gap: 6, padding: "0 0 14px" }}>
-            <button type="button" aria-pressed={workflowMode === "single"}
-              style={workflowMode === "single" ? theme.btn.primary : theme.btn.secondary}
-              onClick={() => { setWorkflowMode("single"); setActiveTab("Protocol"); }}>Single protocol</button>
-            <button type="button" aria-pressed={workflowMode === "campaign"}
-              style={workflowMode === "campaign" ? theme.btn.primary : theme.btn.secondary}
-              onClick={() => { setWorkflowMode("campaign"); setActiveTab("Active Learning"); }}>Active learning campaign</button>
-          </div>
+          {configConnectionErrors.length > 0 && (
+            <div style={{ ...theme.notice.error, marginBottom: 14 }} role="alert">
+              <strong>Could not load this CubOS workspace.</strong>
+              <div>The config lists below may be empty because the API request failed, not because your files are missing.</div>
+              {configConnectionErrors.map((message) => <div key={message} style={{ ...theme.mono, marginTop: 5 }}>{message}</div>)}
+              <button type="button" style={{ ...theme.btn.secondary, ...theme.btnSmall, marginTop: 9 }} onClick={() => void retryOperatorConnection()}>
+                Retry connection
+              </button>
+            </div>
+          )}
           <EditorTabs
           activeTab={activeTab}
           onTabChange={(tab) => {
             setActiveTab(tab);
-            if (tab === "Protocol") setWorkflowMode("single");
-            if (tab === "Active Learning") setWorkflowMode("campaign");
+            setStationOpen(tab !== "Active Learning");
           }}
           dirtyTabs={unsavedConfigs}
           disabledTabs={!deckQuery.data || !gantryQuery.data ? ["Protocol", "Active Learning"] : []}
@@ -1031,13 +1058,19 @@ export default function App() {
         </>
       )}
       {activeView === "Workflow" && activeTab === "Active Learning" && deckQuery.data && gantryQuery.data && <div>
-        <label style={{ display: "grid", gap: 6, marginBottom: 12 }}>Protocol template
-          <select className="campaign-template-select" aria-label="Campaign protocol template" value={protocolFile ?? ""}
-            onChange={(event) => void handleImportProtocol(event.target.value)}>
-            <option value="" disabled>Choose a saved protocol…</option>
-            {(protocolConfigs.data ?? []).map((name) => <option key={name} value={name}>{name}</option>)}
-          </select>
-        </label>
+        <details className="campaign-template-disclosure">
+          <summary>
+            <span>Protocol template (advanced)</span>
+            <small>{protocolFile ?? "No template selected"}</small>
+          </summary>
+          <label>Saved protocol
+            <select className="campaign-template-select" aria-label="Campaign protocol template" value={protocolFile ?? ""}
+              onChange={(event) => void handleImportProtocol(event.target.value)}>
+              <option value="" disabled>Choose a saved protocol…</option>
+              {(protocolConfigs.data ?? []).map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </label>
+        </details>
         <CampaignPanel gantryFile={gantryFile} deckFile={deckFile} protocolFile={protocolFile}
           protocolSteps={protocolQuery.data?.steps ?? []}
           deck={displayDeck ?? deckQuery.data ?? null}
@@ -1131,6 +1164,8 @@ export default function App() {
         left={left}
         topRight={topRight}
         bottomRight={bottomRight}
+        stationOpen={stationOpen}
+        onStationOpenChange={setStationOpen}
       />
       {browseDialog && (
         <ConfigDirDialog

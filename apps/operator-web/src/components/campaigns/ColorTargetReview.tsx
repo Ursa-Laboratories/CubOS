@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { campaignApi } from "./api";
 import type { NormalizedPoint } from "../gantry/cameraGeometry";
+import "./ColorTargetReview.css";
 
 function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -14,16 +15,99 @@ function stringValues(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
 }
 
+const FLAG_LABELS: Record<string, string> = {
+  expected_center_unverified: "The expected well has not been selected",
+  well_not_found: "No clear well edge near the selected point",
+  low_detection_confidence: "Well edge is uncertain",
+  ambiguous_well_detection: "More than one possible well was found",
+  insufficient_valid_pixels: "Too few usable pixels",
+  low_valid_fraction: "Too much of the sample area was excluded",
+  excessive_low_clipping: "Dark pixels are clipped",
+  excessive_high_clipping: "Bright pixels are clipped",
+  excessive_glare: "Glare covers too much of the sample",
+  underexposed: "The saved frame is too dark",
+  overexposed: "The saved frame is too bright",
+  capture_profile_unverified: "Camera settings were not recorded",
+  capture_profile_changed_during_acquisition: "Camera settings changed during capture",
+};
+
+const CAPTURE_FLAGS = [
+  "capture_profile_unverified",
+  "capture_profile_changed_during_acquisition",
+  "underexposed",
+  "overexposed",
+  "excessive_low_clipping",
+  "excessive_high_clipping",
+  "excessive_glare",
+];
+
 interface Props {
   runId: string;
   expectedWell: string;
   measurement: Record<string, unknown>;
   selectedCenter: NormalizedPoint | null;
+  selectionNeedsAnalysis?: boolean;
   onSelectedCenter: (point: NormalizedPoint) => void;
   onMeasurement: (measurement: Record<string, unknown>) => void;
 }
 
-export default function ColorTargetReview({ runId, expectedWell, measurement, selectedCenter, onSelectedCenter, onMeasurement }: Props) {
+function reviewGuidance(status: string, flags: string[], expectedWell: string, selectionNeedsAnalysis: boolean) {
+  if (selectionNeedsAnalysis) {
+    return {
+      tone: "select",
+      badge: "Reanalysis required",
+      title: "Selection changed — reanalyze this region",
+      detail: `The accepted result belongs to the previous ${expectedWell} selection. Reanalyze this saved frame before using the new point as target evidence.`,
+    };
+  }
+  if (status === "accepted") {
+    return {
+      tone: "ready",
+      badge: "Ready",
+      title: "This saved frame passed the current image checks",
+      detail: `The selected region can be used as the ${expectedWell} target for this camera setup. The reported Lab value is still an uncalibrated camera estimate.`,
+    };
+  }
+  const captureProblem = CAPTURE_FLAGS.find((flag) => flags.includes(flag));
+  if (captureProblem) {
+    return {
+      tone: "capture",
+      badge: "New capture needed",
+      title: FLAG_LABELS[captureProblem] ?? "The saved frame has an image-quality problem",
+      detail: `Clicking ${expectedWell} can identify the intended region, but it cannot repair exposure, glare, clipped pixels, or missing camera-setting evidence. Adjust the live image, then capture a new target.`,
+    };
+  }
+  if (flags.includes("expected_center_unverified")) {
+    return {
+      tone: "select",
+      badge: "Select the well",
+      title: `Select the center of ${expectedWell}`,
+      detail: "Click the center of the physical well in this saved frame, then reanalyze. This reuses the same image and does not move the gantry or capture again.",
+    };
+  }
+  if (flags.some((flag) => [
+    "well_not_found",
+    "low_detection_confidence",
+    "ambiguous_well_detection",
+    "insufficient_valid_pixels",
+    "low_valid_fraction",
+  ].includes(flag))) {
+    return {
+      tone: "select",
+      badge: "Check the well",
+      title: `The analysis could not isolate ${expectedWell} confidently`,
+      detail: `Click the center of ${expectedWell} and reanalyze. If the well outline is still missing or ambiguous, improve the live framing and capture a new target.`,
+    };
+  }
+  return {
+    tone: "review",
+    badge: "Review needed",
+    title: "This saved frame did not pass the image checks",
+    detail: "Review the diagnostics below. Reanalysis can change the selected region; image-quality problems require a new capture.",
+  };
+}
+
+export default function ColorTargetReview({ runId, expectedWell, measurement, selectedCenter, selectionNeedsAnalysis = false, onSelectedCenter, onMeasurement }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rawImageError, setRawImageError] = useState(false);
@@ -34,14 +118,55 @@ export default function ColorTargetReview({ runId, expectedWell, measurement, se
   const revision = numberValue(measurement.analysis_revision) ?? 0;
   const flags = useMemo(() => stringValues(quality?.flags), [quality]);
   const status = typeof measurement.measurement_status === "string" ? measurement.measurement_status : "rejected";
+  const guidance = useMemo(
+    () => reviewGuidance(status, flags, expectedWell, selectionNeedsAnalysis),
+    [status, flags, expectedWell, selectionNeedsAnalysis],
+  );
 
-  const selectPoint = (event: React.MouseEvent<HTMLImageElement>) => {
+  const setCenter = (x: number, y: number) => onSelectedCenter({
+    x: Math.max(0, Math.min(1, x)),
+    y: Math.max(0, Math.min(1, y)),
+  });
+
+  const selectPoint = (event: React.MouseEvent<HTMLButtonElement>) => {
+    if (event.detail === 0) {
+      if (!selectedCenter) setCenter(0.5, 0.5);
+      return;
+    }
     const bounds = event.currentTarget.getBoundingClientRect();
     if (bounds.width <= 0 || bounds.height <= 0) return;
-    onSelectedCenter({
-      x: Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width)),
-      y: Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height)),
-    });
+    setCenter(
+      (event.clientX - bounds.left) / bounds.width,
+      (event.clientY - bounds.top) / bounds.height,
+    );
+  };
+
+  const moveSelection = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    const step = event.shiftKey ? 0.05 : 0.01;
+    const current = selectedCenter ?? { x: 0.5, y: 0.5 };
+    const movement: Record<string, [number, number]> = {
+      ArrowLeft: [-step, 0],
+      ArrowRight: [step, 0],
+      ArrowUp: [0, -step],
+      ArrowDown: [0, step],
+    };
+    if (event.key === "Home") {
+      event.preventDefault();
+      event.stopPropagation();
+      setCenter(0.5, 0.5);
+      return;
+    }
+    const delta = movement[event.key];
+    if (!delta) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setCenter(current.x + delta[0], current.y + delta[1]);
+  };
+
+  const stopSelectionKeyUp = (event: React.KeyboardEvent<HTMLButtonElement>) => {
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home"].includes(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   const reanalyze = async () => {
@@ -59,41 +184,110 @@ export default function ColorTargetReview({ runId, expectedWell, measurement, se
     }
   };
 
+  const validFraction = numberValue(quality?.valid_fraction);
+  const glareFraction = numberValue(quality?.glare_fraction);
+  const calibrationStatus = typeof profile?.calibration_status === "string"
+    ? profile.calibration_status.replaceAll("_", " ")
+    : "not reported";
+
   return (
-    <div className="campaign-target-review" aria-label="Target image review">
-      <div className="campaign-toolbar">
+    <section className="target-review" aria-labelledby="target-review-title">
+      <header className="target-review__header">
         <div>
-          <h4>Review saved target frame</h4>
-          <p className="campaign-note">This is the exact saved frame from run {runId}. Click the physical {expectedWell} center, then analyze this same image again. No recapture or motion occurs.</p>
+          <p className="target-review__kicker">Saved target · revision {revision}</p>
+          <h4 id="target-review-title">Review {expectedWell} in the captured frame</h4>
+          <p>This is the immutable image from run <code>{runId}</code>. Selecting a point and reanalyzing never captures again or moves the gantry.</p>
         </div>
-        <span className={status === "accepted" ? "campaign-success" : "campaign-camera-stale"}>{status}</span>
+        <span className={`target-review__status target-review__status--${guidance.tone}`}>{guidance.badge}</span>
+      </header>
+
+      <div className={`target-review__guidance target-review__guidance--${guidance.tone}`}>
+        <strong>{guidance.title}</strong>
+        <p>{guidance.detail}</p>
       </div>
-      <div className="campaign-target-review-grid">
-        <div className="campaign-target-image">
-          {!rawImageError && <img src={campaignApi.colorTargetImageUrl(runId)} alt={`Saved target frame for ${expectedWell}`} onClick={selectPoint} onError={() => setRawImageError(true)} />}
-          {rawImageError && <div className="campaign-target-image-error">Saved frame unavailable. Capture a new target; older target runs may predate immutable image storage.</div>}
-          {selectedCenter && <span className="campaign-selected-center" style={{ left: `${selectedCenter.x * 100}%`, top: `${selectedCenter.y * 100}%` }} />}
+
+      <div className="target-review__frame-wrap">
+        {!rawImageError ? (
+          <button
+            type="button"
+            className="target-review__frame"
+            onClick={selectPoint}
+            onKeyDown={moveSelection}
+            onKeyUp={stopSelectionKeyUp}
+            aria-label={`Select the center of ${expectedWell}. Use arrow keys for fine adjustment and Shift plus arrow keys for larger steps.`}
+          >
+            <img
+              src={campaignApi.colorTargetImageUrl(runId)}
+              alt={`Saved camera frame containing the intended ${expectedWell} target`}
+              onError={() => setRawImageError(true)}
+            />
+            {selectedCenter && (
+              <span
+                className="target-review__selected-center"
+                style={{ left: `${selectedCenter.x * 100}%`, top: `${selectedCenter.y * 100}%` }}
+                aria-hidden="true"
+              />
+            )}
+          </button>
+        ) : (
+          <div className="target-review__image-error">Saved frame unavailable. Capture a new target; older runs may predate immutable image storage.</div>
+        )}
+        <div className="target-review__frame-help">
+          <span>Click the center of the physical {expectedWell} well.</span>
+          <span>Keyboard: arrows fine tune · Shift + arrows moves farther · Home resets to center</span>
         </div>
+      </div>
+
+      <div className="target-review__action-row">
         <div>
-          {!analysisImageError && <img className="campaign-analysis-image" src={campaignApi.colorTargetAnalysisImageUrl(runId, revision)} alt="Color analysis diagnostics" onError={() => setAnalysisImageError(true)} />}
-          {analysisImageError && <div className="campaign-target-image-error">Annotated diagnostics are unavailable for this analysis revision.</div>}
-          <div className="campaign-color-evidence">
-            <span><strong>Expected well</strong> {expectedWell} · operator selection required</span>
-            <span><strong>Detected center</strong> {numberValue(roi?.center_x_px)?.toFixed(1) ?? "—"}, {numberValue(roi?.center_y_px)?.toFixed(1) ?? "—"} px</span>
-            <span><strong>Residual</strong> {numberValue(roi?.center_residual_px)?.toFixed(1) ?? "—"} px</span>
-            <span><strong>Valid ROI</strong> {numberValue(quality?.valid_fraction) === null ? "—" : `${(numberValue(quality?.valid_fraction)! * 100).toFixed(1)}%`}</span>
-            <span><strong>Glare</strong> {numberValue(quality?.glare_fraction) === null ? "—" : `${(numberValue(quality?.glare_fraction)! * 100).toFixed(1)}%`}</span>
-            <span><strong>Color calibration</strong> {typeof profile?.calibration_status === "string" ? profile.calibration_status : "not reported"}</span>
+          <span className="target-review__action-label">Operator-selected center</span>
+          <strong>{selectedCenter ? `${selectedCenter.x.toFixed(3)}, ${selectedCenter.y.toFixed(3)} normalized` : "Not selected"}</strong>
+        </div>
+        <button type="button" onClick={() => void reanalyze()} disabled={!selectedCenter || busy || rawImageError}>
+          {busy ? "Reanalyzing saved frame…" : `Reanalyze selected ${expectedWell} region`}
+        </button>
+      </div>
+
+      {error && <div className="campaign-banner campaign-error" role="alert">{error}</div>}
+
+      <details className="target-review__diagnostics">
+        <summary>View analysis overlay and measurements</summary>
+        <div className="target-review__diagnostic-grid">
+          <div>
+            {!analysisImageError ? (
+              <img
+                src={campaignApi.colorTargetAnalysisImageUrl(runId, revision)}
+                alt={`Analysis overlay for ${expectedWell}, revision ${revision}`}
+                onError={() => setAnalysisImageError(true)}
+              />
+            ) : (
+              <div className="target-review__image-error">The annotated overlay is unavailable for this revision.</div>
+            )}
+            <div className="target-review__legend" aria-label="Analysis overlay legend">
+              <span><i className="target-review__swatch target-review__swatch--expected" />Expected point</span>
+              <span><i className="target-review__swatch target-review__swatch--candidate" />Candidate well edge</span>
+              <span><i className="target-review__swatch target-review__swatch--rejected" />Rejected selection or pixels</span>
+              <span><i className="target-review__swatch target-review__swatch--accepted" />Accepted selection</span>
+            </div>
+          </div>
+          <div className="target-review__evidence">
+            <div><span>Expected well</span><strong>{expectedWell}</strong><small>Named by the protocol; computer vision does not verify identity.</small></div>
+            <div><span>Detected center</span><strong>{numberValue(roi?.center_x_px)?.toFixed(1) ?? "—"}, {numberValue(roi?.center_y_px)?.toFixed(1) ?? "—"} px</strong></div>
+            <div><span>Center residual</span><strong>{numberValue(roi?.center_residual_px)?.toFixed(1) ?? "—"} px</strong></div>
+            <div><span>Usable sample pixels</span><strong>{validFraction === null ? "—" : `${(validFraction * 100).toFixed(1)}%`}</strong></div>
+            <div><span>Glare</span><strong>{glareFraction === null ? "—" : `${(glareFraction * 100).toFixed(1)}%`}</strong></div>
+            <div><span>Camera color estimate</span><strong>{calibrationStatus}</strong><small>No claim of traceable optical color calibration.</small></div>
           </div>
         </div>
-      </div>
-      <div className="campaign-actions">
-        {selectedCenter && <span className="campaign-note">Selected x {selectedCenter.x.toFixed(3)}, y {selectedCenter.y.toFixed(3)} normalized</span>}
-        <button type="button" onClick={() => void reanalyze()} disabled={!selectedCenter || busy || rawImageError}>{busy ? "Analyzing saved frame…" : "Analyze saved frame at selected center"}</button>
-      </div>
-      {flags.length > 0 && <div className="campaign-banner campaign-error" role="alert">{flags.join(" · ")}</div>}
-      {error && <div className="campaign-banner campaign-error" role="alert">{error}</div>}
-      <p className="campaign-note">The selection identifies the intended image region for analysis. It does not save a physical offset, move the gantry, or make computer vision proof of well identity.</p>
-    </div>
+        {flags.length > 0 && (
+          <div className="target-review__flags">
+            <strong>Why this revision was rejected</strong>
+            <ul>{flags.map((flag) => <li key={flag}>{FLAG_LABELS[flag] ?? flag.replaceAll("_", " ")}</li>)}</ul>
+          </div>
+        )}
+      </details>
+
+      <p className="target-review__boundary">The selected point identifies an image region only. It does not save a physical offset or establish the well’s identity.</p>
+    </section>
   );
 }
