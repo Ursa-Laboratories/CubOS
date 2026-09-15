@@ -19,6 +19,7 @@ import type { NormalizedPoint } from "../gantry/cameraGeometry";
 
 const EDITOR_KEY = "cubos.active-learning.campaign-editor";
 const TARGET_REVIEW_KEY = "cubos.active-learning.target-review";
+const PRESET_WORKSPACE_KEY = "cubos.active-learning.preset-workspace";
 const TERMINAL = new Set(["completed", "stopped", "failed", "interrupted"]);
 
 function normalizePresetFilename(value: string): string {
@@ -43,6 +44,52 @@ interface TargetReviewDraft {
   cameraInstrument: string;
   roiFraction: number;
   captureImageHeight: string;
+}
+
+interface PresetWorkspaceDraft {
+  needsFreshTarget: boolean;
+  expectedFiles: { gantry: string; deck: string } | null;
+  selectedPreset: string;
+  presetFilename: string;
+  presetName: string;
+  targetWell: string;
+  redSource: string;
+  yellowSource: string;
+  blueSource: string;
+  candidateText: string;
+  cameraInstrument: string;
+  roiFraction: number;
+  captureImageHeight: string;
+}
+
+function restoredPresetWorkspace(): PresetWorkspaceDraft | null {
+  try {
+    const saved = localStorage.getItem(PRESET_WORKSPACE_KEY);
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as Partial<PresetWorkspaceDraft>;
+    if (typeof parsed.needsFreshTarget !== "boolean") return null;
+    return {
+      needsFreshTarget: parsed.needsFreshTarget,
+      expectedFiles: parsed.expectedFiles
+        && typeof parsed.expectedFiles.gantry === "string"
+        && typeof parsed.expectedFiles.deck === "string"
+        ? parsed.expectedFiles
+        : null,
+      selectedPreset: typeof parsed.selectedPreset === "string" ? parsed.selectedPreset : "",
+      presetFilename: typeof parsed.presetFilename === "string" ? parsed.presetFilename : "",
+      presetName: typeof parsed.presetName === "string" ? parsed.presetName : "",
+      targetWell: typeof parsed.targetWell === "string" ? parsed.targetWell : "plate.A1",
+      redSource: typeof parsed.redSource === "string" ? parsed.redSource : "stocks.A1",
+      yellowSource: typeof parsed.yellowSource === "string" ? parsed.yellowSource : "stocks.A2",
+      blueSource: typeof parsed.blueSource === "string" ? parsed.blueSource : "stocks.A3",
+      candidateText: typeof parsed.candidateText === "string" ? parsed.candidateText : CANDIDATE_WELLS.join(", "),
+      cameraInstrument: typeof parsed.cameraInstrument === "string" ? parsed.cameraInstrument : "camera",
+      roiFraction: isFiniteNumber(parsed.roiFraction) ? parsed.roiFraction : 0.5,
+      captureImageHeight: typeof parsed.captureImageHeight === "string" ? parsed.captureImageHeight : "",
+    };
+  } catch {
+    return null;
+  }
 }
 
 function restoredTargetReview(): TargetReviewDraft | null {
@@ -413,16 +460,18 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       : null;
   }, [protocolSteps]);
   const [restoredReview] = useState(restoredTargetReview);
+  const [restoredPreset] = useState(restoredPresetWorkspace);
   const [spec, setSpec] = useState<CampaignSpec>(() => restoredSpec(props));
   const [presets, setPresets] = useState<CampaignPresetSummary[]>([]);
-  const [selectedPreset, setSelectedPreset] = useState("");
-  const [presetFilename, setPresetFilename] = useState("");
-  const [presetName, setPresetName] = useState("");
+  const [selectedPreset, setSelectedPreset] = useState(restoredPreset?.selectedPreset ?? "");
+  const [presetFilename, setPresetFilename] = useState(restoredPreset?.presetFilename ?? "");
+  const [presetName, setPresetName] = useState(restoredPreset?.presetName ?? "");
   const [presetBusy, setPresetBusy] = useState(false);
   const [presetMessage, setPresetMessage] = useState<string | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
-  const [presetNeedsFreshTarget, setPresetNeedsFreshTarget] = useState(false);
-  const [presetExpectedFiles, setPresetExpectedFiles] = useState<{ gantry: string; deck: string } | null>(null);
+  const [presetNeedsFreshTarget, setPresetNeedsFreshTarget] = useState(restoredPreset?.needsFreshTarget ?? false);
+  const [presetExpectedFiles, setPresetExpectedFiles] = useState<{ gantry: string; deck: string } | null>(restoredPreset?.expectedFiles ?? null);
+  const suppressHistorySelectionRef = useRef(restoredPreset?.needsFreshTarget ?? false);
   const files = useRef({ gantryFile, deckFile, protocolFile });
   const [records, setRecords] = useState<CampaignRecord[]>([]);
   const [selected, setSelected] = useState<CampaignRecord | null>(null);
@@ -433,18 +482,18 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [observation, setObservation] = useState("");
   const [validated, setValidated] = useState(false);
   const [presetIssues, setPresetIssues] = useState<string[]>([]);
-  const [targetWell, setTargetWell] = useState(restoredReview?.targetWell ?? "plate.A1");
-  const [redSource, setRedSource] = useState("stocks.A1");
-  const [yellowSource, setYellowSource] = useState("stocks.A2");
-  const [blueSource, setBlueSource] = useState("stocks.A3");
-  const [candidateText, setCandidateText] = useState(CANDIDATE_WELLS.join(", "));
-  const [cameraInstrument, setCameraInstrument] = useState(restoredReview?.cameraInstrument ?? "camera");
-  const [roiFraction, setRoiFraction] = useState(restoredReview?.roiFraction ?? 0.5);
-  const [captureImageHeight, setCaptureImageHeight] = useState(restoredReview?.captureImageHeight ?? "");
-  const [targetLab, setTargetLab] = useState<number[] | null>(() => restoredReview?.measurement.measurement_status === "accepted" ? numericTriplet(restoredReview.measurement.lab) : null);
-  const [targetRunId, setTargetRunId] = useState<string | null>(restoredReview?.runId ?? null);
-  const [targetMeasurement, setTargetMeasurement] = useState<Record<string, unknown> | null>(restoredReview?.measurement ?? null);
-  const [targetExpectedCenter, setTargetExpectedCenter] = useState<NormalizedPoint | null>(restoredReview?.selectedCenter ?? null);
+  const [targetWell, setTargetWell] = useState(restoredPreset?.targetWell ?? restoredReview?.targetWell ?? "plate.A1");
+  const [redSource, setRedSource] = useState(restoredPreset?.redSource ?? "stocks.A1");
+  const [yellowSource, setYellowSource] = useState(restoredPreset?.yellowSource ?? "stocks.A2");
+  const [blueSource, setBlueSource] = useState(restoredPreset?.blueSource ?? "stocks.A3");
+  const [candidateText, setCandidateText] = useState(restoredPreset?.candidateText ?? CANDIDATE_WELLS.join(", "));
+  const [cameraInstrument, setCameraInstrument] = useState(restoredPreset?.cameraInstrument ?? restoredReview?.cameraInstrument ?? "camera");
+  const [roiFraction, setRoiFraction] = useState(restoredPreset?.roiFraction ?? restoredReview?.roiFraction ?? 0.5);
+  const [captureImageHeight, setCaptureImageHeight] = useState(restoredPreset?.captureImageHeight ?? restoredReview?.captureImageHeight ?? "");
+  const [targetLab, setTargetLab] = useState<number[] | null>(() => !restoredPreset?.needsFreshTarget && restoredReview?.measurement.measurement_status === "accepted" ? numericTriplet(restoredReview.measurement.lab) : null);
+  const [targetRunId, setTargetRunId] = useState<string | null>(restoredPreset?.needsFreshTarget ? null : restoredReview?.runId ?? null);
+  const [targetMeasurement, setTargetMeasurement] = useState<Record<string, unknown> | null>(restoredPreset?.needsFreshTarget ? null : restoredReview?.measurement ?? null);
+  const [targetExpectedCenter, setTargetExpectedCenter] = useState<NormalizedPoint | null>(restoredPreset?.needsFreshTarget ? null : restoredReview?.selectedCenter ?? null);
   const visibleTargetLab = presetNeedsFreshTarget ? null : targetLab ?? (protocolTargetProfileId ? protocolTargetLab : null);
   const [targetBusy, setTargetBusy] = useState(false);
   const [targetStatus, setTargetStatus] = useState<string | null>(null);
@@ -473,6 +522,23 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     && (presetExpectedFiles.gantry !== gantryFile || presetExpectedFiles.deck !== deckFile);
 
   useEffect(() => localStorage.setItem(EDITOR_KEY, JSON.stringify(spec)), [spec]);
+  useEffect(() => {
+    localStorage.setItem(PRESET_WORKSPACE_KEY, JSON.stringify({
+      needsFreshTarget: presetNeedsFreshTarget,
+      expectedFiles: presetExpectedFiles,
+      selectedPreset,
+      presetFilename,
+      presetName,
+      targetWell,
+      redSource,
+      yellowSource,
+      blueSource,
+      candidateText,
+      cameraInstrument,
+      roiFraction,
+      captureImageHeight,
+    } satisfies PresetWorkspaceDraft));
+  }, [presetNeedsFreshTarget, presetExpectedFiles, selectedPreset, presetFilename, presetName, targetWell, redSource, yellowSource, blueSource, candidateText, cameraInstrument, roiFraction, captureImageHeight]);
   const refreshPresets = useCallback(async () => {
     try {
       const next = await campaignApi.listPresets();
@@ -519,7 +585,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setRecords(next);
       setSelected((current) => current
         ? next.find((record) => String(record.campaign_id) === String(current.campaign_id)) ?? current
-        : next[0] ?? null);
+        : suppressHistorySelectionRef.current ? null : next[0] ?? null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     } finally {
@@ -630,6 +696,8 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setValidation([]);
       setPresetIssues([]);
       setPresetNeedsFreshTarget(true);
+      suppressHistorySelectionRef.current = true;
+      setSelected(null);
       setPresetExpectedFiles({ gantry: loaded.spec.gantry_file, deck: loaded.spec.deck_file });
       setPresetFilename(response.filename);
       setPresetName(loaded.name);
@@ -664,6 +732,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         return;
       }
       const record = await campaignApi.create(spec);
+      suppressHistorySelectionRef.current = false;
       setSelected(record);
       setRecords((current) => [record, ...current]);
     } catch (caught) {
@@ -853,9 +922,9 @@ export default function CampaignPanel(props: CampaignPanelProps) {
           <div className="campaign-subtitle">Design, execute, measure, and learn through native CubOS runs.</div>
         </div>
         <div className="campaign-actions">
-          <button type="button" style={theme.btn.secondary} onClick={() => void validate()} disabled={busy}>Validate</button>
+          <button type="button" style={theme.btn.secondary} onClick={() => void validate()} disabled={busy || presetNeedsFreshTarget || presetConfigMismatch} title={presetNeedsFreshTarget ? `Capture and accept ${targetWell}, then Build campaign` : presetConfigMismatch ? "Select the preset's saved gantry and deck first" : undefined}>Validate</button>
           {validated && <span className="campaign-success">Validated</span>}
-          <button type="button" style={theme.btn.primary} onClick={() => void start()} disabled={busy || !!disabledReason || presetNeedsFreshTarget || presetConfigMismatch} title={presetNeedsFreshTarget ? "Capture a fresh target and reconcile fluid/tip state before starting" : presetConfigMismatch ? "Select the preset's saved gantry and deck first" : undefined}>Start campaign</button>
+          <button type="button" style={theme.btn.primary} onClick={() => void start()} disabled={busy || !!disabledReason || presetNeedsFreshTarget || presetConfigMismatch} title={presetNeedsFreshTarget ? `Capture and accept ${targetWell}, then Build campaign` : presetConfigMismatch ? "Select the preset's saved gantry and deck first" : undefined}>Start campaign</button>
         </div>
       </div>
       {disabledReason && <div className="campaign-banner campaign-info">{disabledReason}</div>}
@@ -882,9 +951,11 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       </div>
       {presetMessage && <div className="campaign-banner campaign-success" role="status">{presetMessage}</div>}
       {presetError && <div className="campaign-banner campaign-error" role="alert">{presetError}</div>}
+      {presetNeedsFreshTarget && <div className="campaign-banner campaign-info" role="status"><strong>Preset setup pending.</strong> Capture and accept {targetWell}, then Build campaign. Validate and Start remain disabled until the fresh reference is built into the draft.</div>}
       {presetConfigMismatch && presetExpectedFiles && <div className="campaign-banner campaign-error" role="alert">This setup requires gantry <code>{presetExpectedFiles.gantry}</code> and deck <code>{presetExpectedFiles.deck}</code>. Select those files before capturing a fresh target. Current selection: <code>{gantryFile ?? "none"}</code> · <code>{deckFile ?? "none"}</code>.</div>}
       {selected && (
         <div className="campaign-monitor" role="status">
+          <span>Saved campaign history</span>
           <strong>{selected.state.replaceAll("_", " ")}</strong>
           <span>{selected.trials.length} / {selected.spec.stop.max_trials} trials · best {selected.best_objective ?? "—"}</span>
           {selected.stop_reason && <span>{selected.stop_reason.replaceAll("_", " ")}</span>}
