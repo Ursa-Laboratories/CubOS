@@ -31,11 +31,13 @@ _CONTROL_PROPERTIES = {
     "focus": "CAP_PROP_FOCUS",
     "brightness": "CAP_PROP_BRIGHTNESS",
 }
+# V4L2 UVC backends reject OpenCV's 0.25 and want the raw auto_exposure menu value 1.
 _MANUAL_MODE_PROPERTIES = {
-    "exposure": ("CAP_PROP_AUTO_EXPOSURE", 0.25),
-    "white_balance": ("CAP_PROP_AUTO_WB", 0.0),
-    "focus": ("CAP_PROP_AUTOFOCUS", 0.0),
+    "exposure": ("CAP_PROP_AUTO_EXPOSURE", (0.25, 1.0)),
+    "white_balance": ("CAP_PROP_AUTO_WB", (0.0,)),
+    "focus": ("CAP_PROP_AUTOFOCUS", (0.0,)),
 }
+_READBACK_TOLERANCE = 1e-3
 _PROFILE_PROPERTIES = {
     "auto_exposure": "CAP_PROP_AUTO_EXPOSURE",
     "auto_white_balance": "CAP_PROP_AUTO_WB",
@@ -291,22 +293,38 @@ class OpenCVCamera(CameraInstrument):
                     f"OpenCV does not expose {constant_name}"
                 )
                 continue
+            requested = float(value)
             try:
                 mode = _MANUAL_MODE_PROPERTIES.get(name)
                 mode_accepted = True
                 if mode is not None:
                     mode_property = getattr(self._cv2, mode[0], None)
                     if mode_property is not None:
-                        mode_accepted = self._lease.set_property(
-                            mode_property, mode[1]
+                        mode_accepted = any(
+                            self._lease.set_property(mode_property, candidate)
+                            for candidate in mode[1]
                         )
-                value_accepted = self._lease.set_property(property_id, float(value))
-                accepted = mode_accepted and value_accepted
+                value_accepted = self._lease.set_property(property_id, requested)
+                readback = (
+                    self._lease.get_property(property_id) if value_accepted else None
+                )
             except Exception as exc:
                 accepted = False
                 detail = f"{type(exc).__name__}: {exc}"
             else:
-                detail = "Camera rejected this control" if not accepted else ""
+                matches = value_accepted and math.isclose(
+                    readback,
+                    requested,
+                    rel_tol=_READBACK_TOLERANCE,
+                    abs_tol=_READBACK_TOLERANCE,
+                )
+                accepted = mode_accepted and matches
+                if not value_accepted:
+                    detail = "Camera rejected this control"
+                elif not matches:
+                    detail = f"Camera reports {readback:g} after requesting {requested:g}"
+                else:
+                    detail = ""
             if accepted:
                 accepted_any = True
                 self._unsupported_controls.pop(name, None)

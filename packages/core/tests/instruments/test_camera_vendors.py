@@ -287,6 +287,29 @@ class FakeVideoCapture:
         self.released = True
 
 
+class FakeAutoExposureCv2(FakeCv2):
+    CAP_PROP_AUTO_EXPOSURE = 21
+
+
+class RejectingVideoCapture(FakeVideoCapture):
+    def __init__(self, rejected, readback=None, **kwargs):
+        super().__init__(**kwargs)
+        self.rejected = rejected
+        self.readback = readback or {}
+        self.attempts = []
+
+    def set(self, prop, value):
+        self.attempts.append((prop, value))
+        if (prop, value) in self.rejected:
+            return False
+        return super().set(prop, value)
+
+    def get(self, prop):
+        if prop in self.readback:
+            return self.readback[prop]
+        return super().get(prop)
+
+
 class FakeArrayFrame:
     shape = (600, 800, 3)
 
@@ -749,6 +772,71 @@ class TestOpenCVHardwarePath:
         assert after.frame_id > before.frame_id
         assert after.configuration_revision > before.configuration_revision
         assert camera.control_fingerprint()["controls"]["brightness"]["value"] == 12.0
+        camera.disconnect()
+
+    def test_manual_exposure_falls_back_to_v4l2_menu_value(self, monkeypatch):
+        capture = RejectingVideoCapture(
+            rejected={(FakeAutoExposureCv2.CAP_PROP_AUTO_EXPOSURE, 0.25)},
+            frame=FakeArrayFrame(),
+        )
+        cv2 = FakeAutoExposureCv2(capture_factory=lambda index: capture)
+        monkeypatch.setitem(sys.modules, "cv2", cv2)
+        camera = OpenCVCamera(camera_id=0, offline=False)
+        camera.connect()
+
+        status = camera.set_controls({"exposure": 1500.0})
+
+        assert status["exposure"] == {
+            "supported": True,
+            "value": 1500.0,
+            "error": None,
+        }
+        assert capture.props[FakeAutoExposureCv2.CAP_PROP_AUTO_EXPOSURE] == 1.0
+        assert capture.attempts[-3:] == [
+            (FakeAutoExposureCv2.CAP_PROP_AUTO_EXPOSURE, 0.25),
+            (FakeAutoExposureCv2.CAP_PROP_AUTO_EXPOSURE, 1.0),
+            (FakeAutoExposureCv2.CAP_PROP_EXPOSURE, 1500.0),
+        ]
+        camera.disconnect()
+
+    def test_manual_exposure_rejected_by_every_candidate(self, monkeypatch):
+        capture = RejectingVideoCapture(
+            rejected={
+                (FakeAutoExposureCv2.CAP_PROP_AUTO_EXPOSURE, 0.25),
+                (FakeAutoExposureCv2.CAP_PROP_AUTO_EXPOSURE, 1.0),
+            },
+            frame=FakeArrayFrame(),
+        )
+        cv2 = FakeAutoExposureCv2(capture_factory=lambda index: capture)
+        monkeypatch.setitem(sys.modules, "cv2", cv2)
+        camera = OpenCVCamera(camera_id=0, offline=False)
+        camera.connect()
+
+        status = camera.set_controls({"exposure": 1500.0})
+
+        assert status["exposure"]["supported"] is False
+        assert status["exposure"]["error"] == (
+            "Camera rejected manual mode for this control"
+        )
+        camera.disconnect()
+
+    def test_control_readback_mismatch_is_reported(self, monkeypatch):
+        capture = RejectingVideoCapture(
+            rejected=set(),
+            readback={FakeCv2.CAP_PROP_BRIGHTNESS: 8.0},
+            frame=FakeArrayFrame(),
+        )
+        cv2 = FakeCv2(capture_factory=lambda index: capture)
+        monkeypatch.setitem(sys.modules, "cv2", cv2)
+        camera = OpenCVCamera(camera_id=0, offline=False)
+        camera.connect()
+
+        status = camera.set_controls({"brightness": 12.0})
+
+        assert status["brightness"]["supported"] is False
+        assert status["brightness"]["error"] == (
+            "Camera reports 8 after requesting 12"
+        )
         camera.disconnect()
 
     def test_auto_detect_scans_indexes(self, monkeypatch):
