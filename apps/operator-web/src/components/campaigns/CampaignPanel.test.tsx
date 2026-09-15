@@ -105,6 +105,8 @@ it("builds the color-matching campaign preset", async () => {
   expect(screen.getByLabelText("Design 6 blue_ul")).toHaveValue(125);
   expect(screen.getByLabelText("Sum constraint total")).toHaveValue(300);
   expect((screen.getByLabelText("Sequence 1 values") as HTMLTextAreaElement).value).toContain("plate.B12");
+  expect(screen.getByText("Target Lab 50.0000, 10.0000, 20.0000")).toBeInTheDocument();
+  expect(screen.getByText("Saved in p → measure_color.reference_lab")).toBeInTheDocument();
 });
 
 it("shows target, current, and best color results", async () => {

@@ -324,6 +324,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   } = props;
   const numericChoices = useMemo(() => choices(protocolSteps), [protocolSteps]);
   const stringChoices = useMemo(() => choices(protocolSteps, true), [protocolSteps]);
+  const protocolTargetLab = useMemo(() => {
+    const measurement = protocolSteps.find((step) => step.command === "measure_color");
+    return numericTriplet(measurement?.args.reference_lab);
+  }, [protocolSteps]);
   const [spec, setSpec] = useState<CampaignSpec>(() => restoredSpec(props));
   const files = useRef({ gantryFile, deckFile, protocolFile });
   const [records, setRecords] = useState<CampaignRecord[]>([]);
@@ -343,6 +347,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [cameraInstrument, setCameraInstrument] = useState("camera");
   const [roiFraction, setRoiFraction] = useState(0.5);
   const [targetLab, setTargetLab] = useState<number[] | null>(null);
+  const visibleTargetLab = targetLab ?? protocolTargetLab;
   const [targetBusy, setTargetBusy] = useState(false);
   const [targetStatus, setTargetStatus] = useState<string | null>(null);
 
@@ -583,7 +588,8 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         <div className="campaign-color-limits">50–200 µL per dye · 300 µL total · 5 µL grid · six simplex starts · ΔE00 target ≤ 3</div>
         <div className="campaign-actions">
           <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>{targetBusy ? "Reading target…" : `Read ${targetWell} target & build campaign`}</button>
-          {targetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${targetLab[0]}% ${targetLab[1]} ${targetLab[2]})` }} />Lab {targetLab.map((value) => value.toFixed(2)).join(", ")}</span>}
+          {visibleTargetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${visibleTargetLab[0]}% ${visibleTargetLab[1]} ${visibleTargetLab[2]})` }} />Target Lab {visibleTargetLab.map((value) => value.toFixed(4)).join(", ")}</span>}
+          {protocolTargetLab && protocolFile && <span className="campaign-note">Saved in {protocolFile} → measure_color.reference_lab</span>}
           {targetStatus && <span className="campaign-note">{targetStatus}</span>}
         </div>
       </div>
