@@ -1917,4 +1917,26 @@ describe("CubOS editor interactions", () => {
     expect(screen.getByRole("alert")).toHaveTextContent(/composition sums to 40/i);
     expect(fetchMock).not.toHaveBeenCalledWith("/api/v1/runs", expect.anything());
   });
+
+  it("keeps Protocol and Active Learning as independent tabs and preserves both drafts", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await waitForSettingsLoad();
+    await loadRequiredProtocolDependencies(user);
+
+    expect(screen.getByRole("button", { name: "Active Learning" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    await importConfig(user, "Protocol config", "move.yaml");
+    expect(screen.getByRole("combobox", { name: "Protocol config" })).toHaveValue("move.yaml");
+
+    await user.click(screen.getByRole("button", { name: "Active Learning" }));
+    expect(screen.getByRole("combobox", { name: "Campaign protocol template" })).toHaveValue("move.yaml");
+    await user.clear(screen.getByLabelText("Campaign name"));
+    await user.type(screen.getByLabelText("Campaign name"), "saved campaign draft");
+
+    await user.click(screen.getByRole("button", { name: "Protocol" }));
+    expect(screen.getByRole("combobox", { name: "Protocol config" })).toHaveValue("move.yaml");
+    await user.click(screen.getByRole("button", { name: "Active Learning" }));
+    expect(screen.getByLabelText("Campaign name")).toHaveValue("saved campaign draft");
+  });
 });

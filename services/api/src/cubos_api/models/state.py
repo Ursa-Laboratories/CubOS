@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 StateDomain = Literal["fluid", "tip", "cap"]
@@ -65,6 +65,16 @@ class CreateFluidStateRequest(BaseModel):
     deck_file: str
     label: Optional[str] = None
     fluids: Dict[str, FluidSeedItem] = Field(default_factory=dict)
+    tips: Dict[str, bool] = Field(default_factory=dict)
+
+    @field_validator("tips", mode="before")
+    @classmethod
+    def require_boolean_tip_presence(cls, value):
+        if isinstance(value, dict) and any(
+            not isinstance(present, bool) for present in value.values()
+        ):
+            raise ValueError("tip presence values must be true or false")
+        return value
 
 
 class FluidStateSummaryResponse(BaseModel):

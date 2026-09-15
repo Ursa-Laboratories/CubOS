@@ -57,10 +57,10 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
         raise ProtocolExecutionError(
             "motion planning requires gantry_config to validate carriage bounds."
         )
-    if context.fluid_state_id is not None:
+    if context.fluid_state_id is not None and context.data_store is None:
         raise ProtocolExecutionError(
-            "routing v1 does not support durable fluid-state resume. "
-            "No protocol movement was attempted."
+            "durable routed execution requires a data store so persisted tip "
+            "occupancy can be checked before movement."
         )
     try:
         _build_scene_from_context(context)
@@ -105,16 +105,17 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
             elif step.command_name in {"mix", "drop_tip"}:
                 _motion_for(context.deck, _fixture_key(context.deck, args["position"]))
             elif step.command_name in {"capture", "measure_color"}:
+                command = step.command_name
                 instrument_name = args["instrument"]
                 try:
                     instrument = context.gantry.instruments[instrument_name]
                 except KeyError as exc:
                     raise InvalidGeometryError(
-                        f"Unknown planned camera instrument {instrument_name!r}."
+                        f"Unknown planned {command} instrument {instrument_name!r}."
                     ) from exc
                 if not isinstance(instrument, CameraInstrument):
                     raise InvalidGeometryError(
-                        f"Planned camera instrument {instrument_name!r} is a "
+                        f"Planned {command} instrument {instrument_name!r} is a "
                         f"{type(instrument).__name__}, not a CameraInstrument."
                     )
                 if args.get("position") is not None:
@@ -180,7 +181,8 @@ class RoutingSession:
 
     def __init__(self, context: Any) -> None:
         self.context = context
-        self.base_scene = _build_scene_from_context(context)
+        self.tip_status = _durable_tip_status(context)
+        self.base_scene = _build_scene_from_context(context, self.tip_status)
 
     def current_carriage(self) -> Point3D:
         try:
@@ -225,7 +227,11 @@ class RoutingSession:
         state = ToolState("pipette" if extension else None, extension)
         current_target: str | None = None
         current_instrument: str | None = None
-        consumed: set[str] = set()
+        consumed: set[str] = {
+            f"{rack_key}.tip.{slot_id}"
+            for (rack_key, slot_id), status in self.tip_status.items()
+            if status != "available"
+        }
         self._preview_consumed: set[str] = set()
         prepared: dict[int, PreparedMotionStep] = {}
 
@@ -287,10 +293,21 @@ class RoutingSession:
                     current_instrument=current_instrument,
                 )
                 current_instrument = "pipette"
-            elif command in {"capture", "measure_color"}:
+            elif command == "capture":
                 value = PreparedMotionStep(
                     command, (), {"instrument": args["instrument"]},
                 )
+            elif command == "measure_color":
+                value, current, current_target = self._plan_measure_color(
+                    current,
+                    instrument=args["instrument"],
+                    position=args.get("position"),
+                    image_height=args.get("image_height"),
+                    tool_state=state,
+                    current_target=current_target,
+                    current_instrument=current_instrument,
+                )
+                current_instrument = args["instrument"]
             else:
                 raise InvalidGeometryError(f"Unsupported planned command {command!r}.")
             prepared[step.index] = value
@@ -355,14 +372,21 @@ class RoutingSession:
         rack_key = position.rsplit(".", 1)[0] if "." in position else position
         if tip_id is None:
             tip_id = next(
-                (key for key in rack.tips if rack.is_tip_present(key) and f"{rack_key}.tip.{key}" not in consumed),
+                (
+                    key for key in rack.tips
+                    if self._tip_is_available(rack_key, key, rack)
+                    and f"{rack_key}.tip.{key}" not in consumed
+                ),
                 None,
             )
         if tip_id is None:
             raise InvalidGeometryError(f"pick_up_tip target {position!r} is unavailable.")
         target_name = f"{rack_key}.{tip_id}"
         target_tip_fixture = f"{rack_key}.tip.{tip_id}"
-        if target_tip_fixture in consumed or not rack.is_tip_present(tip_id):
+        if (
+            target_tip_fixture in consumed
+            or not self._tip_is_available(rack_key, tip_id, rack)
+        ):
             raise InvalidGeometryError(f"pick_up_tip target {target_name!r} is unavailable.")
         coordinate = rack.get_tip_location(tip_id)
         target = Point3D(coordinate.x, coordinate.y, coordinate.z)
@@ -385,6 +409,7 @@ class RoutingSession:
                 )
             blockers = _side_exit_blockers(
                 rack, tip_id, world_edge, consumed, rack_key,
+                durable_status=self.tip_status,
             )
             if blockers:
                 raise InvalidGeometryError(
@@ -589,6 +614,70 @@ class RoutingSession:
         )
         return PreparedMotionStep("drop_tip", (ingress, departure), {"drop_after_plan": 0}), hover, bare, None
 
+    def _plan_measure_color(
+        self,
+        current: Point3D,
+        *,
+        instrument: str,
+        position: str | None,
+        image_height: float | None,
+        tool_state: ToolState,
+        current_target: str | None,
+        current_instrument: str | None,
+    ) -> tuple[PreparedMotionStep, Point3D, None]:
+        data = {"instrument": instrument, "capture_after_plan": -1}
+        if image_height is None:
+            return PreparedMotionStep("measure_color", (), data), current, None
+        if position is None:
+            raise InvalidGeometryError(
+                "planned measure_color image_height requires a deck position."
+            )
+        try:
+            height = float(image_height)
+        except (TypeError, ValueError) as exc:
+            raise InvalidGeometryError(
+                "planned measure_color image_height must be a finite number."
+            ) from exc
+        if not math.isfinite(height):
+            raise InvalidGeometryError(
+                "planned measure_color image_height must be a finite number."
+            )
+        approach, capture_point = self._plan_engage(
+            current,
+            position,
+            height,
+            instrument,
+            tool_state,
+            command="measure_color",
+            operation="capture",
+            previous_target=current_target,
+            previous_instrument=current_instrument,
+        )
+        fixture_key = _fixture_key(self.context.deck, position)
+        ceiling = self.context.gantry_config.working_volume.z_max
+        retracted = Point3D(capture_point.x, capture_point.y, ceiling)
+        retract = self._plan(
+            capture_point,
+            retracted,
+            instrument,
+            tool_state,
+            (fixture_key,),
+            "measure_color",
+            "retract",
+        )
+        data.update({
+            "capture_after_plan": 0,
+            "image_height": height,
+            "position": position,
+        })
+        return PreparedMotionStep("measure_color", (approach, retract), data), retracted, None
+
+    def _tip_is_available(self, rack_key: str, tip_id: str, rack: TipRack) -> bool:
+        status = self.tip_status.get((rack_key, tip_id))
+        if status is not None:
+            return status == "available"
+        return rack.is_tip_present(tip_id)
+
     def _plan_engage(
         self,
         current: Point3D,
@@ -746,7 +835,30 @@ class RoutingSession:
         return scene, AccessScope(tuple(allowed), tuple(c.name for c in corridors), (instrument,))
 
 
-def _build_scene_from_context(context: Any) -> Scene:
+def _durable_tip_status(context: Any) -> dict[tuple[str, str], str]:
+    if context.fluid_state_id is None:
+        return {}
+    if context.data_store is None:
+        raise InvalidGeometryError(
+            "Durable routed execution requires a data store for tip-state preflight."
+        )
+    try:
+        snapshot = context.data_store.get_tip_snapshot(context.fluid_state_id)
+    except Exception as exc:
+        raise InvalidGeometryError(
+            "Cannot read durable tip state before route planning: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+    return {
+        (item["rack_key"], item["slot_id"]): item["status"]
+        for item in snapshot["containers"]
+    }
+
+
+def _build_scene_from_context(
+    context: Any,
+    durable_tip_status: Mapping[tuple[str, str], str] | None = None,
+) -> Scene:
     bounds = context.gantry_config.working_volume
     carriage_bounds = AABB(
         "carriage_bounds",
@@ -769,7 +881,13 @@ def _build_scene_from_context(context: Any) -> Scene:
                 )
             if radius is not None:
                 for tip_id, coordinate in labware.tips.items():
-                    if not labware.is_tip_present(tip_id):
+                    persisted = (durable_tip_status or {}).get((key, tip_id))
+                    tip_present = (
+                        persisted == "available"
+                        if persisted is not None
+                        else labware.is_tip_present(tip_id)
+                    )
+                    if not tip_present:
                         continue
                     fixtures.append(AABB(
                         f"{key}.tip.{tip_id}",
@@ -997,13 +1115,21 @@ def _side_exit_blockers(
     edge: str,
     consumed: set[str],
     rack_key: str,
+    *,
+    durable_status: Mapping[tuple[str, str], str] | None = None,
 ) -> list[str]:
     target = rack.get_tip_location(tip_id)
     axis = edge[0]
     target_value = getattr(target, axis)
     blockers = []
     for other_id, coordinate in rack.tips.items():
-        if other_id == tip_id or not rack.is_tip_present(other_id):
+        persisted = (durable_status or {}).get((rack_key, other_id))
+        tip_present = (
+            persisted == "available"
+            if persisted is not None
+            else rack.is_tip_present(other_id)
+        )
+        if other_id == tip_id or not tip_present:
             continue
         if f"{rack_key}.tip.{other_id}" in consumed:
             continue

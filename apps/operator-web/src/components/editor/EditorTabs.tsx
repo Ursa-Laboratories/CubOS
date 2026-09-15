@@ -1,6 +1,6 @@
 import * as theme from "../../theme";
 
-const TABS = ["Gantry", "Deck", "Protocol"] as const;
+const TABS = ["Gantry", "Deck", "Protocol", "Active Learning"] as const;
 type TabName = (typeof TABS)[number];
 
 interface Props {
@@ -37,7 +37,7 @@ export default function EditorTabs({
           display: "flex",
           gap: 4,
           borderBottom: `1px solid ${theme.color.border}`,
-          marginBottom: disabledMessage && activeTab === "Protocol" ? 0 : 18,
+          marginBottom: disabledMessage && disabledTabs.includes(activeTab) ? 0 : 18,
         }}
       >
         {TABS.map((tab) => {

@@ -1,4 +1,4 @@
-import type { CampaignRecord, CampaignSpec, ColorCampaignSetup, ColorTargetRun } from "./types";
+import type { CameraMonitorStatus, CampaignRecord, CampaignSpec, ColorCampaignSetup, ColorTargetRun } from "./types";
 
 const base = "/api/v1/campaigns";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -20,5 +20,49 @@ export const campaignApi = {
   readColorTarget: (body: Omit<ColorCampaignSetup, "target_lab" | "red_source" | "yellow_source" | "blue_source" | "candidate_wells" | "fluid_state_id">) =>
     post<ColorTargetRun>("/color-target", body),
   getColorTarget: (runId: string) => request<ColorTargetRun>(`/color-target/${runId}`),
+  colorTargetImageUrl: (runId: string) => `${base}/color-target/${encodeURIComponent(runId)}/image`,
+  colorTargetAnalysisImageUrl: (runId: string, revision = 0) => `${base}/color-target/${encodeURIComponent(runId)}/analysis-image?revision=${revision}`,
+  reanalyzeColorTarget: (runId: string, expectedCenter: [number, number]) =>
+    post<Record<string, unknown>>(`/color-target/${encodeURIComponent(runId)}/reanalyze`, {
+      expected_center: expectedCenter,
+      expected_center_source: "operator_selected",
+    }),
   prepareColor: (body: ColorCampaignSetup) => post<CampaignSpec>("/color-setup", body),
+  attachFluidState: (id: string | number, fluidStateId: number, reconciliationNote: string) =>
+    post<CampaignRecord>(`/${id}/fluid-state`, { fluid_state_id: fluidStateId, reconciliation_note: reconciliationNote }),
+};
+
+const cameraMonitorBase = "/api/v1/instruments/camera/monitor";
+export const cameraMonitorApi = {
+  start: (instrument: string) => fetch(`${cameraMonitorBase}/start`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instrument }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error((await response.text()) || `${response.status} request failed`);
+    return response.json() as Promise<CameraMonitorStatus>;
+  }),
+  heartbeat: (instrument: string, leaseId: string) => fetch(`${cameraMonitorBase}/heartbeat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instrument, lease_id: leaseId }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error((await response.text()) || `${response.status} request failed`);
+    return response.json() as Promise<CameraMonitorStatus>;
+  }),
+  stop: (instrument: string, leaseId: string) => fetch(`${cameraMonitorBase}/stop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instrument, lease_id: leaseId }),
+  }).then(async (response) => {
+    if (!response.ok) throw new Error((await response.text()) || `${response.status} request failed`);
+    return response.json() as Promise<CameraMonitorStatus>;
+  }),
+  get: (instrument: string) => fetch(`${cameraMonitorBase}?instrument=${encodeURIComponent(instrument)}`)
+    .then(async (response) => {
+      if (!response.ok) throw new Error((await response.text()) || `${response.status} request failed`);
+      return response.json() as Promise<CameraMonitorStatus>;
+    }),
+  frameUrl: (instrument: string, frameId: number) =>
+    `${cameraMonitorBase}/frame?instrument=${encodeURIComponent(instrument)}&frame_id=${frameId}`,
 };

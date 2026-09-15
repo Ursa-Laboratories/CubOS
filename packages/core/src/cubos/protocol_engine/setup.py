@@ -268,14 +268,6 @@ def run_on_hardware(
             fluid_state_id=fluid_state_id,
             defer_position_dependent_planning=True,
         )
-        if (
-            getattr(context.deck, "planning_enabled", False) is True
-            and initial_fluids is not None
-        ):
-            raise ValueError(
-                "routing v1 does not support initial_fluids/durable fluid state. "
-                "No hardware connection or movement was attempted."
-            )
         if fluid_state_id is not None:
             fluid_state_id = data_store.resume_fluid_state(
                 fluid_state_id,

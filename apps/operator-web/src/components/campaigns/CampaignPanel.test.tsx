@@ -2,6 +2,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import CampaignPanel from "./CampaignPanel";
 import type { CampaignRecord } from "./types";
+import type { DeckResponse, GantryResponse } from "../../types";
+
+vi.mock("../../hooks/useFluidState", () => ({
+  useCreateFluidState: () => ({ mutateAsync: vi.fn(), isPending: false }),
+}));
 
 const record = (overrides: Partial<CampaignRecord> = {}): CampaignRecord => ({
   campaign_id: "c-1", spec: { name: "Sweep", gantry_file: "g.yaml", deck_file: "d.yaml", protocol_file: "p.yaml", parameters: [], sequences: [], objective: { mode: "result", path: "result.value", direction: "maximize" }, optimizer: { method: "ei", kernel: "matern52", initial_trials: 3, initial_points: [], exploration: .1, seed: 42 }, stop: { max_trials: 4, target_value: null, patience: 2, min_improvement: 0, max_seconds: null }, mock_mode: true, fluid_state_id: null }, state: "running", created_at: "", updated_at: "", active_run_id: "run-7", trials: [], best_objective: null, stop_reason: null, error: null, pause_requested: false, stop_requested: false, ...overrides,
@@ -46,6 +51,41 @@ describe("CampaignPanel", () => {
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("paused"));
     expect(selected).toHaveBeenCalledTimes(1);
   });
+
+  it("opens the running campaign camera from its loaded setup instead of the editable draft field", async () => {
+    const current = record({ state: "running", spec: { ...record().spec, mock_mode: false, protocol_file: "p.yaml" } });
+    const monitorStatus = {
+      instrument: "snapshot_camera", state: "running", connected: true, lease_id: "lease-1", lease_expires_at: 15, subscriber_count: 1,
+      camera_id: 0, requested_resolution: { width: 800, height: 600 }, actual_resolution: { width: 800, height: 600 },
+      requested_pixel_format: null, actual_pixel_format: "BGR8", frame_id: null, received_at: null, frame_age_seconds: null,
+      image_url: null, control_fingerprint: "x", run_id: "run-7", campaign_id: "c-1", trial_number: 1,
+      step_index: null, step_command: null, step_substep: null, expected_well: null, well_identity_verification: "not_verified_by_cv",
+      roi: null, quality: null, processing_profile: null, latest_analysis: null, warnings: [], error: null,
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const path = String(input);
+      if (path.endsWith("/campaigns")) return new Response(JSON.stringify([current]), { status: 200 });
+      if (path.includes("/camera/monitor")) {
+        if (init?.method === "POST") {
+          expect(JSON.parse(String(init.body))).toMatchObject({ instrument: "snapshot_camera" });
+        }
+        return new Response(JSON.stringify(monitorStatus), { status: 200 });
+      }
+      return new Response("[]", { status: 200 });
+    });
+    const gantry: GantryResponse = {
+      filename: "g.yaml",
+      config: { serial_port: "", gantry_type: "cub_xl", cnc: { factory_z_travel_mm: 80 }, working_volume: { x_min: 0, x_max: 300, y_min: 0, y_max: 200, z_min: 0, z_max: 80 }, instruments: { snapshot_camera: { type: "camera", vendor: "opencv", offset_x: 0, offset_y: 0, depth: -100 } } },
+    };
+    render(<CampaignPanel gantryFile="g.yaml" deckFile="d.yaml" protocolFile="p.yaml" gantry={gantry} protocolSteps={[{ command: "measure_color", args: { instrument: "snapshot_camera" } }]} />);
+    await screen.findByLabelText("Live campaign camera");
+    fireEvent.change(screen.getByLabelText("Color camera"), { target: { value: "editable_draft_camera" } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/instruments/camera/monitor/start",
+      expect.objectContaining({ method: "POST", body: JSON.stringify({ instrument: "snapshot_camera" }) }),
+    ));
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/start"))).toHaveLength(1);
+  });
 });
 
 
@@ -64,6 +104,22 @@ it("submits a finite manual observation for the waiting trial", async () => {
   fireEvent.change(field,{target:{value:"0"}});
   fireEvent.click(screen.getByRole("button",{name:"Submit observation"}));
   await waitFor(()=>expect(fetchMock).toHaveBeenCalledWith("/api/v1/campaigns/c-1/observation",expect.objectContaining({method:"POST"})));
+});
+
+it("offers safe recovery for an interrupted campaign whose last native run succeeded", async () => {
+  const interrupted = record({
+    state: "interrupted",
+    trials: [{ index: 0, parameters: { x: 1 }, run_id: "run-7", state: "succeeded", objective: null }],
+  });
+  const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const path = String(input);
+    if (path.endsWith("/resume")) return new Response(JSON.stringify({ ...interrupted, state: "running" }), { status: 200 });
+    return new Response(JSON.stringify([interrupted]), { status: 200 });
+  });
+  render(<CampaignPanel gantryFile="g" deckFile="d" protocolFile="p" />);
+  const resume = await screen.findByRole("button", { name: "Resume campaign" });
+  fireEvent.click(resume);
+  await waitFor(() => expect(fetchMock).toHaveBeenCalledWith("/api/v1/campaigns/c-1/resume", expect.objectContaining({ method: "POST" })));
 });
 
 it("sends optimizer controls and shared parameter bindings", async () => {
@@ -94,7 +150,7 @@ it("builds the color-matching campaign preset", async () => {
     { command: "transfer", args: { volume_ul: 100, destination: "plate.A2" } },
     { command: "mix", args: { position: "plate.A2", volume_ul: 225, cycles: 3 } },
     { command: "move", args: { instrument: "camera", position: "plate.A2" } },
-    { command: "measure_color", args: { instrument: "camera", position: "plate.A2", reference_lab: [50, 10, 20] } },
+    { command: "measure_color", args: { instrument: "camera", position: "plate.A2", reference_lab: [50, 10, 20], reference_processing_profile_id: "profile-1" } },
   ];
   render(<CampaignPanel gantryFile="g" deckFile="d" protocolFile="p" protocolSteps={protocolSteps} />);
   fireEvent.click(screen.getByRole("button", { name: "Use loaded protocol" }));
@@ -106,7 +162,7 @@ it("builds the color-matching campaign preset", async () => {
   expect(screen.getByLabelText("Sum constraint total")).toHaveValue(300);
   expect((screen.getByLabelText("Sequence 1 values") as HTMLTextAreaElement).value).toContain("plate.B12");
   expect(screen.getByText("Target Lab 50.0000, 10.0000, 20.0000")).toBeInTheDocument();
-  expect(screen.getByText("Saved in p → measure_color.reference_lab")).toBeInTheDocument();
+  expect(screen.getByText("Accepted target will be saved in p with its processing profile.")).toBeInTheDocument();
 });
 
 it("shows target, current, and best color results", async () => {
@@ -139,7 +195,34 @@ it("shows target, current, and best color results", async () => {
   expect(readout).toHaveTextContent("red_ul 125 µL");
 });
 
-it("reads the selected target and builds the complete color campaign", async () => {
+it("previews labware-relative image height as carriage Z without inventing a default", () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]", { status: 200 }));
+  const deck: DeckResponse = {
+    filename: "d.yaml",
+    labware: [{
+      key: "plate",
+      config: { type: "well_plate", name: "Plate", model_name: "plate", rows: 8, columns: 12, calibration: { a1: { x: 1, y: 2, z: 38.5 }, a2: { x: 2, y: 2, z: 38.5 } }, x_offset: 1, y_offset: 1 },
+      wells: { A1: { x: 1, y: 2, z: 38.5 } },
+    }],
+  };
+  const gantry: GantryResponse = {
+    filename: "g.yaml",
+    config: {
+      serial_port: "",
+      gantry_type: "cub_xl",
+      cnc: { factory_z_travel_mm: 80 },
+      working_volume: { x_min: 0, x_max: 300, y_min: 0, y_max: 200, z_min: 0, z_max: 80 },
+      instruments: { camera: { type: "camera", vendor: "opencv", offset_x: 0, offset_y: 0, depth: -114.964 } },
+    },
+  };
+  render(<CampaignPanel gantryFile="g.yaml" deckFile="d.yaml" protocolFile="p.yaml" deck={deck} gantry={gantry} />);
+  expect(screen.getByLabelText("Color capture image height")).toHaveValue(null);
+  fireEvent.change(screen.getByLabelText("Color capture image height"), { target: { value: "122.964" } });
+  expect(screen.getByText(/carriage Z 46.500 mm/)).toBeInTheDocument();
+  expect(screen.getByText(/Review physical camera clearance before running/)).toBeInTheDocument();
+});
+
+it("reviews a rejected target on the saved frame before building the color campaign", async () => {
   let setupBody: Record<string, unknown> | undefined;
   const prepared = {
     ...record().spec,
@@ -159,8 +242,27 @@ it("reads the selected target and builds the complete color campaign", async () 
       return new Response(JSON.stringify({
         run_id: "target-1",
         state: "succeeded",
-        result: { results: [null, { lab: [42, 12, 18] }] },
+        result: { results: [null, {
+          measurement_status: "rejected",
+          roi: { center_x_px: 455, center_y_px: 317, center_residual_px: 58 },
+          quality: { flags: ["expected_center_unverified"], valid_fraction: 0.8, glare_fraction: 0.02 },
+        }] },
         error: null,
+      }), { status: 200 });
+    }
+    if (path.endsWith("/color-target/target-1/reanalyze")) {
+      expect(JSON.parse(String(init?.body))).toEqual({
+        expected_center: [0.56875, 317 / 600],
+        expected_center_source: "operator_selected",
+      });
+      return new Response(JSON.stringify({
+        measurement_status: "accepted",
+        comparison_status: "not_requested",
+        lab: [42, 12, 18],
+        processing_profile: { id: "profile-v1", calibration_status: "uncalibrated" },
+        analysis_revision: 1,
+        quality: { accepted: true, flags: [], valid_fraction: 0.91, glare_fraction: 0.01 },
+        roi: { center_x_px: 455, center_y_px: 317, center_residual_px: 2 },
       }), { status: 200 });
     }
     if (path.endsWith("/color-setup")) {
@@ -171,12 +273,25 @@ it("reads the selected target and builds the complete color campaign", async () 
   });
   render(<CampaignPanel gantryFile="g.yaml" deckFile="d.yaml" protocolFile="old.yaml" onRunSelected={selectedRun} />);
   fireEvent.change(screen.getByLabelText("Target well"), { target: { value: "plate.C4" } });
-  fireEvent.click(screen.getByRole("button", { name: "Read plate.C4 target & build campaign" }));
+  fireEvent.click(screen.getByRole("button", { name: "Capture plate.C4 target for review" }));
+  const savedImage = await screen.findByAltText("Saved target frame for plate.C4");
+  vi.spyOn(savedImage, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+  expect(screen.queryByRole("button", { name: "Build campaign from accepted target" })).not.toBeInTheDocument();
+  expect(screen.getByText("expected_center_unverified")).toBeInTheDocument();
+  fireEvent.click(savedImage, { clientX: 455, clientY: 317 });
+  fireEvent.click(screen.getByRole("button", { name: "Analyze saved frame at selected center" }));
+  const buildButton = await screen.findByRole("button", { name: "Build campaign from accepted target" });
+  fireEvent.click(buildButton);
   await waitFor(() => expect(screen.getByLabelText("Campaign name")).toHaveValue("CIEDE2000 color matching"));
-  expect(selectedRun).toHaveBeenCalledWith("target-1");
+  expect(selectedRun).not.toHaveBeenCalled();
   expect(setupBody).toMatchObject({
     target_well: "plate.C4",
     target_lab: [42, 12, 18],
+    target_run_id: "target-1",
+    target_analysis_revision: 1,
+    reference_processing_profile_id: "profile-v1",
+    expected_center: [0.56875, 317 / 600],
+    expected_center_source: "operator_selected",
     red_source: "stocks.A1",
     yellow_source: "stocks.A2",
     blue_source: "stocks.A3",

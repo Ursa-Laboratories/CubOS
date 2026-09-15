@@ -110,26 +110,50 @@ class ColorTargetRequest(CampaignModel):
     target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
     camera_instrument: str = Field(default="camera", min_length=1, max_length=80)
     roi_fraction: float = Field(default=0.5, gt=0, le=1)
+    expected_center: tuple[float, float] | None = None
+    expected_center_source: Literal["operator_selected"] | None = None
+    image_height: float | None = None
     mock_mode: bool = False
+
+    @field_validator("expected_center", mode="before")
+    @classmethod
+    def accept_json_center_pair(cls, value):
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def center_is_complete(self):
+        if (self.expected_center is None) != (self.expected_center_source is None):
+            raise ValueError("expected_center and expected_center_source must be supplied together")
+        if self.expected_center is not None and any(
+            value < 0 or value > 1 for value in self.expected_center
+        ):
+            raise ValueError("expected_center values must be between 0 and 1")
+        return self
 
 
 class ColorCampaignSetup(CampaignModel):
     gantry_file: str = Field(min_length=1, max_length=255)
     deck_file: str = Field(min_length=1, max_length=255)
+    target_run_id: str | None = Field(default=None, min_length=1, max_length=160)
+    target_analysis_revision: int | None = Field(default=None, ge=0)
     target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
-    target_lab: tuple[float, float, float]
+    target_lab: tuple[float, float, float] | None = None
+    reference_processing_profile_id: str | None = Field(default=None, min_length=1, max_length=128)
     red_source: str = Field(default="stocks.A1", min_length=1, max_length=160)
     yellow_source: str = Field(default="stocks.A2", min_length=1, max_length=160)
     blue_source: str = Field(default="stocks.A3", min_length=1, max_length=160)
     candidate_wells: list[str] = Field(min_length=6, max_length=32)
     camera_instrument: str = Field(default="camera", min_length=1, max_length=80)
     roi_fraction: float = Field(default=0.5, gt=0, le=1)
+    expected_center: tuple[float, float]
+    expected_center_source: Literal["operator_selected"]
+    image_height: float | None = None
     fluid_state_id: int | None = Field(default=None, gt=0)
     mock_mode: bool = False
 
-    @field_validator("target_lab", mode="before")
+    @field_validator("target_lab", "expected_center", mode="before")
     @classmethod
-    def accept_json_lab_triplet(cls, value):
+    def accept_json_tuple(cls, value):
         # JSON has arrays rather than tuples. Normalize the browser payload before
         # strict validation while retaining a fixed-length tuple in the model.
         if isinstance(value, list):
@@ -144,6 +168,32 @@ class ColorCampaignSetup(CampaignModel):
             raise ValueError("Target well cannot also be a candidate well")
         if len(self.candidate_wells) * 3 > 96:
             raise ValueError("Color matching requires three fresh tips per candidate")
+        if any(value < 0 or value > 1 for value in self.expected_center):
+            raise ValueError("expected_center values must be between 0 and 1")
+        if not self.mock_mode and self.fluid_state_id is None:
+            raise ValueError("A real color campaign requires a durable fluid-state ID")
+        if not self.mock_mode and (
+            self.target_run_id is None or self.target_analysis_revision is None
+        ):
+            raise ValueError(
+                "A real color campaign requires an accepted target run and analysis revision"
+            )
+        return self
+
+
+class ColorTargetReanalysisRequest(CampaignModel):
+    expected_center: tuple[float, float]
+    expected_center_source: Literal["operator_selected"] = "operator_selected"
+
+    @field_validator("expected_center", mode="before")
+    @classmethod
+    def accept_json_center_pair(cls, value):
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def center_in_normalized_frame(self):
+        if any(value < 0 or value > 1 for value in self.expected_center):
+            raise ValueError("expected_center values must be between 0 and 1")
         return self
 
 
@@ -154,7 +204,13 @@ class CampaignTrial(CampaignModel):
     state: str = "queued"
     objective: float | None = None
     measurement: dict[str, Any] | None = None
+    objective_status: Literal["pending", "accepted", "unverified", "rejected"] = "pending"
     error: str | None = None
+
+
+class CampaignStateBinding(CampaignModel):
+    fluid_state_id: int = Field(gt=0)
+    reconciliation_note: str = Field(min_length=1, max_length=1000)
 
 
 class CampaignRecord(CampaignModel):
@@ -168,5 +224,6 @@ class CampaignRecord(CampaignModel):
     best_objective: float | None = None
     stop_reason: str | None = None
     error: str | None = None
+    fluid_state_reconciliation_note: str | None = None
     pause_requested: bool = False
     stop_requested: bool = False

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as theme from "../../theme";
+import CampaignFluidState from "./CampaignFluidState";
+import CampaignCameraMonitor from "./CampaignCameraMonitor";
+import ColorTargetReview from "./ColorTargetReview";
 import { campaignApi } from "./api";
 import type {
   CampaignBinding,
@@ -9,8 +12,10 @@ import type {
   ProtocolStep,
 } from "./types";
 import "./CampaignPanel.css";
+import type { NormalizedPoint } from "../gantry/cameraGeometry";
 
 const EDITOR_KEY = "cubos.active-learning.campaign-editor";
+const TARGET_REVIEW_KEY = "cubos.active-learning.target-review";
 const TERMINAL = new Set(["completed", "stopped", "failed", "interrupted"]);
 
 interface BindingChoice extends CampaignBinding {
@@ -21,6 +26,38 @@ const isFiniteNumber = (value: unknown): value is number =>
   typeof value === "number" && Number.isFinite(value);
 const bindingKey = (binding: CampaignBinding) =>
   `${binding.step_index}:${binding.argument}`;
+
+interface TargetReviewDraft {
+  runId: string;
+  measurement: Record<string, unknown>;
+  selectedCenter: NormalizedPoint | null;
+  targetWell: string;
+  cameraInstrument: string;
+  roiFraction: number;
+  captureImageHeight: string;
+}
+
+function restoredTargetReview(): TargetReviewDraft | null {
+  try {
+    const saved = localStorage.getItem(TARGET_REVIEW_KEY);
+    if (!saved) return null;
+    const parsed = JSON.parse(saved) as Partial<TargetReviewDraft>;
+    if (typeof parsed.runId !== "string" || !objectValue(parsed.measurement)) return null;
+    return {
+      runId: parsed.runId,
+      measurement: parsed.measurement as Record<string, unknown>,
+      selectedCenter: parsed.selectedCenter && isFiniteNumber(parsed.selectedCenter.x) && isFiniteNumber(parsed.selectedCenter.y)
+        ? parsed.selectedCenter
+        : null,
+      targetWell: typeof parsed.targetWell === "string" ? parsed.targetWell : "plate.A1",
+      cameraInstrument: typeof parsed.cameraInstrument === "string" ? parsed.cameraInstrument : "camera",
+      roiFraction: isFiniteNumber(parsed.roiFraction) ? parsed.roiFraction : 0.5,
+      captureImageHeight: typeof parsed.captureImageHeight === "string" ? parsed.captureImageHeight : "",
+    };
+  } catch {
+    return null;
+  }
+}
 
 function initialSpec(props: CampaignPanelProps): CampaignSpec {
   return {
@@ -154,6 +191,8 @@ function colorMatchingSpec(
     issues.push("Add a measure_color step after the final mix for automatic CIEDE2000 scoring.");
   } else if (!steps[colorMeasurement].args.reference_lab) {
     issues.push("Set reference_lab on measure_color from the secret target image before validation.");
+  } else if (typeof steps[colorMeasurement].args.reference_processing_profile_id !== "string") {
+    issues.push("Capture and review a new target image so reference Lab and candidates share an accepted processing profile.");
   }
 
   const parameterNames = ["red_ul", "yellow_ul", "blue_ul"];
@@ -280,6 +319,14 @@ function numericTriplet(value: unknown): number[] | null {
     : null;
 }
 
+function objectValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function stringValues(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
 function ColorReadout({ record }: { record: CampaignRecord }) {
   const measured = record.trials.filter((trial) => trial.measurement);
   if (!measured.length) return null;
@@ -296,7 +343,17 @@ function ColorReadout({ record }: { record: CampaignRecord }) {
   const currentRgb = numericTriplet(latest.measurement?.rgb);
   const currentLab = numericTriplet(latest.measurement?.lab);
   const bestRgb = numericTriplet(best?.measurement?.rgb);
-  if (!targetLab && !currentRgb) return null;
+  const quality = objectValue(latest.measurement?.quality);
+  const roi = objectValue(latest.measurement?.roi);
+  const profile = objectValue(latest.measurement?.processing_profile);
+  const identity = objectValue(latest.measurement?.well_identity);
+  const measurementStatus = typeof latest.measurement?.measurement_status === "string" ? latest.measurement.measurement_status : "legacy / unverified";
+  const comparisonStatus = typeof latest.measurement?.comparison_status === "string" ? latest.measurement.comparison_status : "legacy / unverified";
+  const flags = stringValues(quality?.flags);
+  const glare = isFiniteNumber(quality?.glare_fraction) ? quality.glare_fraction : null;
+  const validFraction = isFiniteNumber(quality?.valid_fraction) ? quality.valid_fraction : null;
+  const centerResidual = isFiniteNumber(roi?.center_residual_px) ? roi.center_residual_px : null;
+  if (!targetLab && !currentRgb && !quality) return null;
   const formulation = best
     ? Object.entries(best.parameters).map(([key, value]) => `${key} ${value} µL`).join(" · ")
     : "—";
@@ -304,9 +361,19 @@ function ColorReadout({ record }: { record: CampaignRecord }) {
     <div className="campaign-color-results" aria-label="Color matching results">
       <div className="campaign-color-samples">
         {targetLab && <div><span className="campaign-swatch" style={{ backgroundColor: `lab(${targetLab[0]}% ${targetLab[1]} ${targetLab[2]})` }} /><strong>Target</strong><small>Lab {targetLab.map((value) => value.toFixed(1)).join(", ")}</small></div>}
-        {currentRgb && <div><span className="campaign-swatch" style={{ backgroundColor: `rgb(${currentRgb.join(" ")})` }} /><strong>Current</strong><small>{`${isFiniteNumber(latest.objective) ? `ΔE00 ${latest.objective.toFixed(2)} · ` : ""}${currentLab ? `Lab ${currentLab.map((value) => value.toFixed(1)).join(", ")}` : ""}`}</small></div>}
+        {currentRgb && <div><span className="campaign-swatch" style={{ backgroundColor: `rgb(${currentRgb.join(" ")})` }} /><strong>Current</strong><small>{`${isFiniteNumber(latest.objective) ? `ΔE00 ${latest.objective.toFixed(2)} · ` : ""}${currentLab ? `Estimated camera Lab ${currentLab.map((value) => value.toFixed(1)).join(", ")}` : ""}`}</small></div>}
         {bestRgb && <div><span className="campaign-swatch" style={{ backgroundColor: `rgb(${bestRgb.join(" ")})` }} /><strong>Best</strong><small>ΔE00 {best?.objective?.toFixed(2)}</small></div>}
       </div>
+      <div className="campaign-color-evidence">
+        <span><strong>Measurement</strong> {measurementStatus}</span>
+        <span><strong>Comparison</strong> {comparisonStatus}</span>
+        <span><strong>Color calibration</strong> {typeof profile?.calibration_status === "string" ? profile.calibration_status : "not reported"}</span>
+        <span><strong>Expected well</strong> {typeof identity?.expected_well === "string" ? identity.expected_well : "not reported"} · not verified by CV</span>
+        {centerResidual !== null && <span><strong>Detected-center residual</strong> {centerResidual.toFixed(1)} px</span>}
+        {validFraction !== null && <span><strong>Valid ROI pixels</strong> {(validFraction * 100).toFixed(1)}%</span>}
+        {glare !== null && <span><strong>Glare</strong> {(glare * 100).toFixed(1)}%</span>}
+      </div>
+      {flags.length > 0 && <div className="campaign-banner campaign-error">{flags.join(" · ")}</div>}
       <p><strong>Best formulation:</strong> {formulation}</p>
     </div>
   );
@@ -318,6 +385,9 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     deckFile,
     protocolFile,
     protocolSteps = [],
+    deck = null,
+    gantry = null,
+    availableFluidStates = [],
     disabledReason,
     onRunSelected,
     onCampaignChange,
@@ -328,6 +398,13 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     const measurement = protocolSteps.find((step) => step.command === "measure_color");
     return numericTriplet(measurement?.args.reference_lab);
   }, [protocolSteps]);
+  const protocolTargetProfileId = useMemo(() => {
+    const measurement = protocolSteps.find((step) => step.command === "measure_color");
+    return typeof measurement?.args.reference_processing_profile_id === "string"
+      ? measurement.args.reference_processing_profile_id
+      : null;
+  }, [protocolSteps]);
+  const [restoredReview] = useState(restoredTargetReview);
   const [spec, setSpec] = useState<CampaignSpec>(() => restoredSpec(props));
   const files = useRef({ gantryFile, deckFile, protocolFile });
   const [records, setRecords] = useState<CampaignRecord[]>([]);
@@ -339,19 +416,57 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [observation, setObservation] = useState("");
   const [validated, setValidated] = useState(false);
   const [presetIssues, setPresetIssues] = useState<string[]>([]);
-  const [targetWell, setTargetWell] = useState("plate.A1");
+  const [targetWell, setTargetWell] = useState(restoredReview?.targetWell ?? "plate.A1");
   const [redSource, setRedSource] = useState("stocks.A1");
   const [yellowSource, setYellowSource] = useState("stocks.A2");
   const [blueSource, setBlueSource] = useState("stocks.A3");
   const [candidateText, setCandidateText] = useState(CANDIDATE_WELLS.join(", "));
-  const [cameraInstrument, setCameraInstrument] = useState("camera");
-  const [roiFraction, setRoiFraction] = useState(0.5);
-  const [targetLab, setTargetLab] = useState<number[] | null>(null);
-  const visibleTargetLab = targetLab ?? protocolTargetLab;
+  const [cameraInstrument, setCameraInstrument] = useState(restoredReview?.cameraInstrument ?? "camera");
+  const [roiFraction, setRoiFraction] = useState(restoredReview?.roiFraction ?? 0.5);
+  const [captureImageHeight, setCaptureImageHeight] = useState(restoredReview?.captureImageHeight ?? "");
+  const [targetLab, setTargetLab] = useState<number[] | null>(() => restoredReview?.measurement.measurement_status === "accepted" ? numericTriplet(restoredReview.measurement.lab) : null);
+  const [targetRunId, setTargetRunId] = useState<string | null>(restoredReview?.runId ?? null);
+  const [targetMeasurement, setTargetMeasurement] = useState<Record<string, unknown> | null>(restoredReview?.measurement ?? null);
+  const [targetExpectedCenter, setTargetExpectedCenter] = useState<NormalizedPoint | null>(restoredReview?.selectedCenter ?? null);
+  const visibleTargetLab = targetLab ?? (protocolTargetProfileId ? protocolTargetLab : null);
   const [targetBusy, setTargetBusy] = useState(false);
   const [targetStatus, setTargetStatus] = useState<string | null>(null);
+  const configuredCameras = Object.entries(gantry?.config.instruments ?? {})
+    .filter(([, config]) => config.type === "camera")
+    .map(([name]) => name);
+  const loadedProtocolCamera = selected?.spec.protocol_file === protocolFile
+    ? protocolSteps.find((step) => step.command === "measure_color")?.args.instrument
+    : null;
+  const campaignCameraInstrument = typeof loadedProtocolCamera === "string" && configuredCameras.includes(loadedProtocolCamera)
+    ? loadedProtocolCamera
+    : configuredCameras.length === 1 ? configuredCameras[0] : null;
+  const targetParts = targetWell.split(".");
+  const targetWellZ = targetParts.length === 2
+    ? deck?.labware.find((item) => item.key === targetParts[0])?.wells?.[targetParts[1]]?.z ?? null
+    : null;
+  const cameraDepth = gantry?.config.instruments[cameraInstrument]?.depth;
+  const numericCaptureHeight = captureImageHeight.trim() === "" ? null : Number(captureImageHeight);
+  const captureCarriageZ = numericCaptureHeight !== null && Number.isFinite(numericCaptureHeight)
+    && typeof targetWellZ === "number" && typeof cameraDepth === "number"
+    ? targetWellZ + numericCaptureHeight + cameraDepth
+    : null;
 
   useEffect(() => localStorage.setItem(EDITOR_KEY, JSON.stringify(spec)), [spec]);
+  useEffect(() => {
+    if (!targetRunId || !targetMeasurement) {
+      localStorage.removeItem(TARGET_REVIEW_KEY);
+      return;
+    }
+    localStorage.setItem(TARGET_REVIEW_KEY, JSON.stringify({
+      runId: targetRunId,
+      measurement: targetMeasurement,
+      selectedCenter: targetExpectedCenter,
+      targetWell,
+      cameraInstrument,
+      roiFraction,
+      captureImageHeight,
+    } satisfies TargetReviewDraft));
+  }, [targetRunId, targetMeasurement, targetExpectedCenter, targetWell, cameraInstrument, roiFraction, captureImageHeight]);
   useEffect(() => {
     if (
       files.current.gantryFile !== gantryFile
@@ -464,7 +579,11 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setError("Select the station gantry and deck before reading the target.");
       return;
     }
-    const candidateWells = candidateText.split(/[\n,]/).map((value) => value.trim()).filter(Boolean);
+    const imageHeight = captureImageHeight.trim() === "" ? null : Number(captureImageHeight);
+    if (imageHeight !== null && !Number.isFinite(imageHeight)) {
+      setError("Capture image height must be a finite labware-relative offset in mm.");
+      return;
+    }
     setTargetBusy(true);
     setError(null);
     setTargetStatus(`Reading ${targetWell}; the camera will move under native run control.`);
@@ -475,9 +594,9 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         target_well: targetWell,
         camera_instrument: cameraInstrument,
         roi_fraction: roiFraction,
+        image_height: imageHeight,
         mock_mode: false,
       });
-      onRunSelected?.(run.run_id);
       while (["queued", "running", "cancel_requested"].includes(run.state)) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         run = await campaignApi.getColorTarget(run.run_id);
@@ -487,8 +606,35 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       }
       const results = (run.result as { results?: unknown[] } | null)?.results;
       const measurement = Array.isArray(results) ? results[1] as Record<string, unknown> | undefined : undefined;
-      const lab = numericTriplet(measurement?.lab);
-      if (!lab) throw new Error("Target run completed without a valid Lab measurement.");
+      if (!measurement) throw new Error("Target run completed without analysis evidence.");
+      setTargetRunId(run.run_id);
+      setTargetMeasurement(measurement);
+      setTargetExpectedCenter(null);
+      setTargetLab(null);
+      setTargetStatus(`Target frame saved from ${targetWell}. Review the image and select the intended well center before building the campaign.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setTargetStatus(null);
+    } finally {
+      setTargetBusy(false);
+    }
+  };
+
+  const buildFromAcceptedTarget = async () => {
+    if (!gantryFile || !deckFile || !targetRunId || !targetMeasurement || !targetExpectedCenter) return;
+    const lab = numericTriplet(targetMeasurement.lab);
+    const profile = objectValue(targetMeasurement.processing_profile);
+    const profileId = typeof profile?.id === "string" ? profile.id : null;
+    const analysisRevision = isFiniteNumber(targetMeasurement.analysis_revision) ? targetMeasurement.analysis_revision : 0;
+    if (targetMeasurement.measurement_status !== "accepted" || !lab || !profileId) {
+      setError("The saved target frame must pass quality review and include a processing profile before the campaign can be built.");
+      return;
+    }
+    const imageHeight = captureImageHeight.trim() === "" ? null : Number(captureImageHeight);
+    const candidateWells = candidateText.split(/[\n,]/).map((value) => value.trim()).filter(Boolean);
+    setTargetBusy(true);
+    setError(null);
+    try {
       const prepared = await campaignApi.prepareColor({
         gantry_file: gantryFile,
         deck_file: deckFile,
@@ -500,6 +646,12 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         candidate_wells: candidateWells,
         camera_instrument: cameraInstrument,
         roi_fraction: roiFraction,
+        image_height: imageHeight,
+        expected_center: [targetExpectedCenter.x, targetExpectedCenter.y],
+        expected_center_source: "operator_selected",
+        reference_processing_profile_id: profileId,
+        target_run_id: targetRunId,
+        target_analysis_revision: analysisRevision,
         fluid_state_id: spec.fluid_state_id,
         mock_mode: spec.mock_mode,
       });
@@ -511,7 +663,6 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setTargetStatus(`Target read from ${targetWell}. Campaign protocol ${prepared.protocol_file} is ready to validate.`);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
-      setTargetStatus(null);
     } finally {
       setTargetBusy(false);
     }
@@ -567,32 +718,67 @@ export default function CampaignPanel(props: CampaignPanelProps) {
           {selected.active_run_id && <button type="button" onClick={() => onRunSelected?.(selected.active_run_id!)}>View current trial</button>}
         </div>
       )}
+      {selected?.state === "running" && !selected.spec.mock_mode && campaignCameraInstrument && (
+        <CampaignCameraMonitor instrument={campaignCameraInstrument} />
+      )}
+      {selected?.state === "running" && !selected.spec.mock_mode && !campaignCameraInstrument && (
+        <div className="campaign-banner campaign-info">Load the running campaign&apos;s gantry and protocol to identify its camera before opening the live monitor.</div>
+      )}
 
       <div className="campaign-card campaign-color-setup">
         <div className="campaign-toolbar">
           <div>
             <h4>Color matching setup</h4>
-            <p className="campaign-note">Choose the existing target and three dye stocks here. Reading the target creates the complete candidate protocol and campaign draft automatically.</p>
+            <p className="campaign-note">Choose the existing target and three dye stocks here. Capture and review the target before building the candidate protocol and campaign draft.</p>
           </div>
           <button type="button" style={theme.btn.secondary} onClick={applyColorPreset}>Use loaded protocol</button>
         </div>
         <div className="campaign-fields campaign-color-fields">
-          <label className="campaign-field">Target well<select aria-label="Target well" value={targetWell} onChange={(event) => setTargetWell(event.target.value)}>{PLATE_WELLS.map((well) => <option key={well}>{well}</option>)}</select></label>
+          <label className="campaign-field">Target well<select aria-label="Target well" value={targetWell} onChange={(event) => { setTargetWell(event.target.value); setTargetRunId(null); setTargetMeasurement(null); setTargetExpectedCenter(null); }}>{PLATE_WELLS.map((well) => <option key={well}>{well}</option>)}</select></label>
           <label className="campaign-field">Red stock<input aria-label="Red stock" value={redSource} onChange={(event) => setRedSource(event.target.value)} /></label>
           <label className="campaign-field">Yellow stock<input aria-label="Yellow stock" value={yellowSource} onChange={(event) => setYellowSource(event.target.value)} /></label>
           <label className="campaign-field">Blue stock<input aria-label="Blue stock" value={blueSource} onChange={(event) => setBlueSource(event.target.value)} /></label>
-          <label className="campaign-field">Camera<input aria-label="Color camera" value={cameraInstrument} onChange={(event) => setCameraInstrument(event.target.value)} /></label>
-          <label className="campaign-field">ROI fraction<input aria-label="Color ROI fraction" type="number" min="0.1" max="1" step="0.05" value={roiFraction} onChange={(event) => setRoiFraction(Number(event.target.value))} /></label>
+          <label className="campaign-field">Camera<input aria-label="Color camera" value={cameraInstrument} onChange={(event) => { setCameraInstrument(event.target.value); setTargetRunId(null); setTargetMeasurement(null); setTargetExpectedCenter(null); }} /></label>
+          <label className="campaign-field">Sample radius / detected well radius<input aria-label="Color ROI fraction" type="number" min="0.1" max="1" step="0.05" value={roiFraction} onChange={(event) => { setRoiFraction(Number(event.target.value)); setTargetRunId(null); setTargetMeasurement(null); setTargetExpectedCenter(null); }} /></label>
+          <label className="campaign-field">Capture height relative to well (mm)<input aria-label="Color capture image height" type="number" step="0.5" value={captureImageHeight} onChange={(event) => { setCaptureImageHeight(event.target.value); setTargetRunId(null); setTargetMeasurement(null); setTargetExpectedCenter(null); }} placeholder="Use configured ceiling" /></label>
           <label className="campaign-field campaign-candidate-field">Candidate wells<textarea aria-label="Color candidate wells" value={candidateText} onChange={(event) => setCandidateText(event.target.value)} /></label>
         </div>
+        <p className="campaign-note">Capture height is relative to the calibrated well surface: positive is above it and negative is below. Blank preserves the existing configured ceiling. CubOS validates the selected height against the calibrated labware, working volume, and collision plan, then retracts to the configured planning ceiling.</p>
+        {captureCarriageZ !== null && <p className="campaign-note">Preview: {targetWell} surface Z {targetWellZ?.toFixed(3)} mm + image height {numericCaptureHeight?.toFixed(3)} mm + camera depth {cameraDepth?.toFixed(3)} mm = carriage Z {captureCarriageZ.toFixed(3)} mm. Review physical camera clearance before running.</p>}
+        <p className="campaign-note">After capture, select the intended well center on the saved image. Computer vision may locate a well-like circle near it, but cannot verify the well identity.</p>
         <div className="campaign-color-limits">50–200 µL per dye · 300 µL total · 5 µL grid · six simplex starts · ΔE00 target ≤ 3</div>
         <div className="campaign-actions">
-          <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>{targetBusy ? "Reading target…" : `Read ${targetWell} target & build campaign`}</button>
+          <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>{targetBusy ? "Capturing target…" : `Capture ${targetWell} target for review`}</button>
           {visibleTargetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${visibleTargetLab[0]}% ${visibleTargetLab[1]} ${visibleTargetLab[2]})` }} />Target Lab {visibleTargetLab.map((value) => value.toFixed(4)).join(", ")}</span>}
-          {protocolTargetLab && protocolFile && <span className="campaign-note">Saved in {protocolFile} → measure_color.reference_lab</span>}
+          {visibleTargetLab && protocolFile && <span className="campaign-note">Accepted target will be saved in {protocolFile} with its processing profile.</span>}
+          {!visibleTargetLab && protocolTargetLab && <span className="campaign-note">The loaded protocol contains a legacy reference Lab without accepted processing-profile provenance. Capture a new target before use.</span>}
           {targetStatus && <span className="campaign-note">{targetStatus}</span>}
         </div>
       </div>
+      {targetRunId && targetMeasurement && (
+        <ColorTargetReview
+          key={targetRunId}
+          runId={targetRunId}
+          expectedWell={targetWell}
+          measurement={targetMeasurement}
+          selectedCenter={targetExpectedCenter}
+          onSelectedCenter={setTargetExpectedCenter}
+          onMeasurement={(measurement) => {
+            setTargetMeasurement(measurement);
+            const lab = numericTriplet(measurement.lab);
+            setTargetLab(measurement.measurement_status === "accepted" ? lab : null);
+            setTargetStatus(measurement.measurement_status === "accepted"
+              ? "Saved target frame passed quality review. Build the campaign when the physical setup is ready."
+              : "Saved target frame remains rejected. Review the diagnostics, adjust the selected center, and analyze the same frame again.");
+          }}
+        />
+      )}
+      {targetRunId && targetMeasurement?.measurement_status === "accepted" && (
+        <div className="campaign-actions">
+          <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || !targetExpectedCenter || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign from accepted target</button>
+          {!spec.mock_mode && spec.fluid_state_id === null && <span className="campaign-note">Create or select a reconciled fluid state before building a real color campaign.</span>}
+        </div>
+      )}
       {presetIssues.length > 0 && (
         <div className="campaign-banner campaign-info">
           {presetIssues.map((issue) => <div key={issue}>{issue}</div>)}
@@ -608,9 +794,21 @@ export default function CampaignPanel(props: CampaignPanelProps) {
             <label className="campaign-field">Objective path<input aria-label="Objective result path" value={spec.objective.path} onChange={(event) => update("objective", { ...spec.objective, path: event.target.value })} placeholder="results.0.value" /></label>
             <label className="campaign-field">Direction<select aria-label="Objective direction" value={spec.objective.direction} onChange={(event) => update("objective", { ...spec.objective, direction: event.target.value as "minimize" | "maximize" })}><option value="minimize">Minimize</option><option value="maximize">Maximize</option></select></label>
             <label className="campaign-field">Objective type<select aria-label="Objective mode" value={spec.objective.mode} onChange={(event) => update("objective", { ...spec.objective, mode: event.target.value as "result" | "manual" })}><option value="result">Protocol result</option><option value="manual">Manual observation</option></select></label>
-            <label className="campaign-field">Fluid state ID (optional)<input aria-label="Fluid state ID" type="number" value={spec.fluid_state_id ?? ""} onChange={(event) => update("fluid_state_id", event.target.value ? Number(event.target.value) : null)} /></label>
           </div>
         </div>
+        <CampaignFluidState
+          deckFile={deckFile}
+          deck={deck}
+          states={availableFluidStates}
+          selectedId={spec.fluid_state_id}
+          onSelect={(id) => update("fluid_state_id", id)}
+          selectedCampaign={selected}
+          onCampaignAttached={(record) => {
+            setSelected(record);
+            setRecords((current) => current.map((item) => String(item.campaign_id) === String(record.campaign_id) ? record : item));
+          }}
+          suggestedContainers={[redSource, yellowSource, blueSource]}
+        />
         <div className="campaign-card">
           <h4>Learning strategy</h4>
           <div className="campaign-fields">
@@ -721,7 +919,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
             <div className="campaign-table-wrap"><table className="campaign-table"><thead><tr><th>Trial</th><th>Parameters</th><th>Objective</th><th>Status</th><th>Run</th></tr></thead><tbody>{selected.trials.map((trial) => <tr key={trial.index}><td>{trial.index + 1}</td><td>{Object.entries(trial.parameters).map(([key, value]) => `${key}=${value}`).join(", ")}</td><td>{trial.objective ?? "—"}</td><td>{trial.state}</td><td><button type="button" onClick={() => onRunSelected?.(trial.run_id)}>Open run</button></td></tr>)}</tbody></table></div>
             {selected.state === "awaiting_observation" && <div className="campaign-actions"><input aria-label="Manual observation" type="number" value={observation} onChange={(event) => setObservation(event.target.value)} /><button type="button" onClick={async () => { try { setSelected(await campaignApi.observation(selected.campaign_id, Number(observation))); setObservation(""); } catch (caught) { setError(caught instanceof Error ? caught.message : String(caught)); } }}>Submit observation</button></div>}
             <div className="campaign-actions">
-              {selected.state === "failed" && selected.trials.at(-1)?.state === "succeeded" && <button type="button" onClick={() => void control("resume")}>Resume campaign</button>}
+              {["failed", "interrupted"].includes(selected.state) && selected.trials.at(-1)?.state === "succeeded" && <button type="button" onClick={() => void control("resume")}>Resume campaign</button>}
               {selected.state === "paused" && <button type="button" onClick={() => void control("resume")}>Resume</button>}
               {selected.state === "running" && <button type="button" onClick={() => void control("pause")}>Pause after trial</button>}
               {!TERMINAL.has(selected.state) && <><button type="button" onClick={() => void control("stop")}>Stop after trial</button><button type="button" onClick={() => void control("cancel")}>Cancel run</button></>}

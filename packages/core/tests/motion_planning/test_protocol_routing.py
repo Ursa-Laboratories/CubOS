@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
+from cubos.data import DataStore
 from cubos.deck.loader import _build_deck_from_raw
 from cubos.gantry.gantry_config import GantryConfig, GantryType, WorkingVolume
 from cubos.gantry.gantry import Gantry
@@ -86,6 +88,15 @@ class FakeCamera(CameraInstrument):
         Path(path).write_bytes(b"fake-image")
         self.captures.append(path)
         return path
+
+    def control_fingerprint(self):
+        return {"fingerprint": "offline-camera-profile"}
+
+    def last_frame_metadata(self):
+        return {
+            "frame_id": len(self.captures),
+            "capture_profile": {"fingerprint": "offline-camera-profile"},
+        }
 
 
 def _vial(name: str, x: float, y: float, *, size: float = 10) -> dict:
@@ -454,6 +465,173 @@ def test_consumed_tip_is_absent_from_later_unscoped_transit_scene(monkeypatch) -
 
     assert observed_fixture_sets
     assert all("tips.tip.A1" not in names for names in observed_fixture_sets)
+
+
+def test_durable_tip_state_removes_consumed_side_exit_blockers() -> None:
+    context, controller, _pipette = _context()
+    rack = context.deck["tips"]
+    coordinate_type = type(rack.tips["A1"])
+    rack.tips["A2"] = coordinate_type(x=30, y=20, z=50)
+    rack.tip_present["A2"] = True
+    context.fluid_state_id = 17
+    context.data_store = Mock()
+    context.data_store.get_tip_snapshot.return_value = {
+        "containers": [
+            {"rack_key": "tips", "slot_id": "A1", "status": "consumed"},
+            {"rack_key": "tips", "slot_id": "A2", "status": "available"},
+        ],
+    }
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A2"}),
+        CommandCall("drop_tip", {"position": "waste"}),
+    ])
+
+    prepare_planning_context(protocol, context)
+
+    assert context.planned_motion_steps[0].data["position"] == "tips.A2"
+    assert controller.moves == []
+
+
+def test_durable_tip_state_rejects_consumed_explicit_target_before_motion() -> None:
+    context, controller, _pipette = _context()
+    context.fluid_state_id = 17
+    context.data_store = Mock()
+    context.data_store.get_tip_snapshot.return_value = {
+        "containers": [
+            {"rack_key": "tips", "slot_id": "A1", "status": "consumed"},
+        ],
+    }
+
+    with pytest.raises(ProtocolExecutionError, match="tips.A1.*unavailable"):
+        prepare_planning_context(_native_protocol(), context)
+
+    assert controller.moves == []
+
+
+def test_two_routed_trials_deplete_shared_state_and_measure_unique_wells(
+    tmp_path, monkeypatch,
+) -> None:
+    from cubos.protocol_engine.commands import camera as camera_commands
+
+    def analyze(path, **kwargs):
+        target = Path(path).stem
+        return {
+            "image_path": str(path),
+            "measurement_status": "accepted",
+            "comparison_status": "not_requested",
+            "quality": {"accepted": True, "flags": []},
+            "lab": [40.0 if "first" in target else 41.0, 1.0, 2.0],
+            "processing_profile": {
+                "schema": "cubos.camera-well-cielab.v1",
+                "id": "offline-profile",
+            },
+        }
+
+    monkeypatch.setattr(camera_commands, "analyze_color_image", analyze)
+    deck_path = tmp_path / "deck.yaml"
+    deck_path.write_text("labware: {}\n")
+    store = DataStore(tmp_path / "state.db")
+    try:
+        first_context, _, _ = _context(with_camera=True)
+        first_context.image_output_dir = tmp_path / "images"
+        first_rack = first_context.deck["tips"]
+        coordinate_type = type(first_rack.tips["A1"])
+        first_rack.tips["A2"] = coordinate_type(x=30, y=20, z=50)
+        first_rack.tip_present["A2"] = True
+        state_id = store.create_fluid_state(deck_path, first_context.deck)
+        first_campaign = store.create_campaign("trial 1", fluid_state_id=state_id)
+        first_context.data_store = store
+        first_context.fluid_state_id = state_id
+        first_context.campaign_id = first_campaign
+        first_results = compile_protocol([
+            CommandCall("pick_up_tip", {"position": "tips.A1"}),
+            CommandCall("drop_tip", {"position": "waste"}),
+            CommandCall("move", {"instrument": "camera", "position": "destination"}),
+            CommandCall("measure_color", {
+                "instrument": "camera", "position": "destination",
+                "label": "first", "image_height": 10.0,
+                "expected_center": (0.5, 0.5),
+                "expected_center_source": "operator_selected",
+            }),
+        ]).execute(first_context)
+
+        second_context, _, _ = _context(with_camera=True)
+        second_context.image_output_dir = tmp_path / "images"
+        second_rack = second_context.deck["tips"]
+        second_rack.tips["A2"] = coordinate_type(x=30, y=20, z=50)
+        second_rack.tip_present["A2"] = True
+        store.resume_fluid_state(state_id, deck_path, second_context.deck)
+        second_campaign = store.create_campaign("trial 2", fluid_state_id=state_id)
+        second_context.data_store = store
+        second_context.fluid_state_id = state_id
+        second_context.campaign_id = second_campaign
+        second_results = compile_protocol([
+            CommandCall("pick_up_tip", {"position": "tips.A2"}),
+            CommandCall("drop_tip", {"position": "waste"}),
+            CommandCall("move", {"instrument": "camera", "position": "source"}),
+            CommandCall("measure_color", {
+                "instrument": "camera", "position": "source",
+                "label": "second", "image_height": 10.0,
+                "expected_center": (0.5, 0.5),
+                "expected_center_source": "operator_selected",
+            }),
+        ]).execute(second_context)
+
+        statuses = {
+            item["slot_id"]: item["status"]
+            for item in store.get_tip_snapshot(state_id)["containers"]
+        }
+        assert statuses == {"A1": "consumed", "A2": "consumed"}
+        assert first_results[-1]["measurement_status"] == "accepted"
+        assert second_results[-1]["measurement_status"] == "accepted"
+        assert first_results[-1]["lab"] != second_results[-1]["lab"]
+    finally:
+        store.close()
+
+
+def test_measure_color_image_height_preplans_descent_and_safe_retract() -> None:
+    context, controller, _pipette = _context(with_camera=True)
+    protocol = compile_protocol([
+        CommandCall("move", {"instrument": "camera", "position": "destination"}),
+        CommandCall("measure_color", {
+            "instrument": "camera",
+            "position": "destination",
+            "image_height": 10.0,
+        }),
+    ])
+
+    prepare_planning_context(protocol, context)
+
+    measured = context.planned_motion_steps[1]
+    assert measured.data == {
+        "instrument": "camera",
+        "capture_after_plan": 0,
+        "image_height": 10.0,
+        "position": "destination",
+    }
+    assert len(measured.plans) == 2
+    assert measured.plans[0].end.z < context.gantry_config.working_volume.z_max
+    assert measured.plans[1].end.z == context.gantry_config.working_volume.z_max
+    assert controller.moves == []
+
+
+def test_measure_color_height_checks_all_mounted_tool_state_before_z_motion() -> None:
+    context, controller, pipette = _context(with_camera=True)
+    protocol = compile_protocol([
+        CommandCall("move", {"instrument": "camera", "position": "destination"}),
+        CommandCall("measure_color", {
+            "instrument": "camera",
+            "position": "destination",
+            "image_height": 10.0,
+        }),
+    ])
+    prepare_planning_context(protocol, context)
+    pipette.set_attached_tip_extension(20)
+
+    with pytest.raises(ProtocolExecutionError, match="tool state does not match"):
+        context.routing_session.execute(context.planned_motion_steps[1].plans[0])
+
+    assert controller.moves == []
 
 
 def test_native_move_executes_cached_intermediate_detour_when_both_direct_orders_block() -> None:

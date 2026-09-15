@@ -44,6 +44,7 @@ class FakeRuns:
         self.hold = hold
         self.fail_indices = set(fail_indices or ())
         self.on_complete = on_complete
+        self.state_resolutions = []
         import threading
         self.release_event = threading.Event()
 
@@ -53,6 +54,10 @@ class FakeRuns:
 
     def _validate_bundle(self, *args):
         return None
+
+    def _resolve_run_state(self, deck_yaml, state):
+        self.state_resolutions.append((deck_yaml, state.fluid_state_id))
+        return state.fluid_state_id
 
     @property
     def campaign_owner(self):
@@ -335,6 +340,58 @@ def test_restart_marks_active_campaign_interrupted_without_submitting(tmp_path):
     assert recovered_runs.submissions == []
 
 
+def test_restart_interrupted_campaign_recovers_completed_child_without_replay(
+    tmp_path,
+):
+    from cubos_api.models.campaigns import CampaignRecord, CampaignTrial
+
+    settings, spec = _setup(tmp_path, max_trials=2)
+    first_runs = FakeRuns()
+    first = CampaignManager(settings, first_runs, validator=lambda *args: None)
+    campaign_id = "interrupted-after-success"
+    record = CampaignRecord(
+        campaign_id=campaign_id,
+        spec=spec,
+        state="running",
+        created_at=time.time(),
+        updated_at=time.time(),
+        trials=[CampaignTrial(
+            index=0, parameters={"x": 0.0}, run_id=f"{campaign_id}-trial-1",
+            state="succeeded",
+        )],
+    )
+    first._records[campaign_id] = record
+    first._save(record)
+    for name, text in zip(("gantry", "deck", "protocol"), first._bundle(spec)):
+        (first.base / campaign_id / f"{name}.yaml").write_text(text)
+
+    recovered_runs = FakeRuns([0.5])
+    recovered_runs.records[f"{campaign_id}-trial-1"] = RunRecord(
+        run_id=f"{campaign_id}-trial-1",
+        state="succeeded",
+        created_at=time.time(),
+        mock_mode=True,
+        result={"results": [{"value": 1.0}]},
+    )
+    recovered = CampaignManager(
+        settings, recovered_runs, validator=lambda *args: None, poll_interval=0.005,
+    )
+    assert recovered.get(campaign_id).state == "interrupted"
+
+    resumed = recovered.control(campaign_id, "resume")
+    assert resumed.trials[0].objective == 1.0
+    assert resumed.trials[0].objective_status == "accepted"
+    done = wait_for(recovered, campaign_id, lambda item: item.state == "completed")
+
+    assert [trial.run_id for trial in done.trials] == [
+        f"{campaign_id}-trial-1",
+        f"{campaign_id}-trial-2",
+    ]
+    assert [submission.run_id for submission in recovered_runs.submissions] == [
+        f"{campaign_id}-trial-2",
+    ]
+
+
 def test_pause_finishes_trial_then_resume_continues(tmp_path):
     settings, spec = _setup(tmp_path, max_trials=2)
     native = FakeRuns([2, 1], hold=True)
@@ -363,3 +420,135 @@ def test_drain_stop_records_finished_observation_without_new_trial(tmp_path):
     done = wait_for(manager, record.campaign_id, lambda r: r.state == 'stopped')
     assert len(done.trials) == 1 and done.trials[0].objective == 2
     assert native.cancels == [] and native.owner is None
+
+
+def test_attach_fluid_state_preserves_failed_trial_and_does_not_resume(tmp_path):
+    from cubos_api.models.campaigns import CampaignRecord, CampaignTrial
+
+    settings, spec = _setup(tmp_path, mock=False)
+    runs = FakeRuns()
+    manager = CampaignManager(settings, runs, validator=lambda *a: None)
+    campaign_id = "legacy-physical"
+    record = CampaignRecord(
+        campaign_id=campaign_id,
+        spec=spec,
+        state="failed",
+        created_at=time.time(),
+        updated_at=time.time(),
+        trials=[CampaignTrial(index=0, parameters={"x": 1.0}, run_id="trial-1")],
+    )
+    manager._records[campaign_id] = record
+    manager._save(record)
+    for name, text in zip(("gantry", "deck", "protocol"), manager._bundle(spec)):
+        (manager.base / campaign_id / f"{name}.yaml").write_text(text)
+
+    attached = manager.attach_fluid_state(
+        campaign_id, 17, "A1-A3 absent; current stock volumes entered by operator",
+    )
+
+    assert attached.state == "failed"
+    assert attached.spec.fluid_state_id == 17
+    assert attached.trials[0].run_id == "trial-1"
+    assert attached.fluid_state_reconciliation_note.startswith("A1-A3 absent")
+    assert runs.state_resolutions[-1][1] == 17
+    assert runs.submissions == []
+
+
+def test_untracked_physical_fluid_campaign_cannot_recover_completed_run(tmp_path):
+    from cubos_api.models.campaigns import CampaignRecord, CampaignTrial
+
+    settings, spec = _setup(tmp_path, mock=False)
+    runs = FakeRuns()
+    manager = CampaignManager(settings, runs, validator=lambda *a: None)
+    campaign_id = "untracked-physical"
+    record = CampaignRecord(
+        campaign_id=campaign_id,
+        spec=spec,
+        state="failed",
+        created_at=time.time(),
+        updated_at=time.time(),
+        trials=[CampaignTrial(index=0, parameters={"x": 1.0}, run_id="trial-1")],
+    )
+    manager._records[campaign_id] = record
+    manager._save(record)
+    for name, text in zip(("gantry", "deck", "protocol"), manager._bundle(spec)):
+        (manager.base / campaign_id / f"{name}.yaml").write_text(text)
+    runs.records["trial-1"] = RunRecord(
+        run_id="trial-1", state="succeeded", created_at=time.time(),
+        mock_mode=False, result={"results": [{"value": 1.0}]},
+    )
+    import cubos_api.services.campaign_manager as module
+    module.FLUID_COMMANDS.add("measure")
+    try:
+        with pytest.raises(RunConflictError, match="no durable fluid/tip state"):
+            manager.control(campaign_id, "resume")
+    finally:
+        module.FLUID_COMMANDS.remove("measure")
+
+    assert manager.get(campaign_id).trials[0].objective is None
+    assert runs.submissions == []
+
+
+def test_preflight_uses_durable_available_tips_across_trials(tmp_path, monkeypatch):
+    import cubos_api.services.campaign_manager as module
+
+    settings, _ = _setup(tmp_path, mock=False, max_trials=2)
+    protocol = """protocol:
+  - pick_up_tip:
+      position: tips.A4
+      speed: 50.0
+  - drop_tip:
+      position: waste
+"""
+    (settings.configs_dir / "protocol" / "p.yaml").write_text(protocol)
+    spec = CampaignSpec(
+        name="tracked tips",
+        gantry_file="g.yaml",
+        deck_file="d.yaml",
+        protocol_file="p.yaml",
+        mock_mode=False,
+        fluid_state_id=17,
+        parameters=[{
+            "name": "speed", "minimum": 40.0, "maximum": 60.0, "step": 10.0,
+            "bindings": [{"step_index": 0, "argument": "speed"}],
+        }],
+        sequences=[{
+            "name": "tip", "values": ["tips.A4", "tips.A7"],
+            "bindings": [{"step_index": 0, "argument": "position"}],
+        }],
+        optimizer={"initial_trials": 1},
+        stop={"max_trials": 2},
+    )
+
+    class Store:
+        def __init__(self, _path):
+            pass
+
+        def get_tip_snapshot(self, _state_id):
+            return {
+                "pipette": {"attachment_uncertain": False, "tip_extension_mm": None},
+                "containers": [
+                    {"rack_key": "tips", "slot_id": slot, "status": status}
+                    for slot, status in (
+                        ("A1", "consumed"), ("A2", "consumed"),
+                        ("A3", "consumed"), ("A4", "available"),
+                        ("A7", "available"),
+                    )
+                ],
+            }
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(module, "DataStore", Store)
+    manager = CampaignManager(
+        settings, FakeRuns(), validator=lambda *args: None,
+    )
+
+    preview = manager._preflight(spec, manager._bundle(spec))
+    assert "tips.A4" in preview["protocol_yaml"]
+
+    unavailable = spec.model_copy(deep=True)
+    unavailable.sequences[0].values[0] = "tips.A1"
+    with pytest.raises(ValueError, match="not available in durable fluid state"):
+        manager._preflight(unavailable, manager._bundle(unavailable))

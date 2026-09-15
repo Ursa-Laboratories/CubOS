@@ -6,6 +6,7 @@ from cubos_api.services.campaign_templates import (
     compile_trial,
     extract_result_context,
     extract_result_objective,
+    validate_objective_provenance,
     validate_template,
 )
 
@@ -99,6 +100,10 @@ def test_extract_color_context_keeps_compact_measurement_fields():
         "lab": [40, 10, 20],
         "reference_lab": [42, 9, 18],
         "delta_e_00": 2.1,
+        "roi": {"center_x_px": 100, "center_y_px": 80},
+        "well_identity": {"expected_well": "plate.A2"},
+        "frame_metadata": {"frame_id": 7},
+        "annotated_preview_path": "/images/a2.analysis.png",
         "unrelated": {"large": "payload"},
     }]}
     assert extract_result_context(result, "results.0.delta_e_00") == {
@@ -106,6 +111,10 @@ def test_extract_color_context_keeps_compact_measurement_fields():
         "lab": [40, 10, 20],
         "reference_lab": [42, 9, 18],
         "delta_e_00": 2.1,
+        "roi": {"center_x_px": 100, "center_y_px": 80},
+        "well_identity": {"expected_well": "plate.A2"},
+        "frame_metadata": {"frame_id": 7},
+        "annotated_preview_path": "/images/a2.analysis.png",
     }
 
 
@@ -119,3 +128,29 @@ def test_extract_objective_rejects_missing_path(path):
 def test_extract_objective_rejects_nonfinite_nonnumeric_values(value):
     with pytest.raises(TemplateError):
         extract_result_objective({"value": value}, "value")
+
+
+def test_color_objective_requires_accepted_matching_processing_profile():
+    context = {
+        "measurement_status": "accepted",
+        "comparison_status": "accepted",
+        "quality": {"accepted": True},
+        "processing_profile": {
+            "schema": "cubos.camera-well-cielab.v1",
+            "id": "profile-1",
+        },
+        "reference_processing_profile_id": "profile-1",
+    }
+    validate_objective_provenance("11.delta_e_00", context)
+
+    with pytest.raises(Exception, match="unverified"):
+        validate_objective_provenance("11.delta_e_00", {**context, "quality": {"accepted": False}})
+    with pytest.raises(Exception, match="matching"):
+        validate_objective_provenance(
+            "11.delta_e_00",
+            {**context, "reference_processing_profile_id": "legacy-profile"},
+        )
+
+
+def test_non_color_objective_does_not_require_camera_provenance():
+    validate_objective_provenance("results.0.value", None)

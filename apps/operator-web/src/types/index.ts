@@ -628,6 +628,7 @@ export interface CreateFluidStateRequest {
   deck_file: string;
   label?: string | null;
   fluids?: Record<string, FluidSeedItem>;
+  tips?: Record<string, boolean>;
 }
 
 // Run-submission state choice, owned by App.tsx and threaded into

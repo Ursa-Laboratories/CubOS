@@ -17,6 +17,7 @@ import yaml
 from cubos.data import DataStore
 from cubos.deck import load_deck_from_yaml
 from cubos.deck.errors import DeckLoaderError
+from cubos.protocol_engine.commands.camera import default_images_dir
 
 from cubos_api.config import CubOSSettings, get_settings
 from cubos_api.models.runs import RunRecord, RunSubmission
@@ -341,7 +342,7 @@ class RunManager:
                 # the vendor device open; the run's own instruments must be
                 # able to claim it.
                 from cubos_api.routers.instruments import reset_manual_instruments
-                reset_manual_instruments()
+                reset_manual_instruments(preserve_camera_monitors=True)
                 raw_result = gantry_router.run_protocol_on_session(
                     gantry_path=str(directory / "gantry.yaml"),
                     deck_path=str(directory / "deck.yaml"),
@@ -355,6 +356,40 @@ class RunManager:
                 )
             result = _jsonable(raw_result)
             record = self.store.read(run_id) or record
+            if record.metadata.get("active_learning_target"):
+                target_result = result.get("results") if isinstance(result, dict) else result
+                target_steps = target_result if isinstance(target_result, list) else [target_result]
+                measurement = next(
+                    (
+                        item for item in reversed(target_steps)
+                        if isinstance(item, dict) and item.get("image_path")
+                    ),
+                    None,
+                )
+                if measurement is None:
+                    raise RuntimeError("Color target run produced no saved image result")
+                frame_metadata = measurement.get("frame_metadata")
+                capture_sha256 = (
+                    frame_metadata.get("image_sha256")
+                    if isinstance(frame_metadata, dict) else None
+                )
+                if not isinstance(capture_sha256, str) or not capture_sha256:
+                    raise RuntimeError(
+                        "Color target run produced no capture-time image digest"
+                    )
+                annotated_preview = measurement.get("annotated_preview_path")
+                if not isinstance(annotated_preview, str) or not annotated_preview:
+                    raise RuntimeError(
+                        "Color target run produced no annotated analysis preview"
+                    )
+                self.store.freeze_color_target_source(
+                    record,
+                    Path(measurement["image_path"]),
+                    allowed_root=default_images_dir(),
+                    capture_sha256=capture_sha256,
+                    initial_analysis=measurement,
+                    annotated_preview=Path(annotated_preview),
+                )
             record.state = "succeeded"
             record.result = result
             record.finished_at = time.time()

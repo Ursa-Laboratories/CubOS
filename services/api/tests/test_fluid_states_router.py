@@ -37,13 +37,34 @@ labware:
     role: waste
 """
 
+TIP_DECK_YAML = DECK_YAML + """\
+  tips:
+    type: tip_rack
+    name: tips
+    rows: 1
+    columns: 3
+    pickup_z: 40.0
+    tip_length: 50.0
+    calibration:
+      a1: {x: 10.0, y: 40.0, z: 40.0}
+      a2: {x: 20.0, y: 40.0}
+    x_offset: 10.0
+    y_offset: 10.0
+    tip_present: {A1: true, A2: true, A3: true}
+"""
 
-def _write_deck_config(monkeypatch, tmp_path: Path, filename: str = "state-deck.yaml") -> Path:
+
+def _write_deck_config(
+    monkeypatch,
+    tmp_path: Path,
+    filename: str = "state-deck.yaml",
+    text: str = DECK_YAML,
+) -> Path:
     config_dir = tmp_path / "configs"
     deck_dir = config_dir / "deck"
     deck_dir.mkdir(parents=True, exist_ok=True)
     path = deck_dir / filename
-    path.write_text(DECK_YAML, encoding="utf-8")
+    path.write_text(text, encoding="utf-8")
     monkeypatch.setattr(get_settings(), "config_dir", config_dir)
     return path
 
@@ -73,6 +94,49 @@ def test_create_fluid_state_returns_summary(monkeypatch, tmp_path: Path):
     assert body["container_count"] == 2
     assert len(body["deck_fingerprint"]) == 64
     assert isinstance(body["id"], int)
+
+
+def test_create_fluid_state_accepts_explicit_physical_tip_inventory(
+    monkeypatch, tmp_path: Path,
+):
+    _write_deck_config(monkeypatch, tmp_path, text=TIP_DECK_YAML)
+    app = create_app()
+
+    response = api_request(
+        app,
+        "POST",
+        "/api/v1/fluid-states",
+        json={
+            "deck_file": "state-deck.yaml",
+            "tips": {"tips.A1": False, "tips.A2": False, "tips.A3": False},
+        },
+    )
+
+    assert response.status_code == 201
+    state_id = response.json()["id"]
+    tips = api_request(app, "GET", f"/api/v1/fluid-states/{state_id}/tips")
+    assert [row["status"] for row in tips.json()["containers"]] == [
+        "consumed", "consumed", "consumed",
+    ]
+
+
+def test_create_fluid_state_rejects_unknown_or_nonboolean_tip_seed(
+    monkeypatch, tmp_path: Path,
+):
+    _write_deck_config(monkeypatch, tmp_path, text=TIP_DECK_YAML)
+    app = create_app()
+
+    unknown = api_request(
+        app, "POST", "/api/v1/fluid-states",
+        json={"deck_file": "state-deck.yaml", "tips": {"tips.Z9": False}},
+    )
+    coerced = api_request(
+        app, "POST", "/api/v1/fluid-states",
+        json={"deck_file": "state-deck.yaml", "tips": {"tips.A1": "false"}},
+    )
+
+    assert unknown.status_code == 400
+    assert coerced.status_code == 422
 
 
 def test_create_fluid_state_404_for_missing_deck_file(monkeypatch, tmp_path: Path):

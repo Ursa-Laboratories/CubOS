@@ -14,12 +14,15 @@ def setup() -> ColorCampaignSetup:
         deck_file="d.yaml",
         target_well="plate.A1",
         target_lab=(42.0, 12.0, 18.0),
+        reference_processing_profile_id="profile-v1",
         red_source="stocks.A1",
         yellow_source="stocks.A2",
         blue_source="stocks.A3",
         candidate_wells=[f"plate.A{index}" for index in range(2, 8)],
         camera_instrument="camera",
         roi_fraction=0.5,
+        expected_center=(0.5, 0.5),
+        expected_center_source="operator_selected",
         mock_mode=True,
     )
 
@@ -44,6 +47,8 @@ def test_builder_writes_complete_protocol_and_campaign(tmp_path: Path):
     assert protocol[4]["transfer"]["source"] == "stocks.A2"
     assert protocol[7]["transfer"]["source"] == "stocks.A3"
     assert protocol[11]["measure_color"]["reference_lab"] == [42.0, 12.0, 18.0]
+    assert protocol[11]["measure_color"]["reference_processing_profile_id"] == "profile-v1"
+    assert protocol[11]["measure_color"]["expected_center"] == [0.5, 0.5]
     assert spec.objective.path == "11.delta_e_00"
     result = [None] * 11 + [{"delta_e_00": 2.4}]
     assert extract_result_objective(result, spec.objective.path) == 2.4
@@ -53,6 +58,33 @@ def test_builder_writes_complete_protocol_and_campaign(tmp_path: Path):
     }
     assert spec.sequences[0].values == [f"plate.A{index}" for index in range(2, 8)]
     assert spec.sequences[1].values[:2] == ["tips.A1", "tips.A4"]
+
+
+def test_builder_allocates_each_trial_from_durable_available_tip_order(tmp_path: Path):
+    available = [
+        f"tips.{chr(ord('A') + index // 12)}{index % 12 + 1}"
+        for index in range(3, 21)
+    ]
+    spec = build_color_campaign(
+        setup(), tmp_path, available_tip_positions=available,
+    )
+
+    assert spec.sequences[1].values[:2] == ["tips.A4", "tips.A7"]
+    assert spec.sequences[2].values[:2] == ["tips.A5", "tips.A8"]
+    assert spec.sequences[3].values[:2] == ["tips.A6", "tips.A9"]
+
+
+def test_builder_rejects_insufficient_durable_tip_capacity(tmp_path: Path):
+    import pytest
+
+    with pytest.raises(ValueError, match="needs 18 available tips"):
+        build_color_campaign(
+            setup(), tmp_path,
+            available_tip_positions=[
+                f"tips.{chr(ord('A') + index // 12)}{index % 12 + 1}"
+                for index in range(3, 19)
+            ],
+        )
 
 
 def test_target_cannot_be_reused_as_candidate():

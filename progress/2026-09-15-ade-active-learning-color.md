@@ -1,6 +1,6 @@
 # ADE active-learning color matching
 
-Status: application changes are deployed to the Raspberry Pi on branch `ADE` through `5e02d8290`. Target capture and one physical campaign trial have completed. The campaign is stopped after a recoverable result-extraction error and can now continue from trial 2 through the UI.
+Status: application changes are deployed to the Raspberry Pi on branch `ADE` through `5e02d8290`. Target capture and one physical campaign trial have completed. Campaign `d6ba2e4d2fa9459cad6739feb3324f06` remains stopped. Its stateless tip inventory and legacy color ROI/profile are not safe inputs for automatic continuation; do not resume or repeat trial 1. Local review-branch fixes are under offline validation and are not deployed.
 
 ## Station access and safety
 
@@ -56,7 +56,17 @@ Relevant ADE commits, oldest to newest:
 - Trial 1 image: `/home/cub/.cubos/images/campaign_12/color_candidate_20260915-130401.tiff`
 - The native run succeeded. The campaign stopped only while extracting the objective because real hardware returned `{..., "results": [...]}` while mock mode returned `[...]`. No trial 2 movement occurred.
 
-To continue, connect the gantry in the UI, select campaign `d6ba2e4d2fa9459cad6739feb3324f06` in Campaign History, inspect the physical setup, then click **Resume campaign**. It should score the saved trial 1 at ΔE00 `16.524261796856912` and begin trial 2 in `plate.A3` using the next tip set. Do not click **Start campaign**, because that creates a new campaign and repeats trial 1 in `plate.A2`.
+Do not resume campaign `d6ba2e4d2fa9459cad6739feb3324f06`: its saved ΔE00 `16.524261796856912` came from the legacy center ROI that included background rather than a verified well-local region, and its stateless run did not durably record A1/A2/A3 as consumed. Preserve the run, image, and physical trial as history. A later operator-directed campaign must use an accepted target processing profile, a freshly reconciled durable state that records the actual stock volumes and absent tips, and candidate wells/tips that exclude the already used resources. No software action should start, resume, home, jog, or move hardware automatically.
+
+## Local durable-state and routing review
+
+- Routed protocols can now read authoritative tip occupancy from a durable fluid state before constructing the immutable motion plans. Consumed tips are removed from collision scenes across native trials; available tips remain obstacles and pickup candidates.
+- New real fluid-handling campaigns require a durable fluid-state ID. State creation accepts explicit physical tip-presence overrides, and color-campaign generation allocates tip triplets from the durable available order rather than restarting at A1.
+- A stopped legacy campaign can be bound to a newly created, deck-compatible state only with a stored physical-reconciliation note. Binding preserves trials and never starts a run. Legacy color results without accepted quality and exact processing-profile provenance remain unverified and cannot become optimizer observations.
+- Optional `image_height` is labware-relative. When supplied, routing preplans the checked camera descent and checked return to the configured planning ceiling; omission preserves the existing ceiling capture behavior.
+- Target review can serve a browser-compatible rendering of the immutable saved frame and reanalyze that same trusted image after an operator-selected normalized well center. Target completion first verifies the camera-provided capture-time SHA-256 and freezes the exact TIFF in the run artifact store. Reanalysis does not acquire a camera or move the gantry, rechecks that digest, and persists serialized SHA-tagged analysis revisions separately from the original run result. Real campaign preparation rechecks the frozen bytes and requires the selected analysis revision to name the same capture digest before it accepts the target.
+- OpenCV cameras now use one continuously drained, reference-counted reader per device. Protocol captures wait for a newer frame without consuming the live preview, and every saved frame records host receipt time, actual dimensions/format/settings, a configuration revision, and a SHA-256 of the exact written bytes. Live preview requires explicit per-view leases with heartbeats and expiry; stopping one view does not stop another or a protocol lease, and abandoned views release automatically. Optical-control writes are explicit, report unknown/unsupported support honestly, and are blocked during runs and campaign reservations.
+- Offline checks currently pass: 96 focused campaign/state API tests, 195 focused core routing/camera/color/pipette/setup tests, 363 broader core state/planning tests, and 383 API tests with 2 skipped when the sandbox-incompatible deployment-script module is excluded. Camera-backend validation additionally passed all 604 core instrument tests, 106 focused core camera/color/routing tests, 97 integrated monitor/run/campaign API tests, and 85 API monitor/security/lifespan tests. Five deployment-script tests remain blocked by the local `/dev/fd` sandbox. Physical camera validation remains pending; nothing in this local phase was deployed or run on hardware.
 
 ## Validation and backups
 

@@ -20,6 +20,7 @@ from cubos.data import (
 )
 from cubos.deck import load_deck_from_yaml
 from cubos.deck.errors import DeckLoaderError
+from cubos.deck.labware.tip_rack import TipRackResolutionError, resolve_tip_rack_slot
 from fastapi import APIRouter, HTTPException
 from pydantic import ValidationError
 
@@ -68,6 +69,20 @@ def _load_deck(deck_file: str):
         return path, load_deck_from_yaml(path)
     except (DeckLoaderError, ValueError, ValidationError) as exc:
         raise HTTPException(400, f"cannot load deck {deck_file!r}: {exc}") from exc
+
+
+def _apply_tip_seed(deck, tips: Dict[str, bool]) -> None:
+    """Apply explicit physical tip-presence overrides before state creation."""
+    for target, present in tips.items():
+        try:
+            rack, slot_id = resolve_tip_rack_slot(deck, target)
+        except TipRackResolutionError as exc:
+            raise HTTPException(400, f"invalid tip seed {target!r}: {exc}") from exc
+        if slot_id is None or slot_id not in rack.tips:
+            raise HTTPException(
+                400, f"invalid tip seed {target!r}: an explicit rack slot is required",
+            )
+        rack.tip_present[slot_id] = present
 
 
 def _containers_with_roles(snapshot: Dict[str, Any]) -> List[ContainerView]:
@@ -184,6 +199,7 @@ def _summary(row: Dict[str, Any]) -> FluidStateSummaryResponse:
 @router.post("", response_model=FluidStateSummaryResponse, status_code=201)
 def create_fluid_state(body: CreateFluidStateRequest) -> FluidStateSummaryResponse:
     deck_path, deck = _load_deck(body.deck_file)
+    _apply_tip_seed(deck, body.tips)
     store = _open_store()
     try:
         fluids = {

@@ -202,10 +202,45 @@ def extract_result_context(result: Any, path: str) -> dict[str, Any] | None:
         return None
     allowed = {
         "image_path", "roi_fraction", "rgb", "lab", "reference_lab",
-        "delta_e_00", "delta_e_76",
+        "delta_e_00", "delta_e_76", "measurement_status", "comparison_status",
+        "quality", "processing_profile", "reference_processing_profile_id",
+        "roi", "well_identity", "annotated_preview_path", "frame_metadata",
     }
     payload = {key: parent[key] for key in allowed if key in parent}
     return payload or None
+
+
+def validate_objective_provenance(
+    path: str,
+    context: Mapping[str, Any] | None,
+) -> None:
+    """Reject color scores without accepted, profile-matched image analysis."""
+    if path.rsplit(".", 1)[-1] not in {"delta_e_00", "delta_e_76"}:
+        return
+    if not isinstance(context, Mapping):
+        raise TemplateError(
+            "color objective is unverified because measurement provenance is missing"
+        )
+    profile = context.get("processing_profile")
+    quality = context.get("quality")
+    profile_id = profile.get("id") if isinstance(profile, Mapping) else None
+    reference_profile_id = context.get("reference_processing_profile_id")
+    accepted = (
+        context.get("measurement_status") == "accepted"
+        and context.get("comparison_status") == "accepted"
+        and isinstance(quality, Mapping)
+        and quality.get("accepted") is True
+        and isinstance(profile, Mapping)
+        and profile.get("schema") == "cubos.camera-well-cielab.v1"
+        and isinstance(profile_id, str)
+        and bool(profile_id)
+        and reference_profile_id == profile_id
+    )
+    if not accepted:
+        raise TemplateError(
+            "color objective is unverified: accepted measurement quality and an "
+            "exact matching cubos.camera-well-cielab.v1 processing profile are required"
+        )
 
 
 def _lookup_result(result: Any, path: str, *, label: str) -> Any:

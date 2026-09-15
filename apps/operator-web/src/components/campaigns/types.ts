@@ -1,3 +1,5 @@
+import type { DeckResponse, FluidStateSummary, GantryResponse } from "../../types";
+
 export type CampaignState =
   | "running" | "paused" | "awaiting_observation" | "completed"
   | "stopped" | "failed" | "interrupted";
@@ -35,14 +37,64 @@ export interface ColorCampaignSetup {
   target_lab: [number, number, number]; red_source: string;
   yellow_source: string; blue_source: string; candidate_wells: string[];
   camera_instrument: string; roi_fraction: number;
+  image_height?: number | null;
+  expected_center?: [number, number] | null;
+  expected_center_source?: "operator_selected" | null;
+  reference_processing_profile_id?: string | null;
+  target_run_id?: string | null;
+  target_analysis_revision?: number | null;
   fluid_state_id: number | null; mock_mode: boolean;
 }
 export interface ColorTargetRun {
   run_id: string; state: "queued" | "running" | "cancel_requested" | "succeeded" | "failed" | "cancelled";
   result: unknown; error: string | null;
 }
+
+export interface CameraMonitorStatus {
+  instrument: string;
+  state: "stopped" | "running" | "failed";
+  connected: boolean;
+  camera_id: number | null;
+  lease_id?: string | null;
+  lease_expires_at?: number | null;
+  subscriber_count?: number;
+  requested_resolution: { width: number; height: number } | null;
+  actual_resolution: { width: number; height: number } | null;
+  requested_pixel_format: string | null;
+  actual_pixel_format: string | null;
+  frame_id: number | null;
+  received_at: number | null;
+  frame_age_seconds: number | null;
+  image_url: string | null;
+  control_fingerprint: string | null;
+  capture_profile?: Record<string, unknown> | null;
+  run_id: string | null;
+  campaign_id: string | null;
+  trial_number: number | null;
+  step_index: number | null;
+  step_command: string | null;
+  step_substep: string | null;
+  expected_well: string | null;
+  expected_center?: { x: number; y: number } | null;
+  expected_center_source?: string | null;
+  well_identity_verification: "not_verified_by_cv";
+  roi: Record<string, unknown> | null;
+  quality: Record<string, unknown> | null;
+  processing_profile: Record<string, unknown> | null;
+  analysis_source_image_path?: string | null;
+  analysis_image_url?: string | null;
+  analysis_source_run_id?: string | null;
+  analysis_source_well?: string | null;
+  analysis_source_frame_id?: number | null;
+  analysis_source_received_at?: number | null;
+  analysis_is_current_frame?: boolean;
+  latest_analysis?: Record<string, unknown> | null;
+  warnings: string[];
+  error: string | null;
+}
 export interface CampaignPanelProps {
   gantryFile: string | null; deckFile: string | null; protocolFile: string | null;
-  protocolSteps?: ProtocolStep[]; disabledReason?: string | null;
+  protocolSteps?: ProtocolStep[]; deck?: DeckResponse | null; gantry?: GantryResponse | null; availableFluidStates?: FluidStateSummary[];
+  disabledReason?: string | null;
   onRunSelected?: (runId: string) => void; onCampaignChange?: (record: CampaignRecord | null) => void;
 }

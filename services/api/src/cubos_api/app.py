@@ -123,23 +123,37 @@ async def _origin_host_middleware(request: Request, call_next):
         path = request.url.path
         emergency = path in {"/api/v1/gantry/feed-hold", "/api/v1/gantry/jog-cancel"}
         campaign_action = path.startswith("/api/v1/campaigns/")
+        camera_monitor_action = (
+            request.method == "POST"
+            and path
+            in {
+                "/api/v1/instruments/camera/monitor/start",
+                "/api/v1/instruments/camera/monitor/heartbeat",
+                "/api/v1/instruments/camera/monitor/stop",
+            }
+        )
         native_cancel = path.startswith("/api/v1/runs/") and path.endswith("/cancel")
-        if owner and not (emergency or campaign_action or native_cancel):
+        if owner and not (
+            emergency or campaign_action or camera_monitor_action or native_cancel
+        ):
             return JSONResponse({"detail": "Station reserved by an active-learning campaign; stop it before changing setup or moving manually."}, status_code=409)
     return await call_next(request)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    yield
-    # Shutdown: disconnect the gantry so the serial port is released cleanly
-    session = gantry.current_session()
-    if session is not None and session.connected:
-        logger.info("Shutting down — disconnecting gantry")
-        try:
-            session.disconnect()
-        except Exception as e:
-            logger.warning("Error disconnecting gantry on shutdown: %s", e)
+    try:
+        yield
+    finally:
+        # Shutdown: release cameras/manual devices even if no gantry session
+        # survives, then disconnect/reset the session itself.
+        session = gantry.current_session()
+        if session is not None and session.connected:
+            logger.info("Shutting down — disconnecting gantry")
+            try:
+                session.disconnect()
+            except Exception as e:
+                logger.warning("Error disconnecting gantry on shutdown: %s", e)
         instruments.reset_manual_instruments()
         gantry.reset_session()
 

@@ -29,23 +29,59 @@ def _tip_slots(count: int, offset: int) -> list[str]:
     return slots
 
 
-def target_protocol(target_well: str, camera: str, roi_fraction: float) -> str:
+def target_protocol(
+    target_well: str,
+    camera: str,
+    roi_fraction: float,
+    image_height: float | None = None,
+    expected_center: tuple[float, float] | None = None,
+    expected_center_source: str | None = None,
+) -> str:
+    measure_args: dict[str, object] = {
+        "instrument": camera,
+        "position": target_well,
+        "label": "color_target",
+        "roi_fraction": roi_fraction,
+    }
+    if image_height is not None:
+        measure_args["image_height"] = image_height
+    if expected_center is not None:
+        measure_args["expected_center"] = list(expected_center)
+        measure_args["expected_center_source"] = expected_center_source
     return yaml.safe_dump({"protocol": [
         {"move": {"instrument": camera, "position": target_well}},
-        {"measure_color": {
-            "instrument": camera,
-            "position": target_well,
-            "label": "color_target",
-            "roi_fraction": roi_fraction,
-        }},
+        {"measure_color": measure_args},
     ]}, sort_keys=False)
 
 
 def build_color_campaign(
     setup: ColorCampaignSetup,
     protocol_directory: Path,
+    *,
+    available_tip_positions: list[str] | None = None,
 ) -> CampaignSpec:
     """Write an immutable generated protocol and return its campaign spec."""
+    if setup.target_lab is None or setup.reference_processing_profile_id is None:
+        raise ValueError("Color campaign requires an accepted target measurement and profile")
+    trial_count = len(setup.candidate_wells)
+    required_tips = trial_count * 3
+    if available_tip_positions is None:
+        available_tip_positions = [
+            position
+            for trial in range(trial_count)
+            for position in (
+                _tip_slots(trial_count, 0)[trial],
+                _tip_slots(trial_count, 1)[trial],
+                _tip_slots(trial_count, 2)[trial],
+            )
+        ]
+    if len(available_tip_positions) < required_tips:
+        raise ValueError(
+            f"Color campaign needs {required_tips} available tips for "
+            f"{trial_count} trials, but the durable state has "
+            f"{len(available_tip_positions)}."
+        )
+    selected_tips = available_tip_positions[:required_tips]
     protocol = {"protocol": [
         {"pick_up_tip": {"position": "tips.A1"}},
         {"transfer": {"source": setup.red_source, "destination": setup.candidate_wells[0], "volume_ul": 200.0, "source_height": -8.0}},
@@ -64,12 +100,18 @@ def build_color_campaign(
             "label": "color_candidate",
             "roi_fraction": setup.roi_fraction,
             "reference_lab": list(setup.target_lab),
+            "reference_processing_profile_id": setup.reference_processing_profile_id,
+            "expected_center": list(setup.expected_center),
+            "expected_center_source": setup.expected_center_source,
+            **(
+                {"image_height": setup.image_height}
+                if setup.image_height is not None else {}
+            ),
         }},
     ]}
     protocol_directory.mkdir(parents=True, exist_ok=True)
     filename = f"ade_color_matching_{uuid.uuid4().hex[:8]}.yaml"
     (protocol_directory / filename).write_text(yaml.safe_dump(protocol, sort_keys=False))
-    trial_count = len(setup.candidate_wells)
     destination_bindings = [
         {"step_index": index, "argument": argument}
         for index, argument in ((1, "destination"), (4, "destination"),
@@ -93,7 +135,7 @@ def build_color_campaign(
             {"name": "candidate_well", "values": setup.candidate_wells,
              "bindings": destination_bindings},
             *[
-                {"name": f"{color}_tip", "values": _tip_slots(trial_count, offset),
+                {"name": f"{color}_tip", "values": selected_tips[offset::3],
                  "bindings": [{"step_index": step, "argument": "position"}]}
                 for color, offset, step in (("red", 0, 0), ("yellow", 1, 3), ("blue", 2, 6))
             ],

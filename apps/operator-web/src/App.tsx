@@ -151,7 +151,11 @@ export default function App() {
   // Load the local config directory on mount.
   const restoreWorkspace = (dir: string) => {
     const saved = loadWorkspaceState(dir);
-    if (saved.activeTab) setActiveTab(saved.activeTab);
+    if (saved.activeTab) {
+      setActiveTab(saved.activeTab);
+      if (saved.activeTab === "Protocol") setWorkflowMode("single");
+      if (saved.activeTab === "Active Learning") setWorkflowMode("campaign");
+    }
     setGantryFile(saved.gantryFile);
     setDeckFile(saved.deckFile);
     setProtocolFile(saved.protocolFile);
@@ -803,16 +807,20 @@ export default function App() {
           <div aria-label="Execution mode" style={{ display: "flex", gap: 6, padding: "0 0 14px" }}>
             <button type="button" aria-pressed={workflowMode === "single"}
               style={workflowMode === "single" ? theme.btn.primary : theme.btn.secondary}
-              onClick={() => setWorkflowMode("single")}>Single protocol</button>
+              onClick={() => { setWorkflowMode("single"); setActiveTab("Protocol"); }}>Single protocol</button>
             <button type="button" aria-pressed={workflowMode === "campaign"}
               style={workflowMode === "campaign" ? theme.btn.primary : theme.btn.secondary}
-              onClick={() => { setWorkflowMode("campaign"); setActiveTab("Protocol"); }}>Active learning campaign</button>
+              onClick={() => { setWorkflowMode("campaign"); setActiveTab("Active Learning"); }}>Active learning campaign</button>
           </div>
           <EditorTabs
           activeTab={activeTab}
-          onTabChange={setActiveTab}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+            if (tab === "Protocol") setWorkflowMode("single");
+            if (tab === "Active Learning") setWorkflowMode("campaign");
+          }}
           dirtyTabs={unsavedConfigs}
-          disabledTabs={!deckQuery.data || !gantryQuery.data ? ["Protocol"] : []}
+          disabledTabs={!deckQuery.data || !gantryQuery.data ? ["Protocol", "Active Learning"] : []}
           disabledMessage={(() => {
             const missing = [
               !gantryQuery.data && "Gantry",
@@ -907,7 +915,7 @@ export default function App() {
           />
         </>
           )}
-          {activeTab === "Protocol" && workflowMode === "single" && deckQuery.data && gantryQuery.data && (
+          {activeTab === "Protocol" && deckQuery.data && gantryQuery.data && (
         <>
           {protocolQuery.isError && protocolFile && (
             <div style={importErrorStyle}>Protocol load failed: {errorMessage(protocolQuery.error)}</div>
@@ -994,7 +1002,7 @@ export default function App() {
           )}
         </>
       )}
-      {workflowMode === "campaign" && <div style={{ display: activeView === "Workflow" && activeTab === "Protocol" ? "block" : "none" }}>
+      {activeView === "Workflow" && activeTab === "Active Learning" && deckQuery.data && gantryQuery.data && <div>
         <label style={{ display: "grid", gap: 6, marginBottom: 12 }}>Protocol template
           <select className="campaign-template-select" aria-label="Campaign protocol template" value={protocolFile ?? ""}
             onChange={(event) => void handleImportProtocol(event.target.value)}>
@@ -1004,6 +1012,9 @@ export default function App() {
         </label>
         <CampaignPanel gantryFile={gantryFile} deckFile={deckFile} protocolFile={protocolFile}
           protocolSteps={protocolQuery.data?.steps ?? []}
+          deck={displayDeck ?? deckQuery.data ?? null}
+          gantry={displayGantry ?? gantryQuery.data ?? null}
+          availableFluidStates={fluidStates.data ?? []}
           disabledReason={unsavedConfigs.length ? `Save ${unsavedConfigs.join(", ")} changes before starting a campaign.` : null}
           onRunSelected={(runId) => { setActiveRunId(runId); setActiveView("Run"); }} />
       </div>}

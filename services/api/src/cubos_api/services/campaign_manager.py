@@ -12,6 +12,7 @@ from typing import Callable
 
 import yaml
 
+from cubos.data import DataStore
 from cubos.optimization import SearchExhaustedError, suggest
 from cubos.protocol_engine.setup_validator import run_setup_validation
 from cubos_api.config import CubOSSettings, get_settings
@@ -19,13 +20,19 @@ from cubos_api.models.campaigns import CampaignRecord, CampaignSpec, CampaignTri
 from cubos_api.models.runs import RunSubmission
 from cubos_api.models.state import RunStateSelection
 from cubos_api.services.campaign_templates import (
-    compile_trial, extract_result_context, extract_result_objective, validate_template,
+    TemplateError, compile_trial, extract_result_context, extract_result_objective,
+    validate_objective_provenance, validate_template,
 )
 from cubos_api.services.run_manager import RunConflictError, RunManager, get_run_manager
 from cubos_api.services.yaml_io import resolve_config_path
 
 log = logging.getLogger(__name__)
 TERMINAL = {"completed", "stopped", "failed", "interrupted"}
+FLUID_COMMANDS = {
+    "pick_up_tip", "drop_tip", "transfer", "serial_transfer", "mix",
+    "aspirate", "blowout", "rinse_well", "flush_pipette", "purge_pipette",
+    "clear_well",
+}
 
 
 class CampaignManager:
@@ -96,6 +103,45 @@ class CampaignManager:
         raw = spec.model_dump()
         validate_template(protocol, raw)
         self.runs._validate_bundle(gantry, deck, protocol)
+        template_steps = yaml.safe_load(protocol)["protocol"]
+        fluid_handling = any(
+            next(iter(step)) in FLUID_COMMANDS
+            for step in template_steps
+        )
+        has_tip_pickup = any("pick_up_tip" in step for step in template_steps)
+        if not spec.mock_mode and fluid_handling and spec.fluid_state_id is None:
+            raise ValueError(
+                "Real fluid-handling campaigns require a durable fluid-state ID. "
+                "Create a state matching the physical fluids and tip inventory, "
+                "then select it before starting."
+            )
+        if spec.fluid_state_id is not None:
+            self.runs._resolve_run_state(
+                deck,
+                RunStateSelection(fluid_state_id=spec.fluid_state_id),
+            )
+            store = DataStore(self.settings.data_db_path)
+            try:
+                tip_snapshot = store.get_tip_snapshot(spec.fluid_state_id)
+            finally:
+                store.close()
+            pipette = tip_snapshot["pipette"]
+            if pipette["attachment_uncertain"]:
+                raise ValueError(
+                    "The durable state has an uncertain pipette attachment that "
+                    "requires operator reconciliation"
+                )
+            if has_tip_pickup and pipette["tip_extension_mm"] is not None:
+                raise ValueError(
+                    "Campaigns with tip pickup steps must start with a bare pipette"
+                )
+            available_tips = [
+                f"{item['rack_key']}.{item['slot_id']}"
+                for item in tip_snapshot["containers"]
+                if item["status"] == "available"
+            ]
+        else:
+            available_tips = None
         parameters = self._suggest(spec, [])
         seen_tips = set()
         for index in range(spec.stop.max_trials):
@@ -106,6 +152,13 @@ class CampaignManager:
                     if target in seen_tips:
                         raise ValueError(f"Repeated tip target {target!r}; define distinct per-trial target sequences.")
                     seen_tips.add(target)
+                    if available_tips is not None:
+                        if target not in available_tips:
+                            raise ValueError(
+                                f"Tip target {target!r} is not available in durable "
+                                f"fluid state {spec.fluid_state_id}."
+                            )
+                        available_tips.remove(target)
         preview = compile_trial(protocol, raw, parameters, 0)
         self._validator(gantry, deck, preview)
         return {"parameters": parameters, "protocol_yaml": preview}
@@ -159,29 +212,98 @@ class CampaignManager:
                              name=f"cubos-campaign-{campaign_id}").start()
             return record.model_copy(deep=True)
 
+    def attach_fluid_state(
+        self,
+        campaign_id: str,
+        fluid_state_id: int,
+        reconciliation_note: str,
+    ) -> CampaignRecord:
+        note = reconciliation_note.strip()
+        if not note:
+            raise ValueError("A physical-state reconciliation note is required")
+        with self._lock:
+            record = self._records.get(campaign_id)
+            if record is None:
+                raise KeyError(campaign_id)
+            if record.state not in {"failed", "interrupted", "stopped"}:
+                raise RunConflictError(
+                    "A fluid state can only be attached while the campaign is stopped"
+                )
+            if record.active_run_id is not None:
+                raise RunConflictError("The campaign still has an active native run")
+            existing = record.spec.fluid_state_id
+            if existing is not None and existing != fluid_state_id:
+                raise RunConflictError(
+                    f"Campaign is already bound to fluid state {existing}; replacing "
+                    "a durable physical state is not allowed"
+                )
+            if record.spec.mock_mode:
+                raise ValueError("Offline campaigns cannot attach a real fluid state")
+            bundle = tuple(
+                (self.base / campaign_id / f"{name}.yaml").read_text()
+                for name in ("gantry", "deck", "protocol")
+            )
+            self.runs._resolve_run_state(
+                bundle[1], RunStateSelection(fluid_state_id=fluid_state_id),
+            )
+            record.spec.fluid_state_id = fluid_state_id
+            record.fluid_state_reconciliation_note = note
+            self._save(record)
+            return record.model_copy(deep=True)
+
     def control(self, campaign_id, action):
         with self._lock:
             record = self._records.get(campaign_id)
             if record is None:
                 raise KeyError(campaign_id)
             if record.state in TERMINAL:
-                if action != "resume" or record.state != "failed" or not record.trials:
+                if (
+                    action != "resume"
+                    or record.state not in {"failed", "interrupted"}
+                    or not record.trials
+                ):
                     raise RunConflictError("Campaign has already stopped")
                 trial = record.trials[-1]
+                if (
+                    not record.spec.mock_mode
+                    and self._uses_fluid_handling(record.spec, campaign_id)
+                    and record.spec.fluid_state_id is None
+                ):
+                    raise RunConflictError(
+                        "This legacy physical campaign has no durable fluid/tip state. "
+                        "Create a state matching the current physical setup and attach "
+                        "it before attempting recovery."
+                    )
                 child = self.runs.get(trial.run_id)
                 if child is None or child.state != "succeeded" or child.result is None:
                     raise RunConflictError(
                         "The failed campaign has no completed trial to recover"
                     )
-                trial.objective = extract_result_objective(
+                measurement = extract_result_context(
                     child.result, record.spec.objective.path
                 )
-                trial.measurement = extract_result_context(
-                    child.result, record.spec.objective.path
-                )
+                try:
+                    validate_objective_provenance(
+                        record.spec.objective.path, measurement,
+                    )
+                    objective = extract_result_objective(
+                        child.result, record.spec.objective.path
+                    )
+                except TemplateError as exc:
+                    trial.objective_status = "unverified"
+                    trial.measurement = measurement
+                    self._save(record)
+                    raise RunConflictError(
+                        f"The completed trial was preserved but cannot be used for "
+                        f"optimization: {exc}. Capture a new accepted target/profile "
+                        "and start a campaign that excludes physically used wells and tips."
+                    ) from exc
+                trial.objective = objective
+                trial.measurement = measurement
+                trial.objective_status = "accepted"
                 objectives = [
                     item.objective for item in record.trials
-                    if item.objective is not None
+                    if item.objective is not None and item.objective_status == "accepted"
                 ]
                 record.best_objective = (
                     min(objectives) if record.spec.objective.direction == "minimize"
@@ -245,6 +367,7 @@ class CampaignManager:
             if record.state != "awaiting_observation" or not record.trials or record.trials[-1].objective is not None:
                 raise RunConflictError("No pending observation for this campaign")
             record.trials[-1].objective = float(value)
+            record.trials[-1].objective_status = "accepted"
             self._save(record)
         return self.get(campaign_id)
 
@@ -281,7 +404,9 @@ class CampaignManager:
                     time.sleep(self._poll)
                     continue
                 observations = [{"parameters": t.parameters, "objective": t.objective}
-                                for t in record.trials if t.objective is not None]
+                                for t in record.trials
+                                if t.objective is not None
+                                and t.objective_status == "accepted"]
                 try:
                     parameters = self._suggest(spec, observations)
                 except SearchExhaustedError as exc:
@@ -330,10 +455,22 @@ class CampaignManager:
                         record.state = "awaiting_observation"
                         self._save(record)
                     else:
-                        trial.objective = extract_result_objective(child.result, spec.objective.path)
-                        trial.measurement = extract_result_context(
+                        measurement = extract_result_context(
                             child.result, spec.objective.path
                         )
+                        try:
+                            validate_objective_provenance(
+                                spec.objective.path, measurement,
+                            )
+                            trial.objective = extract_result_objective(
+                                child.result, spec.objective.path,
+                            )
+                        except TemplateError:
+                            trial.objective_status = "rejected"
+                            trial.measurement = measurement
+                            raise
+                        trial.measurement = measurement
+                        trial.objective_status = "accepted"
                 while trial.objective is None:
                     with self._lock:
                         if record.stop_requested:
@@ -365,6 +502,13 @@ class CampaignManager:
                 self._finish(record, "failed", "error", f"{type(exc).__name__}: {exc}")
         finally:
             self.runs.release_campaign(campaign_id)
+
+    def _uses_fluid_handling(self, spec: CampaignSpec, campaign_id: str) -> bool:
+        protocol = (self.base / campaign_id / "protocol.yaml").read_text()
+        return any(
+            next(iter(step)) in FLUID_COMMANDS
+            for step in yaml.safe_load(protocol)["protocol"]
+        )
 
 
 _manager = None

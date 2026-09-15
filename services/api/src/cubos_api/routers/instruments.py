@@ -18,16 +18,32 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel
 
 from cubos.instruments.base_instrument import BaseInstrument, InstrumentError
 from cubos.instruments.camera.exceptions import CameraError
 from cubos.instruments.camera.interface import CameraInstrument
+from cubos.instruments.camera.vendors.opencv import OpenCVCamera
 from cubos.instruments.lighting.exceptions import LightingError
 from cubos.instruments.lighting.interface import LightingInstrument
 from cubos.instruments.registry import get_instrument_class, validate_instrument
 from cubos.protocol_engine.commands.camera import default_images_dir
+
+from cubos_api.models.camera_monitor import (
+    CameraControlsResponse,
+    CameraMonitorLeaseRequest,
+    CameraMonitorRequest,
+    CameraMonitorStatus,
+    SetCameraControlsRequest,
+)
+from cubos_api.services.camera_monitor import (
+    CameraMonitorError,
+    CameraMonitorFrameExpired,
+    CameraMonitorNotRunning,
+    CameraMonitorUnsupported,
+    get_camera_monitor_service,
+)
 
 from .gantry import _reject_if_run_active, _require_session
 
@@ -89,7 +105,7 @@ class CaptureResponse(BaseModel):
     image_path: str
 
 
-def reset_manual_instruments() -> None:
+def reset_manual_instruments(*, preserve_camera_monitors: bool = False) -> None:
     """Disconnect and drop every manually connected instrument."""
     with _manual_lock:
         for name, instrument in _manual_instruments.items():
@@ -101,6 +117,8 @@ def reset_manual_instruments() -> None:
         _last_capture.clear()
         _last_manual_capture.clear()
         _capture_locks.clear()
+    if not preserve_camera_monitors:
+        get_camera_monitor_service().stop_all()
 
 
 def _configured_instruments() -> Dict[str, Dict[str, Any]]:
@@ -170,6 +188,32 @@ def _camera_instrument(name: str) -> CameraInstrument:
             "not a camera instrument.",
         )
     return instrument
+
+
+def _camera_entry(name: str) -> Dict[str, Any]:
+    instruments = _configured_instruments()
+    entry = instruments.get(name)
+    if entry is None:
+        available = ", ".join(sorted(instruments)) or "none"
+        raise HTTPException(
+            404,
+            f"No instrument {name!r} in the connected gantry config. "
+            f"Available: {available}",
+        )
+    if not isinstance(entry, dict) or entry.get("type") != "camera":
+        raise HTTPException(400, f"Instrument {name!r} is not a camera instrument.")
+    return entry
+
+
+def _monitor_configuration(entry: Dict[str, Any]) -> tuple[Any, ...]:
+    return (
+        entry.get("vendor"),
+        entry.get("camera_id", -1),
+        entry.get("resolution_width", 1280),
+        entry.get("resolution_height", 720),
+        entry.get("pixel_format"),
+        entry.get("unsupported_controls", ""),
+    )
 
 
 def _entries_of_type(type_key: str) -> Dict[str, Dict[str, Any]]:
@@ -245,6 +289,7 @@ def list_cameras() -> List[CameraInfo]:
         with _manual_lock:
             connected = name in _manual_instruments
             last = _last_manual_capture.get(name)
+        connected = connected or get_camera_monitor_service().is_running(name)
         infos.append(
             CameraInfo(
                 instrument=name,
@@ -288,6 +333,116 @@ def manual_capture(req: CaptureRequest) -> CaptureResponse:
         if not req.preview:
             _last_manual_capture[req.instrument] = saved
     return CaptureResponse(instrument=req.instrument, image_path=saved)
+
+
+@router.post("/camera/monitor/start", response_model=CameraMonitorStatus)
+def start_camera_monitor(req: CameraMonitorRequest) -> CameraMonitorStatus:
+    """Acquire an explicit preview lease for one configured OpenCV camera."""
+    entry = _camera_entry(req.instrument)
+    if entry.get("vendor") != "opencv":
+        raise HTTPException(501, "Live monitoring currently supports OpenCV cameras only.")
+    service = get_camera_monitor_service()
+    camera = _build_instrument(req.instrument, entry)
+    if not isinstance(camera, OpenCVCamera):
+        raise HTTPException(501, "Live monitoring currently supports OpenCV cameras only.")
+    try:
+        return service.start(
+            req.instrument,
+            camera,
+            configuration=_monitor_configuration(entry),
+        )
+    except CameraMonitorUnsupported as exc:
+        raise HTTPException(501, str(exc)) from exc
+    except CameraMonitorError as exc:
+        raise HTTPException(502, f"Camera monitor failed to start: {exc}") from exc
+
+
+@router.post("/camera/monitor/heartbeat", response_model=CameraMonitorStatus)
+def heartbeat_camera_monitor(req: CameraMonitorLeaseRequest) -> CameraMonitorStatus:
+    """Renew one preview subscriber without changing camera ownership."""
+    _camera_entry(req.instrument)
+    try:
+        return get_camera_monitor_service().heartbeat(
+            req.instrument, req.lease_id
+        )
+    except CameraMonitorNotRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
+
+
+@router.post("/camera/monitor/stop", response_model=CameraMonitorStatus)
+def stop_camera_monitor(req: CameraMonitorLeaseRequest) -> CameraMonitorStatus:
+    """Release this UI monitor's lease without affecting a protocol lease."""
+    _camera_entry(req.instrument)
+    return get_camera_monitor_service().stop(req.instrument, req.lease_id)
+
+
+@router.get("/camera/monitor", response_model=CameraMonitorStatus)
+def camera_monitor_status(instrument: str) -> CameraMonitorStatus:
+    """Read monitor state without opening any instrument."""
+    _camera_entry(instrument)
+    return get_camera_monitor_service().status(instrument)
+
+
+@router.get("/camera/monitor/frame")
+def camera_monitor_frame(instrument: str, frame_id: int | None = None) -> Response:
+    """Serve the latest leased JPEG frame without consuming camera input."""
+    _camera_entry(instrument)
+    try:
+        encoded, actual_frame_id, received_at = (
+            get_camera_monitor_service().frame(instrument, frame_id)
+        )
+    except CameraMonitorFrameExpired as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except CameraMonitorNotRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except CameraMonitorError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    return Response(
+        encoded,
+        media_type="image/jpeg",
+        headers={
+            "Cache-Control": "no-store",
+            "X-CubOS-Frame-Id": str(actual_frame_id),
+            "X-CubOS-Received-At": str(received_at),
+        },
+    )
+
+
+@router.get("/camera/controls", response_model=CameraControlsResponse)
+def camera_controls(instrument: str) -> CameraControlsResponse:
+    """Read controls from an existing monitor lease; never auto-connect."""
+    _camera_entry(instrument)
+    try:
+        return get_camera_monitor_service().controls(instrument)
+    except CameraMonitorNotRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except CameraMonitorError as exc:
+        raise HTTPException(502, str(exc)) from exc
+
+
+@router.get("/camera/monitor/analysis-frame", response_class=FileResponse)
+def camera_monitor_analysis_frame(instrument: str) -> FileResponse:
+    """Serve the latest scored image selected from trusted run metadata."""
+    _camera_entry(instrument)
+    try:
+        path = get_camera_monitor_service().analysis_image_path(instrument)
+    except CameraMonitorError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    return FileResponse(path, headers={"Cache-Control": "no-store"})
+
+
+@router.patch("/camera/controls", response_model=CameraControlsResponse)
+def set_camera_controls(req: SetCameraControlsRequest) -> CameraControlsResponse:
+    """Apply only explicitly supplied controls to an active camera lease."""
+    _reject_if_run_active()
+    _camera_entry(req.instrument)
+    updates = req.controls.model_dump(exclude_none=True, exclude_unset=True)
+    try:
+        return get_camera_monitor_service().set_controls(req.instrument, updates)
+    except CameraMonitorNotRunning as exc:
+        raise HTTPException(409, str(exc)) from exc
+    except CameraMonitorError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/camera/last-image")

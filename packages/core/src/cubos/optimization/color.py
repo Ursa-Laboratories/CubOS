@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import math
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
+
+from .color_analysis import analyze_well_color_image
 
 
 def _triplet(values: Sequence[float], label: str) -> tuple[float, float, float]:
@@ -117,45 +119,47 @@ def analyze_color_image(
     image_path: str | Path,
     *,
     roi_fraction: float = 0.5,
+    expected_center: Sequence[float] | None = None,
+    expected_center_source: str | None = None,
     reference_lab: Sequence[float] | None = None,
+    reference_processing_profile_id: str | None = None,
+    acquisition_context: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Measure median RGB and Lab in a centered circular image region."""
-    if not math.isfinite(roi_fraction) or not 0.0 < roi_fraction <= 1.0:
-        raise ValueError("roi_fraction must be greater than 0 and at most 1")
-    path = Path(image_path).expanduser().resolve()
-    if not path.is_file():
-        raise ValueError(f"color image does not exist: {path}")
-    try:
-        import cv2
-        import numpy as np
-    except ImportError as exc:
-        raise RuntimeError(
-            "Color analysis requires the CubOS camera extra (opencv-python and numpy)."
-        ) from exc
-    frame = cv2.imread(str(path), cv2.IMREAD_COLOR)
-    if frame is None or frame.ndim != 3 or frame.shape[2] < 3:
-        raise ValueError(f"color image is unreadable: {path}")
-    height, width = frame.shape[:2]
-    center_x = (width - 1) / 2.0
-    center_y = (height - 1) / 2.0
-    radius = max(0.5, min(width, height) * roi_fraction / 2.0)
-    yy, xx = np.ogrid[:height, :width]
-    mask = (xx - center_x) ** 2 + (yy - center_y) ** 2 <= radius**2
-    pixels = frame[mask]
-    if not pixels.size:
-        raise ValueError("color image ROI contains no pixels")
-    blue, green, red = (float(value) for value in np.median(pixels[:, :3], axis=0))
-    rgb = (red, green, blue)
-    lab = rgb_to_lab(rgb)
-    result: dict[str, object] = {
-        "image_path": str(path),
-        "roi_fraction": roi_fraction,
-        "rgb": list(rgb),
-        "lab": list(lab),
-    }
+    """Measure a conservative well-local camera Lab estimate.
+
+    The source pixels are never contrast-enhanced. A detected inner-well mask
+    excludes clipped and neutral-glare pixels, and failed quality checks omit
+    Lab and Delta E values so optimization cannot score the background.
+    """
+    result = analyze_well_color_image(
+        image_path,
+        roi_fraction=roi_fraction,
+        expected_center=expected_center,
+        expected_center_source=expected_center_source,
+        reference_lab=reference_lab,
+        reference_processing_profile_id=reference_processing_profile_id,
+        acquisition_context=acquisition_context,
+    )
+    rgb = result.get("rgb")
+    if rgb is not None:
+        lab = rgb_to_lab(rgb)  # type: ignore[arg-type]
+        result["lab"] = list(lab)
+    else:
+        lab = None
     if reference_lab is not None:
         target = _triplet(reference_lab, "reference_lab")
         result["reference_lab"] = list(target)
-        result["delta_e_00"] = ciede2000(lab, target)
-        result["delta_e_76"] = ciede76(lab, target)
+        profile = result["processing_profile"]
+        profile_id = profile["id"]  # type: ignore[index]
+        result["reference_processing_profile_id"] = reference_processing_profile_id
+        if reference_processing_profile_id is None:
+            result["comparison_error"] = "reference_processing_profile_missing"
+        elif reference_processing_profile_id != profile_id:
+            result["comparison_error"] = "incompatible_processing_profile"
+        elif lab is None:
+            result["comparison_error"] = "measurement_rejected"
+        else:
+            result["comparison_status"] = "accepted"
+            result["delta_e_00"] = ciede2000(lab, target)
+            result["delta_e_76"] = ciede76(lab, target)
     return result
