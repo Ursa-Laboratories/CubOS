@@ -14,6 +14,7 @@ import yaml
 
 from cubos.deck.deck import Deck
 from cubos.deck.loader import load_deck_from_yaml_safe
+from cubos.deck.tip_presence import apply_durable_tip_status
 from cubos.gantry.errors import GantryLoaderError
 from cubos.gantry.gantry import Gantry
 from cubos.gantry.gantry_config import GantryConfig
@@ -99,6 +100,9 @@ def setup_protocol(
         deck_path,
         factory_z_travel_mm=gantry_config.factory_z_travel_mm,
     )
+    snapshot_reader = getattr(data_store, "get_tip_snapshot", None)
+    if fluid_state_id is not None and callable(snapshot_reader):
+        apply_durable_tip_status(deck, snapshot_reader(fluid_state_id))
 
     if gantry is None:
         gantry = Gantry(offline=True)

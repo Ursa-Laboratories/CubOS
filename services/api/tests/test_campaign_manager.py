@@ -552,3 +552,15 @@ def test_preflight_uses_durable_available_tips_across_trials(tmp_path, monkeypat
     unavailable.sequences[0].values[0] = "tips.A1"
     with pytest.raises(ValueError, match="not available in durable fluid state"):
         manager._preflight(unavailable, manager._bundle(unavailable))
+
+    validations = []
+    manager = CampaignManager(
+        settings, FakeRuns(), validator=lambda *args: validations.append(args),
+    )
+    manager._preflight(spec, manager._bundle(spec))
+    assert [slot["slot_id"] for slot in validations[-1][3]["containers"]
+            if slot["status"] == "consumed"] == ["A1", "A2", "A3"]
+
+    mock_spec = spec.model_copy(update={"mock_mode": True, "fluid_state_id": None})
+    manager._preflight(mock_spec, manager._bundle(mock_spec))
+    assert validations[-1][3] is None

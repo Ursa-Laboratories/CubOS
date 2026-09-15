@@ -154,3 +154,19 @@ def test_unresolved_targets_are_reported_without_side_exit_attribute_errors():
     ctx, _, _ = setup()
     assert validate_protocol_semantics(protocol('missing.A1'),ctx.gantry,ctx.deck,ctx.gantry_config)
     assert collect_protocol_motion_targets(ctx.gantry_config,protocol('missing.A1'),ctx.deck)==[]
+
+
+def test_durable_snapshot_overlay_unblocks_lane_consumed_in_an_earlier_run():
+    from cubos.deck.tip_presence import apply_durable_tip_status
+    ctx, rack, _ = setup()
+    assert validate_protocol_semantics(protocol('tips.A1'), ctx.gantry, ctx.deck, ctx.gantry_config)
+    apply_durable_tip_status(ctx.deck, {'containers': [
+        {'rack_key': 'tips', 'slot_id': 'A2', 'status': 'consumed'},
+        {'rack_key': 'tips', 'slot_id': 'A1', 'status': 'available'},
+        {'rack_key': 'tips', 'slot_id': 'Z9', 'status': 'available'},
+        {'rack_key': 'other', 'slot_id': 'A1', 'status': 'consumed'},
+    ]})
+    assert not rack.is_tip_present('A2') and rack.is_tip_present('A1')
+    assert not validate_protocol_semantics(protocol('tips.A1'), ctx.gantry, ctx.deck, ctx.gantry_config)
+    apply_durable_tip_status(ctx.deck, {'containers': [{'rack_key': 'tips', 'slot_id': 'A1', 'status': 'attached'}]})
+    assert validate_protocol_semantics(protocol('tips.A1'), ctx.gantry, ctx.deck, ctx.gantry_config)

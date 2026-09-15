@@ -87,14 +87,14 @@ class CampaignManager:
         return tuple(result)
 
     @staticmethod
-    def _validate_setup(gantry, deck, protocol):
+    def _validate_setup(gantry, deck, protocol, tip_snapshot=None):
         with tempfile.TemporaryDirectory(prefix="cubos-campaign-check-") as directory:
             paths = []
             for name, content in (("gantry", gantry), ("deck", deck), ("protocol", protocol)):
                 path = Path(directory) / f"{name}.yaml"
                 path.write_text(content)
                 paths.append(str(path))
-            result = run_setup_validation(*paths)
+            result = run_setup_validation(*paths, tip_snapshot=tip_snapshot)
             if not result.passed:
                 raise ValueError("; ".join(result.errors) or result.output)
 
@@ -120,11 +120,7 @@ class CampaignManager:
                 deck,
                 RunStateSelection(fluid_state_id=spec.fluid_state_id),
             )
-            store = DataStore(self.settings.data_db_path)
-            try:
-                tip_snapshot = store.get_tip_snapshot(spec.fluid_state_id)
-            finally:
-                store.close()
+            tip_snapshot = self._tip_snapshot(spec.fluid_state_id)
             pipette = tip_snapshot["pipette"]
             if pipette["attachment_uncertain"]:
                 raise ValueError(
@@ -141,6 +137,7 @@ class CampaignManager:
                 if item["status"] == "available"
             ]
         else:
+            tip_snapshot = None
             available_tips = None
         parameters = self._suggest(spec, [])
         seen_tips = set()
@@ -160,8 +157,17 @@ class CampaignManager:
                             )
                         available_tips.remove(target)
         preview = compile_trial(protocol, raw, parameters, 0)
-        self._validator(gantry, deck, preview)
+        self._validator(gantry, deck, preview, tip_snapshot)
         return {"parameters": parameters, "protocol_yaml": preview}
+
+    def _tip_snapshot(self, fluid_state_id):
+        if fluid_state_id is None:
+            return None
+        store = DataStore(self.settings.data_db_path)
+        try:
+            return store.get_tip_snapshot(fluid_state_id)
+        finally:
+            store.close()
 
     def validate(self, spec):
         try:
@@ -415,7 +421,7 @@ class CampaignManager:
                     return
                 index = len(record.trials)
                 protocol = compile_trial(bundle[2], spec.model_dump(), parameters, index)
-                self._validator(bundle[0], bundle[1], protocol)
+                self._validator(bundle[0], bundle[1], protocol, self._tip_snapshot(spec.fluid_state_id))
                 submission = RunSubmission(run_id=f"{campaign_id}-trial-{index+1}",
                     gantry_config=bundle[0], deck_config=bundle[1], protocol_yaml=protocol,
                     mock_mode=spec.mock_mode,

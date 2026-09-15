@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from collections.abc import Mapping
 from typing import Any, Literal
 
 _log = logging.getLogger(__name__)
@@ -13,6 +14,7 @@ from cubos.deck.deck import Deck
 from cubos.deck.labware.vial import Vial
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.deck.loader import load_deck_from_yaml
+from cubos.deck.tip_presence import apply_durable_tip_status
 from cubos.gantry.gantry import Gantry
 from cubos.gantry.instrument_loader import load_instrumented_gantry_from_config
 from cubos.gantry.loader import load_gantry_from_yaml
@@ -97,6 +99,7 @@ def run_setup_validation(
     deck_path: str | Path,
     protocol_path: str | Path,
     initial_fluids_path: str | Path | None = None,
+    tip_snapshot: Mapping[str, Any] | None = None,
 ) -> SetupValidationResult:
     """Run full offline setup validation and return a structured result.
 
@@ -106,6 +109,10 @@ def run_setup_validation(
     pipette-model volume bounds, vial dead-volume floors, and destination
     working-volume overflow are all validated offline before any hardware
     run (see ``cubos.validation.fluid_volumes``).
+
+    ``tip_snapshot`` optionally carries a durable tip snapshot
+    (``DataStore.get_tip_snapshot``); its per-slot status overrides the deck
+    YAML's ``tip_present`` so validation sees the same inventory the run will.
     """
     lines: list[str] = []
 
@@ -153,6 +160,9 @@ def run_setup_validation(
             message=f"{type(exc).__name__}: {exc}",
             result_message="RESULT: ERROR - could not load deck config",
         )
+
+    if tip_snapshot is not None:
+        apply_durable_tip_status(deck, tip_snapshot)
 
     out(f"  OK: {deck_path}")
     out(f"  Labware ({len(deck)}):")
