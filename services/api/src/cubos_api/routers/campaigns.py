@@ -1,5 +1,6 @@
 """Active-learning campaign editing and lifecycle endpoints."""
 import hashlib
+import os
 import uuid
 from collections.abc import Mapping
 from pathlib import Path
@@ -310,14 +311,19 @@ def reanalyze_color_target(run_id: str, body: ColorTargetReanalysisRequest):
         configuration.get("acquisition")
         if isinstance(configuration, Mapping) else None
     )
+    expected_digest = record.metadata["color_target_source_sha256"]
     try:
         transaction = manager.store.color_target_analysis_transaction()
         with transaction:
             staging_path = image_path.with_name(
                 f"{image_path.stem}.analysis.png"
-            ).resolve()
+            )
+            if os.path.lexists(staging_path):
+                raise ValueError(
+                    "Frozen-source analysis staging path already exists; inspect "
+                    "the run artifact directory before retrying"
+                )
             try:
-                staging_path.unlink(missing_ok=True)
                 analysis = analyze_color_image(
                     image_path,
                     roi_fraction=float(original.get("roi_fraction", 0.5)),
@@ -335,12 +341,20 @@ def reanalyze_color_target(run_id: str, body: ColorTargetReanalysisRequest):
                 annotated = analysis.get("annotated_preview_path")
                 if not isinstance(annotated, str):
                     raise ValueError("Reanalysis did not produce an annotated preview")
-                annotated_path = Path(annotated).expanduser().resolve()
+                annotated_path = Path(annotated).expanduser()
                 if annotated_path != staging_path:
                     raise ValueError(
                         "Reanalysis preview is not the expected frozen-source derivative"
                     )
+                if annotated_path.is_symlink() or not annotated_path.is_file():
+                    raise ValueError(
+                        "Reanalysis preview is not a regular staging file"
+                    )
                 digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+                if digest != expected_digest:
+                    raise ValueError(
+                        "Frozen color target image changed during reanalysis"
+                    )
                 artifact = {
                     "schema": "cubos.color-target-reanalysis.v1",
                     "source_image_sha256": digest,
@@ -356,7 +370,8 @@ def reanalyze_color_target(run_id: str, body: ColorTargetReanalysisRequest):
                 )
                 analysis = complete_artifact["analysis"]
             finally:
-                staging_path.unlink(missing_ok=True)
+                if os.path.lexists(staging_path):
+                    staging_path.unlink(missing_ok=True)
     except (FileExistsError, OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(409, f"{type(exc).__name__}: {exc}") from exc
     return {

@@ -214,6 +214,7 @@ def test_color_target_reanalysis_uses_saved_frame_and_persists_revision(
     ] = corrupted_metadata.metadata["color_target_source_sha256"]
     manager.store.write(corrupted_metadata)
 
+    frozen_image.chmod(0o644)
     frozen_image.write_bytes(b"corrupted frozen source")
     with pytest.raises(Exception, match="digest does not match"):
         campaign_routes._accepted_target_setup(setup)
@@ -255,6 +256,7 @@ def test_color_target_reanalysis_real_analyzer_accepts_frozen_run_source(
     import cv2
     import numpy as np
     from cubos.optimization import analyze_color_image
+    from cubos_api.routers import campaigns as campaign_routes
 
     image_root = tmp_path / "images"
     image_root.mkdir()
@@ -325,6 +327,46 @@ def test_color_target_reanalysis_real_analyzer_accepts_frozen_run_source(
         "real-analyzer-target", "color-target-source.tiff",
     ).with_name("color-target-source.analysis.png")
     assert not staging.exists()
+
+    outside = tmp_path / "outside-preview.png"
+    outside.write_bytes(b"outside bytes must not change")
+    staging.symlink_to(outside)
+    blocked = api_request(
+        create_app(),
+        "POST",
+        "/api/v1/campaigns/color-target/real-analyzer-target/reanalyze",
+        json={
+            "expected_center": [0.5, 0.5],
+            "expected_center_source": "operator_selected",
+        },
+    )
+    assert blocked.status_code == 409
+    assert outside.read_bytes() == b"outside bytes must not change"
+    assert staging.is_symlink()
+    staging.unlink()
+
+    frozen_source = manager.store.artifact_path(
+        "real-analyzer-target", "color-target-source.tiff",
+    )
+    frozen_bytes = frozen_source.read_bytes()
+
+    def mutate_source(path, **_kwargs):
+        Path(path).write_bytes(b"attempted mutation")
+        raise AssertionError("read-only frozen source unexpectedly changed")
+
+    monkeypatch.setattr(campaign_routes, "analyze_color_image", mutate_source)
+    mutation = api_request(
+        create_app(),
+        "POST",
+        "/api/v1/campaigns/color-target/real-analyzer-target/reanalyze",
+        json={
+            "expected_center": [0.5, 0.5],
+            "expected_center_source": "operator_selected",
+        },
+    )
+    assert mutation.status_code == 409
+    assert frozen_source.read_bytes() == frozen_bytes
+    assert hashlib.sha256(frozen_bytes).hexdigest() == digest
 
 
 def test_real_color_setup_rejects_unprofiled_legacy_target(tmp_path: Path):

@@ -212,6 +212,7 @@ class RunStore:
                 temporary.unlink(missing_ok=True)
                 raise OSError("Color target source changed while it was being preserved")
             temporary.replace(destination)
+            destination.chmod(0o444)
             preview_tmp = analysis_image.with_suffix(".png.tmp")
             shutil.copyfile(resolved_preview, preview_tmp)
             preview_tmp.replace(analysis_image)
