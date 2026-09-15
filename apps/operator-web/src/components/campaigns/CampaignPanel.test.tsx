@@ -272,9 +272,14 @@ it("reviews a rejected target on the saved frame before building the color campa
     return new Response("[]", { status: 200 });
   });
   render(<CampaignPanel gantryFile="g.yaml" deckFile="d.yaml" protocolFile="old.yaml" onRunSelected={selectedRun} />);
+  expect(screen.getByText("g.yaml")).toBeInTheDocument();
+  expect(screen.getByText("d.yaml")).toBeInTheDocument();
   fireEvent.change(screen.getByLabelText("Target well"), { target: { value: "plate.C4" } });
   fireEvent.click(screen.getByRole("button", { name: "Capture plate.C4 target for review" }));
   const savedImage = await screen.findByAltText("Saved target frame for plate.C4");
+  expect(screen.getByText("target-1")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open run" }));
+  expect(selectedRun).toHaveBeenCalledWith("target-1");
   vi.spyOn(savedImage, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 800, height: 600, right: 800, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
   expect(screen.queryByRole("button", { name: "Build campaign from accepted target" })).not.toBeInTheDocument();
   expect(screen.getByText("expected_center_unverified")).toBeInTheDocument();
@@ -283,7 +288,7 @@ it("reviews a rejected target on the saved frame before building the color campa
   const buildButton = await screen.findByRole("button", { name: "Build campaign from accepted target" });
   fireEvent.click(buildButton);
   await waitFor(() => expect(screen.getByLabelText("Campaign name")).toHaveValue("CIEDE2000 color matching"));
-  expect(selectedRun).not.toHaveBeenCalled();
+  expect(selectedRun).toHaveBeenCalledTimes(1);
   expect(setupBody).toMatchObject({
     target_well: "plate.C4",
     target_lab: [42, 12, 18],
@@ -297,4 +302,27 @@ it("reviews a rejected target on the saved frame before building the color campa
     blue_source: "stocks.A3",
   });
   expect(screen.getByText(/Campaign protocol ade_color_matching_1234.yaml is ready/)).toBeInTheDocument();
+});
+
+it("keeps a failed target preflight visible beside the capture action", async () => {
+  const selectedRun = vi.fn();
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    if (String(input).endsWith("/color-target")) {
+      return new Response(JSON.stringify({
+        run_id: "target-failed-1",
+        state: "failed",
+        result: null,
+        error: "Routing preflight failed: camera instrument has no collision envelopes.",
+      }), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  });
+  render(<CampaignPanel gantryFile="picus1000_arducam_usb_seed.yaml" deckFile="cub_deck.yaml" protocolFile="old.yaml" onRunSelected={selectedRun} />);
+  fireEvent.click(screen.getByRole("button", { name: "Capture plate.A1 target for review" }));
+  expect(await screen.findByText("target-failed-1")).toBeInTheDocument();
+  expect(screen.getByRole("alert")).toHaveTextContent("Routing preflight failed");
+  expect(screen.getByText("picus1000_arducam_usb_seed.yaml")).toBeInTheDocument();
+  expect(screen.getByText("cub_deck.yaml")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "Open run" }));
+  expect(selectedRun).toHaveBeenCalledWith("target-failed-1");
 });

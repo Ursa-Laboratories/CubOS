@@ -3,12 +3,14 @@ import * as theme from "../../theme";
 import CampaignFluidState from "./CampaignFluidState";
 import CampaignCameraMonitor from "./CampaignCameraMonitor";
 import ColorTargetReview from "./ColorTargetReview";
+import RunPanel from "../run/RunPanel";
 import { campaignApi } from "./api";
 import type {
   CampaignBinding,
   CampaignPanelProps,
   CampaignRecord,
   CampaignSpec,
+  ColorTargetRun,
   ProtocolStep,
 } from "./types";
 import "./CampaignPanel.css";
@@ -431,6 +433,8 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const visibleTargetLab = targetLab ?? (protocolTargetProfileId ? protocolTargetLab : null);
   const [targetBusy, setTargetBusy] = useState(false);
   const [targetStatus, setTargetStatus] = useState<string | null>(null);
+  const [targetError, setTargetError] = useState<string | null>(null);
+  const [targetRun, setTargetRun] = useState<ColorTargetRun | null>(null);
   const configuredCameras = Object.entries(gantry?.config.instruments ?? {})
     .filter(([, config]) => config.type === "camera")
     .map(([name]) => name);
@@ -586,7 +590,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     }
     setTargetBusy(true);
     setError(null);
-    setTargetStatus(`Reading ${targetWell}; the camera will move under native run control.`);
+    setTargetError(null);
+    setTargetRun(null);
+    setTargetStatus(`Submitting ${targetWell} target run. CubOS will preflight the complete route before any movement.`);
+    let submittedRun: ColorTargetRun | null = null;
     try {
       let run = await campaignApi.readColorTarget({
         gantry_file: gantryFile,
@@ -597,12 +604,21 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         image_height: imageHeight,
         mock_mode: false,
       });
+      submittedRun = run;
+      setTargetRun(run);
+      setTargetStatus(`Target run ${run.run_id} is ${run.state.replaceAll("_", " ")}.`);
       while (["queued", "running", "cancel_requested"].includes(run.state)) {
         await new Promise((resolve) => setTimeout(resolve, 1000));
         run = await campaignApi.getColorTarget(run.run_id);
+        submittedRun = run;
+        setTargetRun(run);
+        setTargetStatus(`Target run ${run.run_id} is ${run.state.replaceAll("_", " ")}.`);
       }
       if (run.state !== "succeeded") {
-        throw new Error(run.error || `Target reading ${run.state}.`);
+        const message = run.error || `Target run ended as ${run.state}.`;
+        setTargetError(message);
+        setTargetStatus(`Target run ${run.run_id} ${run.state}. No target image was accepted.`);
+        return;
       }
       const results = (run.result as { results?: unknown[] } | null)?.results;
       const measurement = Array.isArray(results) ? results[1] as Record<string, unknown> | undefined : undefined;
@@ -613,8 +629,9 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setTargetLab(null);
       setTargetStatus(`Target frame saved from ${targetWell}. Review the image and select the intended well center before building the campaign.`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-      setTargetStatus(null);
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setTargetError(message);
+      setTargetStatus(submittedRun ? `Could not refresh target run ${submittedRun.run_id}.` : "Target request was rejected before a run was created.");
     } finally {
       setTargetBusy(false);
     }
@@ -754,7 +771,28 @@ export default function CampaignPanel(props: CampaignPanelProps) {
           {!visibleTargetLab && protocolTargetLab && <span className="campaign-note">The loaded protocol contains a legacy reference Lab without accepted processing-profile provenance. Capture a new target before use.</span>}
           {targetStatus && <span className="campaign-note">{targetStatus}</span>}
         </div>
+        <div className="campaign-capture-setup">
+          <strong>Capture setup</strong>
+          <code>{gantryFile ?? "No gantry selected"}</code>
+          <span>·</span>
+          <code>{deckFile ?? "No deck selected"}</code>
+        </div>
+        {(targetRun || targetError) && (
+          <div className="campaign-target-run" role="status">
+            {targetRun && <>
+              <span className={`campaign-target-run-state campaign-target-run-${targetRun.state}`}>{targetRun.state.replaceAll("_", " ")}</span>
+              <code>{targetRun.run_id}</code>
+              <button type="button" onClick={() => onRunSelected?.(targetRun.run_id)}>Open run</button>
+            </>}
+            {targetError && <div className="campaign-banner campaign-error" role="alert">{targetError}</div>}
+          </div>
+        )}
       </div>
+      {targetRun && ["queued", "running", "cancel_requested"].includes(targetRun.state) && (
+        <div className="campaign-target-progress">
+          <RunPanel runId={targetRun.run_id} />
+        </div>
+      )}
       {targetRunId && targetMeasurement && (
         <ColorTargetReview
           key={targetRunId}

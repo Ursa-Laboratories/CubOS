@@ -97,6 +97,17 @@
 .campaign-camera-review textarea { min-height:52px; resize:vertical; padding:7px 9px; color:var(--z-ink); background:var(--z-surface-sunken); border:1px solid var(--z-border-strong); border-radius:6px; }
 .campaign-camera-review small { color:var(--z-text-muted); }
 .campaign-target-review { display:flex; flex-direction:column; gap:10px; padding:12px; border:1px solid var(--z-border); border-radius:8px; background:var(--z-surface-muted); }
+.campaign-target-run { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:10px; padding:9px; border:1px solid var(--z-border); border-radius:7px; background:var(--z-surface-sunken); font-size:12px; }
+.campaign-target-run code { color:var(--z-text-secondary); overflow-wrap:anywhere; }
+.campaign-target-run-state { padding:3px 7px; border:1px solid var(--z-border-strong); border-radius:999px; color:var(--z-text-muted); text-transform:capitalize; }
+.campaign-target-run-running { color:var(--z-accent); border-color:var(--z-accent); }
+.campaign-target-run-succeeded { color:var(--z-success-text); border-color:var(--z-success-border); }
+.campaign-target-run-failed,.campaign-target-run-cancelled { color:var(--z-danger-text); border-color:var(--z-danger-border); }
+.campaign-target-run .campaign-banner { flex-basis:100%; }
+.campaign-target-progress { display:block; }
+.campaign-capture-setup { display:flex; align-items:center; flex-wrap:wrap; gap:5px; margin-top:8px; color:var(--z-text-muted); font-size:11px; }
+.campaign-capture-setup strong { color:var(--z-text-secondary); }
+.campaign-capture-setup code { color:var(--z-ink); }
 .campaign-target-review h4 { margin:0 0 4px; color:var(--z-text); font-size:12px; text-transform:uppercase; letter-spacing:.07em; }
 .campaign-target-review p { margin:0; }
 .campaign-target-review-grid { display:grid; grid-template-columns:minmax(280px,1fr) minmax(240px,1fr); gap:12px; align-items:start; }

@@ -2,11 +2,14 @@ import pytest
 import hashlib
 from pathlib import Path
 import time
+from types import SimpleNamespace
 from tests.api_client import api_request
 from cubos_api.app import create_app
 from cubos_api.models.campaigns import Observation
 from cubos_api.models.runs import RunSubmission
 from cubos_api.models.runs import RunRecord
+from cubos_api.models.campaigns import ColorTargetRequest
+from cubos_api.services.run_store import RunStore
 from cubos_api.services.run_manager import get_run_manager, RunConflictError
 
 
@@ -37,6 +40,107 @@ def test_campaign_routes_report_missing_records():
     assert api_request(app,'GET','/api/v1/campaigns/not-found').status_code==404
     assert api_request(app,'POST','/api/v1/campaigns/not-found/stop',json={}).status_code==404
     assert api_request(app,'POST','/api/v1/campaigns/not-found/observation',json={'value':1}).status_code==404
+
+
+def test_color_target_snapshot_preserves_selected_gantry_envelopes_and_filenames(
+    monkeypatch, tmp_path: Path,
+):
+    import yaml
+    from cubos_api.routers import campaigns as campaign_routes
+
+    configs = tmp_path / "configs"
+    (configs / "gantry").mkdir(parents=True)
+    (configs / "deck").mkdir()
+    selected_gantry = {
+        "serial_port": "/dev/example",
+        "gantry_type": "cub",
+        "cnc": {
+            "factory_z_travel_mm": 56.0,
+            "safe_z": 66.5,
+            "default_feed_rate_mm_min": 2000.0,
+        },
+        "working_volume": {
+            "x_min": 0.0, "x_max": 258.205,
+            "y_min": 0.0, "y_max": 144.645,
+            "z_min": 10.5, "z_max": 66.5,
+        },
+        "origin_policy": "deck_origin",
+        "instruments": {
+            "pipette": {
+                "type": "pipette", "vendor": "sartorius",
+                "offset_x": 0.0, "offset_y": 0.0, "depth": -70.0,
+                "motion_envelope": {
+                    "box": {
+                        "offset": {"x": -2.0, "y": -2.0, "z": 0.0},
+                        "size": {"x": 4.0, "y": 4.0, "z": 30.0},
+                    },
+                    "attached_tip_radius_mm": 4.0,
+                },
+            },
+            "camera": {
+                "type": "camera", "vendor": "opencv",
+                "offset_x": 0.0, "offset_y": -46.5, "depth": -114.964,
+                "motion_envelope": {
+                    "box": {
+                        "offset": {"x": -8.0, "y": -8.0, "z": 0.0},
+                        "size": {"x": 16.0, "y": 16.0, "z": 20.0},
+                    },
+                },
+            },
+        },
+    }
+    gantry_path = configs / "gantry" / "picus1000_routing_review.yaml"
+    gantry_path.write_text(yaml.safe_dump(selected_gantry, sort_keys=False))
+    deck_path = configs / "deck" / "color_matching_routing_review.yaml"
+    deck_path.write_text("labware: {}\n")
+    store = RunStore(tmp_path / "runs")
+
+    class CapturingManager:
+        def submit(self, submission):
+            record = RunRecord(
+                run_id=submission.run_id,
+                state="queued",
+                created_at=time.time(),
+                mock_mode=submission.mock_mode,
+                metadata=submission.metadata,
+            )
+            store.create(
+                record,
+                gantry_yaml=submission.gantry_config,
+                deck_yaml=submission.deck_config,
+                protocol_yaml=submission.protocol_yaml,
+            )
+            return record
+
+    monkeypatch.setattr(
+        campaign_routes,
+        "get_settings",
+        lambda: SimpleNamespace(configs_dir=configs),
+    )
+    monkeypatch.setattr(
+        campaign_routes, "get_run_manager", lambda: CapturingManager(),
+    )
+
+    record = campaign_routes.read_color_target(ColorTargetRequest(
+        gantry_file=gantry_path.name,
+        deck_file=deck_path.name,
+        target_well="plate.A1",
+        camera_instrument="camera",
+    ))
+
+    snapshot = yaml.safe_load(
+        (store.run_dir(record.run_id) / "gantry.yaml").read_text()
+    )
+    assert snapshot["cnc"]["safe_z"] == 66.5
+    assert snapshot["cnc"]["default_feed_rate_mm_min"] == 2000.0
+    assert snapshot["instruments"]["camera"]["motion_envelope"] == (
+        selected_gantry["instruments"]["camera"]["motion_envelope"]
+    )
+    assert snapshot["instruments"]["pipette"]["motion_envelope"] == (
+        selected_gantry["instruments"]["pipette"]["motion_envelope"]
+    )
+    assert record.metadata["source_gantry_file"] == gantry_path.name
+    assert record.metadata["source_deck_file"] == deck_path.name
 
 
 def test_color_target_reanalysis_uses_saved_frame_and_persists_revision(

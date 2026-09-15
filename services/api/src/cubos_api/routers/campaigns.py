@@ -225,7 +225,11 @@ def read_color_target(body: ColorTargetRequest):
                 body.expected_center_source,
             ),
             mock_mode=body.mock_mode,
-            metadata={"active_learning_target": body.target_well},
+            metadata={
+                "active_learning_target": body.target_well,
+                "source_gantry_file": body.gantry_file,
+                "source_deck_file": body.deck_file,
+            },
         )
         return get_run_manager().submit(submission)
     except RunConflictError as exc:
