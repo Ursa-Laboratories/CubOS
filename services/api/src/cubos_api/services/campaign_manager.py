@@ -165,7 +165,51 @@ class CampaignManager:
             if record is None:
                 raise KeyError(campaign_id)
             if record.state in TERMINAL:
-                raise RunConflictError("Campaign has already stopped")
+                if action != "resume" or record.state != "failed" or not record.trials:
+                    raise RunConflictError("Campaign has already stopped")
+                trial = record.trials[-1]
+                child = self.runs.get(trial.run_id)
+                if child is None or child.state != "succeeded" or child.result is None:
+                    raise RunConflictError(
+                        "The failed campaign has no completed trial to recover"
+                    )
+                trial.objective = extract_result_objective(
+                    child.result, record.spec.objective.path
+                )
+                trial.measurement = extract_result_context(
+                    child.result, record.spec.objective.path
+                )
+                objectives = [
+                    item.objective for item in record.trials
+                    if item.objective is not None
+                ]
+                record.best_objective = (
+                    min(objectives) if record.spec.objective.direction == "minimize"
+                    else max(objectives)
+                )
+                bundle = tuple(
+                    (self.base / campaign_id / f"{name}.yaml").read_text()
+                    for name in ("gantry", "deck", "protocol")
+                )
+                if not record.spec.mock_mode:
+                    from cubos_api.routers import gantry as gantry_router
+                    session = gantry_router.current_session()
+                    if session is None or not session.connected:
+                        raise ValueError(
+                            "Connect the calibrated gantry before resuming a real campaign"
+                        )
+                self.runs.reserve_campaign(campaign_id)
+                record.state = "running"
+                record.stop_reason = None
+                record.error = None
+                record.pause_requested = False
+                record.stop_requested = False
+                self._save(record)
+                threading.Thread(
+                    target=self._loop, args=(campaign_id, bundle), daemon=True,
+                    name=f"cubos-campaign-{campaign_id}",
+                ).start()
+                return record.model_copy(deep=True)
             if action == "pause":
                 record.pause_requested = True
             elif action == "resume":
