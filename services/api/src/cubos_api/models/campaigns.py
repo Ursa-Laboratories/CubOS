@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class CampaignModel(BaseModel):
@@ -126,6 +126,15 @@ class ColorCampaignSetup(CampaignModel):
     roi_fraction: float = Field(default=0.5, gt=0, le=1)
     fluid_state_id: int | None = Field(default=None, gt=0)
     mock_mode: bool = False
+
+    @field_validator("target_lab", mode="before")
+    @classmethod
+    def accept_json_lab_triplet(cls, value):
+        # JSON has arrays rather than tuples. Normalize the browser payload before
+        # strict validation while retaining a fixed-length tuple in the model.
+        if isinstance(value, list):
+            return tuple(value)
+        return value
 
     @model_validator(mode="after")
     def unique_resources(self):

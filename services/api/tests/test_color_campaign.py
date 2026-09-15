@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import yaml
@@ -56,3 +57,10 @@ def test_target_cannot_be_reused_as_candidate():
     import pytest
     with pytest.raises(ValueError, match="Target well"):
         ColorCampaignSetup.model_validate(raw)
+
+
+def test_setup_accepts_target_lab_from_json_array():
+    raw = setup().model_dump(mode="json")
+    assert isinstance(raw["target_lab"], list)
+    parsed = ColorCampaignSetup.model_validate_json(json.dumps(raw))
+    assert parsed.target_lab == (42.0, 12.0, 18.0)
