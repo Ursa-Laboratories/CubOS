@@ -262,6 +262,12 @@ class RunStore:
                     f"Color-target analysis revision {revision} already exists"
                 )
             complete_artifact = {**artifact, "revision": revision}
+            analysis = complete_artifact.get("analysis")
+            if isinstance(analysis, dict):
+                complete_artifact["analysis"] = {
+                    **analysis,
+                    "annotated_preview_path": str(image_path),
+                }
             image_tmp = image_path.with_suffix(".png.tmp")
             shutil.copyfile(annotated_preview, image_tmp)
             image_tmp.replace(image_path)

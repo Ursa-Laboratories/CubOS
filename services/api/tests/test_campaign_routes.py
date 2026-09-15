@@ -102,7 +102,8 @@ def test_color_target_reanalysis_uses_saved_frame_and_persists_revision(
         assert kwargs["expected_center"] == (0.25, 0.75)
         assert kwargs["acquisition_context"] == acquisition
         analysis_calls.append(len(analysis_calls) + 1)
-        revised_preview = image_root / "target.reanalysis.png"
+        source_path = Path(path)
+        revised_preview = source_path.with_name(f"{source_path.stem}.analysis.png")
         revised_preview.write_bytes(f"revised preview {analysis_calls[-1]}".encode())
         return {
             "image_path": str(frozen_image),
@@ -246,6 +247,84 @@ def test_color_target_reanalysis_rejects_out_of_root_saved_path(
     )
 
     assert response.status_code == 409
+
+
+def test_color_target_reanalysis_real_analyzer_accepts_frozen_run_source(
+    monkeypatch, tmp_path: Path,
+):
+    import cv2
+    import numpy as np
+    from cubos.optimization import analyze_color_image
+
+    image_root = tmp_path / "images"
+    image_root.mkdir()
+    monkeypatch.setenv("CUBOS_IMAGES_DIR", str(image_root))
+    raw_image = image_root / "real-target.tiff"
+    frame = np.full((720, 1280, 3), (48, 52, 58), dtype=np.uint8)
+    cv2.circle(frame, (640, 360), 46, (58, 151, 208), -1, lineType=cv2.LINE_AA)
+    assert cv2.imwrite(str(raw_image), frame)
+    acquisition = {
+        "requested_capture_profile": {"fingerprint": "stable-capture"},
+        "actual_capture_profile": {"fingerprint": "stable-capture"},
+        "image_height": None,
+    }
+    initial = analyze_color_image(
+        raw_image,
+        roi_fraction=0.5,
+        acquisition_context=acquisition,
+    )
+    digest = hashlib.sha256(raw_image.read_bytes()).hexdigest()
+    initial["frame_metadata"] = {"image_sha256": digest}
+    initial["well_identity"] = {
+        "expected_well": "plate.A1",
+        "source": "protocol_position",
+        "verification_status": "not_verified_by_cv",
+    }
+    manager = get_run_manager()
+    record = RunRecord(
+        run_id="real-analyzer-target",
+        state="succeeded",
+        created_at=time.time(),
+        mock_mode=False,
+        metadata={"active_learning_target": "plate.A1"},
+        result={"results": [None, initial]},
+    )
+    manager.store.create(record, gantry_yaml="g", deck_yaml="d", protocol_yaml="p")
+    manager.store.freeze_color_target_source(
+        record,
+        raw_image,
+        allowed_root=image_root,
+        capture_sha256=digest,
+        initial_analysis=initial,
+        annotated_preview=Path(initial["annotated_preview_path"]),
+    )
+    manager.store.write_result(record, record.result)
+    manager.store.write(record)
+
+    response = api_request(
+        create_app(),
+        "POST",
+        "/api/v1/campaigns/color-target/real-analyzer-target/reanalyze",
+        json={
+            "expected_center": [0.5, 0.5],
+            "expected_center_source": "operator_selected",
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["measurement_status"] == "accepted"
+    assert body["quality"]["flags"] == []
+    assert body["analysis_revision"] == 1
+    stored_preview = Path(body["annotated_preview_path"])
+    assert stored_preview == manager.store.artifact_path(
+        "real-analyzer-target", "color-target-analysis-1.png",
+    )
+    assert stored_preview.is_file()
+    staging = manager.store.artifact_path(
+        "real-analyzer-target", "color-target-source.tiff",
+    ).with_name("color-target-source.analysis.png")
+    assert not staging.exists()
 
 
 def test_real_color_setup_rejects_unprofiled_legacy_target(tmp_path: Path):

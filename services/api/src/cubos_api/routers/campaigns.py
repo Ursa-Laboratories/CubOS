@@ -313,43 +313,50 @@ def reanalyze_color_target(run_id: str, body: ColorTargetReanalysisRequest):
     try:
         transaction = manager.store.color_target_analysis_transaction()
         with transaction:
-            analysis = analyze_color_image(
-                image_path,
-                roi_fraction=float(original.get("roi_fraction", 0.5)),
-                expected_center=body.expected_center,
-                expected_center_source=body.expected_center_source,
-                acquisition_context=acquisition if isinstance(acquisition, Mapping) else None,
-            )
-            analysis["well_identity"] = original.get("well_identity") or {
-            "expected_well": record.metadata["active_learning_target"],
-            "source": "protocol_position",
-                "verification_status": "not_verified_by_cv",
-            }
-            annotated = analysis.get("annotated_preview_path")
-            if not isinstance(annotated, str):
-                raise ValueError("Reanalysis did not produce an annotated preview")
-            annotated_path = Path(annotated).expanduser().resolve()
-            root = default_images_dir().expanduser().resolve()
+            staging_path = image_path.with_name(
+                f"{image_path.stem}.analysis.png"
+            ).resolve()
             try:
-                annotated_path.relative_to(root)
-            except ValueError as exc:
-                raise ValueError(
-                    "Reanalysis preview is outside the configured image root"
-                ) from exc
-            digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
-            artifact = {
-                "schema": "cubos.color-target-reanalysis.v1",
-                "source_image_sha256": digest,
-                "expected_center": list(body.expected_center),
-                "expected_center_source": body.expected_center_source,
-                "expected_well": record.metadata["active_learning_target"],
-                "analysis": analysis,
-            }
-            _, complete_artifact = manager.store.append_color_target_analysis(
-                record,
-                artifact=artifact,
-                annotated_preview=annotated_path,
-            )
+                staging_path.unlink(missing_ok=True)
+                analysis = analyze_color_image(
+                    image_path,
+                    roi_fraction=float(original.get("roi_fraction", 0.5)),
+                    expected_center=body.expected_center,
+                    expected_center_source=body.expected_center_source,
+                    acquisition_context=(
+                        acquisition if isinstance(acquisition, Mapping) else None
+                    ),
+                )
+                analysis["well_identity"] = original.get("well_identity") or {
+                    "expected_well": record.metadata["active_learning_target"],
+                    "source": "protocol_position",
+                    "verification_status": "not_verified_by_cv",
+                }
+                annotated = analysis.get("annotated_preview_path")
+                if not isinstance(annotated, str):
+                    raise ValueError("Reanalysis did not produce an annotated preview")
+                annotated_path = Path(annotated).expanduser().resolve()
+                if annotated_path != staging_path:
+                    raise ValueError(
+                        "Reanalysis preview is not the expected frozen-source derivative"
+                    )
+                digest = hashlib.sha256(image_path.read_bytes()).hexdigest()
+                artifact = {
+                    "schema": "cubos.color-target-reanalysis.v1",
+                    "source_image_sha256": digest,
+                    "expected_center": list(body.expected_center),
+                    "expected_center_source": body.expected_center_source,
+                    "expected_well": record.metadata["active_learning_target"],
+                    "analysis": analysis,
+                }
+                _, complete_artifact = manager.store.append_color_target_analysis(
+                    record,
+                    artifact=artifact,
+                    annotated_preview=annotated_path,
+                )
+                analysis = complete_artifact["analysis"]
+            finally:
+                staging_path.unlink(missing_ok=True)
     except (FileExistsError, OSError, RuntimeError, ValueError) as exc:
         raise HTTPException(409, f"{type(exc).__name__}: {exc}") from exc
     return {
