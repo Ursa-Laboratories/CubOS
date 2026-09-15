@@ -104,6 +104,40 @@ class Observation(CampaignModel):
     value: float
 
 
+class ColorTargetRequest(CampaignModel):
+    gantry_file: str = Field(min_length=1, max_length=255)
+    deck_file: str = Field(min_length=1, max_length=255)
+    target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
+    camera_instrument: str = Field(default="camera", min_length=1, max_length=80)
+    roi_fraction: float = Field(default=0.5, gt=0, le=1)
+    mock_mode: bool = False
+
+
+class ColorCampaignSetup(CampaignModel):
+    gantry_file: str = Field(min_length=1, max_length=255)
+    deck_file: str = Field(min_length=1, max_length=255)
+    target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
+    target_lab: tuple[float, float, float]
+    red_source: str = Field(default="stocks.A1", min_length=1, max_length=160)
+    yellow_source: str = Field(default="stocks.A2", min_length=1, max_length=160)
+    blue_source: str = Field(default="stocks.A3", min_length=1, max_length=160)
+    candidate_wells: list[str] = Field(min_length=6, max_length=32)
+    camera_instrument: str = Field(default="camera", min_length=1, max_length=80)
+    roi_fraction: float = Field(default=0.5, gt=0, le=1)
+    fluid_state_id: int | None = Field(default=None, gt=0)
+    mock_mode: bool = False
+
+    @model_validator(mode="after")
+    def unique_resources(self):
+        if len(set(self.candidate_wells)) != len(self.candidate_wells):
+            raise ValueError("Candidate wells must be unique")
+        if self.target_well in self.candidate_wells:
+            raise ValueError("Target well cannot also be a candidate well")
+        if len(self.candidate_wells) * 3 > 96:
+            raise ValueError("Color matching requires three fresh tips per candidate")
+        return self
+
+
 class CampaignTrial(CampaignModel):
     index: int
     parameters: dict[str, float]

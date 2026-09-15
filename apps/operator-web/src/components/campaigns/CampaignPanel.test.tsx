@@ -97,7 +97,7 @@ it("builds the color-matching campaign preset", async () => {
     { command: "measure_color", args: { instrument: "camera", position: "plate.A2", reference_lab: [50, 10, 20] } },
   ];
   render(<CampaignPanel gantryFile="g" deckFile="d" protocolFile="p" protocolSteps={protocolSteps} />);
-  fireEvent.click(screen.getByRole("button", { name: "Use color-matching preset" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use loaded protocol" }));
   expect(screen.getByLabelText("Campaign name")).toHaveValue("CIEDE2000 color matching");
   expect(screen.getByLabelText("GP kernel")).toHaveValue("matern52");
   expect(screen.getByLabelText("Objective result path")).toHaveValue("results.8.delta_e_00");
@@ -135,4 +135,49 @@ it("shows target, current, and best color results", async () => {
   expect(readout).toHaveTextContent("Current");
   expect(readout).toHaveTextContent("Best formulation");
   expect(readout).toHaveTextContent("red_ul 125 µL");
+});
+
+it("reads the selected target and builds the complete color campaign", async () => {
+  let setupBody: Record<string, unknown> | undefined;
+  const prepared = {
+    ...record().spec,
+    name: "CIEDE2000 color matching",
+    protocol_file: "ade_color_matching_1234.yaml",
+    objective: { mode: "result" as const, path: "results.11.delta_e_00", direction: "minimize" as const },
+  };
+  const selectedRun = vi.fn();
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    const path = String(input);
+    if (path.endsWith("/color-target")) {
+      expect(JSON.parse(String(init?.body))).toMatchObject({
+        target_well: "plate.C4",
+        gantry_file: "g.yaml",
+        deck_file: "d.yaml",
+      });
+      return new Response(JSON.stringify({
+        run_id: "target-1",
+        state: "succeeded",
+        result: { results: [null, { lab: [42, 12, 18] }] },
+        error: null,
+      }), { status: 200 });
+    }
+    if (path.endsWith("/color-setup")) {
+      setupBody = JSON.parse(String(init?.body));
+      return new Response(JSON.stringify(prepared), { status: 200 });
+    }
+    return new Response("[]", { status: 200 });
+  });
+  render(<CampaignPanel gantryFile="g.yaml" deckFile="d.yaml" protocolFile="old.yaml" onRunSelected={selectedRun} />);
+  fireEvent.change(screen.getByLabelText("Target well"), { target: { value: "plate.C4" } });
+  fireEvent.click(screen.getByRole("button", { name: "Read plate.C4 target & build campaign" }));
+  await waitFor(() => expect(screen.getByLabelText("Campaign name")).toHaveValue("CIEDE2000 color matching"));
+  expect(selectedRun).toHaveBeenCalledWith("target-1");
+  expect(setupBody).toMatchObject({
+    target_well: "plate.C4",
+    target_lab: [42, 12, 18],
+    red_source: "stocks.A1",
+    yellow_source: "stocks.A2",
+    blue_source: "stocks.A3",
+  });
+  expect(screen.getByText(/Campaign protocol ade_color_matching_1234.yaml is ready/)).toBeInTheDocument();
 });

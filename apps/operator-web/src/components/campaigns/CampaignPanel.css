@@ -32,6 +32,15 @@
 .campaign-color-card { display:flex; align-items:center; justify-content:space-between; gap:18px; border-color:color-mix(in srgb,var(--z-accent) 45%,var(--z-border)); }
 .campaign-color-card h4 { margin-bottom:4px; }
 .campaign-color-card p { margin:0; max-width:720px; }
+.campaign-color-setup { border-color:color-mix(in srgb,var(--z-accent) 45%,var(--z-border)); }
+.campaign-color-setup .campaign-toolbar { justify-content:space-between; align-items:flex-start; }
+.campaign-color-setup .campaign-toolbar p { margin:0; max-width:760px; }
+.campaign-color-fields { margin:12px 0; grid-template-columns:repeat(3,minmax(0,1fr)); }
+.campaign-candidate-field { grid-column:1 / -1; }
+.campaign-candidate-field textarea { min-height:58px; resize:vertical; }
+.campaign-color-limits { margin-bottom:10px; padding:8px; border-radius:6px; background:var(--z-surface-sunken); color:var(--z-text-muted); font-size:12px; }
+.campaign-target-chip { display:flex; align-items:center; gap:7px; font-size:12px; }
+.campaign-target-chip .campaign-swatch { width:28px; height:28px; }
 .campaign-bindings { max-height:130px; min-width:250px; overflow:auto; margin-top:6px; padding:5px; background:var(--z-surface-sunken); border-radius:5px; }
 .campaign-bindings label { white-space:normal; }
 .campaign-sequence { display:grid; grid-template-columns:auto minmax(110px,.6fr) minmax(160px,1fr) minmax(180px,1fr); gap:8px; align-items:start; margin-top:8px; }
@@ -50,4 +59,4 @@
 .campaign-color-samples>div { display:grid; grid-template-columns:42px auto; grid-template-rows:auto auto; column-gap:8px; align-items:center; min-width:180px; }
 .campaign-swatch { grid-row:1 / 3; width:40px; height:40px; border-radius:50%; border:1px solid var(--z-border-strong); box-shadow:inset 0 0 0 2px color-mix(in srgb,white 25%,transparent); }
 .campaign-color-samples small { color:var(--z-text-muted); }
-@media (max-width:780px) { .campaign-results-grid { grid-template-columns:1fr; } .campaign-sequence { grid-template-columns:1fr; } .campaign-color-card { align-items:flex-start; flex-direction:column; } }
+@media (max-width:780px) { .campaign-results-grid { grid-template-columns:1fr; } .campaign-sequence { grid-template-columns:1fr; } .campaign-color-card { align-items:flex-start; flex-direction:column; } .campaign-color-fields { grid-template-columns:1fr; } }

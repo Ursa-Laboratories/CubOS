@@ -30,6 +30,17 @@ export interface CampaignRecord {
   error: string | null; pause_requested: boolean; stop_requested: boolean;
 }
 export interface ProtocolStep { command: string; args: Record<string, unknown> }
+export interface ColorCampaignSetup {
+  gantry_file: string; deck_file: string; target_well: string;
+  target_lab: [number, number, number]; red_source: string;
+  yellow_source: string; blue_source: string; candidate_wells: string[];
+  camera_instrument: string; roi_fraction: number;
+  fluid_state_id: number | null; mock_mode: boolean;
+}
+export interface ColorTargetRun {
+  run_id: string; state: "queued" | "running" | "cancel_requested" | "succeeded" | "failed" | "cancelled";
+  result: unknown; error: string | null;
+}
 export interface CampaignPanelProps {
   gantryFile: string | null; deckFile: string | null; protocolFile: string | null;
   protocolSteps?: ProtocolStep[]; disabledReason?: string | null;

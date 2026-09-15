@@ -120,6 +120,11 @@ const CANDIDATE_WELLS = [
   ...Array.from({ length: 12 }, (_, index) => `plate.B${index + 1}`),
 ];
 
+const PLATE_WELLS = Array.from({ length: 96 }, (_, index) => {
+  const row = String.fromCharCode(65 + Math.floor(index / 12));
+  return `plate.${row}${(index % 12) + 1}`;
+});
+
 const TIP_SLOTS = Array.from({ length: 96 }, (_, index) => {
   const row = String.fromCharCode(65 + Math.floor(index / 12));
   return `tips.${row}${(index % 12) + 1}`;
@@ -330,6 +335,16 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [observation, setObservation] = useState("");
   const [validated, setValidated] = useState(false);
   const [presetIssues, setPresetIssues] = useState<string[]>([]);
+  const [targetWell, setTargetWell] = useState("plate.A1");
+  const [redSource, setRedSource] = useState("stocks.A1");
+  const [yellowSource, setYellowSource] = useState("stocks.A2");
+  const [blueSource, setBlueSource] = useState("stocks.A3");
+  const [candidateText, setCandidateText] = useState(CANDIDATE_WELLS.join(", "));
+  const [cameraInstrument, setCameraInstrument] = useState("camera");
+  const [roiFraction, setRoiFraction] = useState(0.5);
+  const [targetLab, setTargetLab] = useState<number[] | null>(null);
+  const [targetBusy, setTargetBusy] = useState(false);
+  const [targetStatus, setTargetStatus] = useState<string | null>(null);
 
   useEffect(() => localStorage.setItem(EDITOR_KEY, JSON.stringify(spec)), [spec]);
   useEffect(() => {
@@ -439,6 +454,63 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     setValidation([]);
     setValidated(false);
   };
+  const readTargetAndPrepare = async () => {
+    if (!gantryFile || !deckFile) {
+      setError("Select the station gantry and deck before reading the target.");
+      return;
+    }
+    const candidateWells = candidateText.split(/[\n,]/).map((value) => value.trim()).filter(Boolean);
+    setTargetBusy(true);
+    setError(null);
+    setTargetStatus(`Reading ${targetWell}; the camera will move under native run control.`);
+    try {
+      let run = await campaignApi.readColorTarget({
+        gantry_file: gantryFile,
+        deck_file: deckFile,
+        target_well: targetWell,
+        camera_instrument: cameraInstrument,
+        roi_fraction: roiFraction,
+        mock_mode: false,
+      });
+      onRunSelected?.(run.run_id);
+      while (["queued", "running", "cancel_requested"].includes(run.state)) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        run = await campaignApi.getColorTarget(run.run_id);
+      }
+      if (run.state !== "succeeded") {
+        throw new Error(run.error || `Target reading ${run.state}.`);
+      }
+      const results = (run.result as { results?: unknown[] } | null)?.results;
+      const measurement = Array.isArray(results) ? results[1] as Record<string, unknown> | undefined : undefined;
+      const lab = numericTriplet(measurement?.lab);
+      if (!lab) throw new Error("Target run completed without a valid Lab measurement.");
+      const prepared = await campaignApi.prepareColor({
+        gantry_file: gantryFile,
+        deck_file: deckFile,
+        target_well: targetWell,
+        target_lab: lab as [number, number, number],
+        red_source: redSource,
+        yellow_source: yellowSource,
+        blue_source: blueSource,
+        candidate_wells: candidateWells,
+        camera_instrument: cameraInstrument,
+        roi_fraction: roiFraction,
+        fluid_state_id: spec.fluid_state_id,
+        mock_mode: spec.mock_mode,
+      });
+      setTargetLab(lab);
+      setSpec(prepared);
+      setPresetIssues([]);
+      setValidation([]);
+      setValidated(false);
+      setTargetStatus(`Target read from ${targetWell}. Campaign protocol ${prepared.protocol_file} is ready to validate.`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setTargetStatus(null);
+    } finally {
+      setTargetBusy(false);
+    }
+  };
   const bestTrace = useMemo(() => {
     let best: number | null = null;
     return (selected?.trials ?? []).map((trial) => {
@@ -491,15 +563,29 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         </div>
       )}
 
-      <div className="campaign-card campaign-color-card">
-        <div>
-          <h4>Color matching starter</h4>
-          <p className="campaign-note">
-            Three stocks, 300 µL total, six simplex initialization points, Matérn 5/2 GP,
-            expected improvement, and automatic ΔE00 minimization. The target recipe stays hidden.
-          </p>
+      <div className="campaign-card campaign-color-setup">
+        <div className="campaign-toolbar">
+          <div>
+            <h4>Color matching setup</h4>
+            <p className="campaign-note">Choose the existing target and three dye stocks here. Reading the target creates the complete candidate protocol and campaign draft automatically.</p>
+          </div>
+          <button type="button" style={theme.btn.secondary} onClick={applyColorPreset}>Use loaded protocol</button>
         </div>
-        <button type="button" style={theme.btn.secondary} onClick={applyColorPreset}>Use color-matching preset</button>
+        <div className="campaign-fields campaign-color-fields">
+          <label className="campaign-field">Target well<select aria-label="Target well" value={targetWell} onChange={(event) => setTargetWell(event.target.value)}>{PLATE_WELLS.map((well) => <option key={well}>{well}</option>)}</select></label>
+          <label className="campaign-field">Red stock<input aria-label="Red stock" value={redSource} onChange={(event) => setRedSource(event.target.value)} /></label>
+          <label className="campaign-field">Yellow stock<input aria-label="Yellow stock" value={yellowSource} onChange={(event) => setYellowSource(event.target.value)} /></label>
+          <label className="campaign-field">Blue stock<input aria-label="Blue stock" value={blueSource} onChange={(event) => setBlueSource(event.target.value)} /></label>
+          <label className="campaign-field">Camera<input aria-label="Color camera" value={cameraInstrument} onChange={(event) => setCameraInstrument(event.target.value)} /></label>
+          <label className="campaign-field">ROI fraction<input aria-label="Color ROI fraction" type="number" min="0.1" max="1" step="0.05" value={roiFraction} onChange={(event) => setRoiFraction(Number(event.target.value))} /></label>
+          <label className="campaign-field campaign-candidate-field">Candidate wells<textarea aria-label="Color candidate wells" value={candidateText} onChange={(event) => setCandidateText(event.target.value)} /></label>
+        </div>
+        <div className="campaign-color-limits">50–200 µL per dye · 300 µL total · 5 µL grid · six simplex starts · ΔE00 target ≤ 3</div>
+        <div className="campaign-actions">
+          <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>{targetBusy ? "Reading target…" : `Read ${targetWell} target & build campaign`}</button>
+          {targetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${targetLab[0]}% ${targetLab[1]} ${targetLab[2]})` }} />Lab {targetLab.map((value) => value.toFixed(2)).join(", ")}</span>}
+          {targetStatus && <span className="campaign-note">{targetStatus}</span>}
+        </div>
       </div>
       {presetIssues.length > 0 && (
         <div className="campaign-banner campaign-info">

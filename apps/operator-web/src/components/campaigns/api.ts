@@ -1,4 +1,4 @@
-import type { CampaignRecord, CampaignSpec } from "./types";
+import type { CampaignRecord, CampaignSpec, ColorCampaignSetup, ColorTargetRun } from "./types";
 
 const base = "/api/v1/campaigns";
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
@@ -17,4 +17,8 @@ export const campaignApi = {
   stop: (id: string | number) => post<CampaignRecord>(`/${id}/stop`, {}),
   cancel: (id: string | number) => post<CampaignRecord>(`/${id}/cancel`, {}),
   observation: (id: string | number, value: number) => post<CampaignRecord>(`/${id}/observation`, { value }),
+  readColorTarget: (body: Omit<ColorCampaignSetup, "target_lab" | "red_source" | "yellow_source" | "blue_source" | "candidate_wells" | "fluid_state_id">) =>
+    post<ColorTargetRun>("/color-target", body),
+  getColorTarget: (runId: string) => request<ColorTargetRun>(`/color-target/${runId}`),
+  prepareColor: (body: ColorCampaignSetup) => post<CampaignSpec>("/color-setup", body),
 };
