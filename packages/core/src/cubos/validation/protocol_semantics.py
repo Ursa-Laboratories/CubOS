@@ -39,6 +39,7 @@ from cubos.protocol_engine.scan_args import (
     normalize_scan_arguments,
     surface_detection_enabled,
 )
+from cubos.instruments.potentiostat.interface import PotentiostatInstrument
 
 from .errors import ProtocolSemanticViolation
 
@@ -965,6 +966,92 @@ def _validate_measure_command(
         relative_action=relative_action,
         method_kwargs=normalized.method_kwargs,
     ))
+    return violations
+
+
+def _validate_rinse_command(
+    *,
+    step_index: int,
+    args: dict[str, Any],
+    instrumented_gantry: InstrumentedGantry,
+    deck: Deck,
+    gantry: GantryConfig,
+    current_poses: dict[str, Point3D],
+) -> list[ProtocolSemanticViolation]:
+    violations: list[ProtocolSemanticViolation] = []
+    command = "rinse"
+    instrument = args.get("instrument")
+    vial = args.get("vial")
+    height = args.get("measurement_height")
+    instr = instrumented_gantry.instruments.get(instrument)
+    if instr is None:
+        return [_violation(step_index, command, f"unknown instrument {instrument!r}.")]
+    if not isinstance(instr, PotentiostatInstrument):
+        violations.append(_violation(
+            step_index, command,
+            f"instrument {instrument!r} must be a PotentiostatInstrument.",
+        ))
+    finite = _finite_field_violation(step_index, command, "measurement_height", height)
+    if finite is not None:
+        return violations + [finite]
+    if height >= 0:
+        violations.append(_violation(
+            step_index, command,
+            f"measurement_height ({height}) must be negative (below the vial rim).",
+        ))
+    try:
+        target = deck.resolve_labware(vial)
+        coord = deck.resolve_coordinate(vial)
+    except (KeyError, AttributeError, ValueError) as exc:
+        return violations + [_violation(
+            step_index, command, f"vial {vial!r} cannot be resolved on the deck: {exc}",
+        )]
+    if not isinstance(target, Vial):
+        violations.append(_violation(
+            step_index, command,
+            f"target {vial!r} must resolve to a single Vial.",
+        ))
+        return violations
+    safe_z = _resolved_safe_z(gantry)
+    action_z = coord.z + float(height)
+    if safe_z <= coord.z:
+        violations.append(_violation(
+            step_index, command,
+            f"safe_z ({safe_z}) must be above vial rim Z ({coord.z}) for retraction.",
+        ))
+    if action_z > safe_z:
+        violations.append(_violation(
+            step_index, command,
+            f"resolved rinse action Z ({action_z:.3f}) is above safe_z ({safe_z}).",
+        ))
+    safe_pose = (coord.x, coord.y, safe_z)
+    action_pose = (coord.x, coord.y, action_z)
+    violations.extend(_validate_gantry_waypoint(
+        step_index=step_index, command_name=command, gantry=gantry,
+        label=f"rinse {vial!r} safe_z", instrument=instrument,
+        instrumented_gantry=instrumented_gantry, x=coord.x, y=coord.y, z=safe_z,
+    ))
+    violations.extend(_validate_gantry_waypoint(
+        step_index=step_index, command_name=command, gantry=gantry,
+        label=f"rinse {vial!r} action_z", instrument=instrument,
+        instrumented_gantry=instrumented_gantry, x=coord.x, y=coord.y, z=action_z,
+    ))
+    violations.extend(_validate_machine_structure_segment(
+        step_index=step_index, command_name=command, gantry=gantry,
+        label=f"rinse {vial!r} immersion", instrument=instrument,
+        start=safe_pose, end=action_pose,
+    ))
+    violations.extend(_validate_known_transit(
+        step_index=step_index,
+        command_name=command,
+        gantry=gantry,
+        label=f"rinse {vial!r} transit",
+        instrument=instrument,
+        current=current_poses.get(instrument),
+        target=safe_pose,
+        travel_z=safe_z,
+    ))
+    current_poses[instrument] = safe_pose
     return violations
 
 
@@ -1949,6 +2036,15 @@ def validate_protocol_semantics(
                 gantry=gantry,
                 current_poses=current_poses,
                 pipette_tip_extension=pipette_tip_state.tip_extension,
+            ))
+        elif step.command_name == "rinse":
+            violations.extend(_validate_rinse_command(
+                step_index=step.index,
+                args=step.args,
+                instrumented_gantry=instrumented_gantry,
+                deck=deck,
+                gantry=gantry,
+                current_poses=current_poses,
             ))
         elif step.command_name == "scan":
             violations.extend(_validate_scan_command(
