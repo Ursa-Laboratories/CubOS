@@ -1,7 +1,7 @@
 """Operator-authored active-learning campaign specifications and records."""
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
@@ -44,7 +44,9 @@ class Objective(CampaignModel):
 
 class Optimizer(CampaignModel):
     method: Literal["ei", "lcb", "random"] = "ei"
+    kernel: Literal["matern52", "rbf"] = "matern52"
     initial_trials: int = Field(default=3, ge=1, le=100)
+    initial_points: list[dict[str, float]] = Field(default_factory=list, max_length=100)
     exploration: float = Field(default=0.05, ge=0, le=10)
     seed: int = Field(default=7, ge=0, le=2**31-1)
 
@@ -83,6 +85,8 @@ class CampaignSpec(CampaignModel):
             raise ValueError("Parameter names must be unique")
         if self.optimizer.initial_trials > self.stop.max_trials:
             raise ValueError("Initial trials must not exceed the trial budget")
+        if len(self.optimizer.initial_points) > self.optimizer.initial_trials:
+            raise ValueError("Initial design must fit within initial_trials")
         if self.sum_constraint:
             selected = self.sum_constraint.parameters
             if len(set(selected)) != len(selected) or not set(selected) <= set(names):
@@ -106,6 +110,7 @@ class CampaignTrial(CampaignModel):
     run_id: str
     state: str = "queued"
     objective: float | None = None
+    measurement: dict[str, Any] | None = None
     error: str | None = None
 
 

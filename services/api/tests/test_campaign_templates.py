@@ -4,6 +4,7 @@ import yaml
 from cubos_api.services.campaign_templates import (
     TemplateError,
     compile_trial,
+    extract_result_context,
     extract_result_objective,
     validate_template,
 )
@@ -90,6 +91,22 @@ def test_extract_objective_supports_nested_lists_and_root_numeric():
     result = {"results": [[{"force": [0.1, 2.75]}]]}
     assert extract_result_objective(result, "results.0.0.force.1") == 2.75
     assert extract_result_objective(3, "") == 3.0
+
+
+def test_extract_color_context_keeps_compact_measurement_fields():
+    result = {"results": [{
+        "rgb": [120, 80, 40],
+        "lab": [40, 10, 20],
+        "reference_lab": [42, 9, 18],
+        "delta_e_00": 2.1,
+        "unrelated": {"large": "payload"},
+    }]}
+    assert extract_result_context(result, "results.0.delta_e_00") == {
+        "rgb": [120, 80, 40],
+        "lab": [40, 10, 20],
+        "reference_lab": [42, 9, 18],
+        "delta_e_00": 2.1,
+    }
 
 
 @pytest.mark.parametrize("path", ["missing", "results.0.0.nope"])

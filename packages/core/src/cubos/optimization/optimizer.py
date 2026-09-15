@@ -41,8 +41,16 @@ def _constraint_ok(point, names, constraint):
         sum(point[names.index(name)] for name in constraint["parameters"]),
         constraint["total"], abs_tol=1e-7)
 
-def _kernel(a: tuple[float, ...], b: tuple[float, ...]) -> float:
-    return math.exp(-sum((x - y) ** 2 for x, y in zip(a, b)) / (2.0 * 0.3**2))
+def _kernel(
+    a: tuple[float, ...],
+    b: tuple[float, ...],
+    kind: str,
+) -> float:
+    distance = math.sqrt(sum((x - y) ** 2 for x, y in zip(a, b))) / 0.3
+    if kind == "rbf":
+        return math.exp(-(distance**2) / 2.0)
+    scaled = math.sqrt(5.0) * distance
+    return (1.0 + scaled + scaled**2 / 3.0) * math.exp(-scaled)
 
 def _grid(parameter: dict[str, Any]) -> tuple[str, float, float, float, int]:
     if not isinstance(parameter, dict) or "name" not in parameter:
@@ -100,14 +108,26 @@ def _candidate_points(parameters, constraint, rng):
             points.append(point)
     return points
 
-def suggest(parameters: list[dict], observations: list[dict], *, method: str = "ei", initial_trials: int = 3,
-            exploration: float = 0.05, seed: int = 7, direction: str = "minimize", sum_constraint: dict | None = None) -> dict[str, float]:
+def suggest(
+    parameters: list[dict],
+    observations: list[dict],
+    *,
+    method: str = "ei",
+    kernel: str = "matern52",
+    initial_trials: int = 3,
+    initial_points: list[dict[str, float]] | None = None,
+    exploration: float = 0.05,
+    seed: int = 7,
+    direction: str = "minimize",
+    sum_constraint: dict | None = None,
+) -> dict[str, float]:
     """Suggest one unobserved quantized point using random, EI, or LCB."""
     if not isinstance(parameters, list) or not parameters or len(parameters) > 8: raise ValueError("parameters must contain between 1 and 8 entries")
     parsed = [_grid(parameter) for parameter in parameters]; names = [p[0] for p in parsed]
     if len(set(names)) != len(names): raise ValueError("parameter names must be unique")
     if not isinstance(observations, list) or len(observations) > 100: raise ValueError("observations must contain at most 100 trials")
     if method not in {"ei", "lcb", "random"}: raise ValueError("method must be 'ei', 'lcb', or 'random'")
+    if kernel not in {"matern52", "rbf"}: raise ValueError("kernel must be 'matern52' or 'rbf'")
     if direction not in {"minimize", "maximize"}: raise ValueError("direction must be 'minimize' or 'maximize'")
     if isinstance(initial_trials, bool) or not isinstance(initial_trials, int) or initial_trials < 0: raise ValueError("initial_trials must be a non-negative integer")
     exploration = _finite(exploration, "exploration")
@@ -135,6 +155,33 @@ def suggest(parameters: list[dict], observations: list[dict], *, method: str = "
         if math.prod(p[4] for p in parsed) <= _GRID_LIMIT:
             raise SearchExhaustedError("all candidate points have been evaluated")
         raise ValueError("sampled candidate pool contains no unobserved point; retry with another seed")
+    canonical_initial = []
+    for point_index, raw in enumerate(initial_points or []):
+        if not isinstance(raw, dict) or set(raw) != set(names):
+            raise ValueError("each initial point must match the declared parameters")
+        supplied = tuple(
+            _finite(raw[name], f"initial_points.{point_index}.{name}")
+            for name in names
+        )
+        canonical = []
+        for value, parameter in zip(supplied, parsed):
+            index = round((value - parameter[1]) / parameter[3])
+            if not 0 <= index < parameter[4] or not math.isclose(
+                value,
+                parameter[1] + index * parameter[3],
+                abs_tol=1e-7,
+            ):
+                raise ValueError("initial point is outside the quantized feasible grid")
+            canonical.append(parameter[1] + index * parameter[3])
+        point = tuple(canonical)
+        if not _constraint_ok(point, names, sum_constraint):
+            raise ValueError("initial point violates the sum constraint")
+        canonical_initial.append(point)
+    if len(set(canonical_initial)) != len(canonical_initial):
+        raise ValueError("initial points must be unique")
+    for point in canonical_initial:
+        if point not in observed_set:
+            return dict(zip(names, point))
     if method == "random" or len(observed) < initial_trials or not observed:
         return dict(zip(names, rng.choice(remaining)))
     spans = [(p[2] - p[1]) or 1.0 for p in parsed]
@@ -142,11 +189,11 @@ def suggest(parameters: list[dict], observations: list[dict], *, method: str = "
     sign = 1.0 if direction == "minimize" else -1.0; transformed = [sign * value for value in values]
     mean = sum(transformed) / len(transformed); scale = math.sqrt(sum((v - mean) ** 2 for v in transformed) / len(transformed)) or 1.0
     ys = [(v - mean) / scale for v in transformed]
-    lower = _cholesky([[_kernel(a, b) + (_JITTER if i == j else 0.0) for j, b in enumerate(xs)] for i, a in enumerate(xs)])
+    lower = _cholesky([[_kernel(a, b, kernel) + (_JITTER if i == j else 0.0) for j, b in enumerate(xs)] for i, a in enumerate(xs)])
     alpha = _solve_cholesky(lower, ys); best = min(ys); scored = []
     score_points = remaining if len(remaining) <= 1024 else rng.sample(remaining, 1024)
     for point in score_points:
-        x = tuple((value - p[1]) / span for value, p, span in zip(point, parsed, spans)); correlations = [_kernel(x, training) for training in xs]
+        x = tuple((value - p[1]) / span for value, p, span in zip(point, parsed, spans)); correlations = [_kernel(x, training, kernel) for training in xs]
         prediction = sum(k * a for k, a in zip(correlations, alpha)); projected = _solve_cholesky(lower, correlations)
         sigma = math.sqrt(max(1e-12, 1.0 - sum(value * value for value in projected)))
         if method == "ei":

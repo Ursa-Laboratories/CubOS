@@ -4,7 +4,7 @@ import CampaignPanel from "./CampaignPanel";
 import type { CampaignRecord } from "./types";
 
 const record = (overrides: Partial<CampaignRecord> = {}): CampaignRecord => ({
-  campaign_id: "c-1", spec: { name: "Sweep", gantry_file: "g.yaml", deck_file: "d.yaml", protocol_file: "p.yaml", parameters: [], sequences: [], objective: { mode: "result", path: "result.value", direction: "maximize" }, optimizer: { method: "ei", initial_trials: 3, exploration: .1, seed: 42 }, stop: { max_trials: 4, target_value: null, patience: 2, min_improvement: 0, max_seconds: null }, mock_mode: true, fluid_state_id: null }, state: "running", created_at: "", updated_at: "", active_run_id: "run-7", trials: [], best_objective: null, stop_reason: null, error: null, pause_requested: false, stop_requested: false, ...overrides,
+  campaign_id: "c-1", spec: { name: "Sweep", gantry_file: "g.yaml", deck_file: "d.yaml", protocol_file: "p.yaml", parameters: [], sequences: [], objective: { mode: "result", path: "result.value", direction: "maximize" }, optimizer: { method: "ei", kernel: "matern52", initial_trials: 3, initial_points: [], exploration: .1, seed: 42 }, stop: { max_trials: 4, target_value: null, patience: 2, min_improvement: 0, max_seconds: null }, mock_mode: true, fluid_state_id: null }, state: "running", created_at: "", updated_at: "", active_run_id: "run-7", trials: [], best_objective: null, stop_reason: null, error: null, pause_requested: false, stop_requested: false, ...overrides,
 });
 
 afterEach(() => { vi.restoreAllMocks(); localStorage.clear(); });
@@ -81,4 +81,58 @@ it("sends optimizer controls and shared parameter bindings", async () => {
   fireEvent.click(screen.getByRole("checkbox",{name:"Step 2: transfer.volume_ul"}));
   fireEvent.click(screen.getByRole("button",{name:"Validate"}));
   await waitFor(()=>expect(submitted).toMatchObject({spec:{optimizer:{method:"lcb",initial_trials:2,seed:17},parameters:[{bindings:[{step_index:0,argument:"volume_ul"},{step_index:1,argument:"volume_ul"}]}]}}));
+});
+
+it("builds the color-matching campaign preset", async () => {
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("[]", { status: 200 }));
+  const protocolSteps = [
+    { command: "pick_up_tip", args: { position: "tips.A1" } },
+    { command: "transfer", args: { volume_ul: 100, destination: "plate.A2" } },
+    { command: "pick_up_tip", args: { position: "tips.A2" } },
+    { command: "transfer", args: { volume_ul: 100, destination: "plate.A2" } },
+    { command: "pick_up_tip", args: { position: "tips.A3" } },
+    { command: "transfer", args: { volume_ul: 100, destination: "plate.A2" } },
+    { command: "mix", args: { position: "plate.A2", volume_ul: 225, cycles: 3 } },
+    { command: "move", args: { instrument: "camera", position: "plate.A2" } },
+    { command: "measure_color", args: { instrument: "camera", position: "plate.A2", reference_lab: [50, 10, 20] } },
+  ];
+  render(<CampaignPanel gantryFile="g" deckFile="d" protocolFile="p" protocolSteps={protocolSteps} />);
+  fireEvent.click(screen.getByRole("button", { name: "Use color-matching preset" }));
+  expect(screen.getByLabelText("Campaign name")).toHaveValue("CIEDE2000 color matching");
+  expect(screen.getByLabelText("GP kernel")).toHaveValue("matern52");
+  expect(screen.getByLabelText("Objective result path")).toHaveValue("results.8.delta_e_00");
+  expect(screen.getByLabelText("Design 1 red_ul")).toHaveValue(200);
+  expect(screen.getByLabelText("Design 6 blue_ul")).toHaveValue(125);
+  expect(screen.getByLabelText("Sum constraint total")).toHaveValue(300);
+  expect((screen.getByLabelText("Sequence 1 values") as HTMLTextAreaElement).value).toContain("plate.B12");
+});
+
+it("shows target, current, and best color results", async () => {
+  const colorRecord = record({
+    best_objective: 2.4,
+    spec: {
+      ...record().spec,
+      parameters: [
+        { name: "red_ul", minimum: 50, maximum: 200, step: 5, bindings: [{ step_index: 0, argument: "volume_ul" }] },
+        { name: "yellow_ul", minimum: 50, maximum: 200, step: 5, bindings: [{ step_index: 1, argument: "volume_ul" }] },
+        { name: "blue_ul", minimum: 50, maximum: 200, step: 5, bindings: [{ step_index: 2, argument: "volume_ul" }] },
+      ],
+      sum_constraint: { parameters: ["red_ul", "yellow_ul", "blue_ul"], total: 300 },
+    },
+    trials: [{
+      index: 0,
+      parameters: { red_ul: 125, yellow_ul: 50, blue_ul: 125 },
+      run_id: "color-1",
+      state: "succeeded",
+      objective: 2.4,
+      measurement: { rgb: [128, 90, 40], lab: [44, 15, 30], reference_lab: [45, 12, 28], delta_e_00: 2.4 },
+    }],
+  });
+  vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify([colorRecord]), { status: 200 }));
+  render(<CampaignPanel gantryFile="g" deckFile="d" protocolFile="p" />);
+  const readout = await screen.findByLabelText("Color matching results");
+  expect(readout).toHaveTextContent("Target");
+  expect(readout).toHaveTextContent("Current");
+  expect(readout).toHaveTextContent("Best formulation");
+  expect(readout).toHaveTextContent("red_ul 125 µL");
 });

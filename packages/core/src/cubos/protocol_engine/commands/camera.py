@@ -22,6 +22,7 @@ from cubos.instruments.camera.exceptions import CameraError
 from cubos.instruments.camera.interface import CameraInstrument
 from cubos.instruments.lighting.exceptions import LightingError
 from cubos.instruments.lighting.interface import LightingInstrument
+from cubos.optimization.color import analyze_color_image
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
@@ -182,6 +183,57 @@ def capture(
     context.logger.info("capture: %s -> %s", instrument, saved)
     _persist_image(context, position, saved)
     return saved
+
+
+@protocol_command("measure_color", summary=_summaries.measure_color)
+def measure_color(
+    context: "ProtocolContext",
+    instrument: str,
+    reference_lab: tuple[float, float, float] | None = None,
+    roi_fraction: float = 0.5,
+    label: str | None = None,
+    position: str | None = None,
+) -> dict[str, object]:
+    """Capture a centered color sample and optionally score it against Lab.
+
+    This command does not move the gantry. Compose it after a routed ``move``
+    that places the camera over the well. The median sRGB value is measured in
+    a centered circular ROI and converted to CIE Lab. When ``reference_lab`` is
+    supplied, the result includes ``delta_e_00`` for automatic optimization.
+    """
+    if getattr(context.deck, "planning_enabled", False) is True:
+        from ..routing import prepared_step
+
+        planned = prepared_step(context, "measure_color")
+        if planned.data["instrument"] != instrument:
+            raise ProtocolExecutionError(
+                "Planned measure_color instrument does not match the active step."
+            )
+    camera = _get_camera(context, instrument)
+    path = build_image_path(context, label or "color", instrument)
+    try:
+        saved = camera.capture(save_path=str(path))
+        result = analyze_color_image(
+            saved,
+            roi_fraction=roi_fraction,
+            reference_lab=reference_lab,
+        )
+    except CameraError as exc:
+        raise ProtocolExecutionError(f"measure_color: {exc}") from exc
+    except (ValueError, RuntimeError) as exc:
+        raise ProtocolExecutionError(
+            f"measure_color: {type(exc).__name__}: {exc}"
+        ) from exc
+    _persist_image(context, position, saved)
+    context.logger.info(
+        "measure_color: %s -> Lab %s%s",
+        instrument,
+        result["lab"],
+        f", ΔE00 {result['delta_e_00']:.3f}"
+        if "delta_e_00" in result
+        else "",
+    )
+    return result
 
 
 def _resolve_lighting(

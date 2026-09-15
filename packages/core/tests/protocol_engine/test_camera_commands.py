@@ -12,7 +12,7 @@ from cubos.deck.labware.labware import Coordinate3D
 from cubos.instruments.camera.exceptions import CameraCaptureError
 from cubos.instruments.camera.vendors.flir import FlirCamera
 from cubos.instruments.lighting.vendors.pawduino import PawduinoLighting
-from cubos.protocol_engine.commands.camera import capture, image_well
+from cubos.protocol_engine.commands.camera import capture, image_well, measure_color
 from cubos.protocol_engine.errors import ProtocolExecutionError
 from cubos.protocol_engine.runtime import ProtocolContext
 
@@ -124,6 +124,28 @@ class TestCapture:
         camera = FlirCamera(offline=False)  # not connected -> capture raises
         with pytest.raises(ProtocolExecutionError, match="capture"):
             capture(_context({"cam": camera}), instrument="cam")
+
+    def test_measure_color_returns_lab_and_perceptual_score(
+        self, monkeypatch, tmp_path
+    ):
+        expected = {
+            "image_path": str(tmp_path / "image.tiff"),
+            "rgb": [120.0, 80.0, 40.0],
+            "lab": [38.0, 12.0, 28.0],
+            "reference_lab": [40.0, 10.0, 30.0],
+            "delta_e_00": 2.4,
+        }
+        monkeypatch.setattr(
+            "cubos.protocol_engine.commands.camera.analyze_color_image",
+            lambda *args, **kwargs: expected,
+        )
+        result = measure_color(
+            _context({"cam": _camera()}),
+            instrument="cam",
+            position="plate.A1",
+            reference_lab=(40.0, 10.0, 30.0),
+        )
+        assert result == expected
 
 
 class TestImageWell:

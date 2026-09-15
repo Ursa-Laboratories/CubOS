@@ -30,6 +30,7 @@ from .errors import ProtocolExecutionError
 
 SUPPORTED_PLANNED_COMMANDS = frozenset({
     "move", "pick_up_tip", "transfer", "mix", "drop_tip", "capture",
+    "measure_color",
 })
 
 
@@ -103,17 +104,17 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
                 _motion_for(context.deck, _fixture_key(context.deck, args["destination"]))
             elif step.command_name in {"mix", "drop_tip"}:
                 _motion_for(context.deck, _fixture_key(context.deck, args["position"]))
-            elif step.command_name == "capture":
+            elif step.command_name in {"capture", "measure_color"}:
                 instrument_name = args["instrument"]
                 try:
                     instrument = context.gantry.instruments[instrument_name]
                 except KeyError as exc:
                     raise InvalidGeometryError(
-                        f"Unknown planned capture instrument {instrument_name!r}."
+                        f"Unknown planned camera instrument {instrument_name!r}."
                     ) from exc
                 if not isinstance(instrument, CameraInstrument):
                     raise InvalidGeometryError(
-                        f"Planned capture instrument {instrument_name!r} is a "
+                        f"Planned camera instrument {instrument_name!r} is a "
                         f"{type(instrument).__name__}, not a CameraInstrument."
                     )
                 if args.get("position") is not None:
@@ -122,7 +123,7 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
                         context.deck.resolve_coordinate(position)
                     except (KeyError, ValueError, TypeError, AttributeError) as exc:
                         raise InvalidGeometryError(
-                            f"Planned capture position {position!r} cannot be "
+                            f"Planned camera position {position!r} cannot be "
                             f"resolved: {exc}"
                         ) from exc
     except (KeyError, ValueError, TypeError) as exc:
@@ -286,7 +287,7 @@ class RoutingSession:
                     current_instrument=current_instrument,
                 )
                 current_instrument = "pipette"
-            elif command == "capture":
+            elif command in {"capture", "measure_color"}:
                 value = PreparedMotionStep(
                     command, (), {"instrument": args["instrument"]},
                 )

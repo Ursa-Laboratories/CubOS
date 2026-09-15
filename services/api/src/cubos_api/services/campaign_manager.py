@@ -19,7 +19,7 @@ from cubos_api.models.campaigns import CampaignRecord, CampaignSpec, CampaignTri
 from cubos_api.models.runs import RunSubmission
 from cubos_api.models.state import RunStateSelection
 from cubos_api.services.campaign_templates import (
-    compile_trial, extract_result_objective, validate_template,
+    compile_trial, extract_result_context, extract_result_objective, validate_template,
 )
 from cubos_api.services.run_manager import RunConflictError, RunManager, get_run_manager
 from cubos_api.services.yaml_io import resolve_config_path
@@ -124,7 +124,9 @@ class CampaignManager:
     @staticmethod
     def _suggest(spec, observations):
         return suggest([p.model_dump() for p in spec.parameters], observations,
-                       method=spec.optimizer.method, initial_trials=spec.optimizer.initial_trials,
+                       method=spec.optimizer.method, kernel=spec.optimizer.kernel,
+                       initial_trials=spec.optimizer.initial_trials,
+                       initial_points=spec.optimizer.initial_points,
                        exploration=spec.optimizer.exploration, seed=spec.optimizer.seed,
                        direction=spec.objective.direction,
                        sum_constraint=spec.sum_constraint.model_dump() if spec.sum_constraint else None)
@@ -289,6 +291,9 @@ class CampaignManager:
                         self._save(record)
                     else:
                         trial.objective = extract_result_objective(child.result, spec.objective.path)
+                        trial.measurement = extract_result_context(
+                            child.result, spec.objective.path
+                        )
                 while trial.objective is None:
                     with self._lock:
                         if record.stop_requested:

@@ -239,6 +239,37 @@ def test_time_budget_is_checked_between_trials(tmp_path, monkeypatch):
     assert len(final.trials) == 1
 
 
+def test_declared_initial_design_is_submitted_in_order(tmp_path):
+    settings, spec = _setup(tmp_path, max_trials=2)
+    spec.optimizer.initial_trials = 2
+    spec.optimizer.initial_points = [{"x": 2.0}, {"x": 0.0}]
+    runs = FakeRuns([2.0, 1.0])
+    manager = CampaignManager(
+        settings, runs, validator=lambda *args: None, poll_interval=0.005
+    )
+    campaign_id = manager.start(spec).campaign_id
+    wait_for(manager, campaign_id, lambda record: record.state == "completed")
+    assert [submission.metadata["parameters"] for submission in runs.submissions] == [
+        {"x": 2.0},
+        {"x": 0.0},
+    ]
+
+
+def test_initial_design_cannot_exceed_initial_trial_count(tmp_path):
+    _, spec = _setup(tmp_path)
+    with pytest.raises(ValueError, match="Initial design"):
+        CampaignSpec.model_validate(
+            {
+                **spec.model_dump(),
+                "optimizer": {
+                    **spec.optimizer.model_dump(),
+                    "initial_trials": 1,
+                    "initial_points": [{"x": 0.0}, {"x": 1.0}],
+                },
+            }
+        )
+
+
 def test_expired_time_budget_stops_before_first_trial(tmp_path, monkeypatch):
     import cubos_api.services.campaign_manager as campaign_manager_module
 

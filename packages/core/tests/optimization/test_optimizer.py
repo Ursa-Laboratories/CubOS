@@ -88,3 +88,66 @@ def test_decimal_grid_observation_is_canonicalized():
     parameter = [{"name": "x", "minimum": 0, "maximum": 0.9, "step": 0.1}]
     result = suggest(parameter, [{"parameters": {"x": 0.3}, "objective": 1.0}], initial_trials=0)
     assert result["x"] != 0.3
+
+
+def test_declared_initial_design_runs_in_order_before_gp():
+    parameters = [
+        {"name": "red", "minimum": 50, "maximum": 200, "step": 5},
+        {"name": "yellow", "minimum": 50, "maximum": 200, "step": 5},
+        {"name": "blue", "minimum": 50, "maximum": 200, "step": 5},
+    ]
+    initial = [
+        {"red": 200, "yellow": 50, "blue": 50},
+        {"red": 50, "yellow": 200, "blue": 50},
+    ]
+    constraint = {"parameters": ["red", "yellow", "blue"], "total": 300}
+    assert suggest(
+        parameters,
+        [],
+        initial_trials=2,
+        initial_points=initial,
+        sum_constraint=constraint,
+    ) == initial[0]
+    assert suggest(
+        parameters,
+        [{"parameters": initial[0], "objective": 12.0}],
+        initial_trials=2,
+        initial_points=initial,
+        sum_constraint=constraint,
+    ) == initial[1]
+
+
+def test_initial_design_must_be_quantized_and_feasible():
+    with pytest.raises(ValueError, match="quantized"):
+        suggest(P, [], initial_points=[{"x": 0.1, "y": 0.5}])
+    with pytest.raises(ValueError, match="sum constraint"):
+        suggest(
+            P,
+            [],
+            initial_points=[{"x": 0.5, "y": 0.5}],
+            sum_constraint={"parameters": ["x", "y"], "total": 0.5},
+        )
+    with pytest.raises(ValueError, match="quantized"):
+        suggest(
+            P,
+            [],
+            initial_points=[{"x": 0.0, "y": 0.0}, {"x": 0.1, "y": 0.5}],
+        )
+    with pytest.raises(ValueError, match="unique"):
+        suggest(
+            P,
+            [],
+            initial_points=[{"x": 0.0, "y": 0.0}, {"x": 0.0, "y": 0.0}],
+        )
+
+
+def test_matern52_and_rbf_kernels_are_supported():
+    observations = [
+        {"parameters": {"x": 0, "y": 0}, "objective": 2.0},
+        {"parameters": {"x": 1, "y": 1}, "objective": 1.0},
+    ]
+    for kernel in ("matern52", "rbf"):
+        point = suggest(P, observations, initial_trials=0, kernel=kernel)
+        assert set(point) == {"x", "y"}
+    with pytest.raises(ValueError, match="kernel"):
+        suggest(P, observations, initial_trials=0, kernel="linear")
