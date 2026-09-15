@@ -5,6 +5,7 @@ import { campaignApi } from "./components/campaigns/api";
 import AppLayout from "./components/layout/AppLayout";
 import DeckVisualization from "./components/deck/DeckVisualization";
 import GantryPositionWidget from "./components/gantry/GantryPositionWidget";
+import CameraAlignmentPanel from "./components/gantry/CameraAlignmentPanel";
 import EditorTabs from "./components/editor/EditorTabs";
 import DeckEditor from "./components/editor/DeckEditor";
 import GantryEditor from "./components/editor/GantryEditor";
@@ -887,6 +888,33 @@ export default function App() {
           )}
           {configNotices.gantry && (
             <ConfigNotice message={configNotices.gantry} onDismiss={() => setConfigNotices((n) => ({ ...n, gantry: null }))} />
+          )}
+          {displayGantry && displayDeck && gantryFile && deckFile ? (
+            <CameraAlignmentPanel
+              key={`${gantryFile}:${deckFile}`}
+              gantryFile={gantryFile}
+              deckFile={deckFile}
+              gantry={displayGantry}
+              deck={displayDeck}
+              position={gantryPosition.data ?? null}
+              disabledReason={protocolRunActive
+                ? "Camera alignment is unavailable while a run is active."
+                : gantryDirty || deckDirty
+                  ? "Save or discard Gantry and Deck edits before aligning the camera."
+                  : !gantryPosition.data?.connected
+                    ? "Connect the selected gantry before calculating offsets."
+                    : gantryPosition.data.status !== "Idle" && !gantryPosition.data.status.startsWith("<Idle|")
+                      ? `Wait for the controller to become Idle before aligning; current status is ${gantryPosition.data.status}.`
+                    : null}
+              onSaved={() => {
+                qc.invalidateQueries({ queryKey: ["gantry", gantryFile] });
+                void gantryQuery.refetch();
+              }}
+            />
+          ) : (
+            <div style={{ ...theme.notice.warning, marginBottom: 16 }}>
+              Load a Gantry and Deck config to use camera XY alignment.
+            </div>
           )}
           <GantryEditor
             key={gantryQuery.data ? `loaded:${gantryQuery.data.filename}` : `selected:${gantryFile ?? "none"}`}

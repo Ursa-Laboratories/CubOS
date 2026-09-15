@@ -283,6 +283,25 @@ export interface GantryPosition {
   move_error?: string | null;
 }
 
+export interface CameraAlignmentProposal {
+  proposal_id: string;
+  gantry_file: string;
+  gantry_sha256: string;
+  deck_file: string;
+  deck_sha256: string;
+  camera_instrument: string;
+  target_position: string;
+  head: { work_x: number; work_y: number; work_z: number; status: string };
+  target: Coordinate3D;
+  before: { offset_x: number; offset_y: number };
+  after: { offset_x: number; offset_y: number };
+  camera_frame_id: number;
+  camera_frame_received_at: number;
+  camera_frame_age_seconds: number;
+  calibration_warning: string | null;
+  expires_at: number;
+}
+
 export interface ZCalibrationSummary {
   block_height: number;
   total_z_range: number;

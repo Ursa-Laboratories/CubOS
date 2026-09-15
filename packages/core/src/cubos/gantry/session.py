@@ -252,6 +252,55 @@ class GantrySession:
             self._connected_gantry_config = copy.deepcopy(config)
             self._gantry.config = self._runtime_connect_config(config)
 
+    def apply_camera_alignment_config(
+        self,
+        filename: str,
+        *,
+        expected_work_position: tuple[float, float, float],
+        config: dict[str, Any],
+        persist: Callable[[], None],
+    ) -> GantryPositionSnapshot:
+        """Persist and publish a camera-offset edit while manual motion is locked."""
+        if not self._lock.acquire(blocking=False):
+            raise GantrySessionError(
+                "The gantry is busy; camera alignment was not saved."
+            )
+        try:
+            if self._gantry is None:
+                raise GantryNotConnectedError("Gantry is not connected")
+            if self._connected_gantry_filename != filename:
+                raise GantrySessionError(
+                    f"Connected gantry config changed to "
+                    f"{self._connected_gantry_filename!r}; camera alignment was not saved."
+                )
+            if self.calibration_active:
+                raise CalibrationBlockedError(
+                    "Finish gantry calibration before saving camera alignment."
+                )
+            snapshot = self._read_position_locked()
+            observed = (snapshot.work_x, snapshot.work_y, snapshot.work_z)
+            if (
+                snapshot.status != "Idle"
+                and not snapshot.status.startswith("<Idle|")
+            ):
+                raise GantrySessionError(
+                    f"Camera alignment requires an Idle controller; observed "
+                    f"{snapshot.status!r}."
+                )
+            if any(value is None for value in observed) or tuple(
+                float(value) for value in observed
+            ) != expected_work_position:
+                raise GantrySessionError(
+                    "The gantry position changed after camera alignment preview; "
+                    "camera alignment was not saved."
+                )
+            persist()
+            self._connected_gantry_config = copy.deepcopy(config)
+            self._gantry.config = self._runtime_connect_config(config)
+            return snapshot
+        finally:
+            self._lock.release()
+
     def position(self) -> GantryPositionSnapshot:
         if self._gantry is None:
             return GantryPositionSnapshot(connected=False, status="Not connected")

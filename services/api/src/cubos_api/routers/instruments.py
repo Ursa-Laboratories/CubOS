@@ -11,9 +11,13 @@ data store.
 
 from __future__ import annotations
 
+import hashlib
+import json
+import math
 import re
 import threading
 import time
+from collections.abc import Mapping, MutableMapping
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -28,10 +32,17 @@ from cubos.instruments.camera.vendors.opencv import OpenCVCamera
 from cubos.instruments.lighting.exceptions import LightingError
 from cubos.instruments.lighting.interface import LightingInstrument
 from cubos.instruments.registry import get_instrument_class, validate_instrument
+from cubos.deck import load_deck_from_yaml
+from cubos.gantry.yaml_schema import GantryYamlSchema
 from cubos.protocol_engine.commands.camera import default_images_dir
+from cubos_api.config import get_settings
 
 from cubos_api.models.camera_monitor import (
     CameraControlsResponse,
+    CameraAlignmentPreviewRequest,
+    CameraAlignmentProposal,
+    CameraAlignmentSaveRequest,
+    CameraAlignmentSaveResponse,
     CameraMonitorLeaseRequest,
     CameraMonitorRequest,
     CameraMonitorStatus,
@@ -44,6 +55,7 @@ from cubos_api.services.camera_monitor import (
     CameraMonitorUnsupported,
     get_camera_monitor_service,
 )
+from cubos_api.services.yaml_io import read_yaml, resolve_config_path, write_yaml
 
 from .gantry import _reject_if_run_active, _require_session
 
@@ -59,6 +71,8 @@ _last_capture: Dict[str, str] = {}
 # preview frame overwritten every ~800ms while the wizard is open.
 _last_manual_capture: Dict[str, str] = {}
 _capture_locks: Dict[str, threading.Lock] = {}
+_alignment_lock = threading.Lock()
+_ALIGNMENT_PROPOSAL_TTL_S = 300.0
 
 
 def _capture_lock(instrument: str) -> threading.Lock:
@@ -103,6 +117,141 @@ class CaptureRequest(BaseModel):
 class CaptureResponse(BaseModel):
     instrument: str
     image_path: str
+
+
+def _sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _alignment_idle_snapshot(gantry_file: str):
+    _reject_if_run_active()
+    from cubos_api.services.run_manager import active_campaign_owner
+
+    if active_campaign_owner() is not None:
+        raise HTTPException(409, "A campaign owns the station")
+    with _manual_lock:
+        if _manual_instruments:
+            raise HTTPException(
+                409, "Disconnect manual instruments before saving camera alignment",
+            )
+    session = _require_session()
+    if session.calibration_active:
+        raise HTTPException(409, "Finish gantry calibration before saving camera alignment")
+    if session.connected_gantry_filename != gantry_file:
+        raise HTTPException(
+            409,
+            f"Selected gantry {gantry_file!r} is not the connected config "
+            f"{session.connected_gantry_filename!r}",
+        )
+    if session.operation_lock.locked():
+        raise HTTPException(409, "The gantry is busy with a manual operation")
+    snapshot = session.position()
+    if session.operation_lock.locked():
+        raise HTTPException(409, "The gantry became busy while reading its position")
+    if not snapshot.connected or any(
+        value is None or not math.isfinite(float(value))
+        for value in (snapshot.work_x, snapshot.work_y, snapshot.work_z)
+    ):
+        raise HTTPException(409, "Camera alignment requires a known finite work position")
+    if snapshot.status != "Idle" and not snapshot.status.startswith("<Idle|"):
+        raise HTTPException(
+            409, f"Camera alignment requires an Idle controller; observed {snapshot.status!r}",
+        )
+    return session, snapshot
+
+
+def _alignment_proposal(
+    request: CameraAlignmentPreviewRequest,
+) -> CameraAlignmentProposal:
+    session, snapshot = _alignment_idle_snapshot(request.gantry_file)
+    settings = get_settings()
+    gantry_path = resolve_config_path(
+        settings.configs_dir, "gantry", request.gantry_file,
+    )
+    deck_path = resolve_config_path(settings.configs_dir, "deck", request.deck_file)
+    if not gantry_path.is_file():
+        raise HTTPException(404, f"Gantry config not found: {request.gantry_file}")
+    if not deck_path.is_file():
+        raise HTTPException(404, f"Deck config not found: {request.deck_file}")
+    gantry_document = read_yaml(gantry_path)
+    try:
+        saved_config = GantryYamlSchema.model_validate(gantry_document)
+        connected_config = GantryYamlSchema.model_validate(
+            session.connected_gantry_config,
+        )
+    except Exception as exc:
+        raise HTTPException(400, f"Invalid gantry configuration: {exc}") from exc
+    saved_normalized = saved_config.model_dump(mode="json", exclude_none=True)
+    connected_normalized = connected_config.model_dump(mode="json", exclude_none=True)
+    if saved_normalized != connected_normalized:
+        raise HTTPException(
+            409,
+            "The saved gantry file differs from the connected runtime; reload or "
+            "reconnect it before aligning the camera",
+        )
+    instruments = gantry_document.get("instruments") or {}
+    camera = instruments.get(request.camera_instrument)
+    if not isinstance(camera, Mapping) or camera.get("type") != "camera":
+        raise HTTPException(
+            400, f"Instrument {request.camera_instrument!r} is not a camera",
+        )
+    try:
+        monitor = get_camera_monitor_service().require_fresh_status(
+            request.camera_instrument,
+        )
+    except (CameraMonitorNotRunning, CameraMonitorFrameExpired) as exc:
+        raise HTTPException(409, str(exc)) from exc
+    assert monitor.frame_id is not None
+    assert monitor.received_at is not None
+    assert monitor.frame_age_seconds is not None
+    try:
+        deck = load_deck_from_yaml(deck_path)
+        target = deck.resolve_coordinate(request.target_position)
+    except Exception as exc:
+        raise HTTPException(
+            400, f"Cannot resolve alignment target {request.target_position!r}: {exc}",
+        ) from exc
+    head = {
+        "work_x": float(snapshot.work_x),
+        "work_y": float(snapshot.work_y),
+        "work_z": float(snapshot.work_z),
+        "status": snapshot.status,
+    }
+    target_data = {"x": float(target.x), "y": float(target.y), "z": float(target.z)}
+    before = {
+        "offset_x": float(camera.get("offset_x", 0.0)),
+        "offset_y": float(camera.get("offset_y", 0.0)),
+    }
+    after = {
+        "offset_x": target_data["x"] - head["work_x"],
+        "offset_y": target_data["y"] - head["work_y"],
+    }
+    gantry_sha256 = _sha256(gantry_path)
+    deck_sha256 = _sha256(deck_path)
+    facts = {
+        "gantry_file": request.gantry_file,
+        "gantry_sha256": gantry_sha256,
+        "deck_file": request.deck_file,
+        "deck_sha256": deck_sha256,
+        "camera_instrument": request.camera_instrument,
+        "target_position": request.target_position,
+        "head": head,
+        "target": target_data,
+        "before": before,
+        "after": after,
+    }
+    proposal_id = hashlib.sha256(
+        json.dumps(facts, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+    return CameraAlignmentProposal(
+        proposal_id=proposal_id,
+        **facts,
+        camera_frame_id=monitor.frame_id,
+        camera_frame_received_at=monitor.received_at,
+        camera_frame_age_seconds=monitor.frame_age_seconds,
+        calibration_warning=snapshot.calibration_warning,
+        expires_at=time.time() + _ALIGNMENT_PROPOSAL_TTL_S,
+    )
 
 
 def reset_manual_instruments(*, preserve_camera_monitors: bool = False) -> None:
@@ -333,6 +482,137 @@ def manual_capture(req: CaptureRequest) -> CaptureResponse:
         if not req.preview:
             _last_manual_capture[req.instrument] = saved
     return CaptureResponse(instrument=req.instrument, image_path=saved)
+
+
+@router.post(
+    "/camera/alignment/preview",
+    response_model=CameraAlignmentProposal,
+)
+def preview_camera_alignment(
+    request: CameraAlignmentPreviewRequest,
+) -> CameraAlignmentProposal:
+    """Propose camera XY offsets from the current head and a saved deck target."""
+    return _alignment_proposal(request)
+
+
+@router.post(
+    "/camera/alignment/save",
+    response_model=CameraAlignmentSaveResponse,
+)
+def save_camera_alignment(
+    request: CameraAlignmentSaveRequest,
+) -> CameraAlignmentSaveResponse:
+    """Persist an unchanged alignment proposal without moving the gantry."""
+    proposal = request.proposal
+    if proposal.expires_at < time.time():
+        raise HTTPException(409, "Camera alignment proposal expired; preview it again")
+    preview_request = CameraAlignmentPreviewRequest(
+        gantry_file=proposal.gantry_file,
+        deck_file=proposal.deck_file,
+        camera_instrument=proposal.camera_instrument,
+        target_position=proposal.target_position,
+    )
+    with _alignment_lock:
+        current = _alignment_proposal(preview_request)
+        if current.proposal_id != proposal.proposal_id:
+            raise HTTPException(
+                409,
+                "Camera alignment inputs changed after preview; inspect the current "
+                "head, deck, and offsets, then preview again",
+            )
+        session, snapshot = _alignment_idle_snapshot(proposal.gantry_file)
+        current_head = current.head
+        if (
+            float(snapshot.work_x) != current_head.work_x
+            or float(snapshot.work_y) != current_head.work_y
+            or float(snapshot.work_z) != current_head.work_z
+        ):
+            raise HTTPException(
+                409, "The gantry position changed after alignment preview; preview again",
+            )
+        settings = get_settings()
+        gantry_path = resolve_config_path(
+            settings.configs_dir, "gantry", proposal.gantry_file,
+        )
+        if _sha256(gantry_path) != proposal.gantry_sha256:
+            raise HTTPException(
+                409, "The gantry file changed after alignment preview; preview again",
+            )
+        document = read_yaml(gantry_path)
+        instruments = document.get("instruments") or {}
+        camera = instruments.get(proposal.camera_instrument)
+        if not isinstance(camera, MutableMapping) or camera.get("type") != "camera":
+            raise HTTPException(409, "The selected camera definition changed")
+        camera["offset_x"] = current.after.offset_x
+        camera["offset_y"] = current.after.offset_y
+        try:
+            validated = GantryYamlSchema.model_validate(document)
+        except Exception as exc:
+            raise HTTPException(
+                400, f"Updated camera offsets do not form a valid gantry config: {exc}",
+            ) from exc
+        runtime_config = validated.model_dump(mode="json", exclude_none=True)
+        def persist_alignment() -> None:
+            from cubos_api.services.run_manager import active_campaign_owner
+
+            _reject_if_run_active()
+            if active_campaign_owner() is not None:
+                raise HTTPException(
+                    409, "A campaign started before alignment save; preview again",
+                )
+            with _manual_lock:
+                if _manual_instruments:
+                    raise HTTPException(
+                        409,
+                        "A manual instrument connected before alignment save; "
+                        "disconnect it and preview again",
+                    )
+            try:
+                get_camera_monitor_service().require_fresh_status(
+                    proposal.camera_instrument,
+                )
+            except (CameraMonitorNotRunning, CameraMonitorFrameExpired) as exc:
+                raise HTTPException(409, str(exc)) from exc
+            if _sha256(gantry_path) != proposal.gantry_sha256:
+                raise HTTPException(
+                    409, "The gantry file changed during alignment save; preview again",
+                )
+            write_yaml(gantry_path, document)
+
+        try:
+            session.apply_camera_alignment_config(
+                proposal.gantry_file,
+                expected_work_position=(
+                    current.head.work_x,
+                    current.head.work_y,
+                    current.head.work_z,
+                ),
+                config=runtime_config,
+                persist=persist_alignment,
+            )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(409, str(exc)) from exc
+        runtime_camera = (
+            (session.connected_gantry_config or {}).get("instruments") or {}
+        ).get(proposal.camera_instrument)
+        if not isinstance(runtime_camera, Mapping) or (
+            float(runtime_camera.get("offset_x", math.nan)) != current.after.offset_x
+            or float(runtime_camera.get("offset_y", math.nan)) != current.after.offset_y
+        ):
+            raise HTTPException(
+                500,
+                "Camera offsets were saved, but the connected runtime did not refresh; "
+                "disconnect and reconnect before any motion",
+            )
+        # TODO(iter): test stale file/position rejection, the remaining
+        # RunManager reservation concurrency boundary, and comment-preserving
+        # round trips after the operator completes the first alignment iteration.
+        return CameraAlignmentSaveResponse(
+            proposal=current,
+            saved_gantry_sha256=_sha256(gantry_path),
+        )
 
 
 @router.post("/camera/monitor/start", response_model=CameraMonitorStatus)

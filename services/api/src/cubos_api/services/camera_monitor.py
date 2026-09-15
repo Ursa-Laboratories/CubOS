@@ -202,6 +202,24 @@ class CameraMonitorService:
                 )
             return self._status(instrument, monitor)
 
+    def require_fresh_status(self, instrument: str) -> CameraMonitorStatus:
+        """Return an existing monitor only when its latest frame is current."""
+        status = self.status(instrument)
+        if status.state != "running" or not status.connected:
+            raise CameraMonitorNotRunning(
+                "Start the camera monitor before previewing or saving alignment."
+            )
+        if status.frame_id is None or status.frame_age_seconds is None:
+            raise CameraMonitorFrameExpired(
+                "Camera monitor has no current frame for alignment."
+            )
+        if status.frame_age_seconds > self._maximum_frame_age_s:
+            raise CameraMonitorFrameExpired(
+                f"Camera alignment frame is stale "
+                f"({status.frame_age_seconds:.2f}s old)."
+            )
+        return status
+
     def frame(
         self,
         instrument: str,

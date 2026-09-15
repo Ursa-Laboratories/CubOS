@@ -98,8 +98,66 @@ class SetCameraControlsRequest(CameraMonitorModel):
     controls: CameraControlUpdates
 
 
+class CameraAlignmentPreviewRequest(CameraMonitorModel):
+    gantry_file: str = Field(min_length=1, max_length=255)
+    deck_file: str = Field(min_length=1, max_length=255)
+    camera_instrument: str = Field(min_length=1, max_length=80)
+    target_position: str = Field(min_length=1, max_length=160)
+
+
+class CameraAlignmentHead(CameraMonitorModel):
+    work_x: float
+    work_y: float
+    work_z: float
+    status: str
+
+
+class CameraAlignmentCoordinate(CameraMonitorModel):
+    x: float
+    y: float
+    z: float
+
+
+class CameraAlignmentOffsets(CameraMonitorModel):
+    offset_x: float
+    offset_y: float
+
+
+class CameraAlignmentProposal(CameraMonitorModel):
+    proposal_id: str
+    gantry_file: str
+    gantry_sha256: str
+    deck_file: str
+    deck_sha256: str
+    camera_instrument: str
+    target_position: str
+    head: CameraAlignmentHead
+    target: CameraAlignmentCoordinate
+    before: CameraAlignmentOffsets
+    after: CameraAlignmentOffsets
+    camera_frame_id: int
+    camera_frame_received_at: float
+    camera_frame_age_seconds: float
+    calibration_warning: str | None = None
+    expires_at: float
+
+
+class CameraAlignmentSaveRequest(CameraMonitorModel):
+    proposal: CameraAlignmentProposal
+
+
+class CameraAlignmentSaveResponse(CameraMonitorModel):
+    saved: Literal[True] = True
+    proposal: CameraAlignmentProposal
+    saved_gantry_sha256: str
+
+
 __all__ = [
     "CameraControlsResponse",
+    "CameraAlignmentPreviewRequest",
+    "CameraAlignmentProposal",
+    "CameraAlignmentSaveRequest",
+    "CameraAlignmentSaveResponse",
     "CameraMonitorLeaseRequest",
     "CameraMonitorRequest",
     "CameraMonitorStatus",

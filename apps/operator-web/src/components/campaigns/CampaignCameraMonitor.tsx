@@ -19,7 +19,21 @@ function objectValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 }
 
-export default function CampaignCameraMonitor({ instrument }: { instrument: string }) {
+interface AlignmentPreviewStatus {
+  ready: boolean;
+  frameAgeSeconds: number | null;
+  error: string | null;
+}
+
+export default function CampaignCameraMonitor({
+  instrument,
+  variant = "campaign",
+  onAlignmentStatusChange,
+}: {
+  instrument: string;
+  variant?: "campaign" | "alignment";
+  onAlignmentStatusChange?: (status: AlignmentPreviewStatus) => void;
+}) {
   const [status, setStatus] = useState<CameraMonitorStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [review, setReview] = useState<{ frameId: number | null; confirmed: boolean; note: string }>({ frameId: null, confirmed: false, note: "" });
@@ -32,14 +46,29 @@ export default function CampaignCameraMonitor({ instrument }: { instrument: stri
     let leaseId: string | null = null;
     let acquiring = false;
 
+    const publishAlignmentStatus = (next: CameraMonitorStatus | null, nextError: string | null) => {
+      if (!onAlignmentStatusChange) return;
+      const age = next?.frame_age_seconds ?? null;
+      onAlignmentStatusChange({
+        ready: next?.state === "running" && next.frame_id !== null && age !== null && age <= STALE_AFTER_SECONDS && !nextError,
+        frameAgeSeconds: age,
+        error: nextError,
+      });
+    };
+
     const poll = async () => {
       try {
         const next = await cameraMonitorApi.get(instrument);
         if (cancelled) return;
         setStatus(next);
         setError(next.error);
+        publishAlignmentStatus(next, next.error);
       } catch (caught) {
-        if (!cancelled) setError(caught instanceof Error ? caught.message : String(caught));
+        if (!cancelled) {
+          const message = caught instanceof Error ? caught.message : String(caught);
+          setError(message);
+          publishAlignmentStatus(null, message);
+        }
       }
       if (!cancelled) pollTimer = setTimeout(() => void poll(), POLL_MS);
     };
@@ -51,10 +80,12 @@ export default function CampaignCameraMonitor({ instrument }: { instrument: stri
         if (!cancelled) {
           setStatus(next);
           setError(next.error);
+          publishAlignmentStatus(next, next.error);
         }
       } catch (caught) {
         if (!cancelled) {
           setError(`Camera monitor heartbeat: ${caught instanceof Error ? caught.message : String(caught)}. Reacquiring preview lease…`);
+          publishAlignmentStatus(null, caught instanceof Error ? caught.message : String(caught));
           leaseId = null;
           void acquire();
         }
@@ -76,10 +107,12 @@ export default function CampaignCameraMonitor({ instrument }: { instrument: stri
         leaseId = next.lease_id;
         setStatus(next);
         setError(next.error);
+        publishAlignmentStatus(next, next.error);
         heartbeatTimer = setTimeout(() => void heartbeat(), 5000);
       } catch (caught) {
         if (!cancelled) {
           setError(caught instanceof Error ? caught.message : String(caught));
+          publishAlignmentStatus(null, caught instanceof Error ? caught.message : String(caught));
           acquireTimer = setTimeout(() => void acquire(), 1000);
         }
       } finally {
@@ -96,8 +129,9 @@ export default function CampaignCameraMonitor({ instrument }: { instrument: stri
       if (heartbeatTimer) clearTimeout(heartbeatTimer);
       if (acquireTimer) clearTimeout(acquireTimer);
       if (leaseId) void cameraMonitorApi.stop(instrument, leaseId).catch(() => undefined);
+      publishAlignmentStatus(null, null);
     };
-  }, [instrument]);
+  }, [instrument, onAlignmentStatusChange]);
 
   const analysis = status?.latest_analysis ?? null;
   const analysisQuality = objectValue(analysis?.quality);
@@ -128,6 +162,30 @@ export default function CampaignCameraMonitor({ instrument }: { instrument: stri
   const currentReview = review.frameId === status?.frame_id
     ? review
     : { frameId: status?.frame_id ?? null, confirmed: false, note: "" };
+
+  if (variant === "alignment") {
+    return (
+      <section className="campaign-camera campaign-camera-alignment" aria-label="Live camera alignment preview">
+        <div className="campaign-toolbar">
+          <h4>Live camera</h4>
+          <span className={stale ? "campaign-camera-stale" : "campaign-note"}>
+            {frameAge === null ? "Waiting for first frame" : `${frameAge.toFixed(1)} s old${stale ? " · stale" : ""}`}
+          </span>
+        </div>
+        {status?.frame_id !== null && status?.frame_id !== undefined ? (
+          <div className="campaign-camera-frame" style={resolution ? { aspectRatio: `${resolution.width} / ${resolution.height}` } : undefined}>
+            <img src={cameraMonitorApi.frameUrl(instrument, status.frame_id)} alt={`Live alignment preview from ${instrument}`} />
+            <svg viewBox={`0 0 ${resolution?.width ?? 100} ${resolution?.height ?? 100}`} preserveAspectRatio="none" aria-hidden="true">
+              <line x1={(resolution?.width ?? 100) / 2} y1="0" x2={(resolution?.width ?? 100) / 2} y2={resolution?.height ?? 100} className="campaign-optical-center" />
+              <line x1="0" y1={(resolution?.height ?? 100) / 2} x2={resolution?.width ?? 100} y2={(resolution?.height ?? 100) / 2} className="campaign-optical-center" />
+            </svg>
+          </div>
+        ) : <div className="campaign-note">Waiting for a frame from the shared camera monitor.</div>}
+        <div className="campaign-note">Center the selected well on the red optical crosshair by manually jogging in Gantry Control. This preview never moves the gantry.</div>
+        {error && <div className="campaign-banner campaign-error" role="alert">Camera monitor: {error}</div>}
+      </section>
+    );
+  }
 
   return (
     <section className="campaign-camera" aria-label="Live campaign camera">
