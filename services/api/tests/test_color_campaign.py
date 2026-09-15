@@ -4,6 +4,7 @@ from pathlib import Path
 import yaml
 
 from cubos_api.models.campaigns import ColorCampaignSetup
+from cubos_api.services.campaign_templates import extract_result_objective
 from cubos_api.services.color_campaign import build_color_campaign, target_protocol
 
 
@@ -43,6 +44,9 @@ def test_builder_writes_complete_protocol_and_campaign(tmp_path: Path):
     assert protocol[4]["transfer"]["source"] == "stocks.A2"
     assert protocol[7]["transfer"]["source"] == "stocks.A3"
     assert protocol[11]["measure_color"]["reference_lab"] == [42.0, 12.0, 18.0]
+    assert spec.objective.path == "11.delta_e_00"
+    result = [None] * 11 + [{"delta_e_00": 2.4}]
+    assert extract_result_objective(result, spec.objective.path) == 2.4
     assert spec.sum_constraint.total == 300
     assert spec.optimizer.initial_points[0] == {
         "red_ul": 200.0, "yellow_ul": 50.0, "blue_ul": 50.0,

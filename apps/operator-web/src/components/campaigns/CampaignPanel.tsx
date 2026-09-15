@@ -206,7 +206,7 @@ function colorMatchingSpec(
       ],
       objective: {
         mode: "result",
-        path: colorMeasurement >= 0 ? `results.${colorMeasurement}.delta_e_00` : "",
+        path: colorMeasurement >= 0 ? `${colorMeasurement}.delta_e_00` : "",
         direction: "minimize",
       },
       optimizer: {

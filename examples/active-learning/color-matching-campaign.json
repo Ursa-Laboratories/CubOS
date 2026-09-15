@@ -14,7 +14,7 @@
     {"name": "yellow_tip", "values": ["tips.A2", "tips.A5", "tips.A8", "tips.A11", "tips.B2", "tips.B5", "tips.B8", "tips.B11", "tips.C2", "tips.C5", "tips.C8", "tips.C11", "tips.D2", "tips.D5", "tips.D8", "tips.D11", "tips.E2", "tips.E5"], "bindings": [{"step_index": 3, "argument": "position"}]},
     {"name": "blue_tip", "values": ["tips.A3", "tips.A6", "tips.A9", "tips.A12", "tips.B3", "tips.B6", "tips.B9", "tips.B12", "tips.C3", "tips.C6", "tips.C9", "tips.C12", "tips.D3", "tips.D6", "tips.D9", "tips.D12", "tips.E3", "tips.E6"], "bindings": [{"step_index": 6, "argument": "position"}]}
   ],
-  "objective": {"mode": "result", "path": "results.11.delta_e_00", "direction": "minimize"},
+  "objective": {"mode": "result", "path": "11.delta_e_00", "direction": "minimize"},
   "optimizer": {
     "method": "ei",
     "kernel": "matern52",

@@ -98,7 +98,7 @@ def build_color_campaign(
                 for color, offset, step in (("red", 0, 0), ("yellow", 1, 3), ("blue", 2, 6))
             ],
         ],
-        objective={"mode": "result", "path": "results.11.delta_e_00", "direction": "minimize"},
+        objective={"mode": "result", "path": "11.delta_e_00", "direction": "minimize"},
         optimizer={"method": "ei", "kernel": "matern52", "initial_trials": 6,
                    "initial_points": INITIAL_POINTS, "exploration": 0.05, "seed": 7},
         stop={"max_trials": trial_count, "target_value": 3.0, "patience": 0,
