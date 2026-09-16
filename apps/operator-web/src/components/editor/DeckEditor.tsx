@@ -39,36 +39,6 @@ interface Props {
   isRunning?: boolean;
 }
 
-const EMPTY_WELL_PLATE: WellPlateConfig = {
-  type: "well_plate",
-  name: "",
-  model_name: "",
-  rows: 8,
-  columns: 12,
-  length: 127.76,
-  width: 85.47,
-  height: 14.22,
-  calibration: {
-    a1: { x: 100.0, y: 50.0, z: 20.0 },
-    a2: { x: 91.0, y: 50.0, z: 20.0 },
-  },
-  x_offset: 9.0,
-  y_offset: 9.0,
-  capacity_ul: 200.0,
-  working_volume_ul: 150.0,
-};
-
-const EMPTY_VIAL: VialConfig = {
-  type: "vial",
-  name: "",
-  model_name: "",
-  height: 66.75,
-  diameter: 28.0,
-  location: { x: 30.0, y: 40.0, z: 20.0 },
-  capacity_ul: 1500.0,
-  working_volume_ul: 1200.0,
-};
-
 // Calibration A2 must sit exactly one pitch from A1 along one axis
 // (loader validates the step magnitude against x_offset/y_offset).
 const EMPTY_TIP_RACK: TipRackConfig = {
@@ -99,8 +69,6 @@ const EMPTY_TIP_DISPOSAL: TipDisposalConfig = {
 };
 
 const ADDABLE_LABWARE = {
-  well_plate: { label: "+ Well Plate", prefix: "wellplate", template: EMPTY_WELL_PLATE },
-  vial: { label: "+ Vial", prefix: "vial", template: EMPTY_VIAL },
   tip_rack: { label: "+ Tip Rack", prefix: "tiprack", template: EMPTY_TIP_RACK },
   tip_disposal: { label: "+ Tip Disposal", prefix: "tipdisposal", template: EMPTY_TIP_DISPOSAL },
 } as const;
@@ -162,6 +130,7 @@ function labwareFromDeck(deck: DeckResponse | null): Record<string, LabwareConfi
 export default function DeckEditor({ configs, selectedFile, onSelectFile, onImportFile, onNewFile, onDeleteFile, deleteDisabledReason, lastSaved, importedFrom, deck, baseline, onSave, onLocalChange, dirty, onRefresh, gantry = null, position = null, isRunning = false }: Props) {
   const [labware, setLabware] = useState<Record<string, LabwareConfig>>(() => labwareFromDeck(deck));
   const [calibrateOpen, setCalibrateOpen] = useState(false);
+  const [calibrationMode, setCalibrationMode] = useState<"new" | "calibrate">("calibrate");
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -193,7 +162,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
     const { prefix, template } = ADDABLE_LABWARE[type];
     // Find the next free index rather than always using
     // `count + 1` — removing an earlier item and adding a new one could
-    // otherwise land on a key that's still in use (e.g. wellplate_2),
+    // otherwise land on a key that's still in use (e.g. tiprack_2),
     // silently replacing that labware's calibration with a blank template.
     let idx = Object.keys(labware).length + 1;
     let key = `${prefix}_${idx}`;
@@ -289,7 +258,25 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
           </button>
         ))}
         <button
-          onClick={() => setCalibrateOpen(true)}
+          onClick={() => { setCalibrationMode("new"); setCalibrateOpen(true); }}
+          disabled={!canCalibrateLabware}
+          style={{
+            ...addBtnStyle,
+            opacity: canCalibrateLabware ? 1 : 0.45,
+            cursor: canCalibrateLabware ? "pointer" : "not-allowed",
+          }}
+          title={canCalibrateLabware
+            ? "Create and calibrate new labware"
+            : isRunning
+              ? "Protocol running"
+              : !deck
+                ? "Load a deck config first"
+                : "Load a gantry config first"}
+        >
+          New Labware
+        </button>
+        <button
+          onClick={() => { setCalibrationMode("calibrate"); setCalibrateOpen(true); }}
           disabled={!canCalibrateLabware}
           style={{
             ...calibrateBtnStyle,
@@ -390,6 +377,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
         gantry={gantry}
         position={position}
         onSaveDeck={handleCalibrationSave}
+        initialMode={calibrationMode}
       />
     </div>
   );
