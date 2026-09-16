@@ -568,7 +568,7 @@ export default function LabwareCalibrationModal({
       <div style={modalStyle}>
         <div style={headerStyle}>
           <div>
-            <h2 style={{ margin: 0, fontSize: 18, color: theme.color.ink, letterSpacing: "-0.01em" }}>{mode === "new" ? "New Labware" : "Calibrate labware"}</h2>
+            <h2 style={{ margin: 0, fontSize: 18, color: theme.color.ink, letterSpacing: "-0.01em" }}>{mode === "new" ? "Create custom labware" : "Calibrate labware"}</h2>
             <div style={{ marginTop: 3, fontSize: 12, color: theme.color.textMuted }}>
               {deck?.filename ?? "No deck loaded"}
               {selectedLabel ? ` · ${selectedLabel}` : ""}
@@ -602,7 +602,7 @@ export default function LabwareCalibrationModal({
                 <h3 style={sectionTitleStyle}>{mode === "new" ? "Define labware" : "Select Labware"}</h3>
                 <p style={instructionStyle}>
                   {mode === "new"
-                    ? "Define the well plate geometry, then choose which instrument you will position over it. The new plate is added only after calibration is saved."
+                    ? "Define your labware’s layout, then calibrate its position. It will be saved in the current deck configuration."
                     : <>Pick the labware to calibrate, then choose which instrument you will position over it. Recorded positions are converted into the deck frame using that instrument&apos;s configured offsets.</>}
                 </p>
                 {mode !== "new" && labwareEntries.length === 0 && (
