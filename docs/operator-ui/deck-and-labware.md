@@ -16,8 +16,8 @@ where it cannot shift.
 1. **Deck config.** Pick a deck file. The UI opens it as a **working copy**:
    edits save to `cub_deck.yaml` in the config directory, and the file you
    picked is left untouched. The note under the dropdown says so.
-2. **+ Well Plate / + Vial.** Add a new labware entry of that type to the
-   bottom of the list.
+2. **New Labware.** Define a custom well plate, then calibrate and save it
+   using the same dialog. This replaces the old **+ Well Plate / + Vial** shortcuts.
 3. **Calibrate labware.** Opens the labware calibration dialog, covered
    [below](#calibrate-labware-with-the-gantry). It is enabled once both a
    gantry and a deck are loaded and no protocol is running.
@@ -29,6 +29,26 @@ where it cannot shift.
 Other labware types — vial grids, tip racks, tip disposals, and plate
 holders — get their own field sets. Types the editor does not know are
 passed through unchanged when you save.
+
+### Create custom labware
+
+Click **New Labware** beside **Calibrate labware** with a deck and gantry
+config loaded and no protocol running. Enter a unique name, the number of
+rows and columns, and the center-to-center **X/Y well spacing (mm)** for
+that plate. Counts must be positive whole numbers and spacing must be positive.
+The calibration step sets position and orientation; it does not measure both
+spacings, so use the plate's measured spacing or its specification.
+
+Choose the reference instrument and attached-tip settings, then continue
+through **Adjust positions** and **Review & save** below. No placeholder
+labware is added to the deck: closing before saving cancels creation.
+Saving adds the named plate to the current working deck and preserves its
+other entries, including edits you made in the deck editor. Reload the deck
+to confirm the new grid and calibration were saved. Physical dimensions and
+volume fields can be entered in the resulting card if known.
+
+For a one-column plate, A2 is an orientation reference in the direction a
+second column would occupy; it is not an extra well added to the grid.
 
 ### Well plate fields
 
