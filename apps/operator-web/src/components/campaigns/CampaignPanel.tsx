@@ -550,6 +550,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [targetRgbPreview, setTargetRgbPreview] = useState<number[] | null>(null);
   const [targetRgbBusy, setTargetRgbBusy] = useState(false);
   const [targetRgbError, setTargetRgbError] = useState<string | null>(null);
+  const rgbPreviewRequestRef = useRef(0);
   const [redSource, setRedSource] = useState(restoredPreset?.redSource ?? "stocks.A1");
   const [yellowSource, setYellowSource] = useState(restoredPreset?.yellowSource ?? "stocks.A2");
   const [blueSource, setBlueSource] = useState(restoredPreset?.blueSource ?? "stocks.A3");
@@ -659,19 +660,25 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   }, []);
   useEffect(() => { void refreshPresets(); }, [refreshPresets]);
   const previewRgbTarget = useCallback(async (rgb: [number, number, number] | null) => {
+    const requestId = ++rgbPreviewRequestRef.current;
     setTargetRgbError(null);
     setTargetRgbPreview(null);
-    if (!rgb) return;
+    if (!rgb) {
+      setTargetRgbBusy(false);
+      return;
+    }
     setTargetRgbBusy(true);
     try {
       const preview = await campaignApi.previewRgbTarget(rgb);
       const lab = numericTriplet(preview.lab);
       if (!lab) throw new Error("RGB target preview did not return a Lab triplet.");
+      if (requestId !== rgbPreviewRequestRef.current) return;
       setTargetRgbPreview(lab);
     } catch (caught) {
+      if (requestId !== rgbPreviewRequestRef.current) return;
       setTargetRgbError(campaignErrorMessage(caught));
     } finally {
-      setTargetRgbBusy(false);
+      if (requestId === rgbPreviewRequestRef.current) setTargetRgbBusy(false);
     }
   }, []);
   useEffect(() => {
@@ -759,6 +766,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     setTargetError(null);
   };
   const invalidateRgbTarget = () => {
+    rgbPreviewRequestRef.current += 1;
     invalidateBuiltCampaign();
     setTargetRgbPreview(null);
     setTargetRgbError(null);
@@ -948,7 +956,11 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     setTargetMode(mode);
     setSpec((current) => ({ ...current, target_mode: mode, target_rgb: mode === "rgb" ? targetRgb : null }));
     if (mode === "rgb") invalidateRgbTarget();
-    else invalidateCameraTarget();
+    else {
+      rgbPreviewRequestRef.current += 1;
+      setTargetRgbBusy(false);
+      invalidateCameraTarget();
+    }
   };
   const chooseRgb = (rgb: [number, number, number] | null) => {
     setTargetRgb(rgb);
@@ -1380,8 +1392,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         {sourceProtocolMismatch && <div className="campaign-banner campaign-error" role="alert">Select source protocol {sourceProtocolFile} in the Protocol template picker before building. Current selection: {protocolFile}.</div>}
         {batchError && <div className="campaign-banner campaign-error" role="alert">{batchError}</div>}
         <div className="campaign-actions">
-          {visibleTargetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${visibleTargetLab[0]}% ${visibleTargetLab[1]} ${visibleTargetLab[2]})` }} />Target Lab {visibleTargetLab.map((value) => value.toFixed(4)).join(", ")}</span>}
-          {targetMode === "rgb" && targetRgbPreview && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: rgbHex(targetRgb) }} />RGB target ready</span>}
+          {visibleTargetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${visibleTargetLab[0]}% ${visibleTargetLab[1]} ${visibleTargetLab[2]})` }} />Target Lab {visibleTargetLab.map((value) => value.toFixed(2)).join(", ")}</span>}
           {targetStatus && <span className="campaign-note">{targetStatus}</span>}
           {targetReady && <button type="button" aria-label="Build campaign from accepted target" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || batchError !== null || countConsistencyMessage !== null || sourceProtocolMismatch || !sourceProtocolFile || !protocolFile || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign</button>}
         </div>
