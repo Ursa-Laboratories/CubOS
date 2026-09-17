@@ -201,9 +201,10 @@ def extract_result_context(result: Any, path: str) -> dict[str, Any] | None:
     if not isinstance(parent, Mapping):
         return None
     allowed = {
-        "image_path", "roi_fraction", "rgb", "lab", "reference_lab",
+        "image_path", "roi_fraction", "rgb", "lab", "reference_lab", "reference_rgb",
         "delta_e_00", "delta_e_76", "measurement_status", "comparison_status",
         "quality", "processing_profile", "reference_processing_profile_id",
+        "reference_origin", "reference_provenance",
         "roi", "well_identity", "annotated_preview_path", "frame_metadata",
     }
     payload = {key: parent[key] for key in allowed if key in parent}
@@ -225,7 +226,7 @@ def validate_objective_provenance(
     quality = context.get("quality")
     profile_id = profile.get("id") if isinstance(profile, Mapping) else None
     reference_profile_id = context.get("reference_processing_profile_id")
-    accepted = (
+    common_accepted = (
         context.get("measurement_status") == "accepted"
         and context.get("comparison_status") == "accepted"
         and isinstance(quality, Mapping)
@@ -234,12 +235,24 @@ def validate_objective_provenance(
         and profile.get("schema") == "cubos.camera-well-cielab.v1"
         and isinstance(profile_id, str)
         and bool(profile_id)
-        and reference_profile_id == profile_id
     )
+    camera_reference = reference_profile_id == profile_id
+    rgb_reference = (
+        context.get("reference_origin") == "user_selected_srgb"
+        and reference_profile_id is None
+        and isinstance(context.get("reference_rgb"), list)
+        and len(context["reference_rgb"]) == 3
+        and isinstance(context.get("reference_provenance"), Mapping)
+        and context["reference_provenance"].get("encoding") == "sRGB"
+        and context["reference_provenance"].get("whitepoint") == "D65"
+        and context["reference_provenance"].get("calibration_status")
+        == "uncalibrated_reference"
+    )
+    accepted = common_accepted and (camera_reference or rgb_reference)
     if not accepted:
         raise TemplateError(
-            "color objective is unverified: accepted measurement quality and an "
-            "exact matching cubos.camera-well-cielab.v1 processing profile are required"
+            "color objective is unverified: accepted measurement quality and either "
+            "an exact matching camera profile or a declared sRGB reference are required"
         )
 
 

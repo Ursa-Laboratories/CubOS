@@ -9,14 +9,15 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse, Response
 from cubos.gantry.session import GantryNotConnectedError, InterruptFeedHoldTimeoutError
 from cubos.data import DataStore
-from cubos.optimization import analyze_color_image
+from cubos.optimization import analyze_color_image, rgb_to_lab
 from cubos.protocol_engine.commands.camera import default_images_dir
 from cubos_api.config import get_settings
 from cubos_api.models.campaigns import (
     CampaignRecord, CampaignSpec, CampaignStateBinding, CampaignSubmission,
     CampaignPresetDocument, CampaignPresetResponse, CampaignPresetSaveRequest,
     CampaignPresetSummary,
-    ColorCampaignSetup, ColorTargetReanalysisRequest, ColorTargetRequest,
+    ColorCampaignSetup, ColorRgbPreviewRequest, ColorTargetReanalysisRequest,
+    ColorTargetRequest,
     Observation,
 )
 from cubos_api.models.runs import RunRecord, RunSubmission
@@ -117,8 +118,17 @@ def _available_campaign_tips(setup: ColorCampaignSetup) -> list[str] | None:
 
 
 def _accepted_target_setup(setup: ColorCampaignSetup) -> ColorCampaignSetup:
+    if setup.target_mode == "rgb":
+        assert setup.target_rgb is not None
+        return setup.model_copy(update={
+            "target_lab": rgb_to_lab(setup.target_rgb),
+            "reference_processing_profile_id": None,
+            "reference_origin": "user_selected_srgb",
+        })
     if setup.mock_mode:
-        return setup
+        return setup.model_copy(update={
+            "reference_origin": setup.reference_origin or "accepted_camera_measurement",
+        })
     assert setup.target_run_id is not None
     assert setup.target_analysis_revision is not None
     manager, record = _color_target_record(setup.target_run_id)
@@ -212,6 +222,7 @@ def _accepted_target_setup(setup: ColorCampaignSetup) -> ColorCampaignSetup:
     return setup.model_copy(update={
         "target_lab": tuple(float(value) for value in analysis["lab"]),
         "reference_processing_profile_id": profile["id"],
+        "reference_origin": "accepted_camera_measurement",
     })
 
 
@@ -253,6 +264,22 @@ def read_color_target(body: ColorTargetRequest):
     except RunConflictError as exc:
         raise HTTPException(409, str(exc)) from exc
     except (ValueError, OSError) as exc:
+        raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
+
+
+@router.post("/color-target/rgb-preview")
+def preview_rgb_target(body: ColorRgbPreviewRequest):
+    """Return the authoritative D65 Lab preview for a user-selected sRGB color."""
+    try:
+        return {
+            "rgb": list(body.rgb),
+            "lab": list(rgb_to_lab(body.rgb)),
+            "reference_origin": "user_selected_srgb",
+            "encoding": "sRGB",
+            "whitepoint": "D65",
+            "calibration_status": "uncalibrated_reference",
+        }
+    except ValueError as exc:
         raise HTTPException(400, f"{type(exc).__name__}: {exc}") from exc
 
 

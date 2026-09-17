@@ -9,6 +9,7 @@ from pathlib import Path
 
 import yaml
 
+from cubos.optimization import rgb_to_lab
 from cubos_api.models.campaigns import CampaignSpec, ColorCampaignSetup
 
 
@@ -112,8 +113,24 @@ def build_color_campaign(
     source_protocol_yaml: str,
 ) -> CampaignSpec:
     """Write an immutable generated protocol and return its campaign spec."""
-    if setup.target_lab is None or setup.reference_processing_profile_id is None:
-        raise ValueError("Color campaign requires an accepted target measurement and profile")
+    if setup.target_mode == "camera":
+        if setup.target_lab is None or setup.reference_processing_profile_id is None:
+            raise ValueError(
+                "Camera color campaigns require an accepted target measurement and profile"
+            )
+        target_lab = setup.target_lab
+        reference_origin = setup.reference_origin or "accepted_camera_measurement"
+        reference_rgb = None
+    else:
+        if setup.target_rgb is None:
+            raise ValueError("RGB color campaigns require target_rgb")
+        target_lab = rgb_to_lab(setup.target_rgb)
+        reference_origin = setup.reference_origin or "user_selected_srgb"
+        if reference_origin != "user_selected_srgb":
+            raise ValueError("RGB color campaigns require a user-selected sRGB reference")
+        if setup.reference_processing_profile_id is not None:
+            raise ValueError("RGB color campaigns cannot use a camera processing profile")
+        reference_rgb = setup.target_rgb
     source_steps = _source_steps(source_protocol_yaml, batch_size=setup.batch_size)
     trial_count = len(setup.candidate_wells)
     batch_size = setup.batch_size
@@ -184,8 +201,16 @@ def build_color_campaign(
             "position": first_well,
             "label": "color_candidate",
             "roi_fraction": setup.roi_fraction,
-            "reference_lab": list(setup.target_lab),
-            "reference_processing_profile_id": setup.reference_processing_profile_id,
+            "reference_lab": list(target_lab),
+            **(
+                {"reference_processing_profile_id": setup.reference_processing_profile_id}
+                if setup.reference_processing_profile_id is not None else {}
+            ),
+            "reference_origin": reference_origin,
+            **(
+                {"reference_rgb": list(reference_rgb)}
+                if reference_rgb is not None else {}
+            ),
             "expected_center": list(setup.expected_center),
             "expected_center_source": setup.expected_center_source,
             **(
@@ -244,6 +269,8 @@ def build_color_campaign(
         fluid_state_id=setup.fluid_state_id,
         batch_size=batch_size,
         source_protocol_file=setup.source_protocol_file,
+        target_mode=setup.target_mode,
+        target_rgb=setup.target_rgb,
     )
     protocol_directory.mkdir(parents=True, exist_ok=True)
     (protocol_directory / filename).write_text(yaml.safe_dump(protocol, sort_keys=False))

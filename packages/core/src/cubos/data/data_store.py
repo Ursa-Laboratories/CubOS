@@ -269,6 +269,19 @@ CREATE UNIQUE INDEX IF NOT EXISTS tip_operations_one_pending_per_state
 ON tip_operations(fluid_state_id)
 WHERE status IN ('started', 'reconciliation_required');
 
+CREATE TABLE IF NOT EXISTS tip_refill_operations (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id       INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
+                                          ON DELETE CASCADE,
+    operation_key        TEXT    NOT NULL UNIQUE,
+    rack_key             TEXT    NOT NULL,
+    operator             TEXT    NOT NULL,
+    reason               TEXT    NOT NULL,
+    changed_slots_json   TEXT    NOT NULL,
+    preserved_slots_json TEXT    NOT NULL,
+    created_at           TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS cap_containers (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     fluid_state_id     INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
@@ -1342,6 +1355,29 @@ class DataStore:
             resolution,
             detail=detail,
             final_slot_status=final_slot_status,
+        )
+
+    def refill_tip_rack(
+        self,
+        fluid_state_id: int,
+        operation_key: str,
+        rack_key: str,
+        *,
+        operator: str,
+        reason: str,
+        pipette_bare_confirmed: bool,
+    ) -> Any:
+        """Record an operator-confirmed refill of one tip rack."""
+        from .tip_state import refill_tip_rack
+
+        return refill_tip_rack(
+            self._conn,
+            fluid_state_id,
+            operation_key,
+            rack_key,
+            operator=operator,
+            reason=reason,
+            pipette_bare_confirmed=pipette_bare_confirmed,
         )
 
     def restore_pipette_attachment(self, fluid_state_id: int, pipette: Any) -> None:

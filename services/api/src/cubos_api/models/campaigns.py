@@ -79,6 +79,13 @@ class CampaignSpec(CampaignModel):
     fluid_state_id: int | None = Field(default=None, gt=0)
     batch_size: int = Field(default=1, ge=1, le=6)
     source_protocol_file: str | None = Field(default=None, min_length=1, max_length=255)
+    target_mode: Literal["camera", "rgb"] = "camera"
+    target_rgb: tuple[float, float, float] | None = None
+
+    @field_validator("target_rgb", mode="before")
+    @classmethod
+    def accept_json_target_rgb(cls, value):
+        return tuple(value) if isinstance(value, list) else value
 
     @model_validator(mode="after")
     def consistent(self):
@@ -97,6 +104,12 @@ class CampaignSpec(CampaignModel):
             raise ValueError("Offline runs cannot modify a real fluid state")
         if self.batch_size > 1 and self.source_protocol_file is None:
             raise ValueError("Batched color campaigns require a source protocol file")
+        if self.target_rgb is not None and any(
+            value < 0 or value > 255 for value in self.target_rgb
+        ):
+            raise ValueError("target_rgb values must be between 0 and 255")
+        if self.target_mode == "rgb" and self.target_rgb is None:
+            raise ValueError("RGB campaigns require target_rgb")
         return self
 
 
@@ -140,24 +153,27 @@ class ColorCampaignSetup(CampaignModel):
     deck_file: str = Field(min_length=1, max_length=255)
     source_protocol_file: str = Field(min_length=1, max_length=255)
     batch_size: int = Field(default=1, ge=1, le=6)
+    target_mode: Literal["camera", "rgb"] = "camera"
     target_run_id: str | None = Field(default=None, min_length=1, max_length=160)
     target_analysis_revision: int | None = Field(default=None, ge=0)
     target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
+    target_rgb: tuple[float, float, float] | None = None
     target_lab: tuple[float, float, float] | None = None
     reference_processing_profile_id: str | None = Field(default=None, min_length=1, max_length=128)
+    reference_origin: Literal["accepted_camera_measurement", "user_selected_srgb"] | None = None
     red_source: str = Field(default="stocks.A1", min_length=1, max_length=160)
     yellow_source: str = Field(default="stocks.A2", min_length=1, max_length=160)
     blue_source: str = Field(default="stocks.A3", min_length=1, max_length=160)
     candidate_wells: list[str] = Field(min_length=6, max_length=32)
     camera_instrument: str = Field(default="camera", min_length=1, max_length=80)
     roi_fraction: float = Field(default=0.5, gt=0, le=1)
-    expected_center: tuple[float, float]
-    expected_center_source: Literal["operator_selected"]
+    expected_center: tuple[float, float] | None = None
+    expected_center_source: Literal["operator_selected", "frame_center"] | None = None
     image_height: float | None = None
     fluid_state_id: int | None = Field(default=None, gt=0)
     mock_mode: bool = False
 
-    @field_validator("target_lab", "expected_center", mode="before")
+    @field_validator("target_rgb", "target_lab", "expected_center", mode="before")
     @classmethod
     def accept_json_tuple(cls, value):
         # JSON has arrays rather than tuples. Normalize the browser payload before
@@ -170,20 +186,61 @@ class ColorCampaignSetup(CampaignModel):
     def unique_resources(self):
         if len(set(self.candidate_wells)) != len(self.candidate_wells):
             raise ValueError("Candidate wells must be unique")
-        if self.target_well in self.candidate_wells:
+        if self.target_mode == "camera" and self.target_well in self.candidate_wells:
             raise ValueError("Target well cannot also be a candidate well")
         if len(self.candidate_wells) * 3 > 96:
             raise ValueError("Color matching requires three fresh tips per candidate")
-        if any(value < 0 or value > 1 for value in self.expected_center):
+        if self.expected_center is not None and any(
+            value < 0 or value > 1 for value in self.expected_center
+        ):
             raise ValueError("expected_center values must be between 0 and 1")
+        if self.target_rgb is not None and any(
+            value < 0 or value > 255 for value in self.target_rgb
+        ):
+            raise ValueError("target_rgb values must be between 0 and 255")
+        if self.target_mode == "camera":
+            if self.target_rgb is not None:
+                raise ValueError("Camera targets cannot include target_rgb")
+            if self.expected_center is None or self.expected_center_source != "operator_selected":
+                raise ValueError(
+                    "Camera targets require an operator-selected expected center"
+                )
+        else:
+            if self.target_rgb is None:
+                raise ValueError("RGB targets require target_rgb")
+            if self.target_run_id is not None or self.target_analysis_revision is not None:
+                raise ValueError("RGB targets cannot include camera target-run evidence")
+            if self.reference_processing_profile_id is not None:
+                raise ValueError("RGB targets cannot include a camera processing profile")
+            if self.expected_center is None:
+                self.expected_center = (0.5, 0.5)
+            if self.expected_center_source is None:
+                self.expected_center_source = "frame_center"
+            if self.expected_center_source != "frame_center":
+                raise ValueError("RGB targets require a frame-center expected center")
         if not self.mock_mode and self.fluid_state_id is None:
             raise ValueError("A real color campaign requires a durable fluid-state ID")
-        if not self.mock_mode and (
+        if self.target_mode == "camera" and not self.mock_mode and (
             self.target_run_id is None or self.target_analysis_revision is None
         ):
             raise ValueError(
                 "A real color campaign requires an accepted target run and analysis revision"
             )
+        return self
+
+
+class ColorRgbPreviewRequest(CampaignModel):
+    rgb: tuple[float, float, float]
+
+    @field_validator("rgb", mode="before")
+    @classmethod
+    def accept_json_rgb_tuple(cls, value):
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def rgb_in_srgb_range(self):
+        if any(value < 0 or value > 255 for value in self.rgb):
+            raise ValueError("rgb values must be between 0 and 255")
         return self
 
 
@@ -225,7 +282,9 @@ class CampaignStateBinding(CampaignModel):
 class ColorCampaignPresetDraft(CampaignModel):
     source_protocol_file: str | None = Field(default=None, min_length=1, max_length=255)
     batch_size: int = Field(default=1, ge=1, le=6)
+    target_mode: Literal["camera", "rgb"] = "camera"
     target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
+    target_rgb: tuple[float, float, float] | None = None
     red_source: str = Field(default="stocks.A1", min_length=1, max_length=160)
     yellow_source: str = Field(default="stocks.A2", min_length=1, max_length=160)
     blue_source: str = Field(default="stocks.A3", min_length=1, max_length=160)
@@ -233,6 +292,11 @@ class ColorCampaignPresetDraft(CampaignModel):
     camera_instrument: str = Field(default="camera", min_length=1, max_length=80)
     roi_fraction: float = Field(default=0.5, gt=0, le=1)
     image_height: float | None = None
+
+    @field_validator("target_rgb", mode="before")
+    @classmethod
+    def accept_json_rgb_tuple(cls, value):
+        return tuple(value) if isinstance(value, list) else value
 
     @field_validator("candidate_wells")
     @classmethod
@@ -243,8 +307,16 @@ class ColorCampaignPresetDraft(CampaignModel):
 
     @model_validator(mode="after")
     def target_is_not_a_candidate(self):
-        if self.target_well in self.candidate_wells:
+        if self.target_mode == "camera" and self.target_well in self.candidate_wells:
             raise ValueError("Target well cannot also be a candidate well")
+        if self.target_rgb is not None and any(
+            value < 0 or value > 255 for value in self.target_rgb
+        ):
+            raise ValueError("target_rgb values must be between 0 and 255")
+        if self.target_mode == "camera" and self.target_rgb is not None:
+            raise ValueError("Camera targets cannot include target_rgb")
+        if self.target_mode == "rgb" and self.target_rgb is None:
+            raise ValueError("RGB targets require target_rgb")
         return self
 
 

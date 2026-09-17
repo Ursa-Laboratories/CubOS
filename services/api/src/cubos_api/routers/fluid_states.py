@@ -39,6 +39,9 @@ from cubos_api.models.state import (
     ResolveReconciliationRequest,
     ResolveReconciliationResponse,
     TipContainerView,
+    TipRefillRequest,
+    TipRefillResponse,
+    TipRefillView,
     TipStateResponse,
 )
 from cubos_api.services.state_errors import map_state_exception
@@ -168,6 +171,28 @@ def _operation_views(
                 },
             )
         )
+    for refill in tip_snapshot.get("refills", []):
+        if only_status and "applied" not in only_status:
+            continue
+        views.append(
+            OperationView(
+                domain="tip",
+                id=refill["id"],
+                operation_key=refill["operation_key"],
+                operation_type="rack_refill",
+                status="applied",
+                campaign_id=None,
+                detail=f"[{refill['operator']}] {refill['reason']}",
+                created_at=refill["created_at"],
+                updated_at=refill["created_at"],
+                applied_at=refill["created_at"],
+                context={
+                    "rack_key": refill["rack_key"],
+                    "changed_slots": refill["changed_slots"],
+                    "preserved_slots": refill["preserved_slots"],
+                },
+            )
+        )
     for op in cap_snapshot["operations"]:
         if only_status and op["status"] not in only_status:
             continue
@@ -284,7 +309,47 @@ def get_tips(fluid_state_id: int) -> TipStateResponse:
             fluid_state_id=snapshot["fluid_state_id"],
             containers=[TipContainerView(**c) for c in snapshot["containers"]],
             pipette=PipetteAttachmentView(**snapshot["pipette"]),
+            refills=[TipRefillView(**r) for r in snapshot.get("refills", [])],
         )
+    finally:
+        store.close()
+
+
+def _require_station_idle() -> None:
+    """Reject inventory edits while a run or campaign owns the station."""
+    from cubos_api.routers import gantry
+    from cubos_api.services.run_manager import get_run_manager
+
+    status = gantry.run_status()
+    manager = get_run_manager()
+    if status.get("active") or manager.active_run_id is not None:
+        raise HTTPException(409, "station is busy with an active protocol run")
+    if manager.campaign_owner is not None:
+        raise HTTPException(409, "station is reserved by an active-learning campaign")
+
+
+@router.post(
+    "/{fluid_state_id}/tips/refill",
+    response_model=TipRefillResponse,
+    status_code=200,
+)
+def refill_tips(fluid_state_id: int, body: TipRefillRequest) -> TipRefillResponse:
+    """Apply an operator-confirmed full-rack refill to tip state only."""
+    _require_station_idle()
+    store = _open_store()
+    try:
+        try:
+            refill = store.refill_tip_rack(
+                fluid_state_id,
+                body.operation_key.strip(),
+                body.rack_key.strip(),
+                operator=body.operator.strip(),
+                reason=body.reason.strip(),
+                pipette_bare_confirmed=body.pipette_bare_confirmed,
+            )
+        except _STATE_EXCEPTIONS as exc:
+            raise map_state_exception(exc) from exc
+        return TipRefillResponse(fluid_state_id=fluid_state_id, **refill)
     finally:
         store.close()
 

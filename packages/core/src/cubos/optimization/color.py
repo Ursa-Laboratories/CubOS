@@ -121,6 +121,8 @@ def analyze_color_image(
     roi_fraction: float = 0.5,
     expected_center: Sequence[float] | None = None,
     expected_center_source: str | None = None,
+    reference_rgb: Sequence[float] | None = None,
+    reference_origin: str | None = None,
     reference_lab: Sequence[float] | None = None,
     reference_processing_profile_id: str | None = None,
     acquisition_context: Mapping[str, object] | None = None,
@@ -131,11 +133,34 @@ def analyze_color_image(
     excludes clipped and neutral-glare pixels, and failed quality checks omit
     Lab and Delta E values so optimization cannot score the background.
     """
+    if reference_origin not in {
+        None, "accepted_camera_measurement", "user_selected_srgb",
+    }:
+        raise ValueError(
+            "reference_origin must be accepted_camera_measurement or user_selected_srgb"
+        )
+    if reference_rgb is not None:
+        if reference_origin != "user_selected_srgb":
+            raise ValueError("reference_rgb requires a user-selected sRGB reference")
+        converted_lab = rgb_to_lab(reference_rgb)
+        if reference_lab is not None:
+            supplied_lab = _triplet(reference_lab, "reference_lab")
+            if any(abs(left - right) > 1e-9 for left, right in zip(converted_lab, supplied_lab)):
+                raise ValueError("reference_lab does not match reference_rgb conversion")
+        reference_lab = converted_lab
+    elif reference_origin == "user_selected_srgb":
+        raise ValueError("user-selected sRGB references require reference_rgb")
+    if reference_origin == "accepted_camera_measurement" and reference_processing_profile_id is None:
+        raise ValueError(
+            "accepted camera references require reference_processing_profile_id"
+        )
+
     result = analyze_well_color_image(
         image_path,
         roi_fraction=roi_fraction,
         expected_center=expected_center,
         expected_center_source=expected_center_source,
+        reference_origin=reference_origin,
         reference_lab=reference_lab,
         reference_processing_profile_id=reference_processing_profile_id,
         acquisition_context=acquisition_context,
@@ -149,10 +174,31 @@ def analyze_color_image(
     if reference_lab is not None:
         target = _triplet(reference_lab, "reference_lab")
         result["reference_lab"] = list(target)
+        if reference_origin is not None:
+            result["reference_origin"] = reference_origin
+        if reference_rgb is not None:
+            result["reference_rgb"] = list(_triplet(reference_rgb, "reference_rgb"))
+            result["reference_provenance"] = {
+                "origin": "user_selected_srgb",
+                "source": "operator_selected",
+                "encoding": "sRGB",
+                "conversion": "cubos.optimization.color.rgb_to_lab",
+                "whitepoint": "D65",
+                "calibration_status": "uncalibrated_reference",
+            }
         profile = result["processing_profile"]
         profile_id = profile["id"]  # type: ignore[index]
         result["reference_processing_profile_id"] = reference_processing_profile_id
-        if reference_processing_profile_id is None:
+        if reference_origin == "user_selected_srgb":
+            if result.get("measurement_status") != "accepted":
+                result["comparison_error"] = "measurement_rejected"
+            elif lab is None:
+                result["comparison_error"] = "measurement_rejected"
+            else:
+                result["comparison_status"] = "accepted"
+                result["delta_e_00"] = ciede2000(lab, target)
+                result["delta_e_76"] = ciede76(lab, target)
+        elif reference_processing_profile_id is None:
             result["comparison_error"] = "reference_processing_profile_missing"
         elif reference_processing_profile_id != profile_id:
             result["comparison_error"] = "incompatible_processing_profile"

@@ -120,6 +120,65 @@ def test_create_fluid_state_accepts_explicit_physical_tip_inventory(
     ]
 
 
+def test_refill_tips_records_operator_event_and_only_changes_tip_state(
+    monkeypatch, tmp_path: Path,
+):
+    _write_deck_config(monkeypatch, tmp_path, text=TIP_DECK_YAML)
+    app = create_app()
+    created = api_request(
+        app,
+        "POST",
+        "/api/v1/fluid-states",
+        json={
+            "deck_file": "state-deck.yaml",
+            "fluids": {"source": {"volume_ul": 100.0}},
+            "tips": {"tips.A1": False, "tips.A2": False, "tips.A3": False},
+        },
+    ).json()
+    state_id = created["id"]
+
+    response = api_request(
+        app,
+        "POST",
+        f"/api/v1/fluid-states/{state_id}/tips/refill",
+        json={
+            "rack_key": "tips",
+            "pipette_bare_confirmed": True,
+            "operation_key": "manual-refill-1",
+            "operator": "alexc",
+            "reason": "new full rack loaded; pipette confirmed bare",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "applied"
+    assert body["changed_slots"] == ["A1", "A2", "A3"]
+    tips = api_request(app, "GET", f"/api/v1/fluid-states/{state_id}/tips")
+    tip_body = tips.json()
+    assert all(row["status"] == "available" for row in tip_body["containers"])
+    assert tip_body["pipette"]["rack_key"] is None
+    assert tip_body["refills"][0]["operation_key"] == "manual-refill-1"
+    operations = api_request(
+        app, "GET", f"/api/v1/fluid-states/{state_id}/operations?pending_only=false"
+    )
+    refill_operation = next(
+        op for op in operations.json()["operations"]
+        if op["operation_key"] == "manual-refill-1"
+    )
+    assert refill_operation["operation_type"] == "rack_refill"
+    assert refill_operation["context"]["changed_slots"] == ["A1", "A2", "A3"]
+    pending_operations = api_request(
+        app, "GET", f"/api/v1/fluid-states/{state_id}/operations"
+    )
+    assert all(
+        op["operation_key"] != "manual-refill-1"
+        for op in pending_operations.json()["operations"]
+    )
+    source = api_request(app, "GET", f"/api/v1/fluid-states/{state_id}/containers")
+    assert source.json()[0]["current_volume_ul"] == 100.0
+
+
 def test_create_fluid_state_rejects_unknown_or_nonboolean_tip_seed(
     monkeypatch, tmp_path: Path,
 ):

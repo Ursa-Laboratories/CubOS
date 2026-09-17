@@ -129,6 +129,41 @@ class TipContainerView(BaseModel):
     updated_at: str
 
 
+class TipRefillRequest(BaseModel):
+    rack_key: str
+    pipette_bare_confirmed: bool
+    operator: str
+    reason: str
+    operation_key: str
+
+    @model_validator(mode="after")
+    def validate_refill_confirmation(self) -> "TipRefillRequest":
+        if not self.rack_key.strip():
+            raise ValueError("rack_key is required")
+        if not self.operation_key.strip():
+            raise ValueError("operation_key is required")
+        if not self.operator.strip():
+            raise ValueError("operator is required")
+        if not self.reason.strip():
+            raise ValueError("reason is required")
+        if not self.pipette_bare_confirmed:
+            raise ValueError(
+                "pipette_bare_confirmed must be true to refill a rack"
+            )
+        return self
+
+
+class TipRefillView(BaseModel):
+    id: int
+    operation_key: str
+    rack_key: str
+    operator: str
+    reason: str
+    changed_slots: List[str]
+    preserved_slots: List[str]
+    created_at: str
+
+
 class PipetteAttachmentView(BaseModel):
     pipette_key: str
     rack_key: Optional[str] = None
@@ -143,6 +178,12 @@ class TipStateResponse(BaseModel):
     fluid_state_id: int
     containers: List[TipContainerView]
     pipette: PipetteAttachmentView
+    refills: List[TipRefillView] = Field(default_factory=list)
+
+
+class TipRefillResponse(TipRefillView):
+    fluid_state_id: int
+    status: str = "applied"
 
 
 class CapContainerView(BaseModel):

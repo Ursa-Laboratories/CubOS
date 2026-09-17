@@ -10,7 +10,7 @@ from typing import Mapping, Sequence
 
 
 PROFILE_SCHEMA = "cubos.camera-well-cielab.v1"
-_VERIFIED_CENTER_SOURCES = {"operator_selected"}
+_VERIFIED_CENTER_SOURCES = {"operator_selected", "frame_center"}
 _MIN_RADIUS_FRACTION = 0.015
 _MAX_RADIUS_FRACTION = 0.08
 _MAX_CENTER_OFFSET_FRACTION = 0.25
@@ -83,6 +83,7 @@ def processing_profile(
     roi_fraction: float,
     expected_center: Sequence[float] | None = None,
     expected_center_source: str | None = None,
+    reference_origin: str | None = None,
     acquisition_context: Mapping[str, object] | None = None,
     image_properties: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
@@ -118,6 +119,8 @@ def processing_profile(
         ),
         "image_properties": dict(image_properties or {}),
     }
+    if reference_origin is not None:
+        configuration["reference_origin"] = reference_origin
     encoded = json.dumps(configuration, sort_keys=True, separators=(",", ":"))
     digest = hashlib.sha256(encoded.encode("utf-8")).hexdigest()[:16]
     return {
@@ -240,6 +243,7 @@ def analyze_well_color_image(
     roi_fraction: float,
     expected_center: Sequence[float] | None = None,
     expected_center_source: str | None = None,
+    reference_origin: str | None = None,
     reference_lab: Sequence[float] | None = None,
     reference_processing_profile_id: str | None = None,
     acquisition_context: Mapping[str, object] | None = None,
@@ -249,6 +253,14 @@ def analyze_well_color_image(
         raise ValueError("roi_fraction must be greater than 0 and at most 1")
     if reference_processing_profile_id is not None and reference_lab is None:
         raise ValueError("reference_processing_profile_id requires reference_lab")
+    if reference_origin not in {
+        None, "accepted_camera_measurement", "user_selected_srgb",
+    }:
+        raise ValueError(
+            "reference_origin must be accepted_camera_measurement or user_selected_srgb"
+        )
+    if reference_origin == "user_selected_srgb" and reference_processing_profile_id is not None:
+        raise ValueError("user-selected sRGB references cannot use a camera profile")
     center_normalized = _normalized_center(expected_center)
     if expected_center_source is not None and expected_center_source not in _VERIFIED_CENTER_SOURCES:
         allowed = ", ".join(sorted(_VERIFIED_CENTER_SOURCES))
@@ -276,6 +288,9 @@ def analyze_well_color_image(
         roi_fraction=roi_fraction,
         expected_center=center_normalized,
         expected_center_source=expected_center_source,
+        reference_origin=(
+            reference_origin if reference_origin == "user_selected_srgb" else None
+        ),
         acquisition_context=acquisition_context,
         image_properties={
             "width_px": int(width),
