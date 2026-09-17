@@ -139,6 +139,7 @@ class TestPicusModels:
         assert sorted(PICUS2_MODELS) == [
             "picus2_1ch_10",
             "picus2_1ch_1000",
+            "picus2_1ch_120",
             "picus2_1ch_5000",
         ]
 
@@ -146,6 +147,9 @@ class TestPicusModels:
         small = PICUS2_MODELS["picus2_1ch_10"]
         assert (small.min_volume, small.max_volume) == (0.5, 10.0)
         assert small.volume_increment_ul == 0.01
+        medium = PICUS2_MODELS["picus2_1ch_120"]
+        assert (medium.min_volume, medium.max_volume) == (5.0, 120.0)
+        assert medium.volume_increment_ul == 0.1
         large = PICUS2_MODELS["picus2_1ch_1000"]
         assert (large.min_volume, large.max_volume) == (50.0, 1000.0)
         assert large.volume_increment_ul == 1.0
@@ -210,6 +214,24 @@ class TestVolumeQuantization:
         pip = SartoriusPicus2Pipette(pipette_model="picus2_1ch_10", offline=True)
         assert pip._quantize(1.234) == 1.23
 
+    def test_120_model_quantizes_to_a_tenth_of_a_microlitre(self):
+        pip = SartoriusPicus2Pipette(
+            pipette_model="picus2_1ch_120", offline=True,
+        )
+        assert pip._quantize(60.04) == 60.0
+        assert pip._quantize(60.06) == 60.1
+
+    def test_120_model_enforces_its_bounds(self):
+        pip = SartoriusPicus2Pipette(
+            pipette_model="picus2_1ch_120", offline=True,
+        )
+        assert pip._quantize(5.0) == 5.0
+        assert pip._quantize(120.0) == 120.0
+        with pytest.raises(PipetteCommandError, match="outside"):
+            pip._quantize(4.9)
+        with pytest.raises(PipetteCommandError, match="outside"):
+            pip._quantize(120.1)
+
     def test_5000_model_quantizes_to_five_microlitres(self):
         pip = SartoriusPicus2Pipette(
             pipette_model="picus2_1ch_5000", offline=True,
@@ -265,11 +287,26 @@ class TestVolumeQuantization:
         pip = SartoriusPicus2Pipette(pipette_model="picus2_1ch_10", offline=True)
         assert pip._format_volume(1.23) == "1.23"
 
+    def test_120_model_formats_with_one_decimal(self):
+        pip = SartoriusPicus2Pipette(
+            pipette_model="picus2_1ch_120", offline=True,
+        )
+        assert pip._format_volume(60.0) == "60.0"
+
     def test_5000_model_formats_as_an_integer(self):
         pip = SartoriusPicus2Pipette(
             pipette_model="picus2_1ch_5000", offline=True,
         )
         assert pip._format_volume(2500.0) == "2500"
+
+    def test_120_model_tracks_full_stroke_and_rejects_overfill(self):
+        pip = SartoriusPicus2Pipette(
+            pipette_model="picus2_1ch_120", offline=True,
+        )
+        pip.connect()
+        assert pip.aspirate(120.0).loaded_volume_ul == 120.0
+        with pytest.raises(PipetteCommandError, match="already loaded"):
+            pip.aspirate(5.0)
 
     def test_5000_model_tracks_full_stroke_and_rejects_overfill(self):
         pip = SartoriusPicus2Pipette(
