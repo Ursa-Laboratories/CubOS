@@ -619,6 +619,13 @@ def transfer(
     volume, so tracked container state reflects what was asked for while
     hardware receives whatever correction is calibrated to actually deliver
     it.
+
+    Every transfer runs the pipette's calibrated blow-out motion once,
+    right after the *final* stroke's dispense -- clearing any fluid left in
+    the tip after the transfer is otherwise complete, rather than after
+    every stroke of a multi-stroke transfer. It does not change the
+    tracked dispense volume; a blow-out failure is treated the same as a
+    dispense failure (the stroke is marked ``reconciliation_required``).
     """
     _require_uncapped(context, require_uncapped, command_label="transfer")
 
@@ -769,6 +776,7 @@ def transfer(
                 stroke_count=stroke_count,
                 planned_source=(planned.plans[2 * stroke_index] if planned else None),
                 planned_destination=(planned.plans[2 * stroke_index + 1] if planned else None),
+                blow_out=stroke_index == stroke_count - 1,
             )
     finally:
         context.active_substep = previous_substep
@@ -792,6 +800,7 @@ def _execute_transfer_stroke(
     stroke_count: int,
     planned_source: Any = None,
     planned_destination: Any = None,
+    blow_out: bool = False,
 ) -> None:
     """Journal, actuate, and commit exactly one transfer stroke.
 
@@ -799,6 +808,10 @@ def _execute_transfer_stroke(
     the resumability rationale). ``correction`` is applied only to the
     volume handed to the pipette driver; the durable state update always
     uses ``stroke_volume_ul`` (the requested, uncorrected amount).
+
+    ``blow_out`` fires the pipette's blow-out motion right after this
+    stroke's dispense -- callers pass this only for the final stroke of a
+    transfer (see ``transfer``'s docstring).
     """
     operation_key = None
     if tracked:
@@ -842,6 +855,8 @@ def _execute_transfer_stroke(
         else:
             context.routing_session.execute(planned_destination)
         pipette.dispense(commanded_volume_ul, speed)
+        if blow_out:
+            pipette.blowout(speed)
     except BaseException as exc:
         if operation_key is not None:
             _mark_transfer_stroke_uncertain(
