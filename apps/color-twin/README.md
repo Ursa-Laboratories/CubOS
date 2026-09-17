@@ -48,6 +48,13 @@ used. Nominal CAD envelopes, attached-tip radius, camera geometry and saved
 coordinates still require physical fit, collision, Z-stroke and measurement
 validation.
 
+For a clean camera-facing presentation of the saved Picus batch, open
+`?profile=saved-picus120&view=photo`. The `Photo` view keeps the native
+timeline scrubber (`Simulation timeline`) available for deterministic captures
+while hiding route traces, planning overlays and review sidebars. The view
+selector writes the `view` query parameter, so a capture can return to the
+standard UI by changing it to `orbit`, `front`, or `top`.
+
 The synthetic RGB values are illustrative and do not represent measured chemistry.
 
 Tests:

@@ -62,9 +62,11 @@ export default function Scene({run,time,view,showCollisionGeometry}:{run:Run|nul
   function cyl(parent:THREE.Object3D,r:number,h:number,x:number,y:number,z:number,mat:THREE.Material,r2=r,open=false){const mesh=new THREE.Mesh(new THREE.CylinderGeometry(r,r2,h,24,1,open),mat);mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh}
   function ring(parent:THREE.Object3D,inner:number,outer:number,x:number,y:number,z:number,mat:THREE.Material){const mesh=new THREE.Mesh(new THREE.RingGeometry(inner,outer,24),mat);mesh.rotation.x=-Math.PI/2;mesh.position.set(x,y,z);mesh.receiveShadow=true;parent.add(mesh);return mesh}
   function rail(x1:number,y1:number,z1:number,x2:number,y2:number,z2:number,r=4,mat=steel){const a=new THREE.Vector3(x1,y1,z1),b=new THREE.Vector3(x2,y2,z2);const mesh=cyl(scene,r,a.distanceTo(b),...a.clone().add(b).multiplyScalar(.5).toArray() as [number,number,number],mat);mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),b.sub(a).normalize());return mesh}
-  function label(parent:THREE.Object3D,text:string,x:number,y:number,z:number,size=20){const canvas=document.createElement('canvas');canvas.width=512;canvas.height=80;const context=canvas.getContext('2d')!;context.fillStyle='#dae9e9';context.font='500 29px sans-serif';context.textAlign='center';context.fillText(text,256,48);const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(canvas),transparent:true,depthTest:false}));sprite.position.set(x,y,z);sprite.scale.set(size*5,size*.78,1);parent.add(sprite);return sprite}
+  const sceneLabels:THREE.Sprite[]=[]
+  function label(parent:THREE.Object3D,text:string,x:number,y:number,z:number,size=20){const canvas=document.createElement('canvas');canvas.width=512;canvas.height=80;const context=canvas.getContext('2d')!;context.fillStyle='#dae9e9';context.font='500 29px sans-serif';context.textAlign='center';context.fillText(text,256,48);const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(canvas),transparent:true,depthTest:false}));sprite.position.set(x,y,z);sprite.scale.set(size*5,size*.78,1);parent.add(sprite);sceneLabels.push(sprite);return sprite}
 
-  box(scene,1400,4,1400,0,-8,0,material('#132128',.2,.9))
+  const floorMaterial=material('#132128',.2,.9)
+  box(scene,1400,4,1400,0,-8,0,floorMaterial)
   const grid=new THREE.GridHelper(1100,44,'#31494f','#24373d')
   grid.position.y=-5
   scene.add(grid)
@@ -112,8 +114,9 @@ export default function Scene({run,time,view,showCollisionGeometry}:{run:Run|nul
   }
 
   const wellMeshes=new Map<string,THREE.Mesh>()
-  const tipMeshes=new Map<string,THREE.Mesh>()
+  const tipMeshes=new Map<string,THREE.Object3D>()
   const collisionMeshes=new Map<string,{mesh:THREE.Mesh;marker?:THREE.Sprite}>()
+  const routeLines:THREE.Line[]=[]
   const plateMeta=run?.deck_metadata?.plate
   const plateBounds=boundsFor('plate',plateMeta?.height??15,plateMeta?.length,plateMeta?.width)
   if(plateBounds)framedTray(plateBounds,cream,plateBounds.maximum.z-plateBounds.minimum.z)
@@ -167,12 +170,45 @@ export default function Scene({run,time,view,showCollisionGeometry}:{run:Run|nul
     label(bed,'A1 · first pickup',a1.x-145,60+a1.z+12,90-a1.y,9)
    }
   }else if(tipBounds){
-   framedTray(tipBounds,cream,Math.min(10,tipBounds.maximum.z-tipBounds.minimum.z))
-   const minX=tipBounds.minimum.x,maxX=tipBounds.maximum.x,minY=tipBounds.minimum.y,maxY=tipBounds.maximum.y,top=tipBounds.maximum.z-2
-   for(let column=0;column<=12;column++){const x=minX+(maxX-minX)*column/12;box(bed,1.3,2.5,maxY-minY,x-145,60+top,90-(minY+maxY)/2,cream)}
-   for(let row=0;row<=8;row++){const y=minY+(maxY-minY)*row/8;box(bed,maxX-minX,2.5,1.3,(minX+maxX)/2-145,60+top,90-y,cream)}
+   const photoRack=tipLength>=40 && Math.abs((tipBounds.maximum.x-tipBounds.minimum.x)-124)<8
+   if(photoRack){
+    // The saved Picus rack is a vertical open rack: the cream body stops
+    // below a solid green 8 × 12 tray, leaving the 42 mm tips visible.
+    const minX=tipBounds.minimum.x,maxX=tipBounds.maximum.x,minY=tipBounds.minimum.y,maxY=tipBounds.maximum.y
+    const trayHeight=5
+    // The saved pickup point is the tip mouth plane. Keep roughly 16 mm of
+    // each 42 mm tip above the tray, matching the open rack in the reference
+    // photo; the rack body itself remains a visual presentation estimate.
+    const trayTop=tipBounds.maximum.z-16
+    const bodyTop=trayTop-trayHeight
+    const bodyHeight=Math.max(8,bodyTop-tipBounds.minimum.z)
+    const rackBody=material('#f1eee0',.02,.42,.58)
+    box(bed,maxX-minX,bodyHeight,maxY-minY,(minX+maxX)/2-145,60+tipBounds.minimum.z+bodyHeight/2,90-(minY+maxY)/2,rackBody)
+    const tray=material('#078d4d',.05,.3)
+    box(bed,maxX-minX,trayHeight,maxY-minY,(minX+maxX)/2-145,60+bodyTop+trayHeight/2,90-(minY+maxY)/2,tray)
+    const hole=material('#116b4e',.05,.38)
+    // Use the native calibrated points for the hole centers so the tray and
+    // each consumable remain registered to the same 8 × 12 coordinates.
+    for(const point of points.tips??[])
+     cyl(bed,3.1,.22,point.x-145,60+trayTop+.12,90-point.y,hole,3.1)
+   }else{
+    framedTray(tipBounds,cream,Math.min(10,tipBounds.maximum.z-tipBounds.minimum.z))
+    const minX=tipBounds.minimum.x,maxX=tipBounds.maximum.x,minY=tipBounds.minimum.y,maxY=tipBounds.maximum.y,top=tipBounds.maximum.z-2
+    for(let column=0;column<=12;column++){const x=minX+(maxX-minX)*column/12;box(bed,1.3,2.5,maxY-minY,x-145,60+top,90-(minY+maxY)/2,cream)}
+    for(let row=0;row<=8;row++){const y=minY+(maxY-minY)*row/8;box(bed,maxX-minX,2.5,1.3,(minX+maxX)/2-145,60+top,90-y,cream)}
+   }
   }
-  for(const point of points.tips??[]){const tip=cyl(bed,2.8,tipLength,point.x-145,60+point.z-tipLength/2,90-point.y,tipGlass,.35);tipMeshes.set(point.id,tip)}
+  for(const point of points.tips??[]){
+   const tipGroup=new THREE.Group()
+   const tip=cyl(tipGroup,2.8,tipLength,0, -tipLength/2,0,tipGlass,.35)
+   tip.castShadow=true
+   // A small molded collar makes each clear 42 mm tip read as a separate
+   // consumable, including the empty slot after a pickup.
+   cyl(tipGroup,3.25,2.2,0,-1.1,0,tipGlass,3.25)
+   tipGroup.position.set(point.x-145,60+point.z,90-point.y)
+   bed.add(tipGroup)
+   tipMeshes.set(point.id,tipGroup)
+  }
 
   const wasteBounds=fixture('waste')
   const wasteLocation=run?.deck_metadata?.waste.location
@@ -192,6 +228,7 @@ export default function Scene({run,time,view,showCollisionGeometry}:{run:Run|nul
    const line=new THREE.Line(new THREE.BufferGeometry().setFromPoints([a,b]),new THREE.LineBasicMaterial({color:axes.includes('Y')?'#9fd4ac':axes.includes('X')?'#ffb85c':'#8dc8e3',depthTest:false}))
    line.renderOrder=12
    bed.add(line)
+   routeLines.push(line)
   }
   const collisionMaterial=new THREE.MeshBasicMaterial({color:'#ee8e62',transparent:true,opacity:.22,depthWrite:false,wireframe:true})
   for(const item of run?.route?.fixtures??[]){
@@ -259,9 +296,18 @@ export default function Scene({run,time,view,showCollisionGeometry}:{run:Run|nul
    attachedTip.position.y=-state.tip/2
    for(const [id,mesh] of wellMeshes){const value=state.wells[id];(mesh.material as THREE.MeshStandardMaterial).color.set(value?.color??'#aebbb9');mesh.position.y=value?mesh.userData.filledY:mesh.userData.emptyY}
    for(const [id,mesh] of tipMeshes)mesh.visible=!state.used.has(id)
-   for(const [name,{mesh,marker}] of collisionMeshes){const visible=live.current.showCollisionGeometry&&!(name.includes('.tip.')&&state.used.has(name.replace('.tip.','.')));mesh.visible=visible;if(marker)marker.visible=visible}
-   fov.visible=state.current?.kind==='capture'
-   if(live.current.view!==lastView){lastView=live.current.view;camera.position.set(...(lastView==='rack'?(rackInward?[-170,240,310]:[275,260,300]):lastView==='top'?[0,680,1]:lastView==='front'?[0,220,660]:[530,420,570]) as [number,number,number]);controls.target.set(...(lastView==='rack'?(rackInward?[35,120,0]:[110,130,0]):[0,120,0]) as [number,number,number])}
+   const photoMode=live.current.view==='photo'
+   for(const label of sceneLabels)label.visible=!photoMode
+   for(const line of routeLines)line.visible=!photoMode
+   for(const [name,{mesh,marker}] of collisionMeshes){const visible=!photoMode&&live.current.showCollisionGeometry&&!(name.includes('.tip.')&&state.used.has(name.replace('.tip.','.')));mesh.visible=visible;if(marker)marker.visible=visible}
+   fov.visible=!photoMode&&state.current?.kind==='capture'
+   origin.visible=!photoMode
+   grid.visible=!photoMode
+   if(scene.background instanceof THREE.Color)scene.background.set(photoMode?'#b9b4a8':'#132128')
+   scene.fog?.color.set(photoMode?'#b9b4a8':'#132128')
+   floorMaterial.color.set(photoMode?'#8c8a82':'#132128')
+   renderer.toneMappingExposure=photoMode?1.1:1.45
+   if(live.current.view!==lastView){lastView=live.current.view;camera.position.set(...(lastView==='photo'?[10,355,680]:lastView==='rack'?(rackInward?[-170,240,310]:[275,260,300]):lastView==='top'?[0,680,1]:lastView==='front'?[0,220,660]:[530,420,570]) as [number,number,number]);controls.target.set(...(lastView==='photo'?[0,120,0]:lastView==='rack'?(rackInward?[35,120,0]:[110,130,0]):[0,120,0]) as [number,number,number])}
    controls.update()
    renderer.render(scene,camera)
    frame=requestAnimationFrame(tick)

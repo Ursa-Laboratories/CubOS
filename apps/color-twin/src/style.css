@@ -8,3 +8,25 @@
 .variant-toggle{display:flex;gap:4px;margin:10px 0}.variant-toggle button{padding:5px 9px;font-size:9px;background:#203139;color:#8fa7ae}.variant-toggle button.active{background:#d4ad70;color:#243239;border-color:#d4ad70}
 .live-app{max-width:1700px;margin:auto;padding:22px 28px}.live-heading{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.live-heading h1{font-size:25px}.live-heading p{font-size:12px;color:var(--muted)}.live-layout{display:grid;grid-template-columns:minmax(500px,1fr) 300px;gap:16px}.live-layout .scene-wrap{height:570px;min-height:480px}.live-layout .results{display:block}.live-instructions{margin-top:18px;background:#203039;padding:14px;border-radius:7px;line-height:1.7;font-size:11px;color:#b6c9d1}.live-instructions ol{padding-left:17px;margin-bottom:0}.live-instructions li{margin:7px 0}.live-instructions code{font-size:10px;color:#efd1a6}.live-transport{padding:13px 18px;display:flex;align-items:center;gap:25px;border-top:1px solid var(--line);font-size:11px}.live-transport>span:nth-child(2){margin-left:auto;color:var(--muted)}.live-transport button{font-size:11px}.live-layout .help{margin-top:14px}.live-layout .readout strong{font-size:23px}@media(max-width:900px){.live-layout{grid-template-columns:1fr}.live-layout .scene-wrap{height:460px}.live-heading{display:block}.live-heading .badge{display:inline-block;margin-top:15px}.live-app{padding:16px}.live-transport{gap:10px}}
 .scene-controls{display:flex;align-items:center;gap:8px}.geometry-toggle{display:flex;align-items:center;gap:6px;padding:7px 9px;border-color:#33484f;background:#15242b;color:#8299a1;font:8px 'IBM Plex Mono',monospace;letter-spacing:.35px;white-space:nowrap;transition:background-color .2s,color .2s,border-color .2s}.geometry-toggle i{width:7px;height:7px;border:1px solid #bb765d;background:transparent}.geometry-toggle.active{border-color:#b96f56;background:#342a28;color:#f0c0ad}.geometry-toggle.active i{background:#e58a67;box-shadow:0 0 8px #e58a6770}@media(max-width:700px){.scene-heading{align-items:flex-start}.scene-controls{align-items:flex-end;flex-direction:column-reverse}.geometry-toggle{padding:5px 7px;font-size:7px}}
+
+/* Photo mode leaves the native timeline available for deterministic review
+   while removing route/planner chrome and scene annotations from recordings. */
+.photo-mode{max-width:none;padding:0;background:#b9b4a8}
+.photo-mode .topbar,.photo-mode .workspace-heading,.photo-mode .routing-review,.photo-mode .tabs,.photo-mode .policy,.photo-mode .results,.photo-mode .bottom-grid,.photo-mode footer{display:none}
+.photo-mode .layout,.photo-mode .routing-primary{display:block}
+.photo-mode .center{border:0;border-radius:0;background:#b9b4a8;min-height:100vh}
+.photo-mode .scene-heading{display:none}
+.photo-toolbar{display:none}
+.photo-mode .photo-toolbar{display:flex;align-items:center;gap:10px;padding:10px 16px;background:#b9b4a8;color:#39494d;font:9px 'IBM Plex Mono',monospace;letter-spacing:.45px}
+.photo-toolbar>span:first-child{margin-right:auto}
+.photo-toolbar button{padding:6px 10px;border-color:#787d78;background:#a9aaa0;color:#263239;font:9px 'IBM Plex Mono',monospace}
+.photo-toolbar .record-button{border-color:#1c6845;background:#087d45;color:#f4f4df}
+.photo-toolbar .record-button:disabled{color:#dce5d8}
+.photo-toolbar a{color:#194e3a;text-decoration:underline;margin-left:3px}
+.recording-links{display:flex;gap:8px}
+.recording-error{max-width:340px;overflow:hidden;text-overflow:ellipsis;color:#873b30;letter-spacing:0}
+.photo-mode .scene-wrap{width:100%;height:auto;aspect-ratio:16 / 9;min-height:0;max-height:none;flex:none}
+.photo-mode .scene-label,.photo-mode .axes,.photo-mode .coordinate-bar,.photo-mode .orbit-hint{display:none}
+.photo-mode .transport{border-top:1px solid #857f76;background:#b9b4a8;color:#263239}
+.photo-mode .transport span{color:#4f5e62}
+.photo-mode .transport .reset{color:#39494d}
