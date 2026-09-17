@@ -139,8 +139,8 @@ class TestPicusModels:
         assert sorted(PICUS2_MODELS) == [
             "picus2_1ch_10",
             "picus2_1ch_1000",
-            "picus2_1ch_5000",
             "picus2_1ch_120",
+            "picus2_1ch_5000",
         ]
 
     def test_published_vendor_figures(self):
@@ -231,6 +231,7 @@ class TestVolumeQuantization:
             pip._quantize(95.0)
         with pytest.raises(PipetteCommandError, match="outside"):
             pip._quantize(5005.0)
+
     def test_120_model_quantizes_to_a_tenth_of_a_microlitre(self):
         pip = SartoriusPicus2Pipette(
             pipette_model="picus2_1ch_120", offline=True,
@@ -300,6 +301,7 @@ class TestVolumeQuantization:
         assert pip.aspirate(5000.0).loaded_volume_ul == 5000.0
         with pytest.raises(PipetteCommandError, match="already loaded"):
             pip.aspirate(100.0)
+
     def test_120_model_formats_with_one_decimal(self):
         pip = SartoriusPicus2Pipette(
             pipette_model="picus2_1ch_120", offline=True,
