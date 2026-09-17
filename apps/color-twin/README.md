@@ -1,7 +1,7 @@
 # CubOS Color Twin
 
 The Color Twin is a localhost, simulation-only viewer for native CubOS YAML
-protocols. The routing review at the top of the page has exactly three named
+protocols. The routing review at the top of the page has exactly four named
 cases:
 
 1. **Ordinary vertical transfer** — the legacy and planner paths use vertical
@@ -15,6 +15,11 @@ cases:
    X envelope. The planner chooses a Y-first clear
    corridor when traveling toward waste. The UI shows the serialized shared
    plan and the execution segment stream when core exposes both.
+4. **Saved deck · Picus 120 µL batch 1** — a byte-preserved copy of the
+   station's current run: Picus 2 120 µL pipette, 42 mm tips, a standard
+   vertical tip rack, and batch 1 of the color-matching campaign, with the
+   `measure_color` steps dropped (the sim does not support them) and the
+   camera `move` steps kept.
 
 The default view shows solid labware. Turn on **Collision geometry** to inspect
 the planner's conservative obstacle envelopes over those models. This display
@@ -53,7 +58,7 @@ npm run test:render --prefix apps/color-twin
 npm run build --prefix apps/color-twin
 ```
 
-Export all three bundles, serialized core plans, execution traces, comparison
+Export all four bundles, serialized core plans, execution traces, comparison
 results, initial poses, assumptions and the saved-deck hash to a reviewable
 artifact (including editable YAML under each demo folder and the ordinary
 legacy/planned comparison folders):

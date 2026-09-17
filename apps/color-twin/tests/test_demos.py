@@ -4,7 +4,7 @@ import hashlib
 
 import yaml
 
-from sim.demos import SAVED_USER_DECK, _ordinary_motion_metadata, _saved_gantry, _with_motion, demos, get_demo
+from sim.demos import SAVED_PICUS120, SAVED_USER_DECK, _ordinary_motion_metadata, _saved_gantry, _with_motion, demos, get_demo
 from sim.runtime import SimCamera, execute
 from sim.server import compare_ordinary
 from cubos.deck.loader import load_deck_from_yaml_safe
@@ -19,10 +19,10 @@ def test_saved_user_gantry_fixture_matches_generated_profile():
     assert yaml.safe_load(fixture.read_text()) == yaml.safe_load(_saved_gantry())
 
 
-def test_catalog_has_exactly_three_named_protocol_demos():
+def test_catalog_has_exactly_four_named_protocol_demos():
     catalog = demos()
     assert [item['id'] for item in catalog] == [
-        'ordinary-transfer', 'saved-side-exit', 'saved-detour-to-waste'
+        'ordinary-transfer', 'saved-side-exit', 'saved-detour-to-waste', 'saved-picus120'
     ]
     assert all(item['routing']['schema_version'] == 'labware-routing/v1' for item in catalog)
 
@@ -104,6 +104,20 @@ def test_saved_detour_has_shared_route_evidence_and_two_by_six_stocks():
     assert sum(yaml.safe_load(bundle['deck_yaml'])['labware']['tips']['tip_present'].values()) == 96
     assert result['route']['segments']
     assert result['fluids']['plate.A1']['parts'] == [100, 0, 0]
+
+
+def test_saved_picus120_matches_example_files_and_completes_batch_one():
+    bundle = get_demo('saved-picus120').bundle()
+    assert bundle['gantry_yaml'] == (SAVED_PICUS120 / 'gantry.yaml').read_text()
+    assert bundle['deck_yaml'] == (SAVED_PICUS120 / 'deck.yaml').read_text()
+    result = execute(
+        bundle['gantry_yaml'], bundle['deck_yaml'], bundle['protocol_yaml'],
+        routing=bundle['routing'], initial_position=bundle['initial_position'],
+    )
+    assert result['events']
+    assert result['steps'] == 48
+    for well in ('A5', 'A6', 'A7', 'A8', 'A9', 'A10'):
+        assert result['fluids'][f'plate.{well}']['volume'] == 300
 
 
 def test_planning_preview_matches_execution_plan_without_events():

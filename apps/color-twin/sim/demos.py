@@ -20,6 +20,7 @@ from .defaults import DECK, GANTRY, STOCKS, dump, protocol_for
 ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
 SAVED_USER_DECK = EXAMPLES / "saved-user" / "deck.yaml"
+SAVED_PICUS120 = EXAMPLES / "saved-picus120"
 
 
 @dataclass(frozen=True)
@@ -181,6 +182,44 @@ def _saved_detour() -> Demo:
     )
 
 
+def _saved_picus120() -> Demo:
+    # Verbatim station snapshot; no dump()/derivation, unlike the other saved demos.
+    gantry_text = (SAVED_PICUS120 / "gantry.yaml").read_text()
+    deck_text = (SAVED_PICUS120 / "deck.yaml").read_text()
+    protocol_text = (SAVED_PICUS120 / "protocol.yaml").read_text()
+    return Demo(
+        id="saved-picus120",
+        name="Saved deck · Picus 120 µL batch 1",
+        description="Picus 2 120 µL pipette, 42 mm tips, standard vertical rack — replays batch 1 of the running color-matching campaign.",
+        mode="planned",
+        gantry_yaml=gantry_text,
+        deck_yaml=deck_text,
+        protocol_yaml=protocol_text,
+        stocks=tuple(STOCKS),
+        assumptions=(
+            "The frame is tip-end referenced: pipette depth is −42 mm from a tip-attached calibration.",
+            "Bare-nozzle pickup plane is 81.0 mm = carriage 39.0 mm + 42 mm tip length.",
+            "Mix engages at −2 mm because the tip end bottoms out 2.4 mm below the plate rim.",
+            "Transfers above 120 µL are split into multiple pipette strokes by core.",
+            "The waste point is shifted by the frame delta from the prior simulation point; unconfirmed on hardware.",
+            "Camera color measurement is omitted in the sim; only the camera move steps are executed.",
+            "Nominal geometry from the deck's motion boxes is not collision certification.",
+        ),
+        routing={
+            "schema_version": "labware-routing/v1",
+            "planner_enabled": True,
+            "registered_geometry": {
+                "tips": {"kind": "fixture", "source": "saved station deck", "anchor": "tips.A1", "offset": {"x": -7, "y": -78, "z": -60}, "envelope": {"length": 124, "width": 84, "height": 60}},
+                "plate": {"kind": "fixture", "source": "saved station deck"},
+                "stocks": {"kind": "fixture", "source": "saved station deck", "rows": 2, "columns": 6},
+                "waste": {"kind": "fixture", "source": "saved station deck"},
+            },
+            "access_policy": {"default": "vertical"},
+        },
+        initial_position=(244.589, 144.0, 94.601),
+    )
+
+
 def _side_protocol() -> str:
     # Native protocol: side-exit is declared by deck access metadata; there
     # are no handwritten lift/exit moves in the protocol itself.
@@ -251,7 +290,12 @@ def _saved_motion_metadata(*, side_exit: bool = False) -> dict[str, Any]:
     }
 
 
-DEMO_BUILDERS = {"ordinary-transfer": _ordinary, "saved-side-exit": _saved_side_exit, "saved-detour-to-waste": _saved_detour}
+DEMO_BUILDERS = {
+    "ordinary-transfer": _ordinary,
+    "saved-side-exit": _saved_side_exit,
+    "saved-detour-to-waste": _saved_detour,
+    "saved-picus120": _saved_picus120,
+}
 
 
 def demos() -> list[dict[str, Any]]:
