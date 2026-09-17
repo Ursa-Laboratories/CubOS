@@ -128,6 +128,25 @@
 @media (max-width:780px) { .campaign-camera-layout { grid-template-columns:1fr; } }
 @media (max-width:780px) { .campaign-target-review-grid { grid-template-columns:1fr; } }
 
+.campaign-target-select { border-color: color-mix(in srgb, var(--z-accent) 45%, var(--z-border)); }
+.campaign-target-options { display:flex; flex-wrap:wrap; gap:8px; margin:12px 0; }
+.campaign-target-options button { appearance:none; padding:9px 13px; border:1px solid var(--z-border-strong); border-radius:7px; color:var(--z-text-secondary); background:var(--z-surface-sunken); cursor:pointer; font:inherit; font-size:13px; font-weight:650; }
+.campaign-target-options button.is-selected { color:var(--z-ink); border-color:var(--z-accent); background:var(--z-accent-tint); box-shadow:inset 0 -2px 0 var(--z-accent); }
+.campaign-target-mode { display:flex; align-items:end; flex-wrap:wrap; gap:12px; padding:12px; border:1px solid var(--z-border); border-radius:7px; background:var(--z-surface-sunken); }
+.campaign-target-mode .campaign-field { min-width:220px; }
+.campaign-target-status { align-self:center; color:var(--z-text-muted); font-size:12px; }
+.campaign-rgb-target { align-items:center; }
+.campaign-color-picker { display:flex; align-items:center; gap:8px; color:var(--z-text-muted); font-size:12px; }
+.campaign-color-picker input { width:54px; height:36px; padding:2px; border:1px solid var(--z-border-strong); border-radius:6px; background:var(--z-surface); cursor:pointer; }
+.campaign-rgb-values { display:flex; flex-wrap:wrap; gap:8px 16px; color:var(--z-text-secondary); font:12px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.campaign-rgb-values strong { color:var(--z-text-muted); font-size:10px; }
+.campaign-target-preview { display:flex; align-items:center; gap:8px; margin-left:auto; color:var(--z-text-secondary); font-size:12px; }
+.campaign-target-preview > span:last-child { display:flex; flex-direction:column; gap:2px; }
+.campaign-target-preview small { color:var(--z-text-muted); font:11px ui-monospace,SFMono-Regular,Menlo,monospace; }
+.campaign-target-details { margin-top:10px; border-top:1px solid var(--z-border); padding-top:9px; }
+.campaign-target-details summary { width:fit-content; color:var(--z-text-secondary); cursor:pointer; font-size:12px; font-weight:600; }
+.campaign-target-details summary:hover { color:var(--z-accent); }
+
 /* Guided campaign workspace */
 .campaign-panel {
   width: min(100%, 1180px);

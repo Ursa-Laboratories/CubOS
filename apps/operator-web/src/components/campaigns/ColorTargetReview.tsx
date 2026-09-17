@@ -57,7 +57,7 @@ function reviewGuidance(status: string, flags: string[], expectedWell: string, s
       tone: "select",
       badge: "Reanalysis required",
       title: "Selection changed — reanalyze this region",
-      detail: `The accepted result belongs to the previous ${expectedWell} selection. Reanalyze this saved frame before using the new point as target evidence.`,
+      detail: "Use the selected center to refresh the target.",
     };
   }
   if (status === "accepted") {
@@ -65,7 +65,7 @@ function reviewGuidance(status: string, flags: string[], expectedWell: string, s
       tone: "ready",
       badge: "Ready",
       title: "This saved frame passed the current image checks",
-      detail: `The selected region can be used as the ${expectedWell} target for this camera setup. The reported Lab value is still an uncalibrated camera estimate.`,
+      detail: "This target is ready to use.",
     };
   }
   const captureProblem = CAPTURE_FLAGS.find((flag) => flags.includes(flag));
@@ -74,7 +74,7 @@ function reviewGuidance(status: string, flags: string[], expectedWell: string, s
       tone: "capture",
       badge: "New capture needed",
       title: FLAG_LABELS[captureProblem] ?? "The saved frame has an image-quality problem",
-      detail: `Clicking ${expectedWell} can identify the intended region, but it cannot repair exposure, glare, clipped pixels, or missing camera-setting evidence. Adjust the live image, then capture a new target.`,
+      detail: "Capture a new target after fixing the image quality.",
     };
   }
   if (flags.includes("expected_center_unverified")) {
@@ -82,7 +82,7 @@ function reviewGuidance(status: string, flags: string[], expectedWell: string, s
       tone: "select",
       badge: "Select the well",
       title: `Select the center of ${expectedWell}`,
-      detail: "Click the center of the physical well in this saved frame, then reanalyze. This reuses the same image and does not move the gantry or capture again.",
+      detail: "Click the center, then use target.",
     };
   }
   if (flags.some((flag) => [
@@ -96,14 +96,14 @@ function reviewGuidance(status: string, flags: string[], expectedWell: string, s
       tone: "select",
       badge: "Check the well",
       title: `The analysis could not isolate ${expectedWell} confidently`,
-      detail: `Click the center of ${expectedWell} and reanalyze. If the well outline is still missing or ambiguous, improve the live framing and capture a new target.`,
+      detail: "Select the center and use target, or capture again.",
     };
   }
   return {
     tone: "review",
     badge: "Review needed",
     title: "This saved frame did not pass the image checks",
-    detail: "Review the diagnostics below. Reanalysis can change the selected region; image-quality problems require a new capture.",
+    detail: "Open Details for diagnostics, or capture again.",
   };
 }
 
@@ -195,8 +195,8 @@ export default function ColorTargetReview({ runId, expectedWell, measurement, se
       <header className="target-review__header">
         <div>
           <p className="target-review__kicker">Saved target · revision {revision}</p>
-          <h4 id="target-review-title">Review {expectedWell} in the captured frame</h4>
-          <p>This is the immutable image from run <code>{runId}</code>. Selecting a point and reanalyzing never captures again or moves the gantry.</p>
+          <h4 id="target-review-title">Select well center</h4>
+          <p>Click the center of {expectedWell}, then use it as the target.</p>
         </div>
         <span className={`target-review__status target-review__status--${guidance.tone}`}>{guidance.badge}</span>
       </header>
@@ -233,8 +233,7 @@ export default function ColorTargetReview({ runId, expectedWell, measurement, se
           <div className="target-review__image-error">Saved frame unavailable. Capture a new target; older runs may predate immutable image storage.</div>
         )}
         <div className="target-review__frame-help">
-          <span>Click the center of the physical {expectedWell} well.</span>
-          <span>Keyboard: arrows fine tune · Shift + arrows moves farther · Home resets to center</span>
+        <span>Click the center of {expectedWell}.</span>
         </div>
       </div>
 
@@ -244,7 +243,7 @@ export default function ColorTargetReview({ runId, expectedWell, measurement, se
           <strong>{selectedCenter ? `${selectedCenter.x.toFixed(3)}, ${selectedCenter.y.toFixed(3)} normalized` : "Not selected"}</strong>
         </div>
         <button type="button" onClick={() => void reanalyze()} disabled={!selectedCenter || busy || rawImageError}>
-          {busy ? "Reanalyzing saved frame…" : `Reanalyze selected ${expectedWell} region`}
+          {busy ? "Using target…" : "Use target"}
         </button>
       </div>
 

@@ -27,6 +27,10 @@ export const campaignApi = {
       expected_center: expectedCenter,
       expected_center_source: "operator_selected",
     }),
+  previewRgbTarget: (rgb: [number, number, number]) =>
+    post<{ rgb: [number, number, number]; lab: [number, number, number] }>("/color-target/rgb-preview", {
+      rgb,
+    }),
   prepareColor: (body: ColorCampaignSetup) => post<CampaignSpec>("/color-setup", body),
   attachFluidState: (id: string | number, fluidStateId: number, reconciliationNote: string) =>
     post<CampaignRecord>(`/${id}/fluid-state`, { fluid_state_id: fluidStateId, reconciliation_note: reconciliationNote }),

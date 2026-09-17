@@ -13,6 +13,8 @@ export interface CampaignSpec {
   name: string; gantry_file: string; deck_file: string; protocol_file: string;
   batch_size?: number;
   source_protocol_file?: string | null;
+  target_mode?: "camera" | "rgb";
+  target_rgb?: [number, number, number] | null;
   parameters: CampaignParameter[]; sequences: CampaignSequence[];
   objective: { mode: "result" | "manual"; path: string; direction: "minimize" | "maximize" };
   optimizer: {
@@ -36,7 +38,9 @@ export interface CampaignRecord {
 export interface ProtocolStep { command: string; args: Record<string, unknown> }
 export interface ColorCampaignSetup {
   gantry_file: string; deck_file: string; source_protocol_file: string; batch_size: number; target_well: string;
-  target_lab: [number, number, number]; red_source: string;
+  target_mode?: "camera" | "rgb";
+  target_rgb?: [number, number, number] | null;
+  target_lab?: [number, number, number] | null; red_source: string;
   yellow_source: string; blue_source: string; candidate_wells: string[];
   camera_instrument: string; roi_fraction: number;
   image_height?: number | null;
@@ -55,6 +59,8 @@ export interface ColorTargetRun {
 export interface ColorSetupDraft {
   source_protocol_file?: string;
   batch_size?: number;
+  target_mode?: "camera" | "rgb";
+  target_rgb?: [number, number, number] | null;
   target_well: string;
   red_source: string;
   yellow_source: string;
