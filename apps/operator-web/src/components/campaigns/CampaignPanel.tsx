@@ -886,7 +886,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setTargetRgbPreview(null);
       setTargetRun(null);
       setTargetError(null);
-      setTargetStatus("Loaded setup. Capture and accept a fresh target, then select or create a reconciled fluid state.");
+      const loadedTargetMode = loaded.color_setup?.target_mode ?? loaded.spec.target_mode ?? "camera";
+      setTargetStatus(loadedTargetMode === "rgb"
+        ? "Loaded setup. Choose a color target, then build campaign."
+        : "Loaded setup. Capture and accept a fresh target, then select or create a reconciled fluid state.");
       setValidated(false);
       setValidation([]);
       setPresetIssues([]);
@@ -953,8 +956,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     }
   };
   const chooseTargetMode = (mode: TargetMode) => {
+    const nextRgb = mode === "rgb" ? targetRgb ?? [0, 0, 0] as [number, number, number] : null;
     setTargetMode(mode);
-    setSpec((current) => ({ ...current, target_mode: mode, target_rgb: mode === "rgb" ? targetRgb : null }));
+    setTargetRgb(nextRgb);
+    setSpec((current) => ({ ...current, target_mode: mode, target_rgb: nextRgb }));
     if (mode === "rgb") invalidateRgbTarget();
     else {
       rgbPreviewRequestRef.current += 1;
@@ -1249,8 +1254,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
               ? `This setup requires ${presetExpectedFiles.gantry} and ${presetExpectedFiles.deck}.`
               : campaignNeedsBuild && targetReady && !spec.mock_mode && spec.fluid_state_id === null
                 ? "The target is accepted. Choose the durable fluid and tip state that matches the physical deck before building."
+              : campaignNeedsBuild && targetReady
+                ? targetMode === "rgb" ? "Target ready. Build campaign." : "The target is ready. Build campaign."
               : campaignNeedsBuild
-                ? targetMode === "rgb" ? "Choose a valid color target to continue." : "Saved settings are loaded. A fresh accepted target must be built before validation or start."
+                ? targetMode === "rgb" ? "Choose a color target to continue." : "Saved settings are loaded. A fresh accepted target must be built before validation or start."
                 : countConsistencyMessage ?? validation[0] ?? disabledReason ?? "The draft is ready for the next gate."}</p>
         </div>
         <div className="campaign-next-action-buttons">
