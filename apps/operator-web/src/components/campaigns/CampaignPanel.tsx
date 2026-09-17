@@ -478,8 +478,19 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [restoredReview] = useState(restoredTargetReview);
   const [restoredPreset] = useState(restoredPresetWorkspace);
   const [restoredCampaignSpec] = useState<CampaignSpec>(() => restoredSpec(props));
+  const restoredSourceProtocol = restoredPreset?.sourceProtocolFile || restoredCampaignSpec.source_protocol_file || protocolFile || "";
+  const restoredBatchSize = restoredPreset?.batchSize ?? restoredCampaignSpec.batch_size ?? 6;
+  const restoredColorDraft = restoredCampaignSpec.protocol_file.startsWith("ade_color_matching_")
+    || Boolean(restoredCampaignSpec.source_protocol_file)
+    || (restoredReview !== null && (restoredCampaignSpec.objective.path.includes("delta_e")
+      || restoredCampaignSpec.sequences.some((sequence) => sequence.name === "candidate_well")));
+  // TODO(iter): cover migration of a pre-batch generated color draft after tests resume.
+  const restoredColorBuildMismatch = restoredColorDraft
+    && (restoredCampaignSpec.source_protocol_file !== restoredSourceProtocol
+      || (restoredCampaignSpec.batch_size ?? 1) !== restoredBatchSize);
   const initialNeedsFreshTarget = (restoredPreset?.needsFreshTarget ?? false)
-    || (restoredReview !== null && restoredReview.measurement.measurement_status !== "accepted");
+    || (restoredReview !== null && restoredReview.measurement.measurement_status !== "accepted")
+    || restoredColorBuildMismatch;
   const [spec, setSpec] = useState<CampaignSpec>(restoredCampaignSpec);
   const [activeSection, setActiveSection] = useState<"setup" | "run" | "history">("setup");
   const targetSectionRef = useRef<HTMLDivElement | null>(null);
@@ -517,8 +528,8 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [cameraInstrument, setCameraInstrument] = useState(restoredPreset?.cameraInstrument ?? restoredReview?.cameraInstrument ?? "camera");
   const [roiFraction, setRoiFraction] = useState(restoredPreset?.roiFraction ?? restoredReview?.roiFraction ?? 0.5);
   const [captureImageHeight, setCaptureImageHeight] = useState(restoredPreset?.captureImageHeight ?? restoredReview?.captureImageHeight ?? "");
-  const [sourceProtocolFile, setSourceProtocolFile] = useState(restoredPreset?.sourceProtocolFile || restoredCampaignSpec.source_protocol_file || protocolFile || "");
-  const [batchSize, setBatchSize] = useState(restoredPreset?.batchSize ?? restoredCampaignSpec.batch_size ?? 6);
+  const [sourceProtocolFile, setSourceProtocolFile] = useState(restoredSourceProtocol);
+  const [batchSize, setBatchSize] = useState(restoredBatchSize);
   const [targetLab, setTargetLab] = useState<number[] | null>(() => !initialNeedsFreshTarget && restoredReview?.measurement.measurement_status === "accepted" ? numericTriplet(restoredReview.measurement.lab) : null);
   const [targetRunId, setTargetRunId] = useState<string | null>(restoredReview?.runId ?? null);
   const [targetMeasurement, setTargetMeasurement] = useState<Record<string, unknown> | null>(restoredReview?.measurement ?? null);
@@ -631,7 +642,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       || files.current.deckFile !== deckFile
       || files.current.protocolFile !== protocolFile
     ) {
-      if (files.current.protocolFile !== protocolFile && protocolFile && !presetExpectedFiles) {
+      if (files.current.protocolFile !== protocolFile && protocolFile && (!presetExpectedFiles || !sourceProtocolFile)) {
         setSourceProtocolFile(protocolFile);
         if (files.current.protocolFile) {
           setPresetNeedsFreshTarget(true);
@@ -646,7 +657,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         protocol_file: protocolFile ?? current.protocol_file,
       }));
     }
-  }, [gantryFile, deckFile, protocolFile, presetExpectedFiles]);
+  }, [gantryFile, deckFile, protocolFile, presetExpectedFiles, sourceProtocolFile]);
 
   const refresh = useCallback(async () => {
     try {
