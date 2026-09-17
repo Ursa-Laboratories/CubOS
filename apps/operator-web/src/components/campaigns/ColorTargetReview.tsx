@@ -218,7 +218,7 @@ export default function ColorTargetReview({ runId, expectedWell, measurement, se
           >
             <img
               src={campaignApi.colorTargetImageUrl(runId)}
-              alt={`Saved camera frame containing the intended ${expectedWell} target`}
+              alt={`Saved target frame for ${expectedWell}`}
               onError={() => setRawImageError(true)}
             />
             {selectedCenter && (

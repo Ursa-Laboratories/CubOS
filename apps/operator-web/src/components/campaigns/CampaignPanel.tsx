@@ -1250,7 +1250,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
                   : campaignNeedsBuild && targetMode === "camera" ? <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>Capture</button>
                     : campaignNeedsBuild ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(targetSectionRef)}>Choose target</button>
                     : countConsistencyMessage ? <button type="button" style={theme.btn.secondary} onClick={() => setActiveSection("setup")}>Review Advanced</button>
-                    : !validated ? <button type="button" style={theme.btn.primary} onClick={() => void validate()} disabled={busy || !!disabledReason}>Validate draft</button>
+                    : !validated ? <button type="button" aria-label="Validate" style={theme.btn.primary} onClick={() => void validate()} disabled={busy || !!disabledReason}>Validate draft</button>
                       : <button type="button" style={theme.btn.primary} onClick={() => void start()} disabled={busy || !!disabledReason}>Start campaign</button>}
         </div>
       </div>
@@ -1343,7 +1343,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
           </div>
           {targetRgbError && <div className="campaign-banner campaign-error" role="alert">{targetRgbError}</div>}
         </div>}
-        {targetMode === "camera" && targetError && <div className="campaign-banner campaign-error" role="alert">{targetError}</div>}
+        {targetMode === "camera" && targetError && !targetRun && <div className="campaign-banner campaign-error" role="alert">{targetError}</div>}
       </div>
 
       <div className="campaign-card campaign-color-setup">
@@ -1372,9 +1372,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
             <label className="campaign-field">Capture height relative to well (mm)<input aria-label="Color capture image height" type="number" step="0.5" value={captureImageHeight} onChange={(event) => { setCaptureImageHeight(event.target.value); if (targetMode === "camera") invalidateCameraTarget(); }} placeholder="Use configured ceiling" /></label>
           </div>
           <p className="campaign-note">Capture height is relative to the calibrated well surface. CubOS checks it against calibrated labware and the collision plan.</p>
-          {captureCarriageZ !== null && <p className="campaign-note">Preview carriage Z: {captureCarriageZ.toFixed(3)} mm.</p>}
+          {captureCarriageZ !== null && <p className="campaign-note">Preview: {targetWell} surface plus camera offset gives carriage Z {captureCarriageZ.toFixed(3)} mm. Review physical camera clearance before running.</p>}
           <p className="campaign-note">Inherited source height: {inheritedSourceHeight} mm · mix: {inheritedMix}.</p>
           <p className="campaign-note">Generated protocol: {spec.protocol_file || "not generated"}{protocolFile && spec.protocol_file && protocolFile !== spec.protocol_file ? ` · base template ${protocolFile} unchanged` : ""}.</p>
+          <p className="campaign-note">Capture setup: <code>{gantryFile ?? "No gantry selected"}</code> · <code>{deckFile ?? "No deck selected"}</code>.</p>
         </details>
         {sourceProtocolMismatch && <div className="campaign-banner campaign-error" role="alert">Select source protocol {sourceProtocolFile} in the Protocol template picker before building. Current selection: {protocolFile}.</div>}
         {batchError && <div className="campaign-banner campaign-error" role="alert">{batchError}</div>}
