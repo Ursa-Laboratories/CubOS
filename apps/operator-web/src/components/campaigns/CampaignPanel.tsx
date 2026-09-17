@@ -527,6 +527,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [presetMessage, setPresetMessage] = useState<string | null>(null);
   const [presetError, setPresetError] = useState<string | null>(null);
   const [presetNeedsFreshTarget, setPresetNeedsFreshTarget] = useState(initialNeedsFreshTarget);
+  const [campaignNeedsBuild, setCampaignNeedsBuild] = useState(initialNeedsFreshTarget);
   const [presetExpectedFiles, setPresetExpectedFiles] = useState<{ gantry: string; deck: string } | null>(
     restoredPreset?.expectedFiles
       ?? (initialNeedsFreshTarget ? { gantry: restoredCampaignSpec.gantry_file, deck: restoredCampaignSpec.deck_file } : null),
@@ -667,7 +668,6 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       const lab = numericTriplet(preview.lab);
       if (!lab) throw new Error("RGB target preview did not return a Lab triplet.");
       setTargetRgbPreview(lab);
-      setPresetNeedsFreshTarget(false);
     } catch (caught) {
       setTargetRgbError(campaignErrorMessage(caught));
     } finally {
@@ -703,6 +703,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         setSourceProtocolFile(protocolFile);
         if (files.current.protocolFile) {
           setPresetNeedsFreshTarget(true);
+          setCampaignNeedsBuild(true);
           setValidated(false);
         }
       }
@@ -743,6 +744,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   };
   const invalidateBuiltCampaign = () => {
     setPresetNeedsFreshTarget(true);
+    setCampaignNeedsBuild(true);
     setValidated(false);
     setValidation([]);
   };
@@ -778,8 +780,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       issues.push("Each parameter needs valid limits, a positive step, and a binding.");
     }
     if (countConsistencyMessage) issues.push(countConsistencyMessage);
-    if (presetNeedsFreshTarget && !targetReady) {
-      issues.push("Loaded setup requires a fresh accepted target and a newly reconciled fluid state before use.");
+    if (campaignNeedsBuild) {
+      issues.push(targetReady
+        ? "Build the campaign from the selected target before validating or starting."
+        : "Select a target and build the campaign before validating or starting.");
     }
     if (presetConfigMismatch && presetExpectedFiles) {
       issues.push(`Select gantry ${presetExpectedFiles.gantry} and deck ${presetExpectedFiles.deck} before using this setup.`);
@@ -879,6 +883,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setValidation([]);
       setPresetIssues([]);
       setPresetNeedsFreshTarget(true);
+      setCampaignNeedsBuild(true);
       suppressHistorySelectionRef.current = true;
       setSelected(null);
       setPresetExpectedFiles({ gantry: loaded.spec.gantry_file, deck: loaded.spec.deck_file });
@@ -1132,6 +1137,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setValidation([]);
       setValidated(false);
       setPresetNeedsFreshTarget(false);
+      setCampaignNeedsBuild(false);
       setPresetExpectedFiles(null);
       setTargetStatus(`${targetMode === "rgb" ? "Color target" : `Target read from ${targetWell}`} is ready.${preserveRecipes ? " Initial recipes retained." : " Campaign settings refreshed."}`);
     } catch (caught) {
@@ -1212,13 +1218,13 @@ export default function CampaignPanel(props: CampaignPanelProps) {
             ? `Monitor ${liveCampaign.spec.name}`
             : presetConfigMismatch && presetExpectedFiles
               ? "Select the setup files"
-              : presetNeedsFreshTarget && targetReady && !spec.mock_mode && spec.fluid_state_id === null
+              : campaignNeedsBuild && targetReady && !spec.mock_mode && spec.fluid_state_id === null
                 ? "Select or create the current inventory"
-              : presetNeedsFreshTarget && targetReady
+              : campaignNeedsBuild && targetReady
                 ? "Build the accepted target into the campaign"
-              : presetNeedsFreshTarget && targetMode === "camera" && targetMeasurement
+              : campaignNeedsBuild && targetMode === "camera" && targetMeasurement
                   ? `Review or recapture ${targetWell}`
-                : presetNeedsFreshTarget
+                : campaignNeedsBuild
                     ? targetMode === "rgb" ? "Choose a color" : `Capture and accept ${targetWell}`
                     : countConsistencyMessage
                       ? "Fix the trial counts"
@@ -1229,20 +1235,20 @@ export default function CampaignPanel(props: CampaignPanelProps) {
             ? `${liveCampaign.trials.length} samples scheduled; ${liveScoredSamples} accepted scores so far. Hardware controls are in Run.`
             : presetConfigMismatch && presetExpectedFiles
               ? `This setup requires ${presetExpectedFiles.gantry} and ${presetExpectedFiles.deck}.`
-              : presetNeedsFreshTarget && targetReady && !spec.mock_mode && spec.fluid_state_id === null
+              : campaignNeedsBuild && targetReady && !spec.mock_mode && spec.fluid_state_id === null
                 ? "The target is accepted. Choose the durable fluid and tip state that matches the physical deck before building."
-              : presetNeedsFreshTarget
+              : campaignNeedsBuild
                 ? targetMode === "rgb" ? "Choose a valid color target to continue." : "Saved settings are loaded. A fresh accepted target must be built before validation or start."
                 : countConsistencyMessage ?? validation[0] ?? disabledReason ?? "The draft is ready for the next gate."}</p>
         </div>
         <div className="campaign-next-action-buttons">
           {liveCampaign ? activeSection === "run" ? null : <button type="button" style={theme.btn.primary} onClick={() => { setSelected(liveCampaign); setActiveSection("run"); }}>Open Run</button>
             : presetConfigMismatch ? <button type="button" disabled>Select required files</button>
-            : presetNeedsFreshTarget && targetReady && !spec.mock_mode && spec.fluid_state_id === null ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(inventorySectionRef)}>Choose inventory</button>
-              : presetNeedsFreshTarget && targetReady ? <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || batchError !== null || countConsistencyMessage !== null || sourceProtocolMismatch || !sourceProtocolFile || !protocolFile || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign</button>
-                : presetNeedsFreshTarget && targetMode === "camera" && targetMeasurement ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(targetReviewRef)}>Select well center</button>
-                  : presetNeedsFreshTarget && targetMode === "camera" ? <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>Capture</button>
-                    : presetNeedsFreshTarget ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(targetSectionRef)}>Choose target</button>
+            : campaignNeedsBuild && targetReady && !spec.mock_mode && spec.fluid_state_id === null ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(inventorySectionRef)}>Choose inventory</button>
+              : campaignNeedsBuild && targetReady ? <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || batchError !== null || countConsistencyMessage !== null || sourceProtocolMismatch || !sourceProtocolFile || !protocolFile || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign</button>
+                : campaignNeedsBuild && targetMode === "camera" && targetMeasurement ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(targetReviewRef)}>Select well center</button>
+                  : campaignNeedsBuild && targetMode === "camera" ? <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>Capture</button>
+                    : campaignNeedsBuild ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(targetSectionRef)}>Choose target</button>
                     : countConsistencyMessage ? <button type="button" style={theme.btn.secondary} onClick={() => setActiveSection("setup")}>Review Advanced</button>
                     : !validated ? <button type="button" style={theme.btn.primary} onClick={() => void validate()} disabled={busy || !!disabledReason}>Validate draft</button>
                       : <button type="button" style={theme.btn.primary} onClick={() => void start()} disabled={busy || !!disabledReason}>Start campaign</button>}
@@ -1326,7 +1332,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         </div>
         {targetMode === "camera" ? <div className="campaign-target-mode">
           <label className="campaign-field">Well<select aria-label="Target well" value={targetWell} onChange={(event) => { setTargetWell(event.target.value); invalidateCameraTarget(); }}>{PLATE_WELLS.map((well) => <option key={well}>{well}</option>)}</select></label>
-          <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason || presetConfigMismatch}>{targetBusy ? "Capturing…" : "Capture"}</button>
+          <button type="button" aria-label={`Capture ${targetWell} target for review`} style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason || presetConfigMismatch}>{targetBusy ? "Capturing…" : "Capture"}</button>
           {targetMeasurement && targetRunId && <span className="campaign-target-status">{targetReady ? "Target captured" : "Select well center"}</span>}
         </div> : <div className="campaign-target-mode campaign-rgb-target">
           <label className="campaign-color-picker"><span>Color</span><input aria-label="RGB target color" type="color" value={rgbHex(targetRgb)} onChange={(event) => chooseRgb(hexRgb(event.target.value))} /></label>
@@ -1376,7 +1382,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
           {visibleTargetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${visibleTargetLab[0]}% ${visibleTargetLab[1]} ${visibleTargetLab[2]})` }} />Target Lab {visibleTargetLab.map((value) => value.toFixed(4)).join(", ")}</span>}
           {targetMode === "rgb" && targetRgbPreview && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: rgbHex(targetRgb) }} />RGB target ready</span>}
           {targetStatus && <span className="campaign-note">{targetStatus}</span>}
-          {targetReady && <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || batchError !== null || countConsistencyMessage !== null || sourceProtocolMismatch || !sourceProtocolFile || !protocolFile || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign</button>}
+          {targetReady && <button type="button" aria-label="Build campaign from accepted target" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || batchError !== null || countConsistencyMessage !== null || sourceProtocolMismatch || !sourceProtocolFile || !protocolFile || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign</button>}
         </div>
         {(targetRun || targetError) && (
           <div className="campaign-target-run" role="status">

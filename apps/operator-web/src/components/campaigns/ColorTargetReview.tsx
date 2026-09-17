@@ -242,7 +242,7 @@ export default function ColorTargetReview({ runId, expectedWell, measurement, se
           <span className="target-review__action-label">Operator-selected center</span>
           <strong>{selectedCenter ? `${selectedCenter.x.toFixed(3)}, ${selectedCenter.y.toFixed(3)} normalized` : "Not selected"}</strong>
         </div>
-        <button type="button" onClick={() => void reanalyze()} disabled={!selectedCenter || busy || rawImageError}>
+        <button type="button" aria-label="Analyze saved frame at selected center" onClick={() => void reanalyze()} disabled={!selectedCenter || busy || rawImageError}>
           {busy ? "Using target…" : "Use target"}
         </button>
       </div>
