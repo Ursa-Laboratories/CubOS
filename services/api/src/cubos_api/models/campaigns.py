@@ -77,6 +77,8 @@ class CampaignSpec(CampaignModel):
     sum_constraint: SumConstraint | None = None
     mock_mode: bool = False
     fluid_state_id: int | None = Field(default=None, gt=0)
+    batch_size: int = Field(default=1, ge=1, le=6)
+    source_protocol_file: str | None = Field(default=None, min_length=1, max_length=255)
 
     @model_validator(mode="after")
     def consistent(self):
@@ -93,6 +95,8 @@ class CampaignSpec(CampaignModel):
                 raise ValueError("Sum constraint must name distinct campaign parameters")
         if self.mock_mode and self.fluid_state_id is not None:
             raise ValueError("Offline runs cannot modify a real fluid state")
+        if self.batch_size > 1 and self.source_protocol_file is None:
+            raise ValueError("Batched color campaigns require a source protocol file")
         return self
 
 
@@ -134,6 +138,8 @@ class ColorTargetRequest(CampaignModel):
 class ColorCampaignSetup(CampaignModel):
     gantry_file: str = Field(min_length=1, max_length=255)
     deck_file: str = Field(min_length=1, max_length=255)
+    source_protocol_file: str = Field(min_length=1, max_length=255)
+    batch_size: int = Field(default=1, ge=1, le=6)
     target_run_id: str | None = Field(default=None, min_length=1, max_length=160)
     target_analysis_revision: int | None = Field(default=None, ge=0)
     target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
@@ -206,6 +212,9 @@ class CampaignTrial(CampaignModel):
     measurement: dict[str, Any] | None = None
     objective_status: Literal["pending", "accepted", "unverified", "rejected"] = "pending"
     error: str | None = None
+    objective_path: str | None = None
+    sample_well: str | None = None
+    batch_index: int | None = None
 
 
 class CampaignStateBinding(CampaignModel):
@@ -214,6 +223,8 @@ class CampaignStateBinding(CampaignModel):
 
 
 class ColorCampaignPresetDraft(CampaignModel):
+    source_protocol_file: str | None = Field(default=None, min_length=1, max_length=255)
+    batch_size: int = Field(default=1, ge=1, le=6)
     target_well: str = Field(default="plate.A1", min_length=1, max_length=160)
     red_source: str = Field(default="stocks.A1", min_length=1, max_length=160)
     yellow_source: str = Field(default="stocks.A2", min_length=1, max_length=160)

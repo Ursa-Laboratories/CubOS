@@ -17,7 +17,7 @@ export const campaignApi = {
   stop: (id: string | number) => post<CampaignRecord>(`/${id}/stop`, {}),
   cancel: (id: string | number) => post<CampaignRecord>(`/${id}/cancel`, {}),
   observation: (id: string | number, value: number) => post<CampaignRecord>(`/${id}/observation`, { value }),
-  readColorTarget: (body: Omit<ColorCampaignSetup, "target_lab" | "red_source" | "yellow_source" | "blue_source" | "candidate_wells" | "fluid_state_id">) =>
+  readColorTarget: (body: Omit<ColorCampaignSetup, "target_lab" | "red_source" | "yellow_source" | "blue_source" | "candidate_wells" | "fluid_state_id" | "source_protocol_file" | "batch_size">) =>
     post<ColorTargetRun>("/color-target", body),
   getColorTarget: (runId: string) => request<ColorTargetRun>(`/color-target/${runId}`),
   colorTargetImageUrl: (runId: string) => `${base}/color-target/${encodeURIComponent(runId)}/image`,

@@ -11,6 +11,8 @@ export interface CampaignParameter {
 export interface CampaignSequence { name: string; values: string[]; bindings: CampaignBinding[] }
 export interface CampaignSpec {
   name: string; gantry_file: string; deck_file: string; protocol_file: string;
+  batch_size?: number;
+  source_protocol_file?: string | null;
   parameters: CampaignParameter[]; sequences: CampaignSequence[];
   objective: { mode: "result" | "manual"; path: string; direction: "minimize" | "maximize" };
   optimizer: {
@@ -25,7 +27,7 @@ export interface CampaignSpec {
   sum_constraint?: { parameters: string[]; total: number } | null;
   mock_mode: boolean; fluid_state_id: number | null;
 }
-export interface CampaignTrial { index: number; parameters: Record<string, number | string>; run_id: string; state: string; objective: number | null; measurement?: Record<string, unknown> | null; error?: string | null }
+export interface CampaignTrial { index: number; parameters: Record<string, number | string>; run_id: string; state: string; objective: number | null; measurement?: Record<string, unknown> | null; error?: string | null; objective_status?: "pending" | "accepted" | "unverified" | "rejected"; objective_path?: string | null; sample_well?: string | null; batch_index?: number | null }
 export interface CampaignRecord {
   campaign_id: string | number; spec: CampaignSpec; state: CampaignState; created_at: string | number; updated_at: string | number;
   active_run_id: string | null; trials: CampaignTrial[]; best_objective: number | null; stop_reason: string | null;
@@ -33,7 +35,7 @@ export interface CampaignRecord {
 }
 export interface ProtocolStep { command: string; args: Record<string, unknown> }
 export interface ColorCampaignSetup {
-  gantry_file: string; deck_file: string; target_well: string;
+  gantry_file: string; deck_file: string; source_protocol_file: string; batch_size: number; target_well: string;
   target_lab: [number, number, number]; red_source: string;
   yellow_source: string; blue_source: string; candidate_wells: string[];
   camera_instrument: string; roi_fraction: number;
@@ -51,6 +53,8 @@ export interface ColorTargetRun {
 }
 
 export interface ColorSetupDraft {
+  source_protocol_file?: string;
+  batch_size?: number;
   target_well: string;
   red_source: string;
   yellow_source: string;

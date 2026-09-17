@@ -409,10 +409,19 @@ def prepare_color_campaign(body: ColorCampaignSetup):
     settings = get_settings()
     try:
         body = _accepted_target_setup(body)
+        source_path = resolve_config_path(
+            settings.configs_dir, "protocol", body.source_protocol_file,
+        )
+        if not source_path.is_file():
+            raise ValueError(
+                f"Selected source protocol does not exist: {body.source_protocol_file}"
+            )
+        source_protocol_yaml = source_path.read_text()
         return build_color_campaign(
             body,
             settings.configs_dir / "protocol",
             available_tip_positions=_available_campaign_tips(body),
+            source_protocol_yaml=source_protocol_yaml,
         )
     except HTTPException:
         raise

@@ -1,6 +1,6 @@
 # Active-learning campaigns
 
-Choose **Workflow → Active learning campaign** to optimize numeric protocol arguments over repeated native CubOS runs. **Single protocol** retains the existing one-run workflow. Gantry, Deck, Visualize, State and Results continue to use the same operator workspace; each campaign trial also opens in the existing Run view.
+Choose **Workflow → Active Learning** to optimize numeric protocol arguments over repeated native CubOS runs. The **Protocol** tab retains the single-run workflow. Campaign **Setup**, **Run**, and **History** share the existing Gantry, Deck, State and Results workspace.
 
 ## Configure a campaign
 
@@ -35,13 +35,23 @@ Use parameter `height`, bounds 0–10, step 1, bound to step 1 `measurement_heig
 
 ## Color-matching experiment
 
-The campaign editor includes one integrated **Color matching setup**. Select the existing target well, red/yellow/blue stock vials, camera, ROI, and candidate wells, then choose **Read target & build campaign**. CubOS submits the target image as a visible native run, reads its Lab value, writes an immutable generated candidate protocol, and fills the complete campaign draft in the same view. The target read moves the camera and must be supervised like any other real run.
+Select the saved source protocol, target well, three stock vials, camera, sampling radius, and candidate wells. **Capture target** creates a visible native run and moves the camera. Review that saved image, select the intended well, and reanalyze it. Once the image passes its checks and a reconciled inventory is selected, **Build campaign** writes a generated protocol and fills the campaign draft. Selecting a region or reanalyzing a saved image does not move hardware.
 
-The generated campaign creates three 50–200 µL parameters constrained to 300 µL, then schedules six simplex vertices/edge midpoints followed by expected-improvement proposals. The default candidate wells are A2–A7 and B1–B12. Tip slots are allocated from the exposed column inward for the checkpoint station's side-exit rack. The target threshold is ΔE00 ≤ 3. **Use loaded protocol** remains available for advanced operator-authored templates.
+The campaign creates three 50–200 µL parameters constrained to 300 µL per sample, with six initial recipes followed by expected-improvement proposals. The selected source protocol supplies the transfer heights, mixing settings, speeds, and other supported command arguments. For example, protocol 03's stock offset −20 mm and mixing settings of 60 µL, three cycles, and −7 mm are retained. The source must contain the supported three-stock pickup/transfer/drop sequence with mixing before the final drop; unsupported extra steps are rejected rather than discarded.
+
+### Six samples per batch
+
+New color setups default to **6 samples per batch**. CubOS proposes six recipes, then executes one native protocol: one red tip transfers red to all six wells, one yellow tip transfers yellow to all six, and one blue tip transfers blue to all six. Each dose is a separate transfer using the normal pipette capacity checks. Each well then receives a fresh mixing tip and its own camera measurement. A full batch uses nine tips; an 18-sample campaign uses three batches and 27 tips. A shorter final batch uses three dye tips plus one mixing tip per sample.
+
+Shared dye tips must stay out of sample liquid. Negative destination-height offsets are rejected for batched transfers; zero means the calibrated well reference. Verify that this reference provides physical liquid clearance. Tip allocation follows the actual available inventory and side-exit accessibility, including consumption by earlier batches.
+
+Every sample retains its own well, recipe, objective path, measurement status, and score even though it shares a native run ID with its batch. The optimizer uses completed accepted observations before proposing the next batch. **Pause after batch** and **Stop after batch** finish the active batch; **Cancel** interrupts it. A partially executed batch is not replayed automatically. Resolve uncertain tip/fluid state before attempting further work.
+
+Saved YAML presets include `batch_size` and `source_protocol_file`. Existing presets remain single-sample until explicitly updated. Loading a preset clears target evidence and live inventory selection. Rebuild from a reviewed target and current inventory; old generated protocols and started campaign snapshots are not rewritten. Existing generic campaigns without batch settings retain their single-sample execution behavior.
 
 `examples/active-learning/color-target-protocol.yaml`, `color-matching-protocol.yaml`, and `color-matching-campaign.json` remain reviewable file-level examples for the 2026-09-14 checkpoint configs. The integrated UI performs the same setup without manual Lab copying. Set the real fluid-state ID and confirm the stock, plate, tip, camera, waste, and clearance targets before validation. Candidate results retain RGB, Lab, ΔE00, and ΔE76 beside the optimization objective.
 
-Keep camera geometry, lighting, focus, exposure, white balance, and gain fixed for the target and every candidate. The default centered ROI covers 50% of the smaller image dimension. Validate it against the liquid region and exclude glare, well walls, and shadows. Prepare and image A1 first; the optimizer never receives the hidden target recipe, only its Lab value.
+Keep camera geometry, lighting, focus, exposure, white balance, and gain fixed for the target and every candidate. The default sampling radius is 50% of the detected well radius around the operator-selected region. Image checks exclude clipped pixels and glare and reject inadequate exposure; camera Lab remains an uncalibrated estimate. Prepare and image the target first; the optimizer receives its Lab value, not its recipe.
 
 API endpoints: `GET/POST /api/v1/campaigns`, `POST /validate`, `GET /{id}`, and `POST /{id}/pause`, `/resume`, `/stop`, `/cancel`, `/observation` (finite `value`). Submit/validate bodies wrap the configuration in `{"spec": ...}`. A native numeric objective and explicit target sequences are required for fully automatic experimental campaigns; manual observations intentionally wait for the operator.
 

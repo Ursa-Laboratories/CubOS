@@ -1,6 +1,7 @@
-"""Durable sequential BO orchestration over the native CubOS run manager."""
+"""Durable sequential and batched BO over the native CubOS run manager."""
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import tempfile
@@ -139,6 +140,10 @@ class CampaignManager:
         else:
             tip_snapshot = None
             available_tips = None
+        if spec.batch_size > 1:
+            return self._preflight_batch(
+                spec, bundle, tip_snapshot, available_tips,
+            )
         parameters = self._suggest(spec, [])
         seen_tips = set()
         for index in range(spec.stop.max_trials):
@@ -160,6 +165,75 @@ class CampaignManager:
         self._validator(gantry, deck, preview, tip_snapshot)
         return {"parameters": parameters, "protocol_yaml": preview}
 
+    def _preflight_batch(self, spec, bundle, tip_snapshot, available_tips):
+        from cubos_api.services.color_batch import compile_color_trial_batch
+
+        if spec.objective.mode != "result":
+            raise ValueError("Batched color campaigns require a protocol result objective")
+        gantry, deck, base_protocol = bundle
+        pending: list[dict[str, float]] = []
+        planned: list[dict[str, float]] = []
+        for _ in range(spec.stop.max_trials):
+            try:
+                point = self._suggest(spec, [], exclude_points=pending)
+            except SearchExhaustedError as exc:
+                raise ValueError(
+                    "The feasible mixture grid has fewer unique points than "
+                    "the requested sample budget"
+                ) from exc
+            pending.append(point)
+            planned.append(point)
+        seen_tips: set[str] = set()
+        available = set(available_tips) if available_tips is not None else None
+        virtual_tip_snapshot = copy.deepcopy(tip_snapshot)
+        preview = None
+        for start_index in range(0, spec.stop.max_trials, spec.batch_size):
+            compiled = compile_color_trial_batch(
+                base_protocol,
+                spec,
+                planned[start_index:start_index + spec.batch_size],
+                start_index,
+            )
+            if preview is None:
+                preview = compiled
+            batch_tips: set[str] = set()
+            for step in yaml.safe_load(compiled.protocol_yaml)["protocol"]:
+                if "pick_up_tip" not in step:
+                    continue
+                target = step["pick_up_tip"].get("position")
+                if not isinstance(target, str):
+                    raise ValueError("Every batch tip pickup needs a named tip target")
+                if target in batch_tips:
+                    raise ValueError(
+                        f"Tip target {target!r} is picked up more than once in "
+                        "one batch"
+                    )
+                if target in seen_tips:
+                    raise ValueError(
+                        f"Tip target {target!r} is reused across batches"
+                    )
+                if available is not None and target not in available:
+                    raise ValueError(
+                        f"Tip target {target!r} is not available in durable "
+                        f"fluid state {spec.fluid_state_id}."
+                    )
+                batch_tips.add(target)
+            seen_tips.update(batch_tips)
+            self._validator(
+                gantry, deck, compiled.protocol_yaml, virtual_tip_snapshot,
+            )
+            if virtual_tip_snapshot is not None:
+                for item in virtual_tip_snapshot["containers"]:
+                    target = f"{item['rack_key']}.{item['slot_id']}"
+                    if target in batch_tips:
+                        item["status"] = "consumed"
+        assert preview is not None
+        return {
+            "parameters": planned[0],
+            "protocol_yaml": preview.protocol_yaml,
+            "sample_map": list(preview.sample_map),
+        }
+
     def _tip_snapshot(self, fluid_state_id):
         if fluid_state_id is None:
             return None
@@ -177,14 +251,16 @@ class CampaignManager:
             return {"valid": False, "errors": [f"{type(exc).__name__}: {exc}"]}
 
     @staticmethod
-    def _suggest(spec, observations):
+    def _suggest(spec, observations, *, exclude_points=None):
         return suggest([p.model_dump() for p in spec.parameters], observations,
                        method=spec.optimizer.method, kernel=spec.optimizer.kernel,
                        initial_trials=spec.optimizer.initial_trials,
                        initial_points=spec.optimizer.initial_points,
-                       exploration=spec.optimizer.exploration, seed=spec.optimizer.seed,
+                       exploration=spec.optimizer.exploration,
+                       seed=spec.optimizer.seed + len(exclude_points or []),
                        direction=spec.objective.direction,
-                       sum_constraint=spec.sum_constraint.model_dump() if spec.sum_constraint else None)
+                       sum_constraint=spec.sum_constraint.model_dump() if spec.sum_constraint else None,
+                       exclude_points=exclude_points)
 
     def start(self, spec):
         bundle = self._bundle(spec)
@@ -263,6 +339,13 @@ class CampaignManager:
             if record is None:
                 raise KeyError(campaign_id)
             if record.state in TERMINAL:
+                if action == "resume" and record.spec.batch_size > 1:
+                    raise RunConflictError(
+                        "A stopped batch campaign cannot resume automatically. "
+                        "Inspect the completed sample wells, used tips, and durable "
+                        "fluid state; then prepare a new campaign that excludes "
+                        "physically used resources."
+                    )
                 if (
                     action != "resume"
                     or record.state not in {"failed", "interrupted"}
@@ -385,6 +468,9 @@ class CampaignManager:
     def _loop(self, campaign_id, bundle):
         record = self._records[campaign_id]
         spec = record.spec
+        if spec.batch_size > 1:
+            self._loop_batch(campaign_id, bundle)
+            return
         stagnant = 0
         try:
             while True:
@@ -506,6 +592,263 @@ class CampaignManager:
             log.exception("Active-learning campaign %s failed", campaign_id)
             with self._lock:
                 self._finish(record, "failed", "error", f"{type(exc).__name__}: {exc}")
+        finally:
+            self.runs.release_campaign(campaign_id)
+
+    def _loop_batch(self, campaign_id, bundle):
+        # TODO(iter): add permanent batch lifecycle regressions after operator review.
+        from cubos_api.services.color_batch import compile_color_trial_batch
+
+        record = self._records[campaign_id]
+        spec = record.spec
+        stagnant = 0
+        try:
+            while True:
+                with self._lock:
+                    if record.stop_requested:
+                        self._finish(
+                            record, "stopped",
+                            record.stop_reason or "operator_stopped",
+                        )
+                        return
+                    if record.pause_requested:
+                        if record.state != "paused":
+                            record.state = "paused"
+                            self._save(record)
+                        paused = True
+                    else:
+                        paused = False
+                    if not paused:
+                        if len(record.trials) >= spec.stop.max_trials:
+                            self._finish(record, "completed", "trial_budget")
+                            return
+                        if (
+                            spec.stop.max_seconds
+                            and time.time() - record.created_at >= spec.stop.max_seconds
+                        ):
+                            self._finish(record, "completed", "time_budget")
+                            return
+                if paused:
+                    time.sleep(self._poll)
+                    continue
+
+                observations = [
+                    {"parameters": trial.parameters, "objective": trial.objective}
+                    for trial in record.trials
+                    if trial.objective is not None
+                    and trial.objective_status == "accepted"
+                ]
+                batch_start = len(record.trials)
+                batch_limit = min(
+                    spec.batch_size, spec.stop.max_trials - batch_start,
+                )
+                parameter_sets: list[dict[str, float]] = []
+                for _ in range(batch_limit):
+                    try:
+                        point = self._suggest(
+                            spec, observations, exclude_points=parameter_sets,
+                        )
+                    except SearchExhaustedError:
+                        break
+                    parameter_sets.append(point)
+                if not parameter_sets:
+                    with self._lock:
+                        self._finish(record, "completed", "search_exhausted")
+                    return
+
+                compiled = compile_color_trial_batch(
+                    bundle[2], spec, parameter_sets, batch_start,
+                )
+                if (
+                    len(compiled.objective_paths) != len(parameter_sets)
+                    or len(compiled.sample_map) != len(parameter_sets)
+                ):
+                    raise RuntimeError(
+                        "Batch compiler did not return one objective and sample "
+                        "map entry per proposed mixture"
+                    )
+                for offset, (point, path, sample) in enumerate(zip(
+                    parameter_sets, compiled.objective_paths,
+                    compiled.sample_map,
+                )):
+                    if (
+                        sample.get("sample_index") != batch_start + offset
+                        or sample.get("parameters") != point
+                        or sample.get("objective_path") != path
+                        or not isinstance(sample.get("candidate_well"), str)
+                    ):
+                        raise RuntimeError(
+                            "Batch compiler returned mismatched sample provenance"
+                        )
+                self._validator(
+                    bundle[0], bundle[1], compiled.protocol_yaml,
+                    self._tip_snapshot(spec.fluid_state_id),
+                )
+                batch_number = batch_start // spec.batch_size + 1
+                submission = RunSubmission(
+                    run_id=f"{campaign_id}-batch-{batch_number}",
+                    gantry_config=bundle[0],
+                    deck_config=bundle[1],
+                    protocol_yaml=compiled.protocol_yaml,
+                    mock_mode=spec.mock_mode,
+                    state=(
+                        RunStateSelection(fluid_state_id=spec.fluid_state_id)
+                        if spec.fluid_state_id else None
+                    ),
+                    metadata={
+                        "active_learning_campaign_id": campaign_id,
+                        "batch": batch_number,
+                        "sample_map": list(compiled.sample_map),
+                    },
+                )
+                with self._lock:
+                    if record.stop_requested or record.pause_requested:
+                        continue
+                    child = self.runs.submit(
+                        submission, campaign_owner=campaign_id,
+                    )
+                    batch_trials = [
+                        CampaignTrial(
+                            index=batch_start + offset,
+                            parameters=point,
+                            run_id=child.run_id,
+                            state=child.state,
+                            objective_path=compiled.objective_paths[offset],
+                            sample_well=str(
+                                compiled.sample_map[offset]["candidate_well"]
+                            ),
+                            batch_index=batch_number,
+                        )
+                        for offset, point in enumerate(parameter_sets)
+                    ]
+                    record.trials.extend(batch_trials)
+                    record.active_run_id = child.run_id
+                    record.state = "running"
+                    self._save(record)
+
+                while True:
+                    child = self.runs.get(submission.run_id)
+                    if child is None:
+                        raise RuntimeError(
+                            f"Native batch run {submission.run_id} disappeared"
+                        )
+                    with self._lock:
+                        if any(trial.state != child.state for trial in batch_trials):
+                            for trial in batch_trials:
+                                trial.state = child.state
+                            self._save(record)
+                    if (
+                        child.state in {"succeeded", "failed", "cancelled"}
+                        and self.runs.active_run_id != child.run_id
+                    ):
+                        break
+                    time.sleep(self._poll)
+
+                with self._lock:
+                    record.active_run_id = None
+                    if child.state != "succeeded":
+                        for trial in batch_trials:
+                            trial.objective_status = "unverified"
+                            trial.error = child.error or (
+                                "Batch did not complete; physically used wells and "
+                                "tips require reconciliation"
+                            )
+                        self._finish(
+                            record,
+                            "stopped" if record.stop_requested else "failed",
+                            "batch_interrupted_requires_reconciliation",
+                            child.error or (
+                                "A batch may have partially used wells and tips. "
+                                "Inspect the physical setup before creating a new campaign."
+                            ),
+                        )
+                        return
+
+                    rejected: list[str] = []
+                    for trial in batch_trials:
+                        assert trial.objective_path is not None
+                        try:
+                            measurement = extract_result_context(
+                                child.result, trial.objective_path,
+                            )
+                            trial.measurement = measurement
+                            validate_objective_provenance(
+                                trial.objective_path, measurement,
+                            )
+                            if (
+                                measurement is None
+                                or not isinstance(measurement.get("well_identity"), dict)
+                                or measurement["well_identity"].get("expected_well")
+                                != trial.sample_well
+                            ):
+                                raise TemplateError(
+                                    "Sample result does not identify its expected "
+                                    f"protocol well {trial.sample_well!r}"
+                                )
+                            trial.objective = extract_result_objective(
+                                child.result, trial.objective_path,
+                            )
+                            trial.objective_status = "accepted"
+                        except (TemplateError, ValueError) as exc:
+                            trial.objective_status = "rejected"
+                            trial.error = f"{type(exc).__name__}: {exc}"
+                            rejected.append(
+                                f"sample {trial.index + 1} ({trial.sample_well}): {exc}"
+                            )
+                    self._save(record)
+                    if rejected:
+                        self._finish(
+                            record, "failed", "batch_objective_rejected",
+                            "Batch results were preserved, but optimization "
+                            "cannot continue: " + "; ".join(rejected),
+                        )
+                        return
+
+                    target_reached = False
+                    for trial in batch_trials:
+                        value = trial.objective
+                        assert value is not None
+                        previous = record.best_objective
+                        improvement = (
+                            float("inf") if previous is None
+                            else previous - value
+                            if spec.objective.direction == "minimize"
+                            else value - previous
+                        )
+                        if previous is None or improvement > 0:
+                            record.best_objective = value
+                        stagnant = (
+                            0 if improvement > spec.stop.min_improvement
+                            else stagnant + 1
+                        )
+                        target = spec.stop.target_value
+                        if target is not None and (
+                            (value <= target)
+                            if spec.objective.direction == "minimize"
+                            else (value >= target)
+                        ):
+                            target_reached = True
+                    self._save(record)
+                    if record.stop_requested:
+                        self._finish(
+                            record, "stopped",
+                            record.stop_reason or "operator_stopped",
+                        )
+                        return
+                    if target_reached:
+                        self._finish(record, "completed", "target_reached")
+                        return
+                    if spec.stop.patience and stagnant >= spec.stop.patience:
+                        self._finish(record, "completed", "no_improvement")
+                        return
+        except Exception as exc:
+            log.exception("Active-learning batch campaign %s failed", campaign_id)
+            with self._lock:
+                self._finish(
+                    record, "failed", "batch_error_requires_reconciliation",
+                    f"{type(exc).__name__}: {exc}. Inspect physically used wells "
+                    "and tips before creating a new campaign.",
+                )
         finally:
             self.runs.release_campaign(campaign_id)
 

@@ -8,10 +8,25 @@ from cubos_api.services.campaign_templates import extract_result_objective
 from cubos_api.services.color_campaign import build_color_campaign, target_protocol
 
 
+SOURCE_PROTOCOL = """protocol:
+- pick_up_tip: {position: tips.A1}
+- transfer: {source: stocks.A1, destination: plate.A1, volume_ul: 100, source_height: '-20'}
+- drop_tip: {position: waste}
+- pick_up_tip: {position: tips.A2}
+- transfer: {source: stocks.A2, destination: plate.A1, volume_ul: 100, source_height: '-20'}
+- drop_tip: {position: waste}
+- pick_up_tip: {position: tips.A3}
+- transfer: {source: stocks.A3, destination: plate.A1, volume_ul: 100, source_height: '-20'}
+- mix: {position: plate.A1, volume_ul: 60, cycles: 3, height: -7}
+- drop_tip: {position: waste}
+"""
+
+
 def setup() -> ColorCampaignSetup:
     return ColorCampaignSetup(
         gantry_file="g.yaml",
         deck_file="d.yaml",
+        source_protocol_file="source.yaml",
         target_well="plate.A1",
         target_lab=(42.0, 12.0, 18.0),
         reference_processing_profile_id="profile-v1",
@@ -41,7 +56,7 @@ def test_target_protocol_reads_selected_well_without_fluid_steps():
 
 
 def test_builder_writes_complete_protocol_and_campaign(tmp_path: Path):
-    spec = build_color_campaign(setup(), tmp_path)
+    spec = build_color_campaign(setup(), tmp_path, source_protocol_yaml=SOURCE_PROTOCOL)
     protocol = yaml.safe_load((tmp_path / spec.protocol_file).read_text())["protocol"]
     assert protocol[1]["transfer"]["source"] == "stocks.A1"
     assert protocol[4]["transfer"]["source"] == "stocks.A2"
@@ -67,6 +82,7 @@ def test_builder_allocates_each_trial_from_durable_available_tip_order(tmp_path:
     ]
     spec = build_color_campaign(
         setup(), tmp_path, available_tip_positions=available,
+        source_protocol_yaml=SOURCE_PROTOCOL,
     )
 
     assert spec.sequences[1].values[:2] == ["tips.A4", "tips.A7"]
@@ -84,6 +100,7 @@ def test_builder_rejects_insufficient_durable_tip_capacity(tmp_path: Path):
                 f"tips.{chr(ord('A') + index // 12)}{index % 12 + 1}"
                 for index in range(3, 19)
             ],
+            source_protocol_yaml=SOURCE_PROTOCOL,
         )
 
 

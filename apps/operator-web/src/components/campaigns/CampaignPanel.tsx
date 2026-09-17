@@ -71,6 +71,8 @@ interface PresetWorkspaceDraft {
   cameraInstrument: string;
   roiFraction: number;
   captureImageHeight: string;
+  sourceProtocolFile: string;
+  batchSize: number;
 }
 
 function restoredPresetWorkspace(): PresetWorkspaceDraft | null {
@@ -97,6 +99,8 @@ function restoredPresetWorkspace(): PresetWorkspaceDraft | null {
       cameraInstrument: typeof parsed.cameraInstrument === "string" ? parsed.cameraInstrument : "camera",
       roiFraction: isFiniteNumber(parsed.roiFraction) ? parsed.roiFraction : 0.5,
       captureImageHeight: typeof parsed.captureImageHeight === "string" ? parsed.captureImageHeight : "",
+      sourceProtocolFile: typeof parsed.sourceProtocolFile === "string" ? parsed.sourceProtocolFile : "",
+      batchSize: isFiniteNumber(parsed.batchSize) && Number.isInteger(parsed.batchSize) && parsed.batchSize > 0 ? parsed.batchSize : 6,
     };
   } catch {
     return null;
@@ -513,6 +517,8 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const [cameraInstrument, setCameraInstrument] = useState(restoredPreset?.cameraInstrument ?? restoredReview?.cameraInstrument ?? "camera");
   const [roiFraction, setRoiFraction] = useState(restoredPreset?.roiFraction ?? restoredReview?.roiFraction ?? 0.5);
   const [captureImageHeight, setCaptureImageHeight] = useState(restoredPreset?.captureImageHeight ?? restoredReview?.captureImageHeight ?? "");
+  const [sourceProtocolFile, setSourceProtocolFile] = useState(restoredPreset?.sourceProtocolFile || restoredCampaignSpec.source_protocol_file || protocolFile || "");
+  const [batchSize, setBatchSize] = useState(restoredPreset?.batchSize ?? restoredCampaignSpec.batch_size ?? 6);
   const [targetLab, setTargetLab] = useState<number[] | null>(() => !initialNeedsFreshTarget && restoredReview?.measurement.measurement_status === "accepted" ? numericTriplet(restoredReview.measurement.lab) : null);
   const [targetRunId, setTargetRunId] = useState<string | null>(restoredReview?.runId ?? null);
   const [targetMeasurement, setTargetMeasurement] = useState<Record<string, unknown> | null>(restoredReview?.measurement ?? null);
@@ -545,7 +551,25 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   const presetConfigMismatch = presetExpectedFiles !== null
     && (presetExpectedFiles.gantry !== gantryFile || presetExpectedFiles.deck !== deckFile);
   const liveCampaign = records.find((record) => !TERMINAL.has(record.state)) ?? null;
+  const liveScoredSamples = liveCampaign?.trials.filter((trial) => isFiniteNumber(trial.objective) && (!trial.objective_status || trial.objective_status === "accepted")).length ?? 0;
+  const liveScheduledBatches = liveCampaign ? Math.ceil(liveCampaign.trials.length / (liveCampaign.spec.batch_size || 1)) : 0;
   const candidateCount = candidateText.split(/[\n,]/).map((value) => value.trim()).filter(Boolean).length;
+  const plannedSampleCount = Math.min(candidateCount, Math.max(0, spec.stop.max_trials));
+  const batchCount = Number.isInteger(batchSize) && batchSize > 0 ? Math.ceil(plannedSampleCount / batchSize) : 0;
+  const estimatedTipCount = batchSize === 1 ? plannedSampleCount * 3 : plannedSampleCount + batchCount * 3;
+  const sourceTransfers = protocolFile === sourceProtocolFile ? protocolSteps.filter((step) => step.command === "transfer") : [];
+  const sourceMix = protocolFile === sourceProtocolFile ? protocolSteps.find((step) => step.command === "mix") : null;
+  const inheritedSourceHeights = Array.from(new Set(sourceTransfers.map((step) => String(step.args.source_height ?? "unspecified"))));
+  const inheritedSourceHeight = inheritedSourceHeights.length === 1 ? inheritedSourceHeights[0] : inheritedSourceHeights.length > 1 ? "varies" : "not loaded";
+  const inheritedMix = sourceMix
+    ? `${String(sourceMix.args.volume_ul ?? "?")} µL · ${String(sourceMix.args.cycles ?? "?")} cycles · height ${String(sourceMix.args.height ?? "?")} mm`
+    : "not loaded";
+  const sourceProtocolMismatch = Boolean(sourceProtocolFile && protocolFile && sourceProtocolFile !== protocolFile);
+  const batchError = !Number.isInteger(batchSize) || batchSize < 1 || batchSize > 6
+    ? "Samples per batch must be a whole number from 1 to 6."
+    : candidateCount > 0 && batchSize > candidateCount
+      ? `Samples per batch (${batchSize}) cannot exceed selected candidate wells (${candidateCount}).`
+      : null;
   const countConsistencyMessage = !Number.isInteger(spec.optimizer.initial_trials) || spec.optimizer.initial_trials < 1 || spec.optimizer.initial_trials > 100
     ? "Initial trials must be a whole number from 1 to 100."
     : !Number.isInteger(spec.stop.max_trials) || spec.stop.max_trials < 1 || spec.stop.max_trials > 100
@@ -572,8 +596,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       cameraInstrument,
       roiFraction,
       captureImageHeight,
+      sourceProtocolFile,
+      batchSize,
     } satisfies PresetWorkspaceDraft));
-  }, [presetNeedsFreshTarget, presetExpectedFiles, selectedPreset, presetFilename, presetName, targetWell, redSource, yellowSource, blueSource, candidateText, cameraInstrument, roiFraction, captureImageHeight]);
+  }, [presetNeedsFreshTarget, presetExpectedFiles, selectedPreset, presetFilename, presetName, targetWell, redSource, yellowSource, blueSource, candidateText, cameraInstrument, roiFraction, captureImageHeight, sourceProtocolFile, batchSize]);
   const refreshPresets = useCallback(async () => {
     try {
       const next = await campaignApi.listPresets();
@@ -605,6 +631,13 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       || files.current.deckFile !== deckFile
       || files.current.protocolFile !== protocolFile
     ) {
+      if (files.current.protocolFile !== protocolFile && protocolFile && !presetExpectedFiles) {
+        setSourceProtocolFile(protocolFile);
+        if (files.current.protocolFile) {
+          setPresetNeedsFreshTarget(true);
+          setValidated(false);
+        }
+      }
       files.current = { gantryFile, deckFile, protocolFile };
       setSpec((current) => ({
         ...current,
@@ -613,7 +646,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         protocol_file: protocolFile ?? current.protocol_file,
       }));
     }
-  }, [gantryFile, deckFile, protocolFile]);
+  }, [gantryFile, deckFile, protocolFile, presetExpectedFiles]);
 
   const refresh = useCallback(async () => {
     try {
@@ -688,6 +721,14 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       setPresetError("Enter a setup filename and name before saving.");
       return;
     }
+    if (!sourceProtocolFile || !protocolFile || sourceProtocolFile !== protocolFile) {
+      setPresetError(`Select source protocol ${sourceProtocolFile || "03"} in the Protocol template picker before saving this color setup.`);
+      return;
+    }
+    if (batchError) {
+      setPresetError(batchError);
+      return;
+    }
     const imageHeight = captureImageHeight.trim() === "" ? null : Number(captureImageHeight);
     if (imageHeight !== null && !Number.isFinite(imageHeight)) {
       setPresetError("Capture image height must be a finite number or blank.");
@@ -697,7 +738,9 @@ export default function CampaignPanel(props: CampaignPanelProps) {
     setPresetError(null);
     setPresetMessage(null);
     try {
-      const response = await campaignApi.savePreset(filename, name, spec, {
+      const response = await campaignApi.savePreset(filename, name, { ...spec, batch_size: batchSize, source_protocol_file: sourceProtocolFile }, {
+        source_protocol_file: sourceProtocolFile || protocolFile || undefined,
+        batch_size: batchSize,
         target_well: targetWell,
         red_source: redSource,
         yellow_source: yellowSource,
@@ -729,6 +772,10 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       const loaded = response.preset;
       setSpec({ ...loaded.spec, fluid_state_id: null });
       if (loaded.color_setup) {
+        setSourceProtocolFile(loaded.color_setup.source_protocol_file || loaded.spec.source_protocol_file || protocolFile || "");
+        setBatchSize(loaded.color_setup.source_protocol_file || loaded.spec.source_protocol_file
+          ? loaded.color_setup.batch_size ?? loaded.spec.batch_size ?? 6
+          : 6);
         setTargetWell(loaded.color_setup.target_well);
         setRedSource(loaded.color_setup.red_source);
         setYellowSource(loaded.color_setup.yellow_source);
@@ -883,6 +930,18 @@ export default function CampaignPanel(props: CampaignPanelProps) {
   };
 
   const buildFromAcceptedTarget = async () => {
+    if (!sourceProtocolFile || !protocolFile || sourceProtocolFile !== protocolFile) {
+      setError(`Select the saved source protocol ${sourceProtocolFile || "03"} in the Protocol template picker before building.`);
+      return;
+    }
+    if (batchError) {
+      setError(batchError);
+      return;
+    }
+    if (countConsistencyMessage) {
+      setError(countConsistencyMessage);
+      return;
+    }
     if (presetConfigMismatch && presetExpectedFiles) {
       setError(`Select gantry ${presetExpectedFiles.gantry} and deck ${presetExpectedFiles.deck} before building this setup.`);
       return;
@@ -908,6 +967,8 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       const prepared = await campaignApi.prepareColor({
         gantry_file: gantryFile,
         deck_file: deckFile,
+        source_protocol_file: sourceProtocolFile,
+        batch_size: batchSize,
         target_well: targetWell,
         target_lab: lab as [number, number, number],
         red_source: redSource,
@@ -926,23 +987,53 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         mock_mode: spec.mock_mode,
       });
       setTargetLab(lab);
+      const generatedParameters = prepared.parameters.map((parameter) => {
+        const prior = spec.parameters.find((item) => item.name === parameter.name);
+        return prior && Number.isFinite(prior.minimum) && Number.isFinite(prior.maximum) && Number.isFinite(prior.step)
+          && prior.minimum < prior.maximum && prior.step > 0 && prior.step <= prior.maximum - prior.minimum
+          ? { ...parameter, minimum: prior.minimum, maximum: prior.maximum, step: prior.step }
+          : parameter;
+      });
+      const recipeIsValid = (point: Record<string, number>) => {
+        const names = generatedParameters.map((parameter) => parameter.name);
+        if (Object.keys(point).length !== names.length || names.some((name) => !(name in point))) return false;
+        if (!generatedParameters.every((parameter) => {
+          const value = point[parameter.name];
+          return Number.isFinite(value) && value >= parameter.minimum && value <= parameter.maximum
+            && Math.abs((value - parameter.minimum) / parameter.step - Math.round((value - parameter.minimum) / parameter.step)) < 1e-6;
+        })) return false;
+        const constraint = spec.sum_constraint ?? prepared.sum_constraint;
+        return !constraint || Math.abs(constraint.parameters.reduce((sum, name) => sum + point[name], 0) - constraint.total) < 1e-6;
+      };
+      const preserveRecipes = spec.optimizer.initial_points.length > 0
+        && spec.optimizer.initial_points.length <= spec.optimizer.initial_trials
+        && spec.optimizer.initial_points.every(recipeIsValid)
+        && generatedParameters.length === spec.parameters.length;
+      const sampleBudget = Math.min(spec.stop.max_trials, candidateCount);
+      const initialTrials = Math.min(spec.optimizer.initial_trials, sampleBudget);
+      const generatedRecipes = prepared.optimizer.initial_points.slice(0, initialTrials);
+      const preserveBounds = preserveRecipes || generatedRecipes.every(recipeIsValid);
       setSpec((current) => ({
         ...prepared,
         name: current.name,
-        parameters: current.parameters,
-        objective: current.objective,
-        optimizer: current.optimizer,
-        stop: current.stop,
-        sum_constraint: current.sum_constraint,
+        parameters: preserveBounds ? generatedParameters : prepared.parameters,
+        objective: prepared.objective,
+        optimizer: { ...prepared.optimizer, method: current.optimizer.method, kernel: current.optimizer.kernel,
+          initial_trials: initialTrials, initial_points: preserveRecipes ? current.optimizer.initial_points : generatedRecipes,
+          exploration: current.optimizer.exploration, seed: current.optimizer.seed },
+        stop: { ...prepared.stop, ...current.stop, max_trials: sampleBudget },
+        sum_constraint: preserveBounds ? current.sum_constraint ?? prepared.sum_constraint : prepared.sum_constraint,
         mock_mode: current.mock_mode,
         fluid_state_id: current.fluid_state_id,
+        batch_size: batchSize,
+        source_protocol_file: sourceProtocolFile,
       }));
       setPresetIssues([]);
       setValidation([]);
       setValidated(false);
       setPresetNeedsFreshTarget(false);
       setPresetExpectedFiles(null);
-      setTargetStatus(`Target read from ${targetWell}. Campaign protocol ${prepared.protocol_file} is ready to validate.`);
+      setTargetStatus(`Target read from ${targetWell}. Generated protocol ${prepared.protocol_file} is ready to validate.${preserveRecipes ? " Initial recipes were retained." : preserveBounds ? " Prior recipes did not fit the new parameter map and were replaced by generated defaults." : " Prior bounds and recipes did not fit the generated map and were replaced by compiler defaults."}`);
     } catch (caught) {
       setError(campaignErrorMessage(caught));
     } finally {
@@ -994,9 +1085,9 @@ export default function CampaignPanel(props: CampaignPanelProps) {
               ? liveCampaign?.spec.name || "No campaign running"
               : "Campaign history"}</h3>
           <div className="campaign-subtitle">{activeSection === "setup"
-            ? `${spec.mock_mode ? "Offline mock" : "Real hardware"} · ${spec.parameters.length} parameters · ${candidateCount} candidate wells · ${spec.stop.max_trials} trial budget`
+            ? `${spec.mock_mode ? "Offline mock" : "Real hardware"} · ${spec.parameters.length} parameters · ${plannedSampleCount} planned samples · ${batchCount} batches of up to ${batchSize}`
             : activeSection === "run" && liveCampaign
-              ? `${liveCampaign.state.replaceAll("_", " ")} · ${liveCampaign.trials.length} of ${liveCampaign.spec.stop.max_trials} trials · best ${liveCampaign.best_objective ?? "—"}`
+              ? `${liveCampaign.state.replaceAll("_", " ")} · ${liveCampaign.trials.length} samples scheduled · ${liveScoredSamples} scored · ${liveScheduledBatches} of ${Math.ceil(liveCampaign.spec.stop.max_trials / (liveCampaign.spec.batch_size || 1))} batches scheduled · best ${liveCampaign.best_objective ?? "—"}`
               : activeSection === "run"
                 ? "Complete Setup to start a campaign"
                 : `${records.length} saved campaign${records.length === 1 ? "" : "s"}`}</div>
@@ -1035,7 +1126,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
                       ? "Validate the current draft"
                       : "Start the validated campaign"}</strong>
           <p>{liveCampaign
-            ? `${liveCampaign.trials.length} of ${liveCampaign.spec.stop.max_trials} trials recorded. Hardware controls are in Run.`
+            ? `${liveCampaign.trials.length} samples scheduled; ${liveScoredSamples} accepted scores so far. Hardware controls are in Run.`
             : presetConfigMismatch && presetExpectedFiles
               ? `This setup requires ${presetExpectedFiles.gantry} and ${presetExpectedFiles.deck}.`
               : presetNeedsFreshTarget && targetMeasurement?.measurement_status === "accepted" && !targetSelectionNeedsAnalysis && !spec.mock_mode && spec.fluid_state_id === null
@@ -1048,7 +1139,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
           {liveCampaign ? activeSection === "run" ? null : <button type="button" style={theme.btn.primary} onClick={() => { setSelected(liveCampaign); setActiveSection("run"); }}>Open Run</button>
             : presetConfigMismatch ? <button type="button" disabled>Select required files</button>
               : presetNeedsFreshTarget && targetMeasurement?.measurement_status === "accepted" && !targetSelectionNeedsAnalysis && !spec.mock_mode && spec.fluid_state_id === null ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(inventorySectionRef)}>Choose inventory</button>
-              : presetNeedsFreshTarget && targetMeasurement?.measurement_status === "accepted" && !targetSelectionNeedsAnalysis ? <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || !targetExpectedCenter || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign</button>
+              : presetNeedsFreshTarget && targetMeasurement?.measurement_status === "accepted" && !targetSelectionNeedsAnalysis ? <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || !targetExpectedCenter || batchError !== null || countConsistencyMessage !== null || sourceProtocolMismatch || !sourceProtocolFile || !protocolFile || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign</button>
                 : presetNeedsFreshTarget && targetMeasurement ? <button type="button" style={theme.btn.primary} onClick={() => showSetupSection(targetReviewRef)}>Review target</button>
                   : presetNeedsFreshTarget ? <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason}>Capture target</button>
                     : countConsistencyMessage ? <button type="button" style={theme.btn.secondary} onClick={() => setActiveSection("setup")}>Review Advanced</button>
@@ -1106,7 +1197,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
           ) : <>
             <div className="campaign-run-header" role="status">
               <div><span>Hardware control</span><strong>{liveCampaign.spec.name}</strong></div>
-              <div className="campaign-run-metrics"><span>{liveCampaign.state.replaceAll("_", " ")}</span><span>{liveCampaign.trials.length} / {liveCampaign.spec.stop.max_trials} trials</span><span>best {liveCampaign.best_objective ?? "—"}</span></div>
+              <div className="campaign-run-metrics"><span>{liveCampaign.state.replaceAll("_", " ")}</span><span>{liveCampaign.trials.length} scheduled / {liveCampaign.spec.stop.max_trials} sample budget</span><span>{liveScoredSamples} scored</span><span>{liveScheduledBatches} / {Math.ceil(liveCampaign.spec.stop.max_trials / (liveCampaign.spec.batch_size || 1))} batches scheduled</span><span>best {liveCampaign.best_objective ?? "—"}</span></div>
             </div>
             {liveCampaign.active_run_id && <RunPanel runId={liveCampaign.active_run_id} />}
             {!liveCampaign.spec.mock_mode && campaignCameraInstrument && <CampaignCameraMonitor instrument={campaignCameraInstrument} />}
@@ -1115,8 +1206,8 @@ export default function CampaignPanel(props: CampaignPanelProps) {
             <div className="campaign-run-controls">
               <span>These controls act on the server-owned campaign.</span>
               {liveCampaign.state === "paused" && <button type="button" onClick={() => void control("resume", liveCampaign)}>Resume</button>}
-              {liveCampaign.state === "running" && <button type="button" onClick={() => void control("pause", liveCampaign)}>Pause after trial</button>}
-              <button type="button" onClick={() => void control("stop", liveCampaign)}>Stop after trial</button>
+              {liveCampaign.state === "running" && <button type="button" onClick={() => void control("pause", liveCampaign)}>Pause after {liveCampaign.spec.batch_size && liveCampaign.spec.batch_size > 1 ? "batch" : "trial"}</button>}
+              <button type="button" onClick={() => void control("stop", liveCampaign)}>Stop after {liveCampaign.spec.batch_size && liveCampaign.spec.batch_size > 1 ? "batch" : "trial"}</button>
               <button type="button" onClick={() => void control("cancel", liveCampaign)}>Cancel active run</button>
             </div>
             {error && <div className="campaign-banner campaign-error" role="alert">{error}</div>}
@@ -1137,6 +1228,8 @@ export default function CampaignPanel(props: CampaignPanelProps) {
           <button type="button" style={theme.btn.secondary} onClick={applyColorPreset}>Use loaded protocol</button>
         </div>
         <div className="campaign-fields campaign-color-fields">
+          <label className="campaign-field">Source protocol template<input aria-label="Color source protocol template" value={sourceProtocolFile} readOnly placeholder="Select protocol 03 above" /></label>
+          <label className="campaign-field">Samples per batch<input aria-label="Color samples per batch" type="number" min="1" max="6" step="1" value={batchSize} onChange={(event) => { setBatchSize(Number(event.target.value)); invalidateBuiltCampaign(); }} /></label>
           <label className="campaign-field">Target well<select aria-label="Target well" value={targetWell} onChange={(event) => { setTargetWell(event.target.value); invalidateTargetEvidence(); }}>{PLATE_WELLS.map((well) => <option key={well}>{well}</option>)}</select></label>
           <label className="campaign-field">Red stock<input aria-label="Red stock" value={redSource} onChange={(event) => { setRedSource(event.target.value); invalidateBuiltCampaign(); }} /></label>
           <label className="campaign-field">Yellow stock<input aria-label="Yellow stock" value={yellowSource} onChange={(event) => { setYellowSource(event.target.value); invalidateBuiltCampaign(); }} /></label>
@@ -1149,7 +1242,9 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         <p className="campaign-note">Capture height is relative to the calibrated well surface: positive is above it and negative is below. Blank preserves the existing configured ceiling. CubOS validates the selected height against the calibrated labware, working volume, and collision plan, then retracts to the configured planning ceiling.</p>
         {captureCarriageZ !== null && <p className="campaign-note">Preview: {targetWell} surface Z {targetWellZ?.toFixed(3)} mm + image height {numericCaptureHeight?.toFixed(3)} mm + camera depth {cameraDepth?.toFixed(3)} mm = carriage Z {captureCarriageZ.toFixed(3)} mm. Review physical camera clearance before running.</p>}
         <p className="campaign-note">After capture, select the intended well center on the saved image. Computer vision may locate a well-like circle near it, but cannot verify the well identity.</p>
-        <div className="campaign-color-limits">50–200 µL per dye · 300 µL total · 5 µL grid · six simplex starts · ΔE00 target ≤ 3</div>
+        <div className="campaign-color-limits">{candidateCount} candidate wells · {plannedSampleCount} planned samples → {batchCount} native batch runs at up to {batchSize} samples each. Trial budget counts samples, not batches. {batchSize > 1 ? "Each batch dispenses color by color across its wells, then mixes and measures each well." : "Each sample runs the source sequence separately."} Estimated tips: {estimatedTipCount} ({batchSize === 1 ? "three dye tips per sample, with the final dye tip used for mixing" : `${batchCount * 3} dye tips, one per color per batch, plus ${plannedSampleCount} dedicated mix tips`}). Inherited from {sourceProtocolFile || "the selected source protocol"}: source height {inheritedSourceHeight} mm; mix {inheritedMix}. The generated protocol is separate from this saved template.</div>
+        {sourceProtocolMismatch && <div className="campaign-banner campaign-error" role="alert">Select source protocol {sourceProtocolFile} in the Protocol template picker before building. Current selection: {protocolFile}.</div>}
+        {batchError && <div className="campaign-banner campaign-error" role="alert">{batchError}</div>}
         <div className="campaign-actions">
           <button type="button" style={theme.btn.primary} onClick={() => void readTargetAndPrepare()} disabled={targetBusy || !!disabledReason || presetConfigMismatch}>{targetBusy ? "Capturing target…" : `Capture ${targetWell} target for review`}</button>
           {visibleTargetLab && <span className="campaign-target-chip"><span className="campaign-swatch" style={{ backgroundColor: `lab(${visibleTargetLab[0]}% ${visibleTargetLab[1]} ${visibleTargetLab[2]})` }} />Target Lab {visibleTargetLab.map((value) => value.toFixed(4)).join(", ")}</span>}
@@ -1202,7 +1297,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       )}
       {targetRunId && targetMeasurement?.measurement_status === "accepted" && (
         <div className="campaign-actions">
-          <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || !targetExpectedCenter || targetSelectionNeedsAnalysis || presetConfigMismatch || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign from accepted target</button>
+          <button type="button" style={theme.btn.primary} onClick={() => void buildFromAcceptedTarget()} disabled={targetBusy || !targetExpectedCenter || targetSelectionNeedsAnalysis || presetConfigMismatch || batchError !== null || countConsistencyMessage !== null || sourceProtocolMismatch || !sourceProtocolFile || !protocolFile || (!spec.mock_mode && spec.fluid_state_id === null)}>Build campaign from accepted target</button>
           {!spec.mock_mode && spec.fluid_state_id === null && <span className="campaign-note">Create or select a reconciled fluid state before building a real color campaign.</span>}
         </div>
       )}
@@ -1245,7 +1340,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
         </div>
         <div className="campaign-card">
           <h4>Stop limits</h4>
-          <p className="campaign-note">Limits are checked between trials. Cancel interrupts the active native run.</p>
+          <p className="campaign-note">Trial budget counts samples. Limits are checked between completed batches; Cancel interrupts the active native run.</p>
           <div className="campaign-fields">
             {(["max_trials", "patience", "min_improvement", "max_seconds", "target_value"] as const).map((key) => (
               <label className="campaign-field" key={key}>{key.replaceAll("_", " ")}<input aria-label={key.replaceAll("_", " ")} type="number" min={key === "max_trials" ? 1 : key === "patience" || key === "min_improvement" ? 0 : key === "max_seconds" ? 0.001 : undefined} max={key === "max_trials" || key === "patience" ? 100 : key === "max_seconds" ? 604800 : undefined} step={key === "max_trials" || key === "patience" ? 1 : "any"} value={spec.stop[key] ?? ""} onChange={(event) => update("stop", { ...spec.stop, [key]: event.target.value ? Number(event.target.value) : null })} /></label>
@@ -1287,7 +1382,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
       <div className="campaign-card">
         <div className="campaign-toolbar">
           <h4>Initial design</h4>
-          <span className="campaign-note">Runs in this order before model-selected trials.</span>
+          <span className="campaign-note">Samples in this order before model-selected formulations.</span>
           <button type="button" style={theme.btn.secondary} disabled={!spec.parameters.length || spec.optimizer.initial_points.length >= spec.optimizer.initial_trials} onClick={() => update("optimizer", { ...spec.optimizer, initial_points: [...spec.optimizer.initial_points, Object.fromEntries(spec.parameters.map((parameter) => [parameter.name, parameter.minimum]))] })}>Add design point</button>
         </div>
         {spec.optimizer.initial_points.length === 0 ? <p className="campaign-note">No fixed design points. Initial trials will be seeded random samples.</p> : (
@@ -1345,7 +1440,7 @@ export default function CampaignPanel(props: CampaignPanelProps) {
               <TernaryPlot record={selected} />
             </div>
             <ColorReadout record={selected} />
-            <div className="campaign-table-wrap"><table className="campaign-table"><thead><tr><th>Trial</th><th>Parameters</th><th>Objective</th><th>Status</th><th>Run</th></tr></thead><tbody>{selected.trials.map((trial) => <tr key={trial.index}><td>{trial.index + 1}</td><td>{Object.entries(trial.parameters).map(([key, value]) => `${key}=${value}`).join(", ")}</td><td>{trial.objective ?? "—"}</td><td>{trial.state}</td><td><button type="button" onClick={() => onRunSelected?.(trial.run_id)}>Open run</button></td></tr>)}</tbody></table></div>
+            <div className="campaign-table-wrap"><table className="campaign-table"><thead><tr><th>Sample</th><th>Batch</th><th>Well / parameters</th><th>Objective</th><th>Result path</th><th>Status</th><th>Native run</th></tr></thead><tbody>{selected.trials.map((trial) => <tr key={trial.index}><td>{trial.index + 1}</td><td>{trial.batch_index ?? Math.floor(trial.index / (selected.spec.batch_size || 1)) + 1}</td><td><strong>{trial.sample_well ?? "—"}</strong><br />{Object.entries(trial.parameters).map(([key, value]) => `${key}=${value}`).join(", ")}</td><td>{trial.objective ?? "—"}</td><td><code>{trial.objective_path ?? selected.spec.objective.path}</code></td><td>{trial.objective_status ?? trial.state}</td><td><button type="button" onClick={() => onRunSelected?.(trial.run_id)}>Open run {trial.run_id}</button></td></tr>)}</tbody></table></div>
             {["failed", "interrupted", "stopped"].includes(selected.state) && <details className="campaign-history-recovery"><summary>Recovery and fluid-state attachment</summary><CampaignFluidState deckFile={deckFile} deck={deck} states={availableFluidStates} selectedId={spec.fluid_state_id} onSelect={(id) => update("fluid_state_id", id)} selectedCampaign={selected} onCampaignAttached={(record) => { setSelected(record); setRecords((current) => current.map((item) => String(item.campaign_id) === String(record.campaign_id) ? record : item)); }} suggestedContainers={[redSource, yellowSource, blueSource]} /></details>}
             {selected.state === "awaiting_observation" && <div className="campaign-actions"><input aria-label="Manual observation" type="number" value={observation} onChange={(event) => setObservation(event.target.value)} /><button type="button" onClick={async () => { try { setSelected(await campaignApi.observation(selected.campaign_id, Number(observation))); setObservation(""); } catch (caught) { setError(campaignErrorMessage(caught)); } }}>Submit observation</button></div>}
             <div className="campaign-actions">

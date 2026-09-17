@@ -292,6 +292,7 @@ def test_color_target_reanalysis_uses_saved_frame_and_persists_revision(
     setup = ColorCampaignSetup(
         gantry_file="g.yaml",
         deck_file="d.yaml",
+        source_protocol_file="source.yaml",
         target_run_id="target-run",
         target_analysis_revision=1,
         target_well="plate.A1",
@@ -533,6 +534,7 @@ def test_real_color_setup_rejects_unprofiled_legacy_target(tmp_path: Path):
     setup = ColorCampaignSetup(
         gantry_file="g.yaml",
         deck_file="d.yaml",
+        source_protocol_file="source.yaml",
         target_run_id="legacy-target",
         target_analysis_revision=1,
         target_well="plate.A1",

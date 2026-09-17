@@ -120,8 +120,10 @@ def suggest(
     seed: int = 7,
     direction: str = "minimize",
     sum_constraint: dict | None = None,
+    exclude_points: list[dict[str, float]] | None = None,
 ) -> dict[str, float]:
-    """Suggest one unobserved quantized point using random, EI, or LCB."""
+    """Suggest one unobserved point, excluding pending points without scoring them."""
+    # TODO(iter): add permanent pending-point regression coverage after hardware review.
     if not isinstance(parameters, list) or not parameters or len(parameters) > 8: raise ValueError("parameters must contain between 1 and 8 entries")
     parsed = [_grid(parameter) for parameter in parameters]; names = [p[0] for p in parsed]
     if len(set(names)) != len(names): raise ValueError("parameter names must be unique")
@@ -150,10 +152,29 @@ def suggest(
         if not _constraint_ok(point, names, sum_constraint): raise ValueError("observation violates the sum constraint")
         if point in observed: raise ValueError("duplicate observations are not allowed")
         observed.append(point); values.append(_finite(observation.get("objective"), "observation.objective"))
-    observed_set = set(observed); remaining = [p for p in all_points if p not in observed_set]
+    excluded = set()
+    for raw in exclude_points or []:
+        if not isinstance(raw, dict) or set(raw) != set(names):
+            raise ValueError("each excluded point must match the declared parameters")
+        canonical = []
+        for name, parameter in zip(names, parsed):
+            value = _finite(raw[name], f"excluded point parameter {name}")
+            index = round((value - parameter[1]) / parameter[3])
+            if not 0 <= index < parameter[4] or not math.isclose(
+                value, parameter[1] + index * parameter[3], abs_tol=1e-7,
+            ):
+                raise ValueError("excluded point is outside the quantized feasible grid")
+            canonical.append(parameter[1] + index * parameter[3])
+        point = tuple(canonical)
+        if not _constraint_ok(point, names, sum_constraint):
+            raise ValueError("excluded point violates the sum constraint")
+        excluded.add(point)
+    observed_set = set(observed); remaining = [p for p in all_points if p not in observed_set and p not in excluded]
     if not remaining:
         if math.prod(p[4] for p in parsed) <= _GRID_LIMIT:
-            raise SearchExhaustedError("all candidate points have been evaluated")
+            raise SearchExhaustedError(
+                "all candidate points have been evaluated or reserved"
+            )
         raise ValueError("sampled candidate pool contains no unobserved point; retry with another seed")
     canonical_initial = []
     for point_index, raw in enumerate(initial_points or []):
@@ -180,7 +201,7 @@ def suggest(
     if len(set(canonical_initial)) != len(canonical_initial):
         raise ValueError("initial points must be unique")
     for point in canonical_initial:
-        if point not in observed_set:
+        if point not in observed_set and point not in excluded:
             return dict(zip(names, point))
     if method == "random" or len(observed) < initial_trials or not observed:
         return dict(zip(names, rng.choice(remaining)))
