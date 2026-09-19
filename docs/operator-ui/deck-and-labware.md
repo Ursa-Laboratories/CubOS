@@ -33,19 +33,37 @@ passed through unchanged when you save.
 ### Create custom labware
 
 Click **New Labware** beside **Calibrate labware** with a deck and gantry
-config loaded and no protocol running. Enter a unique name, the number of
-rows and columns, and the center-to-center **X/Y well spacing (mm)** for
-that plate. Counts must be positive whole numbers and spacing must be positive.
-The calibration step sets position and orientation; it does not measure both
-spacings, so use the plate's measured spacing or its specification.
+config loaded and no protocol running. This opens the same calibration
+dialog as [Calibrate Labware with the Gantry](#calibrate-labware-with-the-gantry),
+starting on a **Define labware** step instead of **Select labware**.
 
-Choose the reference instrument and attached-tip settings, then continue
-through **Adjust positions** and **Review & save** below. No placeholder
-labware is added to the deck: closing before saving cancels creation.
-Saving adds the named plate to the current working deck and preserves its
-other entries, including edits you made in the deck editor. Reload the deck
-to confirm the new grid and calibration were saved. Physical dimensions and
-volume fields can be entered in the resulting card if known.
+![New Labware, Define labware step, annotated](../images/operator-ui/labware-new-1-define.webp)
+
+1. **Labware name.** A unique name for the new plate. It becomes the
+   deck instance ID, so protocols address wells as `<name>.A1`, `<name>.B2`,
+   and so on.
+2. **Rows / Columns.** The plate's grid. Must be positive whole numbers.
+3. **Well spacing X / Y (mm).** Center-to-center spacing from the plate's
+   specification or your own measurement. Counts must be positive.
+   Calibration sets the plate's position and orientation; it does not
+   measure either spacing, so enter it here up front.
+4. **Reference instrument.** Shown only in a multi-instrument setup — the
+   instrument you will position over the plate. In a single-instrument
+   setup the mounted instrument is used automatically.
+5. **Continue.** Enabled once the name, grid, and spacing are all valid.
+
+**Calibrate with a tip attached**, shown below the spacing fields for a
+pipette reference instrument, works the same as in the calibration flow:
+tick it and enter the tip length so it is subtracted from the recorded Z.
+
+Continue through **Adjust positions** and **Review & save** below —
+identical to the calibration flow for existing labware, jogging to A1 and
+A2 to record the plate's real position. No placeholder labware is added to
+the deck: closing before saving cancels creation. Saving adds the named
+plate to the current working deck and preserves its other entries,
+including edits you made in the deck editor. Reload the deck to confirm the
+new grid and calibration were saved. Physical dimensions and volume fields
+can be entered in the resulting card if known.
 
 For a one-column plate, A2 is an orientation reference in the direction a
 second column would occupy; it is not an extra well added to the grid.
