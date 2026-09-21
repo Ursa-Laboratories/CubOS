@@ -37,6 +37,8 @@ from cubos_api.models.state import (
     ReconciliationResponse,
     ResolveReconciliationRequest,
     ResolveReconciliationResponse,
+    ActiveFluidStateResponse,
+    SelectActiveFluidStateRequest,
     TipContainerView,
     TipStateResponse,
 )
@@ -47,6 +49,33 @@ router = APIRouter(prefix="/api/v1/fluid-states", tags=["cubos-state-v1"])
 
 _PENDING_STATUSES = {"started", "reconciliation_required"}
 _STATE_EXCEPTIONS = (FluidStateError, TipStateError, CapStateError)
+
+
+@router.get("/active", response_model=Optional[ActiveFluidStateResponse])
+def get_active_fluid_state() -> Optional[ActiveFluidStateResponse]:
+    """Return the explicit live physical setup; history is never auto-selected."""
+    store = _open_store()
+    try:
+        active = store.get_active_fluid_state()
+        return ActiveFluidStateResponse(**active) if active else None
+    finally:
+        store.close()
+
+
+@router.put("/active", response_model=ActiveFluidStateResponse)
+def select_active_fluid_state(body: SelectActiveFluidStateRequest) -> ActiveFluidStateResponse:
+    store = _open_store()
+    try:
+        try:
+            active = store.set_active_fluid_state(
+                body.fluid_state_id, expected_revision=body.expected_revision
+            )
+        except ValueError as exc:
+            status = 409 if "revision" in str(exc) else 404
+            raise HTTPException(status, str(exc)) from exc
+        return ActiveFluidStateResponse(**active)
+    finally:
+        store.close()
 
 
 def _data_db_path() -> Path:

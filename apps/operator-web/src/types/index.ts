@@ -478,6 +478,7 @@ export interface RunSubmissionBody {
   mock_mode?: boolean;
   metadata?: Record<string, unknown>;
   state?: RunStateSelection;
+  use_active_state?: boolean;
 }
 
 export interface FluidStateSummary {
@@ -489,6 +490,12 @@ export interface FluidStateSummary {
   updated_at: string;
   container_count: number;
   operation_count: number;
+}
+
+export interface ActiveFluidState {
+  fluid_state_id: number;
+  revision: number;
+  updated_at: string;
 }
 
 export interface ContainerView {

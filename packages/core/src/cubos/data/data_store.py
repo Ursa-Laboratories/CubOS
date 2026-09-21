@@ -49,6 +49,15 @@ CREATE TABLE IF NOT EXISTS fluid_state_sessions (
     updated_at         TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+-- One explicit physical setup survives experiment/run boundaries.  Historical
+-- sessions remain immutable records; this pointer is the only live default.
+CREATE TABLE IF NOT EXISTS active_fluid_state (
+    singleton           INTEGER PRIMARY KEY CHECK (singleton = 1),
+    fluid_state_id      INTEGER NOT NULL REFERENCES fluid_state_sessions(id),
+    revision            INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS campaigns (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
     description     TEXT    NOT NULL,
@@ -1087,6 +1096,38 @@ class DataStore:
         from .fluid_state import list_fluid_states
 
         return list_fluid_states(self._conn)
+
+    def get_active_fluid_state(self) -> dict[str, Any] | None:
+        """Return the explicitly selected live setup and its optimistic revision."""
+        row = self._conn.execute(
+            "SELECT fluid_state_id, revision, updated_at FROM active_fluid_state "
+            "WHERE singleton = 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return {"fluid_state_id": row[0], "revision": row[1], "updated_at": row[2]}
+
+    def set_active_fluid_state(self, fluid_state_id: int, *, expected_revision: int | None = None) -> dict[str, Any]:
+        """Select a live setup, rejecting stale writes atomically."""
+        row = self._conn.execute(
+            "SELECT revision FROM active_fluid_state WHERE singleton = 1"
+        ).fetchone()
+        if self._conn.execute(
+            "SELECT 1 FROM fluid_state_sessions WHERE id = ?", (fluid_state_id,)
+        ).fetchone() is None:
+            raise ValueError(f"fluid state {fluid_state_id} does not exist")
+        current = int(row[0]) if row else 0
+        if expected_revision is not None and expected_revision != current:
+            raise ValueError(f"active fluid state revision is {current}, expected {expected_revision}")
+        next_revision = current + 1
+        self._conn.execute(
+            "INSERT INTO active_fluid_state(singleton, fluid_state_id, revision) VALUES (1, ?, ?) "
+            "ON CONFLICT(singleton) DO UPDATE SET fluid_state_id=excluded.fluid_state_id, "
+            "revision=excluded.revision, updated_at=datetime('now')",
+            (fluid_state_id, next_revision),
+        )
+        self._conn.commit()
+        return self.get_active_fluid_state()  # type: ignore[return-value]
 
     def get_fluid_container(
         self,

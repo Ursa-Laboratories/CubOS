@@ -78,6 +78,17 @@ class FluidStateSummaryResponse(BaseModel):
     operation_count: int
 
 
+class ActiveFluidStateResponse(BaseModel):
+    fluid_state_id: int
+    revision: int
+    updated_at: str
+
+
+class SelectActiveFluidStateRequest(BaseModel):
+    fluid_state_id: int
+    expected_revision: Optional[int] = None
+
+
 # ── Container / operation resource shapes ────────────────────────────────
 
 

@@ -149,7 +149,9 @@ class RunManager:
 
             gantry_yaml, deck_yaml, protocol_yaml = self._resolve_bundle(submission)
             self._validate_bundle(gantry_yaml, deck_yaml, protocol_yaml)
-            fluid_state_id = self._resolve_run_state(deck_yaml, submission.state)
+            fluid_state_id = self._resolve_run_state(
+                deck_yaml, submission.state, use_active_state=submission.use_active_state
+            )
             record = RunRecord(
                 run_id=run_id,
                 state="queued",
@@ -238,7 +240,7 @@ class RunManager:
             raise RunPolicyError("deck configuration digest does not match the device pin")
 
     def _resolve_run_state(
-        self, deck_yaml: str, state: RunStateSelection | None
+        self, deck_yaml: str, state: RunStateSelection | None, *, use_active_state: bool = False
     ) -> int | None:
         """Create or resume the run's fluid state, ahead of hardware execution.
 
@@ -248,6 +250,16 @@ class RunManager:
         mismatch, reconciliation-required) propagate unchanged so the router
         can map each to a distinct HTTP status.
         """
+        # The new workflow uses the explicit persisted setup as the default.
+        # Keep stateless behavior when no setup has ever been selected, which
+        # preserves compatibility for older clients and fresh installations.
+        if state is None and use_active_state:
+            active_store = DataStore(self.settings.data_db_path)
+            active = active_store.get_active_fluid_state()
+            active_store.close()
+            if active is None:
+                raise RunPolicyError("no active physical setup has been selected")
+            state = RunStateSelection(fluid_state_id=int(active["fluid_state_id"]))
         if state is None:
             return None
 

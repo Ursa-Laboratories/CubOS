@@ -75,6 +75,30 @@ def test_create_fluid_state_returns_summary(monkeypatch, tmp_path: Path):
     assert isinstance(body["id"], int)
 
 
+def test_active_setup_is_explicit_and_revision_checked(monkeypatch, tmp_path: Path):
+    _write_deck_config(monkeypatch, tmp_path)
+    app = create_app()
+    created = api_request(
+        app, "POST", "/api/v1/fluid-states", json={"deck_file": "state-deck.yaml"}
+    ).json()
+    state_id = created["id"]
+
+    assert api_request(app, "GET", "/api/v1/fluid-states/active").json() is None
+    selected = api_request(
+        app, "PUT", "/api/v1/fluid-states/active", json={"fluid_state_id": state_id}
+    )
+    assert selected.status_code == 200
+    assert selected.json()["fluid_state_id"] == state_id
+    revision = selected.json()["revision"]
+    stale = api_request(
+        app,
+        "PUT",
+        "/api/v1/fluid-states/active",
+        json={"fluid_state_id": state_id, "expected_revision": revision - 1},
+    )
+    assert stale.status_code == 409
+
+
 def test_create_fluid_state_404_for_missing_deck_file(monkeypatch, tmp_path: Path):
     _write_deck_config(monkeypatch, tmp_path)
     app = create_app()
