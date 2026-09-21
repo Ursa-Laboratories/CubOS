@@ -258,7 +258,7 @@ export default function App() {
   const fluidStates = useFluidStates();
   const activeFluidState = useActiveFluidState();
   React.useEffect(() => {
-    if (activeFluidState.data && fluidStateChoice.mode === "none") {
+    if (activeFluidState.data !== undefined && fluidStateChoice.mode === "none") {
       setFluidStateChoice((current) => current.mode === "none" ? { ...current, mode: "active" } : current);
     }
   }, [activeFluidState.data, fluidStateChoice.mode]);
