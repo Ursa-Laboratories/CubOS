@@ -228,6 +228,41 @@ def test_active_selection_rejects_unknown_state_and_history_is_empty_before_edit
     assert store.list_fluid_manual_edits(state_id) == []
 
 
+def test_manual_add_carries_supplied_components_and_blank_set_is_unknown(tmp_path):
+    store, state_id = _state(tmp_path)
+    _select(store, state_id)
+    source = store.get_fluid_container(state_id, "source", "")
+    store.apply_manual_edits(
+        state_id,
+        [{"mode": "add", "labware_key": "source", "volume_ul": 10,
+          "composition": {"dye": 10}}],
+        expected_revisions={"source": source["version"]},
+    )
+    added = store.get_fluid_container(state_id, "source", "")
+    assert added["current_volume_ul"] == 110
+    assert added["composition"]["dye"] == 10
+    store.apply_manual_edits(
+        state_id,
+        [{"mode": "set", "labware_key": "source", "volume_ul": 25}],
+        expected_revisions={"source": added["version"]},
+    )
+    assert store.get_fluid_container(state_id, "source", "")["composition"] == {"unknown": 25}
+
+
+def test_manual_remove_preserves_composition_proportionally(tmp_path):
+    store, state_id = _state(tmp_path)
+    _select(store, state_id)
+    source = store.get_fluid_container(state_id, "source", "")
+    store.apply_manual_edits(
+        state_id,
+        [{"mode": "remove", "labware_key": "source", "volume_ul": 25}],
+        expected_revisions={"source": source["version"]},
+    )
+    removed = store.get_fluid_container(state_id, "source", "")
+    assert removed["current_volume_ul"] == 75
+    assert removed["composition"] == {"water": 45, "ethanol": 30}
+
+
 def test_single_container_adjust_without_composition_records_unknown_contents(tmp_path):
     store, state_id = _state(tmp_path)
     _select(store, state_id)

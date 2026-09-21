@@ -1280,12 +1280,30 @@ class DataStore:
                                (dest, dest["current_volume_ul"] + volume, {k: dest["composition"].get(k, 0) + moved.get(k, 0) for k in set(dest["composition"]) | set(moved)})]
                 else:
                     current = source["current_volume_ul"]
-                    volume = float(action.get("volume_ul", 0))
-                    if mode == "add": volume = current + volume
-                    elif mode == "remove": volume = current - volume
-                    elif mode == "empty": volume = 0
+                    delta = float(action.get("volume_ul", 0))
+                    if mode == "add":
+                        volume = current + delta
+                        added = action.get("composition")
+                        if added is None:
+                            added = {"unknown": delta} if delta else {}
+                        composition = dict(source["composition"])
+                        for key, value in added.items():
+                            composition[key] = composition.get(key, 0.0) + float(value)
+                    elif mode == "remove":
+                        volume = current - delta
+                        if current and volume >= 0:
+                            ratio = volume / current
+                            composition = {key: value * ratio for key, value in source["composition"].items()}
+                        else:
+                            composition = {}
+                    elif mode == "empty":
+                        volume = 0
+                        composition = {}
+                    else:
+                        volume = delta
+                        supplied = action.get("composition")
+                        composition = dict(supplied) if supplied is not None else ({"unknown": volume} if volume else {})
                     if volume < 0 or volume > source["capacity_ul"]: raise ValueError("volume is outside container capacity")
-                    composition = action.get("composition") if mode in {"set", "empty"} else source["composition"]
                     updates = [(source, volume, composition or {})]
                 for old, new_volume, new_composition in updates:
                     if abs(sum(new_composition.values()) - new_volume) > 1e-6:
