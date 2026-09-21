@@ -308,6 +308,16 @@ export const fluidStateApi = {
       method: "PUT",
       body: JSON.stringify({ fluid_state_id, expected_revision }),
     }),
+  editContainer: (fluidStateId: number, body: import("../types").ManualContainerEditRequest) =>
+    request<import("../types").ContainerView>(`/fluid-states/${fluidStateId}/containers/edit`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  applyManualEdits: (fluidStateId: number, body: import("../types").ManualEditBatchRequest) =>
+    request<import("../types").FluidStateDetail>(`/fluid-states/${fluidStateId}/manual-edits`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
   get: (fluidStateId: number) =>
     request<import("../types").FluidStateDetail>(`/fluid-states/${fluidStateId}`),
   getContainers: (fluidStateId: number) =>

@@ -498,6 +498,31 @@ export interface ActiveFluidState {
   updated_at: string;
 }
 
+export interface ManualContainerEditRequest {
+  labware_key: string;
+  location_id?: string;
+  volume_ul: number;
+  composition?: Record<string, number> | null;
+  expected_version?: number;
+  operation?: string;
+}
+
+export type ManualEditMode = "set" | "add" | "remove" | "empty" | "transfer" | "replace";
+export interface ManualEditAction {
+  mode: ManualEditMode;
+  labware_key: string;
+  location_id?: string;
+  destination_labware_key?: string;
+  destination_location_id?: string;
+  volume_ul?: number;
+  composition?: Record<string, number> | null;
+}
+export interface ManualEditBatchRequest {
+  expected_revisions: Record<string, number>;
+  actions: ManualEditAction[];
+  note?: string;
+}
+
 export interface ContainerView {
   labware_key: string;
   location_id: string;
