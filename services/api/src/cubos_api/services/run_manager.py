@@ -17,6 +17,8 @@ import yaml
 from cubos.data import DataStore
 from cubos.deck import load_deck_from_yaml
 from cubos.deck.errors import DeckLoaderError
+from cubos.protocol_engine.loader import load_protocol_from_yaml
+from cubos.validation.fluid_volumes import validate_protocol_fluid_volumes
 
 from cubos_api.config import CubOSSettings, get_settings
 from cubos_api.models.runs import RunRecord, RunSubmission
@@ -36,6 +38,91 @@ class RunConflictError(RuntimeError):
 
 class RunPolicyError(ValueError):
     pass
+
+
+_FLUID_TARGET_FIELDS: dict[str, tuple[str, ...]] = {
+    "transfer": ("source", "destination"),
+    "serial_transfer": ("source", "plate"),
+    "mix": ("position",),
+    "rinse_well": ("well", "source"),
+    "clear_well": ("well", "waste"),
+}
+
+
+def _fluid_targets(protocol: Any, deck: Any) -> list[tuple[str, Any]]:
+    """Return explicit liquid targets, resolving aliases through the deck."""
+    targets: list[tuple[str, Any]] = []
+    for step in protocol.steps:
+        fields = _FLUID_TARGET_FIELDS.get(step.command_name, ())
+        for field in fields:
+            value = step.args.get(field)
+            if not isinstance(value, str) or not value.strip():
+                continue
+            # `solution`/`waste` selectors are intentionally not inferred:
+            # runtime selection may choose any suitable registered container.
+            try:
+                target = deck.resolve_labware_target(value)
+            except (KeyError, ValueError):
+                continue
+            targets.append((value, target))
+    return targets
+
+
+def _validate_fluid_state_preflight(
+    *, state_id: int, deck: Any, protocol_yaml: str, db_path: Path
+) -> None:
+    """Validate active contents before a run can reach hardware setup.
+
+    Unknownness is checked only for explicit liquid targets in the protocol;
+    an unrelated unknown well is allowed to remain unresolved.  Known values
+    then flow through CubOS's existing static volume simulator for shortage,
+    dead-volume, and destination-overflow checks.
+    """
+    try:
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".yaml", delete=False, encoding="utf-8"
+        ) as protocol_file:
+            protocol_file.write(protocol_yaml)
+            protocol_path = Path(protocol_file.name)
+        protocol = load_protocol_from_yaml(protocol_path)
+        protocol_path.unlink(missing_ok=True)
+        state_store = DataStore(db_path)
+        try:
+            snapshot = state_store.get_fluid_snapshot(state_id)
+        finally:
+            state_store.close()
+    except Exception as exc:
+        if "protocol_path" in locals():
+            protocol_path.unlink(missing_ok=True)
+        raise RunPolicyError(f"fluid-state preflight could not run: {exc}") from exc
+
+    containers = {
+        (item["labware_key"], item.get("location_id", "")): item
+        for item in snapshot.get("containers", [])
+    }
+    unknown: list[str] = []
+    initial_fluids: dict[str, dict[str, float]] = {}
+    for display_name, target in _fluid_targets(protocol, deck):
+        key = (target.labware_key, target.location_id or "")
+        item = containers.get(key)
+        if item is None or not item.get("volume_known", False):
+            unknown.append(display_name)
+            continue
+        initial_fluids[display_name] = {"volume_ul": float(item["current_volume_ul"])}
+    if unknown:
+        names = ", ".join(sorted(set(unknown)))
+        raise RunPolicyError(
+            f"fluid-state preflight blocked: volume is unknown for required target(s): {names}. "
+            "Reconcile or manually set those containers before running."
+        )
+
+    violations = validate_protocol_fluid_volumes(protocol, deck, initial_fluids)
+    if violations:
+        detail = "; ".join(
+            f"step {item.step_index} ({item.command_name}): {item.message}"
+            for item in violations
+        )
+        raise RunPolicyError(f"fluid-state preflight blocked: {detail}")
 
 
 def _jsonable(value: Any) -> Any:
@@ -160,7 +247,10 @@ class RunManager:
                 gantry_yaml, deck_yaml, protocol_yaml = self._resolve_bundle(submission)
                 self._validate_bundle(gantry_yaml, deck_yaml, protocol_yaml)
                 fluid_state_id = self._resolve_run_state(
-                    deck_yaml, submission.state, use_active_state=submission.use_active_state
+                    deck_yaml,
+                    protocol_yaml,
+                    submission.state,
+                    use_active_state=submission.use_active_state,
                 )
                 if fluid_state_id is not None:
                     self._contents_ownership.bind_fluid_state(run_id, fluid_state_id)
@@ -256,7 +346,12 @@ class RunManager:
             raise RunPolicyError("deck configuration digest does not match the device pin")
 
     def _resolve_run_state(
-        self, deck_yaml: str, state: RunStateSelection | None, *, use_active_state: bool = False
+        self,
+        deck_yaml: str,
+        protocol_yaml: str,
+        state: RunStateSelection | None,
+        *,
+        use_active_state: bool = False,
     ) -> int | None:
         """Create or resume the run's fluid state, ahead of hardware execution.
 
@@ -301,21 +396,38 @@ class RunManager:
                         }
                         for key, item in state.initial_state.fluids.items()
                     }
-                    return store.create_fluid_state(
+                    state_id = store.create_fluid_state(
                         str(tmp_path),
                         deck,
                         label=state.initial_state.label,
                         initial_fluids=fluids,
                     )
+                    self._preflight_fluid_state(state_id, deck, protocol_yaml)
+                    return state_id
                 assert state.fluid_state_id is not None
-                return store.resume_fluid_state(
+                state_id = store.resume_fluid_state(
                     state.fluid_state_id, str(tmp_path), deck
                 )
+                self._preflight_fluid_state(state_id, deck, protocol_yaml)
+                return state_id
             finally:
                 store.close()
         finally:
             if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)
+
+    def _preflight_fluid_state(
+        self, state_id: int, deck: Any, protocol_yaml: str
+    ) -> None:
+        """Run contents preflight while admission still owns the station."""
+        # The helper opens its own short-lived read connection so its
+        # snapshot is independent of the store's active transaction.
+        _validate_fluid_state_preflight(
+            state_id=state_id,
+            deck=deck,
+            protocol_yaml=protocol_yaml,
+            db_path=Path(self.settings.data_db_path),
+        )
 
     def _execute(self, run_id: str) -> None:
         from cubos_api.routers import gantry as gantry_router

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +11,7 @@ from cubos_api.services.contents_ownership import (
     ContentsOwnership,
     ContentsOwnershipError,
 )
+from cubos_api.services import run_manager
 
 
 def test_manual_transaction_blocks_while_stateful_run_owns_contents():
@@ -90,3 +92,97 @@ def test_bind_requires_matching_run_and_release_is_idempotent():
     ownership.release("run-1")
     ownership.release("run-1")
     assert ownership.snapshot() is None
+
+
+class _FakeDeck:
+    def resolve_labware_target(self, name):
+        return SimpleNamespace(labware_key=name.split(".")[0], location_id=name.split(".")[-1])
+
+
+class _FakeStore:
+    def __init__(self, snapshot):
+        self.snapshot = snapshot
+
+    def get_fluid_snapshot(self, state_id):
+        return self.snapshot
+
+    def close(self):
+        pass
+
+
+def _fake_protocol():
+    return SimpleNamespace(
+        steps=[
+            SimpleNamespace(
+                command_name="transfer",
+                args={"source": "src.A1", "destination": "dst.A1", "volume_ul": 10},
+            )
+        ]
+    )
+
+
+def test_preflight_rejects_unknown_required_target_but_ignores_unrelated_unknown(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(run_manager, "load_protocol_from_yaml", lambda path: _fake_protocol())
+    monkeypatch.setattr(
+        run_manager,
+        "DataStore",
+        lambda path: _FakeStore(
+            {
+                "containers": [
+                    {
+                        "labware_key": "src",
+                        "location_id": "A1",
+                        "current_volume_ul": 20,
+                        "volume_known": True,
+                    },
+                    {
+                        "labware_key": "unrelated",
+                        "location_id": "A1",
+                        "current_volume_ul": 0,
+                        "volume_known": False,
+                    },
+                ]
+            }
+        ),
+    )
+    with pytest.raises(run_manager.RunPolicyError, match="dst.A1"):
+        run_manager._validate_fluid_state_preflight(
+            state_id=1,
+            deck=_FakeDeck(),
+            protocol_yaml="protocol: []",
+            db_path=tmp_path / "state.db",
+        )
+
+
+@pytest.mark.parametrize(
+    "message",
+    ["source needs 10 uL but only 2 uL", "destination would exceed working volume"],
+)
+def test_preflight_surfaces_existing_shortage_or_overflow_before_execution(
+    monkeypatch, tmp_path, message
+):
+    monkeypatch.setattr(run_manager, "load_protocol_from_yaml", lambda path: _fake_protocol())
+    monkeypatch.setattr(
+        run_manager,
+        "DataStore",
+        lambda path: _FakeStore(
+            {
+                "containers": [
+                    {"labware_key": "src", "location_id": "A1", "current_volume_ul": 20, "volume_known": True},
+                    {"labware_key": "dst", "location_id": "A1", "current_volume_ul": 0, "volume_known": True},
+                ]
+            }
+        ),
+    )
+    violation = SimpleNamespace(step_index=0, command_name="transfer", message=message)
+    monkeypatch.setattr(run_manager, "validate_protocol_fluid_volumes", lambda *args: [violation])
+
+    with pytest.raises(run_manager.RunPolicyError, match=message):
+        run_manager._validate_fluid_state_preflight(
+            state_id=1,
+            deck=_FakeDeck(),
+            protocol_yaml="protocol: []",
+            db_path=tmp_path / "state.db",
+        )
