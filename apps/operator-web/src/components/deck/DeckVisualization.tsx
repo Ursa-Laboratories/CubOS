@@ -398,7 +398,8 @@ function ProjectedDeckVisualization({
     return machineToSvg(projected.horizontal, projected.vertical, SVG_W, SVG_H, horizontalRange, verticalRange);
   };
   const points = (deck?.labware ?? []).flatMap((item) => {
-    const positions = item.positions && Object.entries(item.positions).filter(([name]) => name !== "location") || [];
+    const source = item.positions ?? item.wells ?? {};
+    const positions = Object.entries(source).filter(([name]) => name !== "location");
     return positions.map(([name, point]) => ({ key: `${item.key}:${name}`, label: item.config.name ?? item.key, point }));
   });
   const projectedGantry = project({ x: gantryX, y: yAxisMotion === "bed" ? 0 : gantryY, z: gantryZ }, true);
