@@ -82,7 +82,6 @@ def test_active_setup_is_explicit_and_revision_checked(monkeypatch, tmp_path: Pa
         app, "POST", "/api/v1/fluid-states", json={"deck_file": "state-deck.yaml"}
     ).json()
     state_id = created["id"]
-
     assert api_request(app, "GET", "/api/v1/fluid-states/active").json() is None
     selected = api_request(
         app, "PUT", "/api/v1/fluid-states/active", json={"fluid_state_id": state_id}
@@ -109,6 +108,7 @@ def test_manual_container_edit_is_version_checked_and_audited(monkeypatch, tmp_p
         json={"deck_file": "state-deck.yaml", "fluids": {"source": {"volume_ul": 20}}},
     ).json()
     state_id = created["id"]
+    api_request(app, "PUT", "/api/v1/fluid-states/active", json={"fluid_state_id": state_id})
     before = api_request(app, "GET", f"/api/v1/fluid-states/{state_id}/containers").json()[0]
     edited = api_request(
         app,

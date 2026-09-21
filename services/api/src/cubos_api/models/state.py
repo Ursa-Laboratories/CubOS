@@ -94,6 +94,7 @@ class ManualContainerEditRequest(BaseModel):
 
 
 class ManualEditBatchRequest(BaseModel):
+    expected_active_revision: Optional[int] = Field(default=None, ge=0)
     expected_revisions: Dict[str, int] = Field(default_factory=dict)
     actions: List[Dict[str, Any]] = Field(min_length=1)
     note: Optional[str] = None

@@ -1202,7 +1202,7 @@ class DataStore:
         return result[0]
 
     def apply_manual_edits(
-        self, fluid_state_id: int, actions: list[Mapping[str, Any]], *, expected_revisions: Mapping[str, int] | None = None
+        self, fluid_state_id: int, actions: list[Mapping[str, Any]], *, expected_revisions: Mapping[str, int] | None = None, expected_active_revision: int | None = None
     ) -> list[FluidContainerSnapshot]:
         """Validate and apply a batch of record-only edits in one transaction.
 
@@ -1212,6 +1212,11 @@ class DataStore:
         expected_revisions = expected_revisions or {}
         self._conn.execute("BEGIN IMMEDIATE")
         try:
+            active = self._conn.execute("SELECT fluid_state_id, revision FROM active_fluid_state WHERE singleton=1").fetchone()
+            if active is None or int(active[0]) != fluid_state_id:
+                raise ValueError("only the selected active setup can be edited")
+            if expected_active_revision is not None and int(active[1]) != expected_active_revision:
+                raise ValueError(f"active setup revision is {active[1]}, expected {expected_active_revision}")
             touched: dict[tuple[str, str], FluidContainerSnapshot] = {}
             for action in actions:
                 mode = str(action.get("mode", "set"))
