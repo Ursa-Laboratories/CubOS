@@ -30,7 +30,7 @@ import {
 import RunPanel from "./components/run/RunPanel";
 import { useProtocolCommands, useProtocolConfigs, useProtocol, useSaveProtocol, useValidateProtocolSetup, useRunStatus, useDeleteProtocol } from "./hooks/useProtocol";
 import { useExperimentData } from "./hooks/useExperimentData";
-import { useFluidStates } from "./hooks/useFluidState";
+import { useActiveFluidState, useFluidStates } from "./hooks/useFluidState";
 import { buildSeedFluids, validateSeedRows } from "./utils/fluidSeeds";
 import { loadWorkspaceState, saveWorkspaceState } from "./utils/workspaceState";
 import type {
@@ -256,6 +256,12 @@ export default function App() {
   const gantryPosition = useGantryPosition(true);
   const experimentData = useExperimentData();
   const fluidStates = useFluidStates();
+  const activeFluidState = useActiveFluidState();
+  React.useEffect(() => {
+    if (activeFluidState.data && fluidStateChoice.mode === "none") {
+      setFluidStateChoice((current) => current.mode === "none" ? { ...current, mode: "active" } : current);
+    }
+  }, [activeFluidState.data, fluidStateChoice.mode]);
 
   // Local working copies of each editor's edits, kept in App state so
   // they survive tab switches (each editor unmounts on tab-away, which
@@ -597,6 +603,7 @@ export default function App() {
         deck_file: deckFile,
         protocol_file: protocolFile,
         ...(state ? { state } : {}),
+        ...(fluidStateChoice.mode === "active" ? { use_active_state: true } : {}),
       });
       // Enter the run mode only once the server has accepted the run. A
       // rejected submission (server busy, policy, deck fingerprint) would
@@ -958,6 +965,7 @@ export default function App() {
             fluidStateChoice={fluidStateChoice}
             onFluidStateChoiceChange={setFluidStateChoice}
             availableFluidStates={fluidStates.data ?? []}
+            activeFluidStateId={activeFluidState.data?.fluid_state_id ?? null}
           />
         </>
           )}

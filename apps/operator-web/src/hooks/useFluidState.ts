@@ -56,6 +56,14 @@ export function useApplyManualEdits(fluidStateId: number | null) {
   });
 }
 
+export function useManualEdits(fluidStateId: number | null) {
+  return useQuery({
+    queryKey: ["fluid-states", fluidStateId, "manual-edits"],
+    queryFn: () => fluidStateApi.listManualEdits(fluidStateId!),
+    enabled: fluidStateId != null,
+  });
+}
+
 export function useFluidState(fluidStateId: number | null) {
   return useQuery({
     queryKey: ["fluid-states", fluidStateId],

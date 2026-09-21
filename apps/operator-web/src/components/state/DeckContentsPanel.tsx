@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as theme from "../../theme";
 import { ApiError } from "../../api/client";
 import {
@@ -7,6 +7,7 @@ import {
   useCreateFluidState,
   useFluidState,
   useFluidStates,
+  useManualEdits,
   useSelectActiveFluidState,
 } from "../../hooks/useFluidState";
 import type { ContainerView } from "../../types";
@@ -37,12 +38,15 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
   const selectActive = useSelectActiveFluidState();
   const createState = useCreateFluidState();
   const applyEdits = useApplyManualEdits(selectedId);
+  const manualEdits = useManualEdits(selectedId);
   const [selectedRows, setSelectedRows] = useState<Set<string>>(new Set());
   const [editing, setEditing] = useState<ContainerView | null>(null);
   const [volume, setVolume] = useState("");
   const [composition, setComposition] = useState("");
   const [mode, setMode] = useState<ManualEditMode>("set");
   const [destination, setDestination] = useState("");
+  const [liquidName, setLiquidName] = useState("");
+  const [unit, setUnit] = useState<"uL" | "mL">("uL");
   const [notice, setNotice] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState("");
 
@@ -50,6 +54,12 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
   const allSelected = rows.length > 0 && rows.every((row) => selectedRows.has(`${row.labware_key}:${row.location_id}`));
   const isHistorical = selectedId !== null && selectedId !== activeId;
   const activeSummary = states.data?.find((state) => state.id === activeId);
+
+  useEffect(() => {
+    setSelectedRows(new Set());
+    setEditing(null);
+    setNotice(null);
+  }, [selectedId]);
 
   const operations = useMemo(() => {
     const count = detail.data?.pending_operation_count ?? 0;
@@ -66,6 +76,8 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
     setComposition(Object.entries(row.composition ?? {}).map(([name, value]) => `${name}=${value}`).join(", "));
     setMode("set");
     setDestination("");
+    setLiquidName("");
+    setUnit("uL");
     setNotice(null);
   };
 
@@ -83,7 +95,7 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
 
   const saveEdit = async () => {
     if (!editing || selectedId === null) return;
-    const parsedVolume = Number(volume);
+    const parsedVolume = Number(volume) * (unit === "mL" ? 1000 : 1);
     if (!Number.isFinite(parsedVolume) || parsedVolume < 0) {
       setNotice("Enter a volume of 0 or greater.");
       return;
@@ -102,10 +114,13 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
       const [destinationKey, destinationLocation] = destination.split(".", 2);
       if (mode === "transfer" && !destinationKey) throw new Error("Enter a destination like reservoir.A1.");
       if (mode === "transfer") {
+        const destinationRow = rows.find((row) => row.labware_key === destinationKey && row.location_id === (destinationLocation ?? ""));
+        if (!destinationRow) throw new Error("Destination container was not found in this setup.");
+        expectedRevisions[`${destinationRow.labware_key}.${destinationRow.location_id}`] = destinationRow.version;
         actions[0].destination_labware_key = destinationKey;
         actions[0].destination_location_id = destinationLocation ?? "";
       }
-      await applyEdits.mutateAsync({ expected_revisions: expectedRevisions, actions, note: "Record manual change" });
+      await applyEdits.mutateAsync({ expected_revisions: expectedRevisions, expected_active_revision: activeId === selectedId ? active.data?.revision : undefined, actions, note: `Record manual change${liquidName.trim() ? ` · liquid: ${liquidName.trim()}` : ""}` });
       setEditing(null);
       setNotice("Recorded manual change. No robot command was issued.");
     } catch (error) {
@@ -115,14 +130,25 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
     }
   };
 
+  const previewText = editing ? (() => {
+    const amount = (Number(volume) || 0) * (unit === "mL" ? 1000 : 1);
+    const before = editing.current_volume_ul;
+    if (mode === "set") return `${volumeLabel(before)} → ${volumeLabel(amount)}`;
+    if (mode === "add") return `${volumeLabel(before)} → ${volumeLabel(before + amount)}`;
+    if (mode === "remove") return `${volumeLabel(before)} → ${volumeLabel(Math.max(0, before - amount))}`;
+    if (mode === "empty") return `${volumeLabel(before)} → 0 µL`;
+    const destinationRow = rows.find((row) => `${row.labware_key}.${row.location_id}` === destination);
+    return `${volumeLabel(before)} → ${volumeLabel(Math.max(0, before - amount))}; destination ${destinationRow ? `${volumeLabel(destinationRow.current_volume_ul)} → ${volumeLabel(destinationRow.current_volume_ul + amount)}` : "not selected"}`;
+  })() : "";
+
   const create = async () => {
     if (!deckFile) {
       setNotice("Load a deck configuration before creating a physical setup.");
       return;
     }
     try {
-      const summary = await createState.mutateAsync({ deck_file: deckFile, label: newLabel.trim() || null });
-      await selectActive.mutateAsync({ fluidStateId: summary.id });
+      const summary = await createState.mutateAsync({ deck_file: deckFile, label: newLabel.trim() || null, omitted_volumes_unknown: true });
+      await selectActive.mutateAsync({ fluidStateId: summary.id, expectedRevision: active.data?.revision });
       setViewId(null);
       setNewLabel("");
       setNotice("Fresh setup created and activated. Record the observed contents before running.");
@@ -175,7 +201,7 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
       {selectedId === null ? <div style={emptyStyle}>No setup selected.</div> : detail.isLoading ? <div style={emptyStyle}>Loading contents…</div> : (
         <>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-            <button type="button" style={theme.btn.secondary} disabled={isHistorical || isRunActive || selectActive.isPending || activeId === selectedId} onClick={() => selectActive.mutate({ fluidStateId: selectedId, expectedRevision: active.data?.revision })}>
+            <button type="button" style={theme.btn.secondary} disabled={isRunActive || selectActive.isPending || activeId === selectedId} onClick={() => { if (window.confirm("Activate this setup as the live physical setup? Review its contents first.")) selectActive.mutate({ fluidStateId: selectedId, expectedRevision: active.data?.revision }); }}>
               {selectActive.isPending ? "Activating…" : activeId === selectedId ? "Active setup" : "Activate this setup"}
             </button>
             <span style={metaStyle}>Select rows for a shared edit. Changes are record-only and auditable.</span>
@@ -189,13 +215,17 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
                 return <tr key={key}>
                   <td style={tdStyle}><input type="checkbox" aria-label={`Select ${row.labware_key} ${row.location_id}`} checked={selectedRows.has(key)} onChange={() => setSelectedRows((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })} /></td>
                   <td style={tdStyle}><span style={theme.mono}>{row.labware_key}{row.location_id ? `.${row.location_id}` : ""}</span><div style={metaStyle}>{row.role || row.solution || row.labware_type}</div></td>
-                  <td style={tdNumericStyle}><strong>{volumeLabel(row.current_volume_ul)}</strong><div style={metaStyle}>working max {volumeLabel(row.working_volume_ul)} · tracked</div></td>
+                  <td style={tdNumericStyle}><strong>{row.volume_known === false ? "Unknown" : volumeLabel(row.current_volume_ul)}</strong><div style={metaStyle}>working max {volumeLabel(row.working_volume_ul)} · {row.volume_known === false ? "operator confirmation required" : "tracked"}</div></td>
                   <td style={tdStyle}>{compositionLabel(row.composition)}</td>
                   <td style={tdStyle}><button type="button" style={theme.btn.ghost} disabled={isHistorical || isRunActive} onClick={() => openEdit(row)}>Record manual change</button></td>
                 </tr>;
               })}</tbody>
             </table>
           </div>
+          <details style={{ marginTop: 12 }}>
+            <summary style={{ ...theme.fieldLabel, cursor: "pointer" }}>Manual change history ({manualEdits.data?.length ?? 0})</summary>
+            {(manualEdits.data ?? []).length === 0 ? <div style={metaStyle}>No manual changes recorded.</div> : <div style={{ marginTop: 8, display: "grid", gap: 6 }}>{(manualEdits.data ?? []).map((edit) => <div key={edit.id} style={{ ...metaStyle, padding: 8, border: `1px solid ${theme.color.border}`, borderRadius: theme.radius.sm }}><strong>{edit.operation}</strong> · {edit.labware_key}{edit.location_id ? `.${edit.location_id}` : ""} · {new Date(edit.created_at).toLocaleString()}<div>Before → after values are retained in the audit record.</div></div>)}</div>}
+          </details>
         </>
       )}
 
@@ -203,9 +233,13 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
         <div style={theme.sectionLabel}>Record manual change · {editing.labware_key}{editing.location_id ? `.${editing.location_id}` : ""}</div>
         <p style={{ margin: "8px 0", color: theme.color.textSecondary, fontSize: 12 }}>This updates the journaled record only. It never commands the robot.</p>
         <label style={fieldStyle}><span style={theme.fieldLabel}>Change type</span><select value={mode} onChange={(event) => setMode(event.target.value as ManualEditMode)} style={theme.input}><option value="set">Correct to observed</option><option value="add">Add volume</option><option value="remove">Remove volume</option><option value="empty">Record empty</option><option value="transfer">Record manual transfer</option></select></label>
-        {mode === "transfer" ? <label style={fieldStyle}><span style={theme.fieldLabel}>Destination</span><input value={destination} onChange={(event) => setDestination(event.target.value)} style={theme.input} placeholder="reservoir.A1" /></label> : <label style={fieldStyle}><span style={theme.fieldLabel}>{mode === "set" ? "Observed volume" : "Volume change"} (µL)</span><input autoFocus value={volume} onChange={(event) => setVolume(event.target.value)} style={theme.input} inputMode="decimal" /></label>}
+        {mode !== "empty" && <label style={fieldStyle}><span style={theme.fieldLabel}>Unit</span><select aria-label="Volume unit" value={unit} onChange={(event) => setUnit(event.target.value as "uL" | "mL")} style={theme.input}><option value="uL">µL</option><option value="mL">mL</option></select></label>}
+        {mode === "transfer" && <label style={fieldStyle}><span style={theme.fieldLabel}>Transfer volume ({unit})</span><input autoFocus value={volume} onChange={(event) => setVolume(event.target.value)} style={theme.input} inputMode="decimal" /></label>}
+        {mode === "transfer" && <label style={fieldStyle}><span style={theme.fieldLabel}>Destination</span><input value={destination} onChange={(event) => setDestination(event.target.value)} style={theme.input} placeholder="reservoir.A1" /></label>}
+        {mode !== "transfer" && mode !== "empty" && <label style={fieldStyle}><span style={theme.fieldLabel}>{mode === "set" ? "Observed volume" : "Volume change"} ({unit})</span><input autoFocus value={volume} onChange={(event) => setVolume(event.target.value)} style={theme.input} inputMode="decimal" /></label>}
         {mode === "set" && <label style={fieldStyle}><span style={theme.fieldLabel}>Composition (optional)</span><input value={composition} onChange={(event) => setComposition(event.target.value)} style={theme.input} placeholder="water=900, dye=100" /></label>}
-        <div style={{ marginTop: 10, padding: 8, border: `1px solid ${theme.color.border}`, borderRadius: theme.radius.sm, color: theme.color.textSecondary, fontSize: 12 }}>Preview: <strong>{mode}</strong> {mode === "transfer" ? `${volume || "0"} µL → ${destination || "destination"}` : `${volume || "0"} µL`}. This is one atomic journal update.</div>
+        {mode === "add" && <label style={fieldStyle}><span style={theme.fieldLabel}>Named liquid (optional)</span><input value={liquidName} onChange={(event) => setLiquidName(event.target.value)} style={theme.input} placeholder="buffer, water, sample…" /></label>}
+        <div style={{ marginTop: 10, padding: 8, border: `1px solid ${theme.color.border}`, borderRadius: theme.radius.sm, color: theme.color.textSecondary, fontSize: 12 }}>Before → after preview: <strong>{previewText}</strong>. This is one atomic journal update.</div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}><button type="button" style={theme.btn.secondary} onClick={() => setEditing(null)}>Cancel</button><button type="button" style={theme.btn.primary} disabled={applyEdits.isPending} onClick={() => void saveEdit()}>{applyEdits.isPending ? "Saving…" : "Save record"}</button></div>
       </div>}
     </section>

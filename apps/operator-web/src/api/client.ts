@@ -318,6 +318,8 @@ export const fluidStateApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  listManualEdits: (fluidStateId: number) =>
+    request<import("../types").ManualEditView[]>(`/fluid-states/${fluidStateId}/manual-edits`),
   get: (fluidStateId: number) =>
     request<import("../types").FluidStateDetail>(`/fluid-states/${fluidStateId}`),
   getContainers: (fluidStateId: number) =>

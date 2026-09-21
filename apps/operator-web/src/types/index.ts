@@ -521,6 +521,17 @@ export interface ManualEditBatchRequest {
   expected_revisions: Record<string, number>;
   actions: ManualEditAction[];
   note?: string;
+  expected_active_revision?: number;
+}
+
+export interface ManualEditView {
+  id: number;
+  labware_key: string;
+  location_id: string;
+  operation: string;
+  before: Record<string, unknown>;
+  after: Record<string, unknown>;
+  created_at: string;
 }
 
 export interface ContainerView {
@@ -530,6 +541,7 @@ export interface ContainerView {
   capacity_ul: number;
   working_volume_ul: number;
   current_volume_ul: number;
+  volume_known?: boolean;
   composition: Record<string, number>;
   version: number;
   updated_at: string;
@@ -639,6 +651,7 @@ export interface CreateFluidStateRequest {
   deck_file: string;
   label?: string | null;
   fluids?: Record<string, FluidSeedItem>;
+  omitted_volumes_unknown?: boolean;
 }
 
 // Run-submission state choice, owned by App.tsx and threaded into
@@ -646,7 +659,7 @@ export interface CreateFluidStateRequest {
 // "new"/"resume" require an explicit operator choice before Run is
 // enabled, and route submission through the versioned /api/v1/runs
 // resource instead of the legacy synchronous endpoint.
-export type FluidStateChoiceMode = "none" | "new" | "resume";
+export type FluidStateChoiceMode = "active" | "none" | "new" | "resume";
 
 // One component of a seed row's composition, kept as raw input strings so
 // the controlled inputs can hold partial/empty values while editing. Parsed
