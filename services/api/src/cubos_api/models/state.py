@@ -93,6 +93,12 @@ class ManualContainerEditRequest(BaseModel):
     operation: str = "manual_adjustment"
 
 
+class ManualEditBatchRequest(BaseModel):
+    expected_revisions: Dict[str, int] = Field(default_factory=dict)
+    actions: List[Dict[str, Any]] = Field(min_length=1)
+    note: Optional[str] = None
+
+
 class SelectActiveFluidStateRequest(BaseModel):
     fluid_state_id: int
     expected_revision: Optional[int] = None

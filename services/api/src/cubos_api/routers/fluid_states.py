@@ -40,6 +40,7 @@ from cubos_api.models.state import (
     ActiveFluidStateResponse,
     SelectActiveFluidStateRequest,
     ManualContainerEditRequest,
+    ManualEditBatchRequest,
     TipContainerView,
     TipStateResponse,
 )
@@ -107,6 +108,29 @@ def edit_fluid_container(
             if view.labware_key == body.labware_key and view.location_id == body.location_id:
                 return view
         raise HTTPException(404, "container not found")
+    finally:
+        store.close()
+
+
+@router.post("/{fluid_state_id}/manual-edits", response_model=FluidStateDetailResponse)
+def apply_manual_edits(fluid_state_id: int, body: ManualEditBatchRequest) -> FluidStateDetailResponse:
+    store = _open_store()
+    try:
+        try:
+            store.apply_manual_edits(fluid_state_id, body.actions, expected_revisions=body.expected_revisions)
+            snapshot = store.get_fluid_snapshot(fluid_state_id)
+        except ValueError as exc:
+            raise HTTPException(409 if "revision" in str(exc) else 400, str(exc)) from exc
+        except _STATE_EXCEPTIONS as exc:
+            raise map_state_exception(exc) from exc
+        containers = _containers_with_roles(snapshot)
+        return FluidStateDetailResponse(
+            id=snapshot["id"], deck_path=snapshot["deck_path"], deck_fingerprint=snapshot["deck_fingerprint"],
+            label=snapshot["label"], created_at=snapshot["created_at"], updated_at=snapshot["updated_at"],
+            containers=containers,
+            pending_operation_count=sum(op["status"] in _PENDING_STATUSES for op in snapshot["operations"]),
+            reconciliation_required_count=sum(op["status"] == "reconciliation_required" for op in snapshot["operations"]),
+        )
     finally:
         store.close()
 
