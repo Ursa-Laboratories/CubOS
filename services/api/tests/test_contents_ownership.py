@@ -65,12 +65,16 @@ def test_manual_transaction_serializes_and_run_cannot_slip_between_check_and_com
     assert ownership.snapshot() is None
 
 
-def test_legacy_stateless_workflow_does_not_need_contents_claim():
+def test_legacy_stateless_workflow_still_owns_physical_station():
     ownership = ContentsOwnership()
+    ownership.claim_run("legacy-run")
+    assert ownership.snapshot().fluid_state_id is None
+    with pytest.raises(ContentsOwnershipError, match="legacy-run"):
+        with ownership.manual_transaction():
+            pass
+    ownership.release("legacy-run")
     with ownership.manual_transaction():
-        # A legacy run with no selected fluid state has no ownership claim.
-        ownership_snapshot = ownership.snapshot()
-    assert ownership_snapshot is None
+        pass
 
 
 def test_bind_requires_matching_run_and_release_is_idempotent():

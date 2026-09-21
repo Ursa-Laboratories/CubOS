@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from cubos.data import DataStore, FluidStateError
+from cubos.data import (
+    DataStore,
+    FluidStateError,
+    FluidStateReconciliationRequiredError,
+)
 from cubos.deck.loader import load_deck_from_yaml_safe
 
 
@@ -175,3 +179,32 @@ def test_legacy_fluid_transfer_journal_still_requires_campaign_and_is_conservati
     assert destination["current_volume_ul"] == pytest.approx(45.0)
     assert source["composition"] == {"water": 45.0, "ethanol": 30.0}
     assert destination["composition"] == {"water": 35.0, "ethanol": 10.0}
+
+
+def test_manual_edits_are_blocked_while_a_fluid_operation_is_pending(tmp_path):
+    store, state_id = _state(tmp_path)
+    campaign_id = store.create_campaign("pending", fluid_state_id=state_id)
+    _select(store, state_id)
+    store.begin_fluid_transfer(
+        state_id, "pending-transfer", "source", "destination", 10.0,
+        campaign_id=campaign_id,
+    )
+
+    with pytest.raises(FluidStateReconciliationRequiredError):
+        store.apply_manual_edits(
+            state_id,
+            [{"mode": "set", "labware_key": "source", "volume_ul": 90.0,
+              "composition": {"water": 90.0}}],
+        )
+
+
+def test_single_container_adjust_without_composition_records_unknown_contents(tmp_path):
+    store, state_id = _state(tmp_path)
+    _select(store, state_id)
+
+    adjusted = store.adjust_fluid_container(
+        state_id, "source", "", 25.0, composition=None,
+    )
+
+    assert adjusted["volume_known"] is True
+    assert adjusted["composition"] == {"unknown": 25.0}

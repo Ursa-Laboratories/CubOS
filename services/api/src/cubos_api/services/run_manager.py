@@ -150,21 +150,20 @@ class RunManager:
             if self.store.exists(run_id) or self.store.run_dir(run_id).exists():
                 raise RunConflictError(f"run {run_id!r} already exists")
             # Claim before reading the active pointer.  This makes state
-            # capture and active-setup edits one indivisible workflow.
-            if submission.state is not None or submission.use_active_state:
-                self._contents_ownership.claim_run(run_id)
-                contents_claimed = True
+            # capture and active-setup edits one indivisible workflow.  The
+            # claim applies to legacy stateless runs too: they still own the
+            # physical station while hardware executes, even though they do
+            # not opt into persistent contents accounting.
+            self._contents_ownership.claim_run(run_id)
+            contents_claimed = True
             try:
                 gantry_yaml, deck_yaml, protocol_yaml = self._resolve_bundle(submission)
                 self._validate_bundle(gantry_yaml, deck_yaml, protocol_yaml)
                 fluid_state_id = self._resolve_run_state(
                     deck_yaml, submission.state, use_active_state=submission.use_active_state
                 )
-                if contents_claimed and fluid_state_id is not None:
+                if fluid_state_id is not None:
                     self._contents_ownership.bind_fluid_state(run_id, fluid_state_id)
-                elif contents_claimed:
-                    self._contents_ownership.release(run_id)
-                    contents_claimed = False
                 record = RunRecord(
                     run_id=run_id,
                     state="queued",
@@ -362,7 +361,7 @@ class RunManager:
                     step_observer=step_observer,
                 )
             result = _jsonable(raw_result)
-            if record.fluid_state_id is not None:
+            if record.fluid_state_id is not None or isinstance(result, dict):
                 campaign_id = result.get("campaign_id") if isinstance(result, dict) else None
                 self._contents_ownership.bind_campaign(run_id, campaign_id)
             record = self.store.read(run_id) or record
@@ -392,8 +391,7 @@ class RunManager:
             with self._lock:
                 if self._active_run_id == run_id:
                     self._active_run_id = None
-            if record.fluid_state_id is not None:
-                self._contents_ownership.release(run_id)
+            self._contents_ownership.release(run_id)
 
 
 _manager: RunManager | None = None
