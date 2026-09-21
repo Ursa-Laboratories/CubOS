@@ -186,3 +186,86 @@ def test_preflight_surfaces_existing_shortage_or_overflow_before_execution(
             protocol_yaml="protocol: []",
             db_path=tmp_path / "state.db",
         )
+
+
+@pytest.mark.parametrize("command", ["rinse_well", "flush_pipette", "purge_pipette", "clear_well"])
+def test_preflight_rejects_dynamic_waste_selection_before_connect(
+    monkeypatch, tmp_path, command
+):
+    monkeypatch.setattr(
+        run_manager,
+        "load_protocol_from_yaml",
+        lambda path: SimpleNamespace(
+            # Explicit source isolates the dynamic-waste guard for each command.
+            steps=[SimpleNamespace(command_name=command, args={"source": "src.A1"})]
+        ),
+    )
+    with pytest.raises(run_manager.RunPolicyError, match="dynamic waste selection"):
+        run_manager._validate_fluid_state_preflight(
+            state_id=1,
+            deck=_FakeDeck(),
+            protocol_yaml="protocol: []",
+            db_path=tmp_path / "state.db",
+        )
+
+
+def test_preflight_rejects_dynamic_stock_selection_before_connect(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        run_manager,
+        "load_protocol_from_yaml",
+        lambda path: SimpleNamespace(
+            steps=[
+                SimpleNamespace(
+                    command_name="flush_pipette",
+                    args={"solution": "water", "waste": "waste.A1"},
+                )
+            ]
+        ),
+    )
+    with pytest.raises(run_manager.RunPolicyError, match="dynamic stock selection"):
+        run_manager._validate_fluid_state_preflight(
+            state_id=1,
+            deck=_FakeDeck(),
+            protocol_yaml="protocol: []",
+            db_path=tmp_path / "state.db",
+        )
+
+
+@pytest.mark.parametrize(
+    ("command", "args"),
+    [
+        ("rinse_well", {"well": "well.A1", "source": "src.A1", "waste": "waste.A1"}),
+        ("flush_pipette", {"source": "src.A1", "waste": "waste.A1"}),
+        ("purge_pipette", {"source": "src.A1", "waste": "waste.A1"}),
+        ("clear_well", {"well": "well.A1", "waste": "waste.A1"}),
+    ],
+)
+def test_preflight_checks_explicit_waste_for_every_liquid_command(
+    monkeypatch, tmp_path, command, args
+):
+    monkeypatch.setattr(
+        run_manager,
+        "load_protocol_from_yaml",
+        lambda path: SimpleNamespace(
+            steps=[SimpleNamespace(command_name=command, args=args)]
+        ),
+    )
+    monkeypatch.setattr(
+        run_manager,
+        "DataStore",
+        lambda path: _FakeStore(
+            {
+                "containers": [
+                    {"labware_key": "src", "location_id": "A1", "current_volume_ul": 20, "volume_known": True},
+                    {"labware_key": "well", "location_id": "A1", "current_volume_ul": 20, "volume_known": True},
+                ]
+            }
+        ),
+    )
+    with pytest.raises(run_manager.RunPolicyError, match="waste.A1"):
+        run_manager._validate_fluid_state_preflight(
+            state_id=1,
+            deck=_FakeDeck(),
+            protocol_yaml="protocol: []",
+            db_path=tmp_path / "state.db",
+        )

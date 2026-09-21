@@ -44,8 +44,17 @@ _FLUID_TARGET_FIELDS: dict[str, tuple[str, ...]] = {
     "transfer": ("source", "destination"),
     "serial_transfer": ("source", "plate"),
     "mix": ("position",),
-    "rinse_well": ("well", "source"),
+    "rinse_well": ("well", "source", "waste"),
+    "flush_pipette": ("source", "waste"),
+    "purge_pipette": ("source", "waste"),
     "clear_well": ("well", "waste"),
+}
+
+_DYNAMIC_LIQUID_COMMANDS = {
+    "rinse_well",
+    "flush_pipette",
+    "purge_pipette",
+    "clear_well",
 }
 
 
@@ -53,10 +62,40 @@ def _fluid_targets(protocol: Any, deck: Any) -> list[tuple[str, Any]]:
     """Return explicit liquid targets, resolving aliases through the deck."""
     targets: list[tuple[str, Any]] = []
     for step in protocol.steps:
+        if step.command_name in _DYNAMIC_LIQUID_COMMANDS:
+            args = step.args
+            if args.get("solution") and not args.get("source"):
+                raise RunPolicyError(
+                    f"fluid-state preflight blocked: {step.command_name} uses "
+                    "dynamic stock selection (`solution`); provide an explicit "
+                    "known `source` before running."
+                )
+            if not args.get("waste"):
+                raise RunPolicyError(
+                    f"fluid-state preflight blocked: {step.command_name} uses "
+                    "dynamic waste selection; provide an explicit known `waste` "
+                    "before running."
+                )
         fields = _FLUID_TARGET_FIELDS.get(step.command_name, ())
         for field in fields:
             value = step.args.get(field)
             if not isinstance(value, str) or not value.strip():
+                continue
+            if step.command_name == "serial_transfer" and field == "plate":
+                try:
+                    plate = deck.resolve_labware(value)
+                    well_ids = list(getattr(plate, "wells", ()))
+                    axis = step.args.get("axis")
+                    if isinstance(axis, str):
+                        if axis.isalpha():
+                            well_ids = [well for well in well_ids if well[0] == axis.upper()]
+                        else:
+                            well_ids = [well for well in well_ids if well[1:] == axis]
+                    for well_id in well_ids:
+                        target_name = f"{value}.{well_id}"
+                        targets.append((target_name, deck.resolve_labware_target(target_name)))
+                except (KeyError, ValueError):
+                    pass
                 continue
             # `solution`/`waste` selectors are intentionally not inferred:
             # runtime selection may choose any suitable registered container.
@@ -86,11 +125,19 @@ def _validate_fluid_state_preflight(
             protocol_path = Path(protocol_file.name)
         protocol = load_protocol_from_yaml(protocol_path)
         protocol_path.unlink(missing_ok=True)
+        # Resolve command semantics before opening the state database so an
+        # unsupported dynamic liquid selector fails deterministically even if
+        # the caller's state id is stale.
+        targets = _fluid_targets(protocol, deck)
         state_store = DataStore(db_path)
         try:
             snapshot = state_store.get_fluid_snapshot(state_id)
         finally:
             state_store.close()
+    except RunPolicyError:
+        if "protocol_path" in locals():
+            protocol_path.unlink(missing_ok=True)
+        raise
     except Exception as exc:
         if "protocol_path" in locals():
             protocol_path.unlink(missing_ok=True)
@@ -102,7 +149,7 @@ def _validate_fluid_state_preflight(
     }
     unknown: list[str] = []
     initial_fluids: dict[str, dict[str, float]] = {}
-    for display_name, target in _fluid_targets(protocol, deck):
+    for display_name, target in targets:
         key = (target.labware_key, target.location_id or "")
         item = containers.get(key)
         if item is None or not item.get("volume_known", False):
