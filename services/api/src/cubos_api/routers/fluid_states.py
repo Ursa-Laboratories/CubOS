@@ -39,6 +39,7 @@ from cubos_api.models.state import (
     ResolveReconciliationResponse,
     ActiveFluidStateResponse,
     SelectActiveFluidStateRequest,
+    ManualContainerEditRequest,
     TipContainerView,
     TipStateResponse,
 )
@@ -74,6 +75,38 @@ def select_active_fluid_state(body: SelectActiveFluidStateRequest) -> ActiveFlui
             status = 409 if "revision" in str(exc) else 404
             raise HTTPException(status, str(exc)) from exc
         return ActiveFluidStateResponse(**active)
+    finally:
+        store.close()
+
+
+@router.post("/{fluid_state_id}/containers/edit", response_model=ContainerView)
+def edit_fluid_container(
+    fluid_state_id: int, body: ManualContainerEditRequest
+) -> ContainerView:
+    """Apply a record-only contents correction; this never actuates hardware."""
+    store = _open_store()
+    try:
+        try:
+            container = store.adjust_fluid_container(
+                fluid_state_id,
+                body.labware_key,
+                body.location_id,
+                body.volume_ul,
+                body.composition,
+                expected_version=body.expected_version,
+                operation=body.operation,
+            )
+            snapshot = store.get_fluid_snapshot(fluid_state_id)
+        except ValueError as exc:
+            status = 409 if "revision" in str(exc) else 400
+            raise HTTPException(status, str(exc)) from exc
+        except _STATE_EXCEPTIONS as exc:
+            raise map_state_exception(exc) from exc
+        views = _containers_with_roles(snapshot)
+        for view in views:
+            if view.labware_key == body.labware_key and view.location_id == body.location_id:
+                return view
+        raise HTTPException(404, "container not found")
     finally:
         store.close()
 

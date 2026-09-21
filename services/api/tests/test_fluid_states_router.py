@@ -99,6 +99,39 @@ def test_active_setup_is_explicit_and_revision_checked(monkeypatch, tmp_path: Pa
     assert stale.status_code == 409
 
 
+def test_manual_container_edit_is_version_checked_and_audited(monkeypatch, tmp_path: Path):
+    _write_deck_config(monkeypatch, tmp_path)
+    app = create_app()
+    created = api_request(
+        app,
+        "POST",
+        "/api/v1/fluid-states",
+        json={"deck_file": "state-deck.yaml", "fluids": {"source": {"volume_ul": 20}}},
+    ).json()
+    state_id = created["id"]
+    before = api_request(app, "GET", f"/api/v1/fluid-states/{state_id}/containers").json()[0]
+    edited = api_request(
+        app,
+        "POST",
+        f"/api/v1/fluid-states/{state_id}/containers/edit",
+        json={
+            "labware_key": "source",
+            "volume_ul": 120,
+            "composition": {"buffer": 120.0},
+            "expected_version": before["version"],
+        },
+    )
+    assert edited.status_code == 200
+    assert edited.json()["current_volume_ul"] == 120
+    stale = api_request(
+        app,
+        "POST",
+        f"/api/v1/fluid-states/{state_id}/containers/edit",
+        json={"labware_key": "source", "volume_ul": 10, "expected_version": before["version"]},
+    )
+    assert stale.status_code == 409
+
+
 def test_create_fluid_state_404_for_missing_deck_file(monkeypatch, tmp_path: Path):
     _write_deck_config(monkeypatch, tmp_path)
     app = create_app()

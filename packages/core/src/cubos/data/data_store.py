@@ -223,6 +223,17 @@ CREATE TABLE IF NOT EXISTS fluid_operations (
     applied_at               TEXT
 );
 
+CREATE TABLE IF NOT EXISTS fluid_manual_edits (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fluid_state_id INTEGER NOT NULL REFERENCES fluid_state_sessions(id) ON DELETE CASCADE,
+    labware_key TEXT NOT NULL,
+    location_id TEXT NOT NULL DEFAULT '',
+    operation TEXT NOT NULL,
+    before_json TEXT NOT NULL,
+    after_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS tip_containers (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     fluid_state_id     INTEGER NOT NULL REFERENCES fluid_state_sessions(id)
@@ -1159,6 +1170,37 @@ class DataStore:
             volume_ul,
             composition,
         )
+
+    def adjust_fluid_container(
+        self,
+        fluid_state_id: int,
+        labware_key: str,
+        location_id: str,
+        volume_ul: float,
+        composition: Mapping[str, float] | None = None,
+        *,
+        expected_version: int | None = None,
+        operation: str = "manual_adjustment",
+    ) -> FluidContainerSnapshot:
+        """Record a manual contents correction with optimistic concurrency."""
+        before = self.get_fluid_container(fluid_state_id, labware_key, location_id)
+        if expected_version is not None and before["version"] != expected_version:
+            raise ValueError(
+                f"container revision is {before['version']}, expected {expected_version}"
+            )
+        from .fluid_state import seed_fluid
+
+        target = f"{labware_key}.{location_id}" if location_id else labware_key
+        seed_fluid(self._conn, fluid_state_id, target, volume_ul, composition)
+        after = self.get_fluid_container(fluid_state_id, labware_key, location_id)
+        self._conn.execute(
+            "INSERT INTO fluid_manual_edits(fluid_state_id, labware_key, location_id, operation, before_json, after_json) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (fluid_state_id, labware_key, location_id, operation,
+             json.dumps(dict(before)), json.dumps(dict(after))),
+        )
+        self._conn.commit()
+        return after
 
     def begin_fluid_transfer(
         self,

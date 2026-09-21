@@ -84,6 +84,15 @@ class ActiveFluidStateResponse(BaseModel):
     updated_at: str
 
 
+class ManualContainerEditRequest(BaseModel):
+    labware_key: str
+    location_id: str = ""
+    volume_ul: float = Field(ge=0)
+    composition: Optional[Dict[str, float]] = None
+    expected_version: Optional[int] = Field(default=None, ge=0)
+    operation: str = "manual_adjustment"
+
+
 class SelectActiveFluidStateRequest(BaseModel):
     fluid_state_id: int
     expected_revision: Optional[int] = None
