@@ -121,6 +121,54 @@ describe("DeckVisualization", () => {
     expect(screen.getByText("probe offset")).toBeInTheDocument();
   });
 
+  it.each(["isometric", "front-xz", "side-yz"] as const)(
+    "renders wells-only deck coordinates in the %s projection",
+    (view) => {
+      const wellsOnlyDeck: DeckResponse = {
+        filename: "live_96_well.yaml",
+        labware: [
+          {
+            key: "plate_96",
+            config: {
+              type: "well_plate",
+              name: "Live 96 Well Plate",
+              model_name: "standard_96",
+              rows: 1,
+              columns: 2,
+              calibration: { a1: { x: 80, y: 70, z: 12 }, a2: { x: 89, y: 70, z: 12 } },
+              x_offset: 9,
+              y_offset: 9,
+            },
+            wells: {
+              A1: { x: 80, y: 70, z: 12 },
+              A2: { x: 89, y: 70, z: 12 },
+            },
+            positions: undefined,
+          },
+        ],
+      };
+      const { container } = render(
+        <DeckVisualization
+          deck={wellsOnlyDeck}
+          instruments={null}
+          gantryPosition={null}
+          machineXRange={[0, 300]}
+          machineYRange={[0, 200]}
+          machineZRange={[0, 100]}
+          view={view}
+        />,
+      );
+
+      expect(screen.getAllByText("Live 96 Well Plate")).toHaveLength(2);
+      const projectedWells = container.querySelectorAll("circle");
+      expect(projectedWells).toHaveLength(2);
+      for (const well of projectedWells) {
+        expect(well.getAttribute("cx")).not.toBeNull();
+        expect(well.getAttribute("cy")).not.toBeNull();
+      }
+    },
+  );
+
   it("renders tip racks, holders, and nested holder labware", () => {
     render(
       <DeckVisualization
