@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import DeckVisualization from "./DeckVisualization";
 import type { DeckResponse } from "../../types";
+import { projectDeckCoordinate, signedRange } from "./projections";
 
 const deck: DeckResponse = {
   filename: "panda_deck.yaml",
@@ -92,6 +93,34 @@ const deck: DeckResponse = {
 };
 
 describe("DeckVisualization", () => {
+  it("projects deck-frame Z without flipping signed coordinates", () => {
+    expect(projectDeckCoordinate({ x: -10, y: 20, z: -5 }, "front-xz")).toEqual({ horizontal: -10, vertical: -5 });
+    expect(projectDeckCoordinate({ x: -10, y: 20, z: -5 }, "side-yz")).toEqual({ horizontal: 20, vertical: -5 });
+    expect(signedRange([-40, -2])).toEqual([-40, -2]);
+  });
+
+  it.each([
+    ["isometric", "X (mm) · Z / deck perspective"],
+    ["front-xz", "X (mm) · Z (mm)"],
+    ["side-yz", "Y (mm) · Z (mm)"],
+  ] as const)("renders the %s projection with axes and height marker", (view, axisCaption) => {
+    render(
+      <DeckVisualization
+        deck={deck}
+        instruments={{ probe: { type: "probe", vendor: "mock", offset_x: 12, offset_y: -4 } }}
+        gantryPosition={{ connected: true, status: "Idle", x: 10, y: 20, z: 15, work_x: 10, work_y: 20, work_z: 15, calibration_active: false }}
+        machineXRange={[-50, 300]}
+        machineYRange={[-40, 220]}
+        machineZRange={[-20, 80]}
+        view={view}
+      />,
+    );
+    expect(screen.getByTestId("deck-visualization")).toHaveAttribute("data-view", view);
+    expect(screen.getByText(axisCaption, { exact: true })).toBeInTheDocument();
+    expect(screen.getByText("Z 15.0 mm")).toBeInTheDocument();
+    expect(screen.getByText("probe offset")).toBeInTheDocument();
+  });
+
   it("renders tip racks, holders, and nested holder labware", () => {
     render(
       <DeckVisualization

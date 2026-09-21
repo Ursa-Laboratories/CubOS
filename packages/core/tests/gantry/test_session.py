@@ -333,6 +333,27 @@ def test_position_returns_cached_status_while_operation_lock_is_held(tmp_path):
     assert snapshot.status == "Run"
 
 
+def test_position_uses_controller_observed_cache_while_operation_lock_is_held(tmp_path):
+    class ObservedCacheGantry(FakeGantry):
+        def get_cached_position_info(self):
+            return {
+                "coords": {"x": 42.5, "y": 18.0, "z": 7.25},
+                "work_pos": {"x": 42.5, "y": 18.0, "z": 7.25},
+                "status": "Run",
+            }
+
+    session = GantrySession(gantry_factory=ObservedCacheGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    session.operation_lock.acquire()
+    try:
+        snapshot = session.position()
+    finally:
+        session.operation_lock.release()
+
+    assert (snapshot.x, snapshot.y, snapshot.z) == (42.5, 18.0, 7.25)
+    assert snapshot.status == "Run"
+
+
 def test_position_uses_alarm_status_when_read_raises_alarm(tmp_path):
     session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
     session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
