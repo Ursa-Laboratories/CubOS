@@ -1247,6 +1247,8 @@ class DataStore:
                     dest_key = str(action["destination_labware_key"])
                     dest_loc = str(action.get("destination_location_id", ""))
                     dest = self.get_fluid_container(fluid_state_id, dest_key, dest_loc)
+                    if not source.get("volume_known", True) or not dest.get("volume_known", True):
+                        raise ValueError("transfer requires known source and destination volumes")
                     volume = float(action["volume_ul"])
                     if volume <= 0 or source["current_volume_ul"] < volume:
                         raise ValueError("transfer volume exceeds known source volume")

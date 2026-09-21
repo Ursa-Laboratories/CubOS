@@ -132,6 +132,23 @@ def test_manual_container_edit_is_version_checked_and_audited(monkeypatch, tmp_p
     assert stale.status_code == 409
 
 
+def test_new_workflow_can_mark_omitted_contents_unknown(monkeypatch, tmp_path: Path):
+    _write_deck_config(monkeypatch, tmp_path)
+    app = create_app()
+    state = api_request(
+        app, "POST", "/api/v1/fluid-states",
+        json={"deck_file": "state-deck.yaml", "omitted_volumes_unknown": True},
+    ).json()
+    api_request(app, "PUT", "/api/v1/fluid-states/active", json={"fluid_state_id": state["id"]})
+    containers = api_request(app, "GET", f"/api/v1/fluid-states/{state['id']}/containers").json()
+    assert all(container["volume_known"] is False for container in containers)
+    blocked = api_request(
+        app, "POST", f"/api/v1/fluid-states/{state['id']}/manual-edits",
+        json={"actions": [{"mode": "transfer", "labware_key": "source", "destination_labware_key": "waste", "volume_ul": 1}]},
+    )
+    assert blocked.status_code == 400
+
+
 def test_create_fluid_state_404_for_missing_deck_file(monkeypatch, tmp_path: Path):
     _write_deck_config(monkeypatch, tmp_path)
     app = create_app()
