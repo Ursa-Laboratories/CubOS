@@ -14,7 +14,6 @@ import HolderRenderer from "./HolderRenderer";
 import InstrumentRenderer from "./InstrumentRenderer";
 import TipRackRenderer from "./TipRackRenderer";
 import VialRenderer from "./VialRenderer";
-import { normalizeDeckView, projectDeckCoordinate, signedRange, type DeckView } from "./projections";
 import WellPlateRenderer from "./WellPlateRenderer";
 
 interface Props {
@@ -23,8 +22,6 @@ interface Props {
   gantryPosition: GantryPosition | null;
   machineXRange?: [number, number];
   machineYRange?: [number, number];
-  machineZRange?: [number, number];
-  view?: DeckView | "front" | "side";
   yAxisMotion?: "head" | "bed";
 }
 
@@ -106,25 +103,8 @@ export default function DeckVisualization({
   gantryPosition,
   machineXRange = [0, 300],
   machineYRange = [0, 200],
-  machineZRange = [0, 100],
-  view = "top",
   yAxisMotion = "head",
 }: Props) {
-  const selectedView = normalizeDeckView(view === "front" ? "front-xz" : view === "side" ? "side-yz" : view);
-  if (selectedView !== "top") {
-    return (
-      <ProjectedDeckVisualization
-        deck={deck}
-        instruments={instruments}
-        gantryPosition={gantryPosition}
-        view={selectedView}
-        machineXRange={machineXRange}
-        machineYRange={machineYRange}
-        machineZRange={machineZRange}
-        yAxisMotion={yAxisMotion}
-      />
-    );
-  }
   const visualBounds = getVisualizationBounds(deck, instruments, machineXRange, machineYRange);
   const visualXRange: [number, number] = [visualBounds.minX, visualBounds.maxX];
   const visualYRange: [number, number] = [visualBounds.minY, visualBounds.maxY];
@@ -336,7 +316,7 @@ export default function DeckVisualization({
             key={key}
             label={key}
             instrument={inst}
-            gantryPosition={markerPosition}
+            gantryPosition={gantryPosition}
             svgWidth={SVG_W}
             svgHeight={SVG_H}
             machineXRange={visualXRange}
@@ -353,101 +333,8 @@ export default function DeckVisualization({
           machineYRange={visualYRange}
         />
       )}
-      {gantryPosition && Number.isFinite(gantryPosition.work_z ?? gantryPosition.z) && (
-        <text x={SVG_W - SVG_PADDING} y={SVG_H - 6} fill={themeViz.caption} fontSize={10} fontFamily={themeFont.mono} textAnchor="end" data-testid="gantry-height">
-          Z {(gantryPosition.work_z ?? gantryPosition.z).toFixed(1)} mm
-        </text>
-      )}
     </svg>
   );
-}
-
-function ProjectedDeckVisualization({
-  deck,
-  instruments,
-  gantryPosition,
-  view,
-  machineXRange,
-  machineYRange,
-  machineZRange,
-  yAxisMotion,
-}: {
-  deck: DeckResponse | null;
-  instruments: Record<string, InstrumentConfig> | null;
-  gantryPosition: GantryPosition | null;
-  view: DeckView;
-  machineXRange: [number, number];
-  machineYRange: [number, number];
-  machineZRange: [number, number];
-  yAxisMotion: "head" | "bed";
-}) {
-  const horizontalRange = projectedRange(view, machineXRange, machineYRange, machineZRange, "horizontal");
-  const verticalRange = projectedRange(view, machineXRange, machineYRange, machineZRange, "vertical");
-  const viewport = getSvgViewport(SVG_W, SVG_H, horizontalRange, verticalRange);
-  const gantryX = gantryPosition?.work_x ?? gantryPosition?.x ?? 0;
-  const gantryY = gantryPosition?.work_y ?? gantryPosition?.y ?? 0;
-  const gantryZ = gantryPosition?.work_z ?? gantryPosition?.z ?? 0;
-  // In bed mode the deck translates under a fixed head. Keep all deck
-  // coordinates in the deck frame and apply the same +Y display translation
-  // as the Top renderer; the tool marker remains at deck-frame Y=0.
-  const project = (point: Coordinate3D, isTool = false) => {
-    const displayPoint = yAxisMotion === "bed"
-      ? { ...point, y: point.y + (isTool ? 0 : gantryY) }
-      : point;
-    const projected = projectDeckCoordinate(displayPoint, view);
-    return machineToSvg(projected.horizontal, projected.vertical, SVG_W, SVG_H, horizontalRange, verticalRange);
-  };
-  const points = (deck?.labware ?? []).flatMap((item) => {
-    const source = item.positions ?? item.wells ?? {};
-    const positions = Object.entries(source).filter(([name]) => name !== "location");
-    return positions.map(([name, point]) => ({ key: `${item.key}:${name}`, label: item.config.name ?? item.key, point }));
-  });
-  const projectedGantry = project({ x: gantryX, y: yAxisMotion === "bed" ? 0 : gantryY, z: gantryZ }, true);
-  const offsetPoints = Object.entries(instruments ?? {}).map(([key, instrument]) => {
-    // CubOS stores the calibrated gantry-to-tool distance as ``depth``;
-    // the tool tip is below the gantry by that amount.
-    const offsetZ = -finiteNumber(instrument.depth, 0);
-    const point = { x: gantryX + (instrument.offset_x ?? 0), y: (yAxisMotion === "bed" ? 0 : gantryY) + (instrument.offset_y ?? 0), z: gantryZ + offsetZ };
-    return { key, point, projected: project(point, true) };
-  });
-  const horizontalLabel = view === "side-yz" ? "Y (mm)" : "X (mm)";
-  const verticalLabel = view === "isometric" ? "Z / deck perspective" : "Z (mm)";
-  const xLeft = viewport.originX;
-  const xRight = viewport.originX + viewport.width;
-  const yTop = viewport.originY;
-  const yBottom = viewport.originY + viewport.height;
-  const gridStep = 50;
-  const horizontalTicks: number[] = [];
-  for (let tick = Math.ceil(horizontalRange[0] / gridStep) * gridStep; tick <= horizontalRange[1]; tick += gridStep) horizontalTicks.push(tick);
-  const verticalTicks: number[] = [];
-  for (let tick = Math.ceil(verticalRange[0] / gridStep) * gridStep; tick <= verticalRange[1]; tick += gridStep) verticalTicks.push(tick);
-  return (
-    <svg width={SVG_W} height={SVG_H} data-testid="deck-visualization" data-view={view} style={{ background: themeViz.canvas, borderRadius: 8, border: `1px solid ${themeColor.border}`, display: "block", width: "100%", height: "auto", maxHeight: "100%" }} viewBox={`0 0 ${SVG_W} ${SVG_H}`} preserveAspectRatio="xMidYMid meet">
-      <rect x={xLeft} y={yTop} width={viewport.width} height={viewport.height} fill={themeViz.canvas} stroke={themeViz.frame} />
-      {horizontalTicks.map((tick) => { const p = machineToSvg(tick, verticalRange[0], SVG_W, SVG_H, horizontalRange, verticalRange); return <g key={`hx${tick}`}><line x1={p.sx} y1={yTop} x2={p.sx} y2={yBottom} stroke={themeViz.grid} strokeWidth={0.5} /><text x={p.sx} y={yBottom + 14} fill={themeViz.tick} fontSize={9} fontFamily={themeFont.mono} textAnchor="middle">{tick}</text></g>; })}
-      {verticalTicks.map((tick) => { const p = machineToSvg(horizontalRange[0], tick, SVG_W, SVG_H, horizontalRange, verticalRange); return <g key={`vy${tick}`}><line x1={xLeft} y1={p.sy} x2={xRight} y2={p.sy} stroke={themeViz.grid} strokeWidth={0.5} /><text x={xLeft - 4} y={p.sy + 3} fill={themeViz.tick} fontSize={9} fontFamily={themeFont.mono} textAnchor="end">{tick}</text></g>; })}
-      {points.map(({ key, label, point }) => { const p = project(point); return <g key={key}><circle cx={p.sx} cy={p.sy} r={4} fill={themeColor.accent} /><text x={p.sx + 6} y={p.sy - 5} fill={themeViz.label} fontSize={9}>{label}</text></g>; })}
-      {offsetPoints.map(({ key, projected }) => <g key={`instrument-${key}`}><circle cx={projected.sx} cy={projected.sy} r={6} fill={themeColor.warning} stroke={themeViz.frame} /><text x={projected.sx + 8} y={projected.sy + 3} fill={themeViz.label} fontSize={9}>{key} offset</text></g>)}
-      {gantryPosition && <g data-testid="projected-gantry"><line x1={projectedGantry.sx} y1={yBottom} x2={projectedGantry.sx} y2={projectedGantry.sy} stroke={themeColor.warning} strokeDasharray="4 3" /><circle cx={projectedGantry.sx} cy={projectedGantry.sy} r={5} fill={themeColor.warning} /><text x={projectedGantry.sx + 8} y={projectedGantry.sy - 7} fill={themeViz.label} fontSize={10} fontFamily={themeFont.mono}>Z {gantryZ.toFixed(1)} mm</text></g>}
-      <text x={xRight} y={yTop - 6} fill={themeViz.caption} fontSize={10} fontFamily={themeFont.mono} textAnchor="end">{`${horizontalLabel} · ${verticalLabel}`}</text>
-    </svg>
-  );
-}
-
-function projectedRange(
-  view: DeckView,
-  xRange: [number, number],
-  yRange: [number, number],
-  zRange: [number, number],
-  axis: "horizontal" | "vertical",
-): [number, number] {
-  const corners: Coordinate3D[] = [];
-  for (const x of xRange) for (const y of yRange) for (const z of zRange) corners.push({ x, y, z });
-  const values = corners.map((corner) => {
-    const projected = projectDeckCoordinate(corner, view);
-    return axis === "horizontal" ? projected.horizontal : projected.vertical;
-  });
-  return signedRange([Math.min(...values), Math.max(...values)]);
 }
 
 function getVisualizationBounds(

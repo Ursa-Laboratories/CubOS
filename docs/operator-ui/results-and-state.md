@@ -49,24 +49,16 @@ shows the resulting record.
 Further down, **Caps** lists cap state for capper-managed vials, and the
 footer reports any pending operations — steps that were interrupted
 mid-way. When an interrupted operation leaves the physical state uncertain,
-a **Resolution** form appears so an operator can record what they observed
-and reconcile the record. See
+a **Resolution** form appears so an operator can confirm whether the
+operation was applied and reconcile the record. See
 [Fluid State Tracking](../fluid-state.md#interrupted-operations).
 
 ## Visualize the Deck
 
 The **Visualize** view shows the same deck map as the right-hand panel,
-scaled up to the full left panel. Use **Top** for the normal deck layout,
-**Isometric** for a three-dimensional overview, or **Front** and **Side** to
-inspect X/Z and Y/Z height relationships. Labware is drawn at its calibrated
+scaled up to the full left panel. Labware is drawn at its calibrated
 position, instruments are drawn around the head, and the **HEAD** crosshair
 follows the live gantry position. It is useful on a small screen, or when
 you want to watch a run without the editors in the way.
-
-The map reads the machine's signed working-volume bounds, so negative
-coordinates remain negative in the coordinate grid. A labware `height` is its
-physical outer dimension; the calibrated point shown by the map is the
-labware reference position. The live head marker is read from CubOS runtime
-position state and may be absent while the gantry is disconnected.
 
 ![The Visualize view, showing the full-size deck map](../images/operator-ui/visualize.webp)

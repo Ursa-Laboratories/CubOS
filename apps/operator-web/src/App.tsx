@@ -2,7 +2,6 @@ import React, { useRef, useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import AppLayout from "./components/layout/AppLayout";
 import DeckVisualization from "./components/deck/DeckVisualization";
-import type { DeckView } from "./components/deck/projections";
 import GantryPositionWidget from "./components/gantry/GantryPositionWidget";
 import EditorTabs from "./components/editor/EditorTabs";
 import DeckEditor from "./components/editor/DeckEditor";
@@ -104,7 +103,6 @@ type SavedMark = { filename: string; at: Date } | null;
 export default function App() {
   const qc = useQueryClient();
   const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "State" | "Results">("Workflow");
-  const [deckView, setDeckView] = useState<DeckView>("top");
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
@@ -384,9 +382,6 @@ export default function App() {
   const machineYRange: [number, number] = workingVolume
     ? [workingVolume.y_min, workingVolume.y_max]
     : [0, 200];
-  const machineZRange: [number, number] = workingVolume
-    ? [workingVolume.z_min, workingVolume.z_max]
-    : [0, 100];
 
   // Unsaved-edit tracking. Each editor reports edits up into the local
   // working copies above; a non-null/defined working copy means the user
@@ -980,18 +975,7 @@ export default function App() {
       )}
       {activeView === "Visualize" && (
         <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "0 0 10px", flex: "0 0 auto" }}>
-            <h3 style={{ ...theme.panelTitle, margin: 0 }}>Deck Visualization</h3>
-            <label style={{ ...theme.fieldLabel, display: "flex", alignItems: "center", gap: 6 }}>
-              View
-              <select aria-label="Deck view" value={deckView} onChange={(event) => setDeckView(event.target.value as DeckView)} style={theme.input}>
-                <option value="top">Top</option>
-                <option value="isometric">Isometric</option>
-                <option value="front-xz">Front</option>
-                <option value="side-yz">Side</option>
-              </select>
-            </label>
-          </div>
+          <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Deck Visualization</h3>
           <div style={{ flex: "1 1 auto", minHeight: 0 }}>
             <DeckVisualization
               deck={displayDeck}
@@ -999,8 +983,6 @@ export default function App() {
               gantryPosition={gantryPosition.data ?? null}
               machineXRange={machineXRange}
               machineYRange={machineYRange}
-              machineZRange={machineZRange}
-              view={deckView}
               yAxisMotion={yAxisMotion}
             />
           </div>
@@ -1020,18 +1002,7 @@ export default function App() {
 
   const topRight = (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, margin: "0 0 10px", flex: "0 0 auto" }}>
-        <h3 style={{ ...theme.panelTitle, margin: 0 }}>Deck Visualization</h3>
-        <label style={{ ...theme.fieldLabel, display: "flex", alignItems: "center", gap: 6 }}>
-          View
-          <select aria-label="Deck view" value={deckView} onChange={(event) => setDeckView(event.target.value as DeckView)} style={theme.input}>
-            <option value="top">Top</option>
-            <option value="isometric">Isometric</option>
-            <option value="front-xz">Front</option>
-            <option value="side-yz">Side</option>
-          </select>
-        </label>
-      </div>
+      <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Deck Visualization</h3>
       <div style={deckVisualizationFrameStyle}>
         <DeckVisualization
           deck={displayDeck}
@@ -1039,8 +1010,6 @@ export default function App() {
           gantryPosition={gantryPosition.data ?? null}
           machineXRange={machineXRange}
           machineYRange={machineYRange}
-          machineZRange={machineZRange}
-          view={deckView}
           yAxisMotion={yAxisMotion}
         />
       </div>

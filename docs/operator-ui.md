@@ -124,10 +124,9 @@ Two things to remember:
    disabled until both a gantry and a deck file are loaded.
 3. **Config picker.** Each tab starts with a dropdown listing the files of
    that kind in the config directory, plus **New** and **Delete** buttons.
-4. **Deck Visualization.** A deck map with **Top**, **Isometric**, **Front**,
-   and **Side** view choices. Labware appears as you define it, instruments
-   are drawn at the head, and a crosshair labeled **HEAD** tracks the live
-   gantry position. It is always visible.
+4. **Deck Visualization.** A top-down map of the deck. Labware appears as
+   you define it, instruments are drawn at the head, and a crosshair labeled
+   **HEAD** tracks the live gantry position. It is always visible.
 5. **Gantry Control.** Connection status, jog pad, coordinate readout,
    **Move To**, and the **Calibrate** button. Also always visible.
 6. **Config Directory.** The folder the UI reads and saves gantry, deck, and
