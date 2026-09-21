@@ -129,9 +129,9 @@ def apply_manual_edits(fluid_state_id: int, body: ManualEditBatchRequest) -> Flu
                 store.apply_manual_edits(fluid_state_id, body.actions,
                     expected_revisions=body.expected_revisions,
                     expected_active_revision=body.expected_active_revision)
+            snapshot = store.get_fluid_snapshot(fluid_state_id)
         except ContentsOwnershipError as exc:
             raise HTTPException(409, str(exc)) from exc
-            snapshot = store.get_fluid_snapshot(fluid_state_id)
         except ValueError as exc:
             raise HTTPException(409 if "revision" in str(exc) else 400, str(exc)) from exc
         except _STATE_EXCEPTIONS as exc:

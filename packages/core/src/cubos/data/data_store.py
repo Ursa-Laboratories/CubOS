@@ -1209,7 +1209,7 @@ class DataStore:
         result = self.apply_manual_edits(
             fluid_state_id,
             [{"mode": "set", "labware_key": labware_key, "location_id": location_id,
-              "volume_ul": volume_ul, "composition": composition or {}}],
+              "volume_ul": volume_ul, "composition": composition if composition is not None else {"unknown": volume_ul}}],
             expected_revisions={
                 (f"{labware_key}.{location_id}" if location_id else labware_key): expected_version
             } if expected_version is not None else {},
@@ -1227,6 +1227,15 @@ class DataStore:
         expected_revisions = expected_revisions or {}
         self._conn.execute("BEGIN IMMEDIATE")
         try:
+            from .fluid_state import FluidStateReconciliationRequiredError
+            pending = self._conn.execute(
+                "SELECT 1 FROM fluid_operations WHERE fluid_state_id=? AND status IN ('started','reconciliation_required') "
+                "UNION ALL SELECT 1 FROM tip_operations WHERE fluid_state_id=? AND status IN ('started','reconciliation_required') "
+                "UNION ALL SELECT 1 FROM cap_operations WHERE fluid_state_id=? AND status IN ('started','reconciliation_required') LIMIT 1",
+                (fluid_state_id, fluid_state_id, fluid_state_id),
+            ).fetchone()
+            if pending is not None:
+                raise FluidStateReconciliationRequiredError("manual contents edits require reconciliation of pending operations")
             active = self._conn.execute("SELECT fluid_state_id, revision FROM active_fluid_state WHERE singleton=1").fetchone()
             if active is None or int(active[0]) != fluid_state_id:
                 raise ValueError("only the selected active setup can be edited")
