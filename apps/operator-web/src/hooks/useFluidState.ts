@@ -52,6 +52,7 @@ export function useApplyManualEdits(fluidStateId: number | null) {
     onSuccess: (detail) => {
       qc.setQueryData(["fluid-states", fluidStateId], detail);
       qc.invalidateQueries({ queryKey: ["fluid-states"] });
+      qc.invalidateQueries({ queryKey: ["fluid-states", fluidStateId, "manual-edits"] });
     },
   });
 }

@@ -28,6 +28,10 @@ function compositionLabel(composition: Record<string, number>): string {
   return entries.length ? entries.map(([name, value]) => `${name} ${volumeLabel(value)}`).join(", ") : "No composition recorded";
 }
 
+function containerIdentity(labwareKey: string, locationId: string): string {
+  return locationId ? `${labwareKey}.${locationId}` : labwareKey;
+}
+
 export default function DeckContentsPanel({ deckFile, isRunActive = false }: Props) {
   const states = useFluidStates();
   const active = useActiveFluidState();
@@ -47,6 +51,8 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
   const [destination, setDestination] = useState("");
   const [liquidName, setLiquidName] = useState("");
   const [unit, setUnit] = useState<"uL" | "mL">("uL");
+  const [pasteText, setPasteText] = useState("");
+  const [pasteRows, setPasteRows] = useState<Array<{ key: string; volume: number; composition?: Record<string, number> }>>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [newLabel, setNewLabel] = useState("");
 
@@ -102,21 +108,21 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
     }
     try {
       const parsedComposition = parseComposition();
+      const effectiveComposition = Object.keys(parsedComposition).length ? parsedComposition : undefined;
       const targets = selectedRows.size > 1 && mode !== "transfer"
         ? rows.filter((row) => selectedRows.has(`${row.labware_key}:${row.location_id}`))
         : [editing];
       const expectedRevisions: Record<string, number> = {};
       const actions: ManualEditAction[] = targets.map((target) => {
-        const identity = `${target.labware_key}.${target.location_id}`;
-        expectedRevisions[identity] = target.version;
-        return { mode, labware_key: target.labware_key, location_id: target.location_id, volume_ul: mode === "empty" ? 0 : parsedVolume, composition: mode === "set" ? parsedComposition : undefined };
+        expectedRevisions[containerIdentity(target.labware_key, target.location_id)] = target.version;
+        return { mode, labware_key: target.labware_key, location_id: target.location_id, volume_ul: mode === "empty" ? 0 : parsedVolume, composition: mode === "set" || mode === "replace" ? effectiveComposition : mode === "add" && liquidName.trim() ? { [liquidName.trim()]: parsedVolume } : undefined };
       });
       const [destinationKey, destinationLocation] = destination.split(".", 2);
       if (mode === "transfer" && !destinationKey) throw new Error("Enter a destination like reservoir.A1.");
       if (mode === "transfer") {
         const destinationRow = rows.find((row) => row.labware_key === destinationKey && row.location_id === (destinationLocation ?? ""));
         if (!destinationRow) throw new Error("Destination container was not found in this setup.");
-        expectedRevisions[`${destinationRow.labware_key}.${destinationRow.location_id}`] = destinationRow.version;
+        expectedRevisions[containerIdentity(destinationRow.labware_key, destinationRow.location_id)] = destinationRow.version;
         actions[0].destination_labware_key = destinationKey;
         actions[0].destination_location_id = destinationLocation ?? "";
       }
@@ -155,6 +161,34 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
     } catch (error) {
       setNotice(error instanceof Error ? error.message : String(error));
     }
+  };
+
+  const preparePaste = () => {
+    try {
+      const parsed = pasteText.trim().split(/\r?\n/).filter(Boolean).map((line) => {
+        const [key, rawVolume, rawComposition] = line.split("\t");
+        const volume = Number(rawVolume);
+        if (!key || !Number.isFinite(volume) || volume < 0) throw new Error("Each row must be: labware.location<TAB>volume µL<TAB>optional composition name=value.");
+        const composition = rawComposition ? Object.fromEntries(rawComposition.split(",").map((part) => { const [name, value] = part.split("="); return [name.trim(), Number(value)]; })) : undefined;
+        return { key: key.trim(), volume, composition };
+      });
+      setPasteRows(parsed);
+      setNotice(`${parsed.length} pasted row${parsed.length === 1 ? "" : "s"} ready for review.`);
+    } catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
+  };
+
+  const savePaste = async () => {
+    if (!selectedId || !pasteRows.length) return;
+    const expectedRevisions: Record<string, number> = {};
+    const actions: ManualEditAction[] = pasteRows.map((item) => {
+      const [labwareKey, locationId = ""] = item.key.split(".", 2);
+      const row = rows.find((candidate) => candidate.labware_key === labwareKey && candidate.location_id === locationId);
+      if (!row) throw new Error(`Unknown container ${item.key}.`);
+      expectedRevisions[containerIdentity(labwareKey, locationId)] = row.version;
+      return { mode: "replace", labware_key: labwareKey, location_id: locationId, volume_ul: item.volume, composition: item.composition };
+    });
+    try { await applyEdits.mutateAsync({ expected_revisions: expectedRevisions, expected_active_revision: activeId === selectedId ? active.data?.revision : undefined, actions, note: "Spreadsheet paste record" }); setPasteRows([]); setPasteText(""); setNotice("Bulk contents recorded atomically."); }
+    catch (error) { setNotice(error instanceof Error ? error.message : String(error)); }
   };
 
   return (
@@ -197,6 +231,13 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
         {isHistorical && <span style={historyPillStyle}>Historical view · viewing does not activate this setup</span>}
         <span style={{ ...metaStyle, marginLeft: "auto" }}>{operations}</span>
       </div>
+      <details>
+        <summary style={{ ...theme.fieldLabel, cursor: "pointer" }}>Paste spreadsheet contents</summary>
+        <p style={metaStyle}>Paste tab separated rows: <span style={theme.mono}>labware.location · volume in µL · optional name=volume composition</span>.</p>
+        <textarea aria-label="Spreadsheet paste" value={pasteText} onChange={(event) => setPasteText(event.target.value)} style={{ ...theme.input, width: "100%", minHeight: 64, resize: "vertical" }} placeholder="reservoir.A1\t850\twater=850" />
+        <div style={{ display: "flex", gap: 8, marginTop: 6 }}><button type="button" style={theme.btn.secondary} onClick={preparePaste}>Prepare preview</button>{pasteRows.length > 0 && <button type="button" style={theme.btn.primary} disabled={isHistorical || isRunActive || applyEdits.isPending} onClick={() => void savePaste()}>Save {pasteRows.length} rows</button>}</div>
+        {pasteRows.length > 0 && <div style={metaStyle}>Preview: {pasteRows.map((row) => `${row.key} → ${volumeLabel(row.volume)}`).join(" · ")}</div>}
+      </details>
 
       {selectedId === null ? <div style={emptyStyle}>No setup selected.</div> : detail.isLoading ? <div style={emptyStyle}>Loading contents…</div> : (
         <>
@@ -224,7 +265,7 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
           </div>
           <details style={{ marginTop: 12 }}>
             <summary style={{ ...theme.fieldLabel, cursor: "pointer" }}>Manual change history ({manualEdits.data?.length ?? 0})</summary>
-            {(manualEdits.data ?? []).length === 0 ? <div style={metaStyle}>No manual changes recorded.</div> : <div style={{ marginTop: 8, display: "grid", gap: 6 }}>{(manualEdits.data ?? []).map((edit) => <div key={edit.id} style={{ ...metaStyle, padding: 8, border: `1px solid ${theme.color.border}`, borderRadius: theme.radius.sm }}><strong>{edit.operation}</strong> · {edit.labware_key}{edit.location_id ? `.${edit.location_id}` : ""} · {new Date(edit.created_at).toLocaleString()}<div>Before → after values are retained in the audit record.</div></div>)}</div>}
+            {(manualEdits.data ?? []).length === 0 ? <div style={metaStyle}>No manual changes recorded.</div> : <div style={{ marginTop: 8, display: "grid", gap: 6 }}>{(manualEdits.data ?? []).map((edit) => { const before = edit.before as { current_volume_ul?: number; volume_known?: boolean }; const after = edit.after as { current_volume_ul?: number; volume_known?: boolean }; return <div key={edit.id} style={{ ...metaStyle, padding: 8, border: `1px solid ${theme.color.border}`, borderRadius: theme.radius.sm }}><strong>{edit.operation}</strong> · {edit.labware_key}{edit.location_id ? `.${edit.location_id}` : ""} · {new Date(edit.created_at).toLocaleString()}<div>{before.volume_known === false ? "Unknown" : volumeLabel(Number(before.current_volume_ul ?? 0))} → {after.volume_known === false ? "Unknown" : volumeLabel(Number(after.current_volume_ul ?? 0))}</div></div>; })}</div>}
           </details>
         </>
       )}
@@ -232,12 +273,12 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
       {editing && <div style={dialogStyle} role="dialog" aria-label="Record manual change">
         <div style={theme.sectionLabel}>Record manual change · {editing.labware_key}{editing.location_id ? `.${editing.location_id}` : ""}</div>
         <p style={{ margin: "8px 0", color: theme.color.textSecondary, fontSize: 12 }}>This updates the journaled record only. It never commands the robot.</p>
-        <label style={fieldStyle}><span style={theme.fieldLabel}>Change type</span><select value={mode} onChange={(event) => setMode(event.target.value as ManualEditMode)} style={theme.input}><option value="set">Correct to observed</option><option value="add">Add volume</option><option value="remove">Remove volume</option><option value="empty">Record empty</option><option value="transfer">Record manual transfer</option></select></label>
+        <label style={fieldStyle}><span style={theme.fieldLabel}>Change type</span><select value={mode} onChange={(event) => setMode(event.target.value as ManualEditMode)} style={theme.input}><option value="set">Correct to observed</option><option value="add">Add volume</option><option value="remove">Remove volume</option><option value="empty">Record empty</option><option value="replace">Replace selected labware contents</option><option value="transfer">Record manual transfer</option></select></label>
         {mode !== "empty" && <label style={fieldStyle}><span style={theme.fieldLabel}>Unit</span><select aria-label="Volume unit" value={unit} onChange={(event) => setUnit(event.target.value as "uL" | "mL")} style={theme.input}><option value="uL">µL</option><option value="mL">mL</option></select></label>}
         {mode === "transfer" && <label style={fieldStyle}><span style={theme.fieldLabel}>Transfer volume ({unit})</span><input autoFocus value={volume} onChange={(event) => setVolume(event.target.value)} style={theme.input} inputMode="decimal" /></label>}
         {mode === "transfer" && <label style={fieldStyle}><span style={theme.fieldLabel}>Destination</span><input value={destination} onChange={(event) => setDestination(event.target.value)} style={theme.input} placeholder="reservoir.A1" /></label>}
         {mode !== "transfer" && mode !== "empty" && <label style={fieldStyle}><span style={theme.fieldLabel}>{mode === "set" ? "Observed volume" : "Volume change"} ({unit})</span><input autoFocus value={volume} onChange={(event) => setVolume(event.target.value)} style={theme.input} inputMode="decimal" /></label>}
-        {mode === "set" && <label style={fieldStyle}><span style={theme.fieldLabel}>Composition (optional)</span><input value={composition} onChange={(event) => setComposition(event.target.value)} style={theme.input} placeholder="water=900, dye=100" /></label>}
+        {(mode === "set" || mode === "replace") && <label style={fieldStyle}><span style={theme.fieldLabel}>Composition (optional)</span><input value={composition} onChange={(event) => setComposition(event.target.value)} style={theme.input} placeholder="water=900, dye=100" /></label>}
         {mode === "add" && <label style={fieldStyle}><span style={theme.fieldLabel}>Named liquid (optional)</span><input value={liquidName} onChange={(event) => setLiquidName(event.target.value)} style={theme.input} placeholder="buffer, water, sample…" /></label>}
         <div style={{ marginTop: 10, padding: 8, border: `1px solid ${theme.color.border}`, borderRadius: theme.radius.sm, color: theme.color.textSecondary, fontSize: 12 }}>Before → after preview: <strong>{previewText}</strong>. This is one atomic journal update.</div>
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end", marginTop: 10 }}><button type="button" style={theme.btn.secondary} onClick={() => setEditing(null)}>Cancel</button><button type="button" style={theme.btn.primary} disabled={applyEdits.isPending} onClick={() => void saveEdit()}>{applyEdits.isPending ? "Saving…" : "Save record"}</button></div>
