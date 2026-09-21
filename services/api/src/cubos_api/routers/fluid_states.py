@@ -125,6 +125,19 @@ def apply_manual_edits(fluid_state_id: int, body: ManualEditBatchRequest) -> Flu
     store = _open_store()
     try:
         try:
+            required = set()
+            for action in body.actions:
+                source = action.get("labware_key")
+                if source:
+                    required.add(f"{source}.{action.get('location_id', '')}" if action.get("location_id", "") else str(source))
+                if action.get("mode") == "transfer" and action.get("destination_labware_key"):
+                    dest = action["destination_labware_key"]
+                    loc = action.get("destination_location_id", "")
+                    required.add(f"{dest}.{loc}" if loc else str(dest))
+            if required != set(body.expected_revisions):
+                missing = sorted(required - set(body.expected_revisions))
+                extra = sorted(set(body.expected_revisions) - required)
+                raise HTTPException(422, f"expected_revisions must match touched containers; missing={missing}, extra={extra}")
             with get_contents_ownership().manual_transaction():
                 store.apply_manual_edits(fluid_state_id, body.actions,
                     expected_revisions=body.expected_revisions,

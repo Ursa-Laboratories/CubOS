@@ -146,7 +146,7 @@ def test_new_workflow_can_mark_omitted_contents_unknown(monkeypatch, tmp_path: P
         app, "POST", f"/api/v1/fluid-states/{state['id']}/manual-edits",
         json={"actions": [{"mode": "transfer", "labware_key": "source", "destination_labware_key": "waste", "volume_ul": 1}]},
     )
-    assert blocked.status_code == 400
+    assert blocked.status_code == 422
 
 
 def test_create_fluid_state_404_for_missing_deck_file(monkeypatch, tmp_path: Path):
