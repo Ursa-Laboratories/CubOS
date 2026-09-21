@@ -23,7 +23,8 @@ function volumeLabel(value: number): string {
   return value >= 1000 ? `${(value / 1000).toFixed(2)} mL` : `${value.toFixed(1)} µL`;
 }
 
-function compositionLabel(composition: Record<string, number>): string {
+function compositionLabel(composition: Record<string, number>, volumeKnown = true): string {
+  if (!volumeKnown) return "Composition unknown";
   const entries = Object.entries(composition ?? {});
   return entries.length ? entries.map(([name, value]) => `${name} ${volumeLabel(value)}`).join(", ") : "No composition recorded";
 }
@@ -257,7 +258,7 @@ export default function DeckContentsPanel({ deckFile, isRunActive = false }: Pro
                   <td style={tdStyle}><input type="checkbox" aria-label={`Select ${row.labware_key} ${row.location_id}`} checked={selectedRows.has(key)} onChange={() => setSelectedRows((current) => { const next = new Set(current); if (next.has(key)) next.delete(key); else next.add(key); return next; })} /></td>
                   <td style={tdStyle}><span style={theme.mono}>{row.labware_key}{row.location_id ? `.${row.location_id}` : ""}</span><div style={metaStyle}>{row.role || row.solution || row.labware_type}</div></td>
                   <td style={tdNumericStyle}><strong>{row.volume_known === false ? "Unknown" : volumeLabel(row.current_volume_ul)}</strong><div style={metaStyle}>working max {volumeLabel(row.working_volume_ul)} · {row.volume_known === false ? "operator confirmation required" : "tracked"}</div></td>
-                  <td style={tdStyle}>{compositionLabel(row.composition)}</td>
+                  <td style={tdStyle}>{compositionLabel(row.composition, row.volume_known !== false)}</td>
                   <td style={tdStyle}><button type="button" style={theme.btn.ghost} disabled={isHistorical || isRunActive} onClick={() => openEdit(row)}>Record manual change</button></td>
                 </tr>;
               })}</tbody>
