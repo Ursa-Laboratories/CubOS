@@ -46,6 +46,7 @@ from cubos_api.models.state import (
     TipStateResponse,
 )
 from cubos_api.services.state_errors import map_state_exception
+from cubos_api.services.contents_ownership import ContentsOwnershipError, get_contents_ownership
 from cubos_api.services.yaml_io import resolve_config_path
 
 router = APIRouter(prefix="/api/v1/fluid-states", tags=["cubos-state-v1"])
@@ -70,9 +71,12 @@ def select_active_fluid_state(body: SelectActiveFluidStateRequest) -> ActiveFlui
     store = _open_store()
     try:
         try:
-            active = store.set_active_fluid_state(
-                body.fluid_state_id, expected_revision=body.expected_revision
-            )
+            with get_contents_ownership().manual_transaction():
+                active = store.set_active_fluid_state(
+                    body.fluid_state_id, expected_revision=body.expected_revision
+                )
+        except ContentsOwnershipError as exc:
+            raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             status = 409 if "revision" in str(exc) else 404
             raise HTTPException(status, str(exc)) from exc
@@ -89,16 +93,19 @@ def edit_fluid_container(
     store = _open_store()
     try:
         try:
-            container = store.adjust_fluid_container(
-                fluid_state_id,
-                body.labware_key,
-                body.location_id,
-                body.volume_ul,
-                body.composition,
-                expected_version=body.expected_version,
-                operation=body.operation,
-            )
+            with get_contents_ownership().manual_transaction():
+                container = store.adjust_fluid_container(
+                    fluid_state_id,
+                    body.labware_key,
+                    body.location_id,
+                    body.volume_ul,
+                    body.composition,
+                    expected_version=body.expected_version,
+                    operation=body.operation,
+                )
             snapshot = store.get_fluid_snapshot(fluid_state_id)
+        except ContentsOwnershipError as exc:
+            raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             status = 409 if "revision" in str(exc) else 400
             raise HTTPException(status, str(exc)) from exc
@@ -118,9 +125,12 @@ def apply_manual_edits(fluid_state_id: int, body: ManualEditBatchRequest) -> Flu
     store = _open_store()
     try:
         try:
-            store.apply_manual_edits(fluid_state_id, body.actions,
-                expected_revisions=body.expected_revisions,
-                expected_active_revision=body.expected_active_revision)
+            with get_contents_ownership().manual_transaction():
+                store.apply_manual_edits(fluid_state_id, body.actions,
+                    expected_revisions=body.expected_revisions,
+                    expected_active_revision=body.expected_active_revision)
+        except ContentsOwnershipError as exc:
+            raise HTTPException(409, str(exc)) from exc
             snapshot = store.get_fluid_snapshot(fluid_state_id)
         except ValueError as exc:
             raise HTTPException(409 if "revision" in str(exc) else 400, str(exc)) from exc
