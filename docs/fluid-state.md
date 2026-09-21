@@ -59,6 +59,9 @@ same-shape plate. Every change has an immutable before/after history entry.
 Edits are rejected while a run or campaign owns the setup. If a run is
 interrupted, reconcile the actual source and destination volumes before
 resuming; CubOS does not infer them from the command that was attempted.
+An observed volume may exceed a labware working-volume warning while it is
+being recorded, but pre-run safety validation must resolve that warning before
+the robot is allowed to execute a protocol.
 
 ## Create a state
 

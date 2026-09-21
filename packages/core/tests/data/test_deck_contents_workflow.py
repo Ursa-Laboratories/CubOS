@@ -198,6 +198,36 @@ def test_manual_edits_are_blocked_while_a_fluid_operation_is_pending(tmp_path):
         )
 
 
+def test_unknown_opt_in_blocks_transfer_and_explicit_empty_is_known(tmp_path):
+    deck_path = tmp_path / "deck.yaml"
+    deck_path.write_text(DECK_YAML, encoding="utf-8")
+    deck = load_deck_from_yaml_safe(deck_path)
+    store = DataStore(":memory:")
+    state_id = store.create_fluid_state(deck_path, deck, omitted_volumes_unknown=True)
+    store.set_active_fluid_state(state_id)
+    with pytest.raises(ValueError, match="known source"):
+        store.apply_manual_edits(state_id, [{"mode": "transfer", "labware_key": "source", "destination_labware_key": "destination", "volume_ul": 1}])
+    empty = store.apply_manual_edits(state_id, [{"mode": "empty", "labware_key": "source"}])
+    assert empty[0]["volume_known"] is True
+
+
+def test_manual_edit_rejects_stale_active_revision_and_invalid_composition(tmp_path):
+    store, state_id = _state(tmp_path)
+    revision = _select(store, state_id)["revision"]
+    with pytest.raises(ValueError, match="active setup revision"):
+        store.apply_manual_edits(state_id, [{"mode": "set", "labware_key": "source", "volume_ul": 10, "composition": {"water": 10}}], expected_active_revision=revision - 1)
+    with pytest.raises(ValueError, match="composition"):
+        store.apply_manual_edits(state_id, [{"mode": "set", "labware_key": "source", "volume_ul": 10, "composition": {"water": 9}}])
+
+
+def test_active_selection_rejects_unknown_state_and_history_is_empty_before_edit(tmp_path):
+    store, state_id = _state(tmp_path)
+    with pytest.raises(ValueError, match="does not exist"):
+        store.set_active_fluid_state(999)
+    assert store.get_active_fluid_state() is None
+    assert store.list_fluid_manual_edits(state_id) == []
+
+
 def test_single_container_adjust_without_composition_records_unknown_contents(tmp_path):
     store, state_id = _state(tmp_path)
     _select(store, state_id)

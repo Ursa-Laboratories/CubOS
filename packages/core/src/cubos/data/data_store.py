@@ -1245,17 +1245,29 @@ class DataStore:
             for action in actions:
                 mode = str(action.get("mode", "set"))
                 if mode == "replace":
+                    cap = self._conn.execute(
+                        "SELECT status FROM cap_containers WHERE fluid_state_id=? AND labware_key=? AND location_id=?",
+                        (fluid_state_id, str(action["labware_key"]), str(action.get("location_id", ""))),
+                    ).fetchone()
+                    if cap is not None and cap[0] != "uncapped":
+                        raise ValueError("cannot replace a capped container; reconcile or explicitly confirm its cap state first")
+                if mode == "replace":
                     mode = "set"
                 source_key = str(action["labware_key"])
                 source_loc = str(action.get("location_id", ""))
                 source = self.get_fluid_container(fluid_state_id, source_key, source_loc)
                 identity = f"{source_key}.{source_loc}" if source_loc else source_key
+                if expected_revisions and identity not in expected_revisions:
+                    raise ValueError(f"missing expected revision for {identity}")
                 if identity in expected_revisions and source["version"] != expected_revisions[identity]:
                     raise ValueError(f"container revision is {source['version']}, expected {expected_revisions[identity]}")
                 if mode == "transfer":
                     dest_key = str(action["destination_labware_key"])
                     dest_loc = str(action.get("destination_location_id", ""))
                     dest = self.get_fluid_container(fluid_state_id, dest_key, dest_loc)
+                    dest_identity = f"{dest_key}.{dest_loc}" if dest_loc else dest_key
+                    if expected_revisions and dest_identity not in expected_revisions:
+                        raise ValueError(f"missing expected revision for {dest_identity}")
                     if not source.get("volume_known", True) or not dest.get("volume_known", True):
                         raise ValueError("transfer requires known source and destination volumes")
                     volume = float(action["volume_ul"])
