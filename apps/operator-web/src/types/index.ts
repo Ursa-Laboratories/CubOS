@@ -532,6 +532,7 @@ export interface ManualEditView {
   before: Record<string, unknown>;
   after: Record<string, unknown>;
   created_at: string;
+  note?: string | null;
 }
 
 export interface ContainerView {
