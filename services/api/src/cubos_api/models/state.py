@@ -108,6 +108,7 @@ class ManualEditView(BaseModel):
     operation: str
     before: Dict[str, Any]
     after: Dict[str, Any]
+    note: Optional[str] = None
     created_at: str
 
 

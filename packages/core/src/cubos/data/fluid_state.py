@@ -203,6 +203,7 @@ def create_fluid_state(
     *,
     label: str | None = None,
     initial_fluids: Mapping[str, Any] | None = None,
+    omitted_volumes_unknown: bool = False,
 ) -> int:
     """Create one durable state session and register its volume labware."""
     path, snapshot_json = _resolved_deck_provenance(deck_path)
@@ -249,6 +250,12 @@ def create_fluid_state(
                 location_id,
                 definition["volume_ul"],
                 definition["composition"],
+            )
+        if omitted_volumes_unknown:
+            connection.execute(
+                "UPDATE fluid_containers SET volume_known=0 WHERE fluid_state_id=? "
+                "AND current_volume_ul=0 AND composition_json='{}'",
+                (fluid_state_id,),
             )
         connection.execute(
             "UPDATE fluid_state_sessions SET updated_at = datetime('now') "
