@@ -183,6 +183,7 @@ CREATE TABLE IF NOT EXISTS fluid_containers (
                                       AND working_volume_ul <= capacity_ul
                                   ),
     current_volume_ul  REAL    NOT NULL DEFAULT 0.0 CHECK (current_volume_ul >= 0),
+    volume_known       INTEGER NOT NULL DEFAULT 1 CHECK (volume_known IN (0, 1)),
     composition_json   TEXT    NOT NULL DEFAULT '{}',
     version            INTEGER NOT NULL DEFAULT 0 CHECK (version >= 0),
     created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -410,6 +411,7 @@ class DataStore:
             "deck_descriptor_json",
             "TEXT NOT NULL DEFAULT '{}'",
         )
+        self._add_column_if_missing("fluid_containers", "volume_known", "INTEGER NOT NULL DEFAULT 1")
         self._conn.execute(
             "UPDATE experiments SET labware_key = labware_name "
             "WHERE labware_key IS NULL"
@@ -1073,17 +1075,22 @@ class DataStore:
         *,
         label: str | None = None,
         initial_fluids: Mapping[str, Any] | None = None,
+        omitted_volumes_unknown: bool = False,
     ) -> int:
         """Create a deck-associated fluid-state session."""
         from .fluid_state import create_fluid_state
 
-        return create_fluid_state(
+        state_id = create_fluid_state(
             self._conn,
             deck_path,
             deck,
             label=label,
             initial_fluids=initial_fluids,
         )
+        if omitted_volumes_unknown:
+            self._conn.execute("UPDATE fluid_containers SET volume_known=0 WHERE fluid_state_id=? AND current_volume_ul=0 AND composition_json='{}'", (state_id,))
+            self._conn.commit()
+        return state_id
 
     def resume_fluid_state(
         self,
@@ -1117,6 +1124,14 @@ class DataStore:
         if row is None:
             return None
         return {"fluid_state_id": row[0], "revision": row[1], "updated_at": row[2]}
+
+    def list_fluid_manual_edits(self, fluid_state_id: int) -> list[dict[str, Any]]:
+        rows = self._conn.execute(
+            "SELECT id, labware_key, location_id, operation, before_json, after_json, created_at "
+            "FROM fluid_manual_edits WHERE fluid_state_id=? ORDER BY id", (fluid_state_id,)
+        ).fetchall()
+        return [{"id": r[0], "labware_key": r[1], "location_id": r[2], "operation": r[3],
+                 "before": json.loads(r[4]), "after": json.loads(r[5]), "created_at": r[6]} for r in rows]
 
     def set_active_fluid_state(self, fluid_state_id: int, *, expected_revision: int | None = None) -> dict[str, Any]:
         """Select a live setup, rejecting stale writes atomically."""
@@ -1220,6 +1235,8 @@ class DataStore:
             touched: dict[tuple[str, str], FluidContainerSnapshot] = {}
             for action in actions:
                 mode = str(action.get("mode", "set"))
+                if mode == "replace":
+                    mode = "set"
                 source_key = str(action["labware_key"])
                 source_loc = str(action.get("location_id", ""))
                 source = self.get_fluid_container(fluid_state_id, source_key, source_loc)
@@ -1253,7 +1270,7 @@ class DataStore:
                     key = (old["labware_key"], old["location_id"])
                     touched[key] = old
                     self._conn.execute(
-                        "UPDATE fluid_containers SET current_volume_ul=?, composition_json=?, version=version+1, updated_at=datetime('now') WHERE fluid_state_id=? AND labware_key=? AND location_id=?",
+                        "UPDATE fluid_containers SET current_volume_ul=?, volume_known=1, composition_json=?, version=version+1, updated_at=datetime('now') WHERE fluid_state_id=? AND labware_key=? AND location_id=?",
                         (new_volume, json.dumps(new_composition), fluid_state_id, old["labware_key"], old["location_id"]),
                     )
                     new = dict(old); new.update(current_volume_ul=new_volume, composition=new_composition, version=old["version"] + 1)

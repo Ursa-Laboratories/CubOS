@@ -65,6 +65,7 @@ class CreateFluidStateRequest(BaseModel):
     deck_file: str
     label: Optional[str] = None
     fluids: Dict[str, FluidSeedItem] = Field(default_factory=dict)
+    omitted_volumes_unknown: bool = False
 
 
 class FluidStateSummaryResponse(BaseModel):
@@ -100,6 +101,16 @@ class ManualEditBatchRequest(BaseModel):
     note: Optional[str] = None
 
 
+class ManualEditView(BaseModel):
+    id: int
+    labware_key: str
+    location_id: str
+    operation: str
+    before: Dict[str, Any]
+    after: Dict[str, Any]
+    created_at: str
+
+
 class SelectActiveFluidStateRequest(BaseModel):
     fluid_state_id: int
     expected_revision: Optional[int] = None
@@ -117,6 +128,7 @@ class ContainerView(BaseModel):
     capacity_ul: float
     working_volume_ul: float
     current_volume_ul: float
+    volume_known: bool = False
     composition: Dict[str, float]
     version: int
     updated_at: str

@@ -41,6 +41,7 @@ from cubos_api.models.state import (
     SelectActiveFluidStateRequest,
     ManualContainerEditRequest,
     ManualEditBatchRequest,
+    ManualEditView,
     TipContainerView,
     TipStateResponse,
 )
@@ -137,6 +138,19 @@ def apply_manual_edits(fluid_state_id: int, body: ManualEditBatchRequest) -> Flu
         store.close()
 
 
+@router.get("/{fluid_state_id}/manual-edits", response_model=List[ManualEditView])
+def list_manual_edits(fluid_state_id: int) -> List[ManualEditView]:
+    store = _open_store()
+    try:
+        try:
+            store.get_fluid_snapshot(fluid_state_id)
+        except _STATE_EXCEPTIONS as exc:
+            raise map_state_exception(exc) from exc
+        return [ManualEditView(**row) for row in store.list_fluid_manual_edits(fluid_state_id)]
+    finally:
+        store.close()
+
+
 def _data_db_path() -> Path:
     return get_settings().data_db_path.expanduser().resolve()
 
@@ -176,6 +190,7 @@ def _containers_with_roles(snapshot: Dict[str, Any]) -> List[ContainerView]:
                 capacity_ul=container["capacity_ul"],
                 working_volume_ul=container["working_volume_ul"],
                 current_volume_ul=container["current_volume_ul"],
+                volume_known=container.get("volume_known", False),
                 composition=container["composition"],
                 version=container["version"],
                 updated_at=container["updated_at"],
@@ -280,7 +295,8 @@ def create_fluid_state(body: CreateFluidStateRequest) -> FluidStateSummaryRespon
         }
         try:
             state_id = store.create_fluid_state(
-                str(deck_path), deck, label=body.label, initial_fluids=fluids
+                str(deck_path), deck, label=body.label, initial_fluids=fluids,
+                omitted_volumes_unknown=body.omitted_volumes_unknown,
             )
         except _STATE_EXCEPTIONS as exc:
             raise map_state_exception(exc) from exc
