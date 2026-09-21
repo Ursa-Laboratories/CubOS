@@ -24,6 +24,7 @@ from cubos_api.models.state import RunStateSelection
 from cubos_api.services.run_store import RunStore, sha256_text
 from cubos_api.services.step_observer import RunStoreStepObserver
 from cubos_api.services.yaml_io import resolve_config_path
+from cubos_api.services.contents_ownership import get_contents_ownership
 
 
 log = logging.getLogger(__name__)
@@ -122,6 +123,7 @@ class RunManager:
         self.settings = settings
         self.store = RunStore(settings.ensure_run_dir())
         self._lock = threading.Lock()
+        self._contents_ownership = get_contents_ownership()
         self._active_run_id: str | None = None
         self._recover_interrupted_runs()
 
@@ -141,32 +143,47 @@ class RunManager:
 
     def submit(self, submission: RunSubmission) -> RunRecord:
         run_id = submission.run_id or uuid.uuid4().hex
+        contents_claimed = False
         with self._lock:
             if self._active_run_id is not None:
                 raise RunConflictError(f"server busy with run {self._active_run_id!r}")
             if self.store.exists(run_id) or self.store.run_dir(run_id).exists():
                 raise RunConflictError(f"run {run_id!r} already exists")
-
-            gantry_yaml, deck_yaml, protocol_yaml = self._resolve_bundle(submission)
-            self._validate_bundle(gantry_yaml, deck_yaml, protocol_yaml)
-            fluid_state_id = self._resolve_run_state(
-                deck_yaml, submission.state, use_active_state=submission.use_active_state
-            )
-            record = RunRecord(
-                run_id=run_id,
-                state="queued",
-                created_at=time.time(),
-                mock_mode=submission.mock_mode,
-                metadata=submission.metadata,
-                fluid_state_id=fluid_state_id,
-            )
-            self.store.create(
-                record,
-                gantry_yaml=gantry_yaml,
-                deck_yaml=deck_yaml,
-                protocol_yaml=protocol_yaml,
-            )
-            self._active_run_id = run_id
+            # Claim before reading the active pointer.  This makes state
+            # capture and active-setup edits one indivisible workflow.
+            if submission.state is not None or submission.use_active_state:
+                self._contents_ownership.claim_run(run_id)
+                contents_claimed = True
+            try:
+                gantry_yaml, deck_yaml, protocol_yaml = self._resolve_bundle(submission)
+                self._validate_bundle(gantry_yaml, deck_yaml, protocol_yaml)
+                fluid_state_id = self._resolve_run_state(
+                    deck_yaml, submission.state, use_active_state=submission.use_active_state
+                )
+                if contents_claimed and fluid_state_id is not None:
+                    self._contents_ownership.bind_fluid_state(run_id, fluid_state_id)
+                elif contents_claimed:
+                    self._contents_ownership.release(run_id)
+                    contents_claimed = False
+                record = RunRecord(
+                    run_id=run_id,
+                    state="queued",
+                    created_at=time.time(),
+                    mock_mode=submission.mock_mode,
+                    metadata=submission.metadata,
+                    fluid_state_id=fluid_state_id,
+                )
+                self.store.create(
+                    record,
+                    gantry_yaml=gantry_yaml,
+                    deck_yaml=deck_yaml,
+                    protocol_yaml=protocol_yaml,
+                )
+                self._active_run_id = run_id
+            except Exception:
+                if contents_claimed:
+                    self._contents_ownership.release(run_id)
+                raise
 
         thread = threading.Thread(
             target=self._execute,
@@ -345,6 +362,9 @@ class RunManager:
                     step_observer=step_observer,
                 )
             result = _jsonable(raw_result)
+            if record.fluid_state_id is not None:
+                campaign_id = result.get("campaign_id") if isinstance(result, dict) else None
+                self._contents_ownership.bind_campaign(run_id, campaign_id)
             record = self.store.read(run_id) or record
             record.state = "succeeded"
             record.result = result
@@ -372,6 +392,8 @@ class RunManager:
             with self._lock:
                 if self._active_run_id == run_id:
                     self._active_run_id = None
+            if record.fluid_state_id is not None:
+                self._contents_ownership.release(run_id)
 
 
 _manager: RunManager | None = None
