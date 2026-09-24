@@ -133,6 +133,9 @@ def _seed_all_instruments_store(path):
                 "step_size_mm": 0.01,
                 "z_target_mm": -80.0,
                 "force_limit_n": 10.0,
+                "tip_shape": "spherical",
+                "tip_radius_mm": 1.5875,
+                "tip_material": "stainless",
             },
         ),
     )
@@ -327,6 +330,9 @@ def test_export_campaign_results_csvs_writes_sane_flat_files(tmp_path):
     asmi_rows = list(csv.DictReader((run_dir / "asmi.csv").open()))
     assert [row["z_position_mm"] for row in asmi_rows] == ["-74.0", "-74.1"]
     assert [row["corrected_force_n"] for row in asmi_rows] == ["0.1", "0.2"]
+    assert [row["tip_shape"] for row in asmi_rows] == ["spherical", "spherical"]
+    assert [row["tip_radius_mm"] for row in asmi_rows] == ["1.5875", "1.5875"]
+    assert [row["tip_material"] for row in asmi_rows] == ["stainless", "stainless"]
 
     potentiostat_rows = list(csv.DictReader((run_dir / "potentiostat.csv").open()))
     assert [row["time_s"] for row in potentiostat_rows] == ["0.0", "0.1"]
@@ -339,6 +345,24 @@ def test_export_campaign_results_csvs_writes_sane_flat_files(tmp_path):
     assert "uvvis,2,uvvis.csv" in manifest
     assert "asmi,2,asmi.csv" in manifest
     assert "potentiostat,2,potentiostat.csv" in manifest
+
+
+def test_results_csv_leaves_tip_blank_for_unmigrated_database(tmp_path):
+    import sqlite3
+
+    db_path = tmp_path / "panda_data.db"
+    campaign_id = _seed_all_instruments_store(db_path)
+    with sqlite3.connect(db_path) as conn:
+        for column in ("tip_shape", "tip_radius_mm", "tip_material"):
+            conn.execute(f"ALTER TABLE asmi_measurements DROP COLUMN {column}")
+
+    export_campaign_results_csvs(db_path, campaign_id, output_dir=tmp_path / "results")
+
+    run_dir = next((tmp_path / "results").iterdir())
+    asmi_rows = list(csv.DictReader((run_dir / "asmi.csv").open()))
+    assert [row["tip_shape"] for row in asmi_rows] == ["", ""]
+    assert [row["tip_radius_mm"] for row in asmi_rows] == ["", ""]
+    assert [row["corrected_force_n"] for row in asmi_rows] == ["0.1", "0.2"]
 
 
 def test_export_campaign_results_csvs_writes_via_atomic_replace(monkeypatch, tmp_path):

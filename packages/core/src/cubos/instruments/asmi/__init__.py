@@ -1,5 +1,10 @@
 from cubos.instruments.asmi.interface import ASMIInstrument
-from cubos.instruments.asmi.models import ASMIStatus, MeasurementResult
+from cubos.instruments.asmi.models import (
+    ASMIStatus,
+    IndenterTip,
+    MeasurementResult,
+    TipShape,
+)
 from cubos.instruments.asmi.vendors.vernier import VernierASMI
 from cubos.instruments.asmi.exceptions import (
     ASMIError,
@@ -12,6 +17,8 @@ __all__ = [
     "ASMIInstrument",
     "VernierASMI",
     "ASMIStatus",
+    "IndenterTip",
+    "TipShape",
     "MeasurementResult",
     "ASMIError",
     "ASMIConnectionError",

@@ -743,6 +743,124 @@ class TestASMIInstrumentMeasurementLogging:
         assert row == (None, None, None)
         store.close()
 
+    def test_asmi_tip_geometry_round_trip(self):
+        store = _make_store()
+        cid = store.create_campaign(description="asmi tip")
+        eid = store.create_experiment(cid, "film_plate", "B1", "[]")
+
+        mid = store.log_measurement(eid, _asmi_measurement(
+            tip_shape="spherical", tip_radius_mm=1.5875, tip_material="stainless",
+        ))
+
+        row = store._conn.execute(
+            "SELECT tip_shape, tip_radius_mm, tip_material "
+            "FROM asmi_measurements WHERE id = ?",
+            (mid,),
+        ).fetchone()
+        assert row == ("spherical", pytest.approx(1.5875), "stainless")
+        store.close()
+
+    def test_asmi_without_tip_persists_nulls(self):
+        store = _make_store()
+        cid = store.create_campaign(description="asmi no tip")
+        eid = store.create_experiment(cid, "film_plate", "B1", "[]")
+
+        mid = store.log_measurement(eid, _asmi_measurement())
+
+        row = store._conn.execute(
+            "SELECT tip_shape, tip_radius_mm, tip_material "
+            "FROM asmi_measurements WHERE id = ?",
+            (mid,),
+        ).fetchone()
+        assert row == (None, None, None)
+        store.close()
+
+    @pytest.mark.parametrize("metadata_constraint", ["", "NOT NULL"])
+    def test_legacy_asmi_table_gains_tip_columns(self, tmp_path, metadata_constraint):
+        db_path = tmp_path / "legacy.db"
+        with sqlite3.connect(db_path) as conn:
+            conn.executescript(f"""
+                CREATE TABLE campaigns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    description TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE experiments (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    campaign_id INTEGER NOT NULL REFERENCES campaigns(id),
+                    labware_name TEXT NOT NULL,
+                    well_id TEXT,
+                    contents TEXT,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE asmi_measurements (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    experiment_id INTEGER NOT NULL REFERENCES experiments(id),
+                    sample_timestamps TEXT NOT NULL,
+                    z_positions TEXT NOT NULL,
+                    raw_forces TEXT NOT NULL,
+                    corrected_forces TEXT NOT NULL,
+                    directions TEXT NOT NULL,
+                    baseline_avg REAL NOT NULL,
+                    baseline_std REAL NOT NULL,
+                    force_exceeded INTEGER NOT NULL DEFAULT 0,
+                    data_points INTEGER NOT NULL,
+                    step_size_mm REAL {metadata_constraint},
+                    z_target_mm REAL {metadata_constraint},
+                    force_limit_n REAL {metadata_constraint},
+                    timestamp TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                INSERT INTO campaigns (id, description) VALUES (1, 'legacy');
+                INSERT INTO experiments (id, campaign_id, labware_name, well_id)
+                VALUES (1, 1, 'plate', 'A1');
+                INSERT INTO asmi_measurements (
+                    id, experiment_id, sample_timestamps, z_positions, raw_forces,
+                    corrected_forces, directions, baseline_avg, baseline_std,
+                    data_points, step_size_mm, z_target_mm, force_limit_n
+                ) VALUES (1, 1, '[1.0]', '[0.0]', '[0.1]', '[0.0]', '["down"]',
+                          0.1, 0.0, 1, 0.01, -1.0, 10.0);
+            """)
+
+        store = DataStore(db_path=db_path)
+        columns = {
+            row[1] for row in store._conn.execute("PRAGMA table_info(asmi_measurements)")
+        }
+        assert {"tip_shape", "tip_radius_mm", "tip_material"} <= columns
+        legacy_row = store._conn.execute(
+            "SELECT step_size_mm, tip_shape, tip_radius_mm FROM asmi_measurements WHERE id = 1"
+        ).fetchone()
+        assert legacy_row == (pytest.approx(0.01), None, None)
+
+        mid = store.log_measurement(1, _asmi_measurement(
+            tip_shape="flat_punch", tip_radius_mm=2.0,
+        ))
+        new_row = store._conn.execute(
+            "SELECT tip_shape, tip_radius_mm FROM asmi_measurements WHERE id = ?",
+            (mid,),
+        ).fetchone()
+        assert new_row == ("flat_punch", pytest.approx(2.0))
+        store.close()
+
+
+def _asmi_measurement(**tip_metadata) -> InstrumentMeasurement:
+    return InstrumentMeasurement(
+        measurement_type=MeasurementType.ASMI_INDENTATION,
+        payload={
+            "sample_timestamps": [1.0],
+            "z_positions_mm": [0.0],
+            "raw_forces_n": [0.01],
+            "corrected_forces_n": [0.005],
+            "directions": ["down"],
+        },
+        metadata={
+            "baseline_avg": 0.005,
+            "baseline_std": 0.001,
+            "force_exceeded": False,
+            "data_points": 1,
+            **tip_metadata,
+        },
+    )
+
 
 class TestLabwareTracking:
 

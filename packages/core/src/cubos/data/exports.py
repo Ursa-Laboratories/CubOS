@@ -630,6 +630,9 @@ def _asmi_results_csv(rows: list[sqlite3.Row]) -> str:
         "step_size_mm",
         "z_target_mm",
         "force_limit_n",
+        "tip_shape",
+        "tip_radius_mm",
+        "tip_material",
     ]
     output_rows: list[dict[str, Any]] = []
     for row in rows:
@@ -656,8 +659,15 @@ def _asmi_results_csv(rows: list[sqlite3.Row]) -> str:
                 "step_size_mm": row["step_size_mm"],
                 "z_target_mm": row["z_target_mm"],
                 "force_limit_n": row["force_limit_n"],
+                "tip_shape": _optional_column(row, "tip_shape"),
+                "tip_radius_mm": _optional_column(row, "tip_radius_mm"),
+                "tip_material": _optional_column(row, "tip_material"),
             })
     return _dict_rows_csv(columns, output_rows)
+
+
+def _optional_column(row: sqlite3.Row, name: str) -> Any:
+    return row[name] if name in row.keys() else None
 
 
 def _potentiostat_results_csv(rows: list[sqlite3.Row]) -> str:

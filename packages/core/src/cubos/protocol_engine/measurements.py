@@ -225,6 +225,9 @@ def normalize_measurement(
             "step_size_mm": raw_result.get("step_size_mm"),
             "z_target_mm": raw_result.get("z_target_mm"),
             "force_limit_n": raw_result.get("force_limit_n"),
+            "tip_shape": raw_result.get("tip_shape"),
+            "tip_radius_mm": raw_result.get("tip_radius_mm"),
+            "tip_material": raw_result.get("tip_material"),
             "instrument_name": instrument_name,
             "method_name": method_name,
         }

@@ -1,10 +1,10 @@
 """Generic ASMI/force-indentation instrument interface."""
 
 from abc import abstractmethod
-from typing import Any
+from typing import Any, Mapping, Optional
 
 from cubos.instruments.base_instrument import BaseInstrument
-from cubos.instruments.asmi.models import ASMIStatus, MeasurementResult
+from cubos.instruments.asmi.models import ASMIStatus, IndenterTip, MeasurementResult
 
 # Surface-detection defaults shared by drivers and static validators.
 # The search descends in coarse steps from the measurement plane until the
@@ -17,6 +17,21 @@ DEFAULT_SURFACE_SEARCH_MAX_TRAVEL_MM = 10.0
 
 class ASMIInstrument(BaseInstrument):
     """Base class for ASMI-compatible force sensing instruments."""
+
+    def __init__(
+        self,
+        *args: Any,
+        tip: IndenterTip | Mapping[str, Any] | None = None,
+        **kwargs: Any,
+    ):
+        super().__init__(*args, **kwargs)
+        self.tip: Optional[IndenterTip] = IndenterTip.from_config(tip)
+
+    def tip_result_fields(self) -> dict[str, Any]:
+        """Tip geometry keys every indentation result must carry for persistence."""
+        if self.tip is None:
+            return {"tip_shape": None, "tip_radius_mm": None, "tip_material": None}
+        return self.tip.result_fields()
 
     @abstractmethod
     def measure(self, n_samples: int = 1) -> MeasurementResult:

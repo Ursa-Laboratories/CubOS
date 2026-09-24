@@ -95,6 +95,27 @@ instruments:
     sensor_channels: [1]
 ```
 
+Optionally declare the indenter tip that is physically mounted on the probe.
+CubOS stores the tip with every indentation so analysis (for example, Hertz
+elastic modulus, which depends on tip radius) uses the real geometry instead
+of a guess:
+
+```yaml
+instruments:
+  asmi:
+    type: asmi
+    vendor: vernier
+    tip:
+      shape: spherical     # spherical or flat_punch
+      radius_mm: 1.5875    # sphere radius, or punch radius for flat_punch
+      material: stainless  # optional free text
+```
+
+`tip` is optional; configs without it keep working and their measurements
+record no tip. When `tip` is present, `shape` and a positive `radius_mm` are
+required. Update this block whenever you swap the physical tip — each
+measurement records the tip that was configured when it ran.
+
 **`filmetrics` / `kla`** — KLA Filmetrics thin-film measurement, driven through
 a vendor executable and recipe file:
 

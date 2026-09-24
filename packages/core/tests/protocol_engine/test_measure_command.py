@@ -218,6 +218,46 @@ def test_measure_persists_single_asmi_indentation_when_campaign_is_present():
     store.close()
 
 
+def test_measure_persists_asmi_tip_geometry_from_instrument_config():
+    from cubos.gantry.gantry import Gantry
+    from cubos.instruments.asmi.vendors.vernier import VernierASMI
+
+    plate = _plate()
+    board = MagicMock()
+    board.controller = Gantry(offline=True)
+    board.instruments = {
+        "asmi": VernierASMI(
+            offline=True,
+            step_size=0.5,
+            tip={"shape": "spherical", "radius_mm": 1.5875, "material": "stainless"},
+        ),
+    }
+    store = DataStore(db_path=":memory:")
+    campaign_id = store.create_campaign(description="measure tip")
+    store.register_labware(campaign_id, "plate_1", plate)
+    ctx = ProtocolContext(
+        gantry=board,
+        deck=Deck({"plate_1": plate}),
+        data_store=store,
+        campaign_id=campaign_id,
+    )
+
+    measure(
+        ctx,
+        instrument="asmi",
+        position="plate_1.A1",
+        measurement_height=0.0,
+        method="indentation",
+        indentation_limit_height=-1.0,
+    )
+
+    row = store._conn.execute(
+        "SELECT tip_shape, tip_radius_mm, tip_material FROM asmi_measurements"
+    ).fetchone()
+    assert row == ("spherical", pytest.approx(1.5875), "stainless")
+    store.close()
+
+
 def test_measure_persists_single_filmetrics_thickness_when_campaign_is_present():
     plate = _plate()
     board = MagicMock()

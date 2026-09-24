@@ -119,6 +119,33 @@ class TestNormalizeMeasurement:
         assert measurement.payload["z_positions_mm"] == [-73.01, -73.02]
         assert measurement.payload["directions"] == ["down", "down"]
         assert measurement.metadata["measure_with_return"] is False
+        assert measurement.metadata["tip_shape"] is None
+        assert measurement.metadata["tip_radius_mm"] is None
+        assert measurement.metadata["tip_material"] is None
+
+    def test_normalize_asmi_indentation_carries_tip_geometry(self):
+        raw_result = {
+            "measurements": [
+                {"timestamp": 1.0, "z_mm": -73.01, "raw_force_n": 0.10, "corrected_force_n": 0.01, "direction": "down"},
+            ],
+            "baseline_avg": 0.09,
+            "baseline_std": 0.001,
+            "force_exceeded": False,
+            "data_points": 1,
+            "tip_shape": "spherical",
+            "tip_radius_mm": 1.5875,
+            "tip_material": "stainless",
+        }
+
+        measurement = normalize_measurement(
+            instrument_name="asmi",
+            method_name="indentation",
+            raw_result=raw_result,
+        )
+
+        assert measurement.metadata["tip_shape"] == "spherical"
+        assert measurement.metadata["tip_radius_mm"] == 1.5875
+        assert measurement.metadata["tip_material"] == "stainless"
 
     def test_normalize_asmi_indentation_with_return_mode(self):
         raw_result = {

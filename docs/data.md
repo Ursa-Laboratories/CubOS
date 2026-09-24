@@ -26,7 +26,7 @@ successful run, analysis-friendly CSV exports are also written under
 | `filmetrics_measurements` | Thickness and goodness-of-fit. |
 | `uv_curing_measurements` | UV intensity, exposure duration, and cure timestamp. |
 | `camera_measurements` | Image path results. |
-| `asmi_measurements` | Force/z/time series, baseline stats, force-limit metadata. |
+| `asmi_measurements` | Force/z/time series, baseline stats, force-limit metadata, and the indenter tip configured in the gantry YAML (`tip_shape`, `tip_radius_mm`, `tip_material`; empty when no tip was configured). |
 | `potentiostat_measurements` | OCP/CA/CV/CP time, voltage, current, and technique metadata. |
 | `labware` | Per-well or per-vial volume and contents tracking. |
 

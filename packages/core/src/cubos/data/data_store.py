@@ -120,6 +120,9 @@ CREATE TABLE IF NOT EXISTS asmi_measurements (
     step_size_mm    REAL,
     z_target_mm     REAL,
     force_limit_n   REAL,
+    tip_shape       TEXT,
+    tip_radius_mm   REAL,
+    tip_material    TEXT,
     timestamp       TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -395,6 +398,9 @@ class DataStore:
             "WHERE labware_key IS NULL"
         )
         self._relax_asmi_metadata_columns()
+        self._add_column_if_missing("asmi_measurements", "tip_shape", "TEXT")
+        self._add_column_if_missing("asmi_measurements", "tip_radius_mm", "REAL")
+        self._add_column_if_missing("asmi_measurements", "tip_material", "TEXT")
         self._migrate_fluid_operations_schema()
         self._create_fluid_operation_indexes()
         self._conn.commit()
@@ -806,6 +812,9 @@ class DataStore:
                 step_size_mm=_optional_float(measurement.metadata.get("step_size_mm")),
                 z_target_mm=_optional_float(measurement.metadata.get("z_target_mm")),
                 force_limit_n=_optional_float(measurement.metadata.get("force_limit_n")),
+                tip_shape=measurement.metadata.get("tip_shape"),
+                tip_radius_mm=_optional_float(measurement.metadata.get("tip_radius_mm")),
+                tip_material=measurement.metadata.get("tip_material"),
             )
 
         if measurement.measurement_type == MeasurementType.FILMETRICS_THICKNESS:
@@ -953,17 +962,21 @@ class DataStore:
         step_size_mm: float,
         z_target_mm: float,
         force_limit_n: float,
+        tip_shape: Optional[str] = None,
+        tip_radius_mm: Optional[float] = None,
+        tip_material: Optional[str] = None,
     ) -> int:
         cursor = self._conn.execute(
             "INSERT INTO asmi_measurements "
             "(experiment_id, sample_timestamps, z_positions, raw_forces, "
             "corrected_forces, directions, baseline_avg, baseline_std, "
             "force_exceeded, data_points, step_size_mm, z_target_mm, "
-            "force_limit_n) "
+            "force_limit_n, tip_shape, tip_radius_mm, tip_material) "
             "VALUES (:experiment_id, :sample_timestamps, :z_positions, "
             ":raw_forces, :corrected_forces, :directions, :baseline_avg, "
             ":baseline_std, :force_exceeded, :data_points, :step_size_mm, "
-            ":z_target_mm, :force_limit_n)",
+            ":z_target_mm, :force_limit_n, :tip_shape, :tip_radius_mm, "
+            ":tip_material)",
             {
                 "experiment_id": experiment_id,
                 "sample_timestamps": json.dumps(list(sample_timestamps)),
@@ -978,6 +991,9 @@ class DataStore:
                 "step_size_mm": step_size_mm,
                 "z_target_mm": z_target_mm,
                 "force_limit_n": force_limit_n,
+                "tip_shape": tip_shape,
+                "tip_radius_mm": tip_radius_mm,
+                "tip_material": tip_material,
             },
         )
         return cursor.lastrowid

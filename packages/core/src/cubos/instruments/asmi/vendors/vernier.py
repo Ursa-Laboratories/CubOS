@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import statistics
 import time
-from typing import Optional
+from typing import Any, Mapping, Optional
 
 from cubos.instruments.asmi.interface import (
     ASMIInstrument,
@@ -15,7 +15,7 @@ from cubos.instruments.asmi.exceptions import (
     ASMICommandError,
     ASMIConnectionError,
 )
-from cubos.instruments.asmi.models import ASMIStatus, MeasurementResult
+from cubos.instruments.asmi.models import ASMIStatus, IndenterTip, MeasurementResult
 
 _DEFAULT_FORCE_THRESHOLD = -100
 _DEFAULT_SENSOR_CHANNELS = [1]
@@ -64,10 +64,11 @@ class VernierASMI(ASMIInstrument):
         surface_search_step: float = DEFAULT_SURFACE_SEARCH_STEP_MM,
         surface_force_threshold: float = DEFAULT_SURFACE_FORCE_THRESHOLD_N,
         surface_search_max_travel: float = DEFAULT_SURFACE_SEARCH_MAX_TRAVEL_MM,
+        tip: IndenterTip | Mapping[str, Any] | None = None,
     ):
         super().__init__(
             name=name, offset_x=offset_x, offset_y=offset_y,
-            depth=depth, offline=offline,
+            depth=depth, offline=offline, tip=tip,
         )
         self._default_force = default_force
         self._force_threshold = force_threshold
@@ -383,6 +384,7 @@ class VernierASMI(ASMIInstrument):
                 measure_with_return=measure_with_return,
             )
             result["detect_surface"] = detect_surface
+            result.update(self.tip_result_fields())
             if surface_info is not None:
                 result.update(surface_info)
                 result["z_target_mm"] = target_z
@@ -453,6 +455,7 @@ class VernierASMI(ASMIInstrument):
             force_limit_n=_force_limit,
         )
         result["detect_surface"] = detect_surface
+        result.update(self.tip_result_fields())
         if surface_info is not None:
             result.update(surface_info)
         return result
