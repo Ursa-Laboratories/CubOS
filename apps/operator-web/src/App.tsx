@@ -10,6 +10,7 @@ import { EMPTY_GANTRY } from "./components/editor/gantryDefaults";
 import ProtocolEditor from "./components/editor/ProtocolEditor";
 import DataOutputPanel from "./components/data/DataOutputPanel";
 import StatePanel from "./components/state/StatePanel";
+import DeckContentsPanel from "./components/state/DeckContentsPanel";
 import { useConfirm } from "./components/common/useConfirm";
 import { ConfigDirDialog } from "./components/common/ConfigDirDialog";
 import { UpdateBanner } from "./components/common/UpdateBanner";
@@ -29,7 +30,7 @@ import {
 import RunPanel from "./components/run/RunPanel";
 import { useProtocolCommands, useProtocolConfigs, useProtocol, useSaveProtocol, useValidateProtocolSetup, useRunStatus, useDeleteProtocol } from "./hooks/useProtocol";
 import { useExperimentData } from "./hooks/useExperimentData";
-import { useFluidStates } from "./hooks/useFluidState";
+import { useActiveFluidState, useFluidStates } from "./hooks/useFluidState";
 import { buildSeedFluids, validateSeedRows } from "./utils/fluidSeeds";
 import { loadWorkspaceState, saveWorkspaceState } from "./utils/workspaceState";
 import type {
@@ -102,7 +103,7 @@ type SavedMark = { filename: string; at: Date } | null;
 
 export default function App() {
   const qc = useQueryClient();
-  const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "State" | "Results">("Workflow");
+  const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "Contents" | "State" | "Results">("Workflow");
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
@@ -255,6 +256,12 @@ export default function App() {
   const gantryPosition = useGantryPosition(true);
   const experimentData = useExperimentData();
   const fluidStates = useFluidStates();
+  const activeFluidState = useActiveFluidState();
+  React.useEffect(() => {
+    if (activeFluidState.data !== undefined && fluidStateChoice.mode === "none") {
+      setFluidStateChoice((current) => current.mode === "none" ? { ...current, mode: "active" } : current);
+    }
+  }, [activeFluidState.data, fluidStateChoice.mode]);
 
   // Local working copies of each editor's edits, kept in App state so
   // they survive tab switches (each editor unmounts on tab-away, which
@@ -596,6 +603,7 @@ export default function App() {
         deck_file: deckFile,
         protocol_file: protocolFile,
         ...(state ? { state } : {}),
+        ...(fluidStateChoice.mode === "active" ? { use_active_state: true } : {}),
       });
       // Enter the run mode only once the server has accepted the run. A
       // rejected submission (server busy, policy, deck fingerprint) would
@@ -678,6 +686,7 @@ export default function App() {
             // tab, and the run is what the operator navigates back to.
             ...(activeRunId ? (["Run"] as const) : []),
             "Visualize",
+            "Contents",
             "State",
             "Results",
           ] as const
@@ -956,6 +965,7 @@ export default function App() {
             fluidStateChoice={fluidStateChoice}
             onFluidStateChoiceChange={setFluidStateChoice}
             availableFluidStates={fluidStates.data ?? []}
+            activeFluidStateId={activeFluidState.data?.fluid_state_id ?? null}
           />
         </>
           )}
@@ -989,6 +999,7 @@ export default function App() {
         </div>
       )}
       {activeView === "State" && <StatePanel />}
+      {activeView === "Contents" && <DeckContentsPanel deckFile={deckFile} isRunActive={protocolRunActive} />}
       {activeView === "Results" && (
         <DataOutputPanel
           campaigns={experimentData.data ?? []}
