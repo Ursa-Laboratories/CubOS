@@ -31,6 +31,7 @@ def test_move_to_preserves_xyz_without_hidden_z_flip(mock_mill_cls) -> None:
         y_coordinate=100.0,
         z_coordinate=40.0,
         travel_z=None,
+        allow_diagonal_xy=False,
     )
 
 
@@ -76,6 +77,7 @@ def test_boundary_translation(mock_mill_cls) -> None:
         y_coordinate=200.0,
         z_coordinate=80.0,
         travel_z=None,
+        allow_diagonal_xy=False,
     )
 
 
@@ -89,6 +91,22 @@ def test_travel_z_translates_to_machine_space(mock_mill_cls) -> None:
         y_coordinate=100.0,
         z_coordinate=40.0,
         travel_z=70.0,
+        allow_diagonal_xy=False,
+    )
+
+
+@patch("cubos.gantry.gantry.Mill")
+def test_travel_z_at_working_volume_ceiling_allows_diagonal_xy(mock_mill_cls) -> None:
+    """travel_z == working_volume.z_max (80.0 in _config()) is the top of
+    the deck's travel envelope, so XY may combine into one diagonal move."""
+    gantry = Gantry(config=_config())
+    gantry.move_to(150.0, 100.0, 40.0, travel_z=80.0)
+    mock_mill_cls.return_value.move_to.assert_called_once_with(
+        x_coordinate=150.0,
+        y_coordinate=100.0,
+        z_coordinate=40.0,
+        travel_z=80.0,
+        allow_diagonal_xy=True,
     )
 
 

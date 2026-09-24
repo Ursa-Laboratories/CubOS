@@ -19,6 +19,7 @@ def test_gantry_move_to_sends_deck_origin_z_without_sign_flip(mock_mill_cls):
         y_coordinate=20.0,
         z_coordinate=-5.0,
         travel_z=None,
+        allow_diagonal_xy=False,
     )
 
 

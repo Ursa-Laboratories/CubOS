@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import re
 from typing import Any, Dict, Optional
 
@@ -78,6 +79,22 @@ class Gantry:
 
         if hasattr(self.config, "factory_z_travel_mm"):
             return float(getattr(self.config, "factory_z_travel_mm"))
+        return None
+
+    def _working_volume_z_max(self) -> Optional[float]:
+        """Deck-frame top of the working volume, if configured.
+
+        This is the calibrated usable ceiling (post pull-off reserve),
+        not the raw ``factory_z_travel_mm`` hardware span.
+        """
+        if not isinstance(self.config, dict):
+            return None
+        working_volume = self.config.get("working_volume")
+        if not isinstance(working_volume, dict):
+            return None
+        z_max = working_volume.get("z_max")
+        if isinstance(z_max, (int, float)) and math.isfinite(float(z_max)):
+            return float(z_max)
         return None
 
     def connect(self, port: str | None = None) -> None:
@@ -217,6 +234,11 @@ class Gantry:
         descends/ascends to the target Z. This is how higher layers
         (InstrumentedGantry, protocol commands) express "travel above this labware" without the
         mill baking in a machine-wide retract.
+
+        When ``travel_z`` is exactly the top of the configured working
+        volume, XY travel is known to clear every obstacle on the deck,
+        so the underlying X/Y motion is combined into one diagonal move
+        instead of two sequential ones.
         """
         if self._offline:
             if travel_z is not None:
@@ -236,11 +258,18 @@ class Gantry:
                 if travel_z is not None
                 else None
             )
+            z_max = self._working_volume_z_max()
+            allow_diagonal_xy = (
+                travel_z is not None
+                and z_max is not None
+                and math.isclose(travel_z, z_max, abs_tol=1e-6)
+            )
             self._mill.move_to(
                 x_coordinate=machine_x,
                 y_coordinate=machine_y,
                 z_coordinate=machine_z,
                 travel_z=machine_travel_z,
+                allow_diagonal_xy=allow_diagonal_xy,
             )
         except (
             MillConnectionError,

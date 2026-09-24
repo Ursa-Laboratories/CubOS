@@ -629,6 +629,68 @@ class TestCNCDriverLogic(unittest.TestCase):
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
     @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_build_transit_move_combines_xy_when_diagonal_allowed(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        """allow_diagonal_xy=True (caller has confirmed travel_z is the
+        top of the working volume) combines X and Y into one G01."""
+        mill = Mill()
+
+        current = Coordinates(-100.0, -50.0, -78.0)
+        target = Coordinates(-110.0, -60.0, -90.0)
+        commands = mill._build_transit_move(
+            current, target, travel_z=-85.0, allow_diagonal_xy=True,
+        )
+
+        self.assertEqual(commands, [
+            "G01 Z-85.0 F3000",           # lift
+            "G01 X-110.0 Y-60.0 F3000",   # combined diagonal
+            "G01 Z-90.0 F3000",           # descend
+        ])
+
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_build_transit_move_diagonal_allowed_but_only_one_axis_changes(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        """allow_diagonal_xy has nothing to combine when only one of X/Y
+        actually moves — that axis is still emitted alone."""
+        mill = Mill()
+
+        current = Coordinates(-100.0, -50.0, -85.0)
+        target = Coordinates(-110.0, -50.0, -85.0)  # Y unchanged
+        commands = mill._build_transit_move(
+            current, target, travel_z=-85.0, allow_diagonal_xy=True,
+        )
+
+        self.assertEqual(commands, ["G01 X-110.0 F3000"])
+
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
+    def test_move_to_passes_allow_diagonal_xy_through_to_transit_builder(
+        self, mock_cmd_logger, mock_mill_logger, mock_serial,
+    ):
+        """End-to-end: move_to(..., allow_diagonal_xy=True) emits the
+        combined X/Y command via execute_command."""
+        mill = Mill()
+        mill.ser_mill = MagicMock()
+        mill.current_coordinates = MagicMock(
+            return_value=Coordinates(-100.0, -50.0, -78.0),
+        )
+        mill.execute_command = MagicMock()
+
+        mill.move_to(
+            x_coordinate=-110.0, y_coordinate=-60.0, z_coordinate=-90.0,
+            travel_z=-85.0, allow_diagonal_xy=True,
+        )
+
+        mill.execute_command.assert_any_call("G01 X-110.0 Y-60.0 F3000")
+
+    @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
+    @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
     def test_move_to_survives_position_read_failure(
         self, mock_cmd_logger, mock_mill_logger, mock_serial,
     ):

@@ -928,6 +928,7 @@ class Mill:
         z_coordinate: float = 0.00,
         coordinates: Coordinates = None,
         travel_z: Optional[float] = None,
+        allow_diagonal_xy: bool = False,
     ) -> None:
         """
         Move the mill to the specified coordinates.
@@ -948,6 +949,11 @@ class Mill:
             z_coordinate (float): Z coordinate.
             coordinates (Coordinates): Target coordinates object (overrides x/y/z params).
             travel_z (float): Machine-space Z to hold during XY travel.
+            allow_diagonal_xy (bool): Combine X and Y into one interpolated
+                move during transit at ``travel_z``. Only safe when the
+                caller has confirmed ``travel_z`` is the top of the working
+                volume, so no obstacle can lie in the XY plane at that
+                height; ignored when ``travel_z`` is None.
         """
         goto = (
             Coordinates(x=x_coordinate, y=y_coordinate, z=z_coordinate)
@@ -992,7 +998,8 @@ class Mill:
             )
         else:
             commands = self._build_transit_move(
-                current_coordinates, target_coordinates, travel_z
+                current_coordinates, target_coordinates, travel_z,
+                allow_diagonal_xy=allow_diagonal_xy,
             )
         for cmd in commands:
             self.execute_command(cmd)
@@ -1061,14 +1068,21 @@ class Mill:
         current_coordinates: Coordinates,
         target_coordinates: Coordinates,
         travel_z: float,
+        allow_diagonal_xy: bool = False,
     ):
         """Transit via ``travel_z``, axis-by-axis: lift → X → Y → descend.
 
         Each step is emitted only when it would produce actual motion,
         so a move already at ``travel_z`` skips the lift, a same-X
         (or same-Y) move skips that axis, and a final Z matching
-        ``travel_z`` skips the descent. X and Y always move in
-        separate G-codes — no diagonal.
+        ``travel_z`` skips the descent.
+
+        X and Y move in separate G-codes by default — no diagonal — since
+        a straight-line XY interpolation could graze an obstacle the
+        caller didn't plan for. When ``allow_diagonal_xy`` is set (only
+        safe when ``travel_z`` is confirmed to be the top of the working
+        volume, where no obstacle can be in the XY plane), X and Y are
+        combined into a single interpolated move instead.
 
         ``current_coordinates`` may be ``None`` (position read failed);
         the full lift → X → Y → descend sequence is then emitted
@@ -1081,10 +1095,17 @@ class Mill:
         commands = []
         if current_coordinates is None or current_coordinates.z != travel_z:
             commands.append(f"G01 Z{travel_z}{f}")
-        if current_coordinates is None or target_coordinates.x != current_coordinates.x:
-            commands.append(f"G01 X{target_coordinates.x}{f}")
-        if current_coordinates is None or target_coordinates.y != current_coordinates.y:
-            commands.append(f"G01 Y{target_coordinates.y}{f}")
+        x_changes = current_coordinates is None or target_coordinates.x != current_coordinates.x
+        y_changes = current_coordinates is None or target_coordinates.y != current_coordinates.y
+        if allow_diagonal_xy and x_changes and y_changes:
+            commands.append(
+                f"G01 X{target_coordinates.x} Y{target_coordinates.y}{f}"
+            )
+        else:
+            if x_changes:
+                commands.append(f"G01 X{target_coordinates.x}{f}")
+            if y_changes:
+                commands.append(f"G01 Y{target_coordinates.y}{f}")
         if target_coordinates.z != travel_z:
             commands.append(f"G01 Z{target_coordinates.z}{f}")
         return commands

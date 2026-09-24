@@ -55,6 +55,7 @@ class TestGantry(unittest.TestCase):
             y_coordinate=20.0,
             z_coordinate=30.0,
             travel_z=None,
+            allow_diagonal_xy=False,
         )
 
     @patch("cubos.gantry.gantry.Mill")
@@ -67,7 +68,55 @@ class TestGantry(unittest.TestCase):
             y_coordinate=20.0,
             z_coordinate=30.0,
             travel_z=50.0,
+            allow_diagonal_xy=False,
         )
+
+    @patch("cubos.gantry.gantry.Mill")
+    def test_move_with_travel_z_at_working_volume_ceiling_allows_diagonal_xy(
+        self, mock_mill_cls,
+    ):
+        """travel_z == working_volume.z_max means XY travel clears every
+        obstacle on the deck, so X/Y may combine into one diagonal move."""
+        mock_mill = mock_mill_cls.return_value
+        config = {**self.config, "working_volume": {"z_max": 50.0}}
+        gantry = Gantry(config=config)
+        gantry.move_to(10, 20, 30, travel_z=50.0)
+        mock_mill.move_to.assert_called_with(
+            x_coordinate=10.0,
+            y_coordinate=20.0,
+            z_coordinate=30.0,
+            travel_z=50.0,
+            allow_diagonal_xy=True,
+        )
+
+    @patch("cubos.gantry.gantry.Mill")
+    def test_move_with_travel_z_below_working_volume_ceiling_forbids_diagonal_xy(
+        self, mock_mill_cls,
+    ):
+        mock_mill = mock_mill_cls.return_value
+        config = {**self.config, "working_volume": {"z_max": 50.0}}
+        gantry = Gantry(config=config)
+        gantry.move_to(10, 20, 30, travel_z=49.0)
+        mock_mill.move_to.assert_called_with(
+            x_coordinate=10.0,
+            y_coordinate=20.0,
+            z_coordinate=30.0,
+            travel_z=49.0,
+            allow_diagonal_xy=False,
+        )
+
+    def test_working_volume_z_max_none_when_config_not_a_dict(self):
+        gantry = Gantry(config=object(), offline=True)
+        self.assertIsNone(gantry._working_volume_z_max())
+
+    def test_working_volume_z_max_none_when_working_volume_missing(self):
+        gantry = Gantry(config=self.config, offline=True)
+        self.assertIsNone(gantry._working_volume_z_max())
+
+    def test_working_volume_z_max_none_when_z_max_not_numeric(self):
+        config = {**self.config, "working_volume": {"z_max": "top"}}
+        gantry = Gantry(config=config, offline=True)
+        self.assertIsNone(gantry._working_volume_z_max())
 
     @patch("cubos.gantry.gantry.Mill")
     def test_is_healthy(self, mock_mill_cls):
