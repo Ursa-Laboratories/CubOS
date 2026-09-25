@@ -257,6 +257,18 @@ class GantrySession:
             return GantryPositionSnapshot(connected=False, status="Not connected")
         acquired = self._lock.acquire(blocking=False)
         if not acquired:
+            # Protocol execution owns the operation lock.  Read the latest
+            # status frame already consumed by the controller driver so this
+            # endpoint can show real observed motion without racing serial
+            # command/response traffic.
+            cached_reader = getattr(self._gantry, "get_cached_position_info", None)
+            if cached_reader is not None:
+                try:
+                    cached = cached_reader()
+                except Exception:
+                    cached = None
+                if cached is not None:
+                    return self._snapshot_from_position_info(cached)
             return self._position_from_cache_with_status(self._extract_status())
         try:
             return self._read_position_locked()
@@ -741,6 +753,24 @@ class GantrySession:
             move_error=self._move_error,
         )
         return self._last_position
+
+    def _snapshot_from_position_info(self, info: dict[str, Any]) -> GantryPositionSnapshot:
+        coords = info["coords"]
+        work_pos = info.get("work_pos")
+        snapshot = GantryPositionSnapshot(
+            x=float(coords["x"]),
+            y=float(coords["y"]),
+            z=float(coords["z"]),
+            work_x=float(work_pos["x"]) if work_pos else None,
+            work_y=float(work_pos["y"]) if work_pos else None,
+            work_z=float(work_pos["z"]) if work_pos else None,
+            status=str(info["status"]),
+            connected=True,
+            calibration_warning=self._calibration_warning,
+            move_error=self._move_error,
+        )
+        self._last_position = snapshot
+        return snapshot
 
     def _position_from_cache_with_status(self, status: str) -> GantryPositionSnapshot:
         if self._last_position is not None:
