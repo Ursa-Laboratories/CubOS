@@ -1,6 +1,10 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fluidStateApi } from "../api/client";
-import type { CreateFluidStateRequest, ResolveReconciliationRequest } from "../types";
+import type {
+  CorrectContainerRequest,
+  CreateFluidStateRequest,
+  ResolveReconciliationRequest,
+} from "../types";
 
 export function useFluidStates() {
   return useQuery({
@@ -68,6 +72,26 @@ export function useResolveReconciliation(fluidStateId: number | null) {
   return useMutation({
     mutationFn: (body: ResolveReconciliationRequest) =>
       fluidStateApi.resolveReconciliation(fluidStateId!, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["fluid-states", fluidStateId] });
+    },
+  });
+}
+
+export function useCorrectContainer(fluidStateId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (args: {
+      labwareKey: string;
+      locationId: string;
+      body: CorrectContainerRequest;
+    }) =>
+      fluidStateApi.correctContainer(
+        fluidStateId!,
+        args.labwareKey,
+        args.locationId,
+        args.body,
+      ),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["fluid-states", fluidStateId] });
     },

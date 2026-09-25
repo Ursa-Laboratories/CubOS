@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import StatePanel from "./StatePanel";
@@ -116,7 +116,12 @@ const RECONCILIATION: ReconciliationResponse = {
   items: [RECONCILIATION_ITEM],
 };
 
-function installFetchMock(overrides: { reconciliation?: ReconciliationResponse } = {}) {
+function installFetchMock(
+  overrides: {
+    reconciliation?: ReconciliationResponse;
+    correctContainer?: () => Response;
+  } = {},
+) {
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
@@ -138,6 +143,18 @@ function installFetchMock(overrides: { reconciliation?: ReconciliationResponse }
         operation_key: "indeterminate",
         status: "applied",
         detail: "[alexc] confirmed via camera review",
+      });
+    }
+    if (path === "/api/v1/fluid-states/1/containers/source" && method === "PATCH") {
+      if (overrides.correctContainer) return overrides.correctContainer();
+      return jsonResponse({
+        labware_key: "source",
+        location_id: "",
+        previous_volume_ul: 100,
+        current_volume_ul: 80,
+        composition: { buffer: 80 },
+        version: 2,
+        detail: "[alexc] measured jar",
       });
     }
     return new Response("Not found", { status: 404 });
@@ -254,5 +271,138 @@ describe("StatePanel", () => {
 
     expect(await screen.findByText(/No fluid state selected/)).toBeInTheDocument();
     expect(select.value).toBe("");
+  });
+
+  it("double-clicking the volume cell opens a prefilled inline editor", async () => {
+    installFetchMock({ reconciliation: { fluid_state_id: 1, items: [] } });
+    const user = userEvent.setup();
+    renderPanel();
+
+    const cell = await screen.findByText("100.000 / 400.000");
+    await user.dblClick(cell);
+
+    const input = (await screen.findByLabelText("Edit volume for source")) as HTMLInputElement;
+    expect(input.value).toBe("100");
+  });
+
+  it("saving a corrected volume calls correctContainer with the captured version and refetches", async () => {
+    const fetchMock = installFetchMock({ reconciliation: { fluid_state_id: 1, items: [] } });
+    const user = userEvent.setup();
+    renderPanel();
+
+    const cell = await screen.findByText("100.000 / 400.000");
+    await user.dblClick(cell);
+    const input = await screen.findByLabelText("Edit volume for source");
+    await user.clear(input);
+    await user.type(input, "80");
+    await user.keyboard("{Enter}");
+
+    expect(await screen.findByText(/Correct volume for source/)).toBeInTheDocument();
+    expect(screen.getByText(/100\.000 → 80\.000/)).toBeInTheDocument();
+
+    await user.type(screen.getByPlaceholderText("Your name or initials"), "alexc");
+    await user.type(
+      screen.getByPlaceholderText(/Why is this correction accurate/),
+      "measured jar",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/fluid-states/1/containers/source",
+      expect.objectContaining({ method: "PATCH" }),
+    ));
+    const [, init] = fetchMock.mock.calls.find(
+      ([reqInput]) => reqInput === "/api/v1/fluid-states/1/containers/source",
+    )!;
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      new_volume_ul: 80,
+      version: 1,
+      operator: "alexc",
+      reason: "measured jar",
+    });
+
+    await waitFor(() => {
+      const detailCalls = fetchMock.mock.calls.filter(
+        ([reqInput]) => reqInput === "/api/v1/fluid-states/1",
+      );
+      expect(detailCalls.length).toBeGreaterThan(1);
+    });
+  });
+
+  it("blocks submitting a correction with a blank operator or reason", async () => {
+    const fetchMock = installFetchMock({ reconciliation: { fluid_state_id: 1, items: [] } });
+    const user = userEvent.setup();
+    renderPanel();
+
+    const cell = await screen.findByText("100.000 / 400.000");
+    await user.dblClick(cell);
+    const input = await screen.findByLabelText("Edit volume for source");
+    await user.clear(input);
+    await user.type(input, "80");
+    await user.keyboard("{Enter}");
+
+    await user.click(await screen.findByRole("button", { name: "Save" }));
+    expect(await screen.findByText(/Operator and reason are both required/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/fluid-states/1/containers/source",
+      expect.anything(),
+    );
+  });
+
+  it("surfaces a backend error in the form and keeps it open", async () => {
+    installFetchMock({
+      reconciliation: { fluid_state_id: 1, items: [] },
+      correctContainer: () =>
+        new Response(
+          JSON.stringify({ detail: "source changed since this correction was opened" }),
+          { status: 409, headers: { "Content-Type": "application/json" } },
+        ),
+    });
+    const user = userEvent.setup();
+    renderPanel();
+
+    const cell = await screen.findByText("100.000 / 400.000");
+    await user.dblClick(cell);
+    const input = await screen.findByLabelText("Edit volume for source");
+    await user.clear(input);
+    await user.type(input, "80");
+    await user.keyboard("{Enter}");
+
+    await user.type(screen.getByPlaceholderText("Your name or initials"), "alexc");
+    await user.type(
+      screen.getByPlaceholderText(/Why is this correction accurate/),
+      "measured jar",
+    );
+    await user.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(
+      await screen.findByText(/source changed since this correction was opened/),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Correct volume for source/)).toBeInTheDocument();
+  });
+
+  it("cancels the inline editor on Escape or an unchanged blur without calling the API", async () => {
+    const fetchMock = installFetchMock({ reconciliation: { fluid_state_id: 1, items: [] } });
+    const user = userEvent.setup();
+    renderPanel();
+
+    const cell = await screen.findByText("100.000 / 400.000");
+    await user.dblClick(cell);
+    await user.type(await screen.findByLabelText("Edit volume for source"), "5");
+    await user.keyboard("{Escape}");
+
+    expect(screen.queryByLabelText("Edit volume for source")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Correct volume for source/)).not.toBeInTheDocument();
+
+    await user.dblClick(cell);
+    const reopened = await screen.findByLabelText("Edit volume for source");
+    fireEvent.blur(reopened);
+
+    expect(screen.queryByLabelText("Edit volume for source")).not.toBeInTheDocument();
+    expect(screen.queryByText(/Correct volume for source/)).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      "/api/v1/fluid-states/1/containers/source",
+      expect.anything(),
+    );
   });
 });

@@ -27,6 +27,7 @@ from .exports import (
 from .fluid_state import (
     FLUID_STATE_API_VERSION,
     FluidContainerSnapshot,
+    FluidCorrectionResult,
     FluidOperationSnapshot,
     FluidReplacementEndpoint,
     FluidReplacementState,
@@ -79,6 +80,7 @@ __all__ = [
     "list_campaign_summaries",
     "FLUID_STATE_API_VERSION",
     "FluidContainerSnapshot",
+    "FluidCorrectionResult",
     "FluidOperationSnapshot",
     "FluidReplacementEndpoint",
     "FluidReplacementState",

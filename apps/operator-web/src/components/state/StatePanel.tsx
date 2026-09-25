@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import type { CSSProperties } from "react";
+import { useMemo, useRef, useState } from "react";
+import type { CSSProperties, KeyboardEvent } from "react";
 import * as theme from "../../theme";
 import {
   useFluidStates,
@@ -8,8 +8,11 @@ import {
   useCapState,
   useReconciliation,
   useResolveReconciliation,
+  useCorrectContainer,
 } from "../../hooks/useFluidState";
-import type { OperationView } from "../../types";
+import type { ContainerView, OperationView } from "../../types";
+
+const VOLUME_CHANGE_TOLERANCE_UL = 1e-6;
 
 const RESOLUTIONS: { value: string; label: string }[] = [
   { value: "applied", label: "Applied — confirmed it happened as journaled" },
@@ -33,6 +36,23 @@ interface ResolveFormState {
   reason: string;
 }
 
+interface EditingCellState {
+  labware_key: string;
+  location_id: string;
+  version: number;
+  previousVolume: number;
+}
+
+interface CorrectFormState {
+  labware_key: string;
+  location_id: string;
+  version: number;
+  previousVolume: number;
+  newVolume: number;
+  operator: string;
+  reason: string;
+}
+
 export default function StatePanel() {
   const fluidStates = useFluidStates();
   // undefined = no explicit choice yet (fall back to the newest state once
@@ -48,9 +68,16 @@ export default function StatePanel() {
   const caps = useCapState(selectedId);
   const reconciliation = useReconciliation(selectedId);
   const resolveMutation = useResolveReconciliation(selectedId);
+  const correctMutation = useCorrectContainer(selectedId);
 
   const [resolveForm, setResolveForm] = useState<ResolveFormState | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
+
+  const [editingCell, setEditingCell] = useState<EditingCellState | null>(null);
+  const [editingValue, setEditingValue] = useState("");
+  const [correctForm, setCorrectForm] = useState<CorrectFormState | null>(null);
+  const [correctError, setCorrectError] = useState<string | null>(null);
+  const suppressNextBlurRef = useRef(false);
 
   const reconciliationItems = useMemo(
     () => reconciliation.data?.items ?? [],
@@ -81,6 +108,87 @@ export default function StatePanel() {
       reconciliation.refetch();
     } catch (err) {
       setResolveError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const beginEditingVolume = (container: ContainerView) => {
+    setCorrectError(null);
+    suppressNextBlurRef.current = false;
+    setEditingCell({
+      labware_key: container.labware_key,
+      location_id: container.location_id,
+      version: container.version,
+      previousVolume: container.current_volume_ul,
+    });
+    setEditingValue(String(container.current_volume_ul));
+  };
+
+  const cancelEditingVolume = () => {
+    setEditingCell(null);
+  };
+
+  // Use the version/volume captured when editing began, not whatever the
+  // row re-rendered with meanwhile (e.g. a background refetch) — otherwise
+  // a concurrent change to this container would go undetected instead of
+  // rejecting with a 409.
+  const commitEditingVolume = (editing: EditingCellState) => {
+    const parsed = Number(editingValue);
+    const changed =
+      Number.isFinite(parsed) &&
+      Math.abs(parsed - editing.previousVolume) > VOLUME_CHANGE_TOLERANCE_UL;
+    setEditingCell(null);
+    if (!changed) return;
+    setCorrectForm({
+      labware_key: editing.labware_key,
+      location_id: editing.location_id,
+      version: editing.version,
+      previousVolume: editing.previousVolume,
+      newVolume: parsed,
+      operator: "",
+      reason: "",
+    });
+  };
+
+  const handleVolumeKeyDown = (event: KeyboardEvent<HTMLInputElement>, editing: EditingCellState) => {
+    if (event.key === "Enter") {
+      suppressNextBlurRef.current = true;
+      commitEditingVolume(editing);
+    } else if (event.key === "Escape") {
+      suppressNextBlurRef.current = true;
+      cancelEditingVolume();
+    }
+  };
+
+  const handleVolumeBlur = (editing: EditingCellState) => {
+    if (suppressNextBlurRef.current) {
+      suppressNextBlurRef.current = false;
+      return;
+    }
+    commitEditingVolume(editing);
+  };
+
+  const submitCorrect = async () => {
+    if (!correctForm) return;
+    if (!correctForm.operator.trim() || !correctForm.reason.trim()) {
+      setCorrectError("Operator and reason are both required.");
+      return;
+    }
+    setCorrectError(null);
+    try {
+      await correctMutation.mutateAsync({
+        labwareKey: correctForm.labware_key,
+        locationId: correctForm.location_id,
+        body: {
+          new_volume_ul: correctForm.newVolume,
+          version: correctForm.version,
+          operator: correctForm.operator.trim(),
+          reason: correctForm.reason.trim(),
+        },
+      });
+      setCorrectForm(null);
+      detail.refetch();
+    } catch (err) {
+      setCorrectError(err instanceof Error ? err.message : String(err));
     }
   };
 
@@ -218,23 +326,92 @@ export default function StatePanel() {
                     </tr>
                   </thead>
                   <tbody>
-                    {detail.data.containers.map((container) => (
-                      <tr key={`${container.labware_key}.${container.location_id}`}>
-                        <td style={tdStyle}>
-                          <span style={theme.mono}>
-                            {container.labware_key}
-                            {container.location_id ? `.${container.location_id}` : ""}
-                          </span>
-                        </td>
-                        <td style={tdStyle}>{container.role ?? "—"}</td>
-                        <td style={tdNumericStyle}>
-                          {formatVolume(container.current_volume_ul)} / {formatVolume(container.working_volume_ul)}
-                        </td>
-                        <td style={tdStyle}>{formatComposition(container.composition)}</td>
-                      </tr>
-                    ))}
+                    {detail.data.containers.map((container) => {
+                      const isEditing =
+                        editingCell?.labware_key === container.labware_key &&
+                        editingCell?.location_id === container.location_id;
+                      const editing = isEditing ? editingCell : null;
+                      return (
+                        <tr key={`${container.labware_key}.${container.location_id}`}>
+                          <td style={tdStyle}>
+                            <span style={theme.mono}>
+                              {container.labware_key}
+                              {container.location_id ? `.${container.location_id}` : ""}
+                            </span>
+                          </td>
+                          <td style={tdStyle}>{container.role ?? "—"}</td>
+                          <td
+                            style={tdNumericStyle}
+                            onDoubleClick={() => beginEditingVolume(container)}
+                          >
+                            {editing ? (
+                              <input
+                                type="number"
+                                step="0.001"
+                                min="0"
+                                autoFocus
+                                aria-label={`Edit volume for ${container.labware_key}${container.location_id ? `.${container.location_id}` : ""}`}
+                                style={{ ...theme.input, width: 100 }}
+                                value={editingValue}
+                                onChange={(event) => setEditingValue(event.target.value)}
+                                onKeyDown={(event) => handleVolumeKeyDown(event, editing)}
+                                onBlur={() => handleVolumeBlur(editing)}
+                              />
+                            ) : (
+                              <>
+                                {formatVolume(container.current_volume_ul)} / {formatVolume(container.working_volume_ul)}
+                              </>
+                            )}
+                          </td>
+                          <td style={tdStyle}>{formatComposition(container.composition)}</td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
+              </div>
+            )}
+
+            {correctForm && (
+              <div style={resolveFormStyle}>
+                <div style={theme.sectionLabel}>
+                  Correct volume for {correctForm.labware_key}
+                  {correctForm.location_id ? `.${correctForm.location_id}` : ""}
+                </div>
+                <div style={metaTextStyle}>
+                  {formatVolume(correctForm.previousVolume)} → {formatVolume(correctForm.newVolume)} µL
+                </div>
+                <label style={fieldRowStyle}>
+                  <span style={theme.fieldLabel}>Operator</span>
+                  <input
+                    style={theme.input}
+                    value={correctForm.operator}
+                    onChange={(event) => setCorrectForm({ ...correctForm, operator: event.target.value })}
+                    placeholder="Your name or initials"
+                  />
+                </label>
+                <label style={fieldRowStyle}>
+                  <span style={theme.fieldLabel}>Reason</span>
+                  <textarea
+                    style={{ ...theme.input, minHeight: 60, resize: "vertical" }}
+                    value={correctForm.reason}
+                    onChange={(event) => setCorrectForm({ ...correctForm, reason: event.target.value })}
+                    placeholder="Why is this correction accurate?"
+                  />
+                </label>
+                {correctError && <div style={errorStyle}>{correctError}</div>}
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button
+                    style={primaryButtonStyle}
+                    disabled={correctMutation.isPending}
+                    onClick={() => void submitCorrect()}
+                  >
+                    {correctMutation.isPending ? "Saving…" : "Save"}
+                  </button>
+                  <button style={secondaryButtonStyle} onClick={() => setCorrectForm(null)}>
+                    Cancel
+                  </button>
+                </div>
               </div>
             )}
           </div>
