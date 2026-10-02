@@ -19,6 +19,7 @@ class GantryType(str, Enum):
 
     CUB = "cub"
     CUB_XL = "cub_xl"
+    GENMITSU_4040_PRO_MAX = "genmitsu_4040_pro_max"
 
 
 class OriginPolicy(str, Enum):

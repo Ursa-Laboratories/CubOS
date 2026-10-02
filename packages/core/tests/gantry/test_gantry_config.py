@@ -128,6 +128,17 @@ class TestGantryConfig:
         )
         assert config.gantry_type == GantryType.CUB_XL
 
+    def test_genmitsu_4040_pro_max_string_is_normalized_to_enum(self):
+        config = GantryConfig(
+            serial_port="/dev/ttyUSB0",
+            gantry_type="genmitsu_4040_pro_max",
+            factory_z_travel_mm=80.0,
+            working_volume=_make_volume(
+                x_max=390.0, y_max=390.0, z_max=70.0,
+            ),
+        )
+        assert config.gantry_type == GantryType.GENMITSU_4040_PRO_MAX
+
     def test_rejects_unknown_gantry_type(self):
         with pytest.raises(ValueError, match="gantry_type"):
             GantryConfig(

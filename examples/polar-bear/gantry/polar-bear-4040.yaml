@@ -1,7 +1,7 @@
 # Polar Bear contact-angle station. Instrument offsets, capper engagement
 # depth, and the deck frame remain uncalibrated; do not run protocols yet.
 serial_port: /dev/serial/by-path/platform-xhci-hcd.0-usb-0:2:1.0-port0
-gantry_type: cub_xl
+gantry_type: genmitsu_4040_pro_max
 origin_policy: deck_origin
 cnc:
   default_feed_rate_mm_min: 3000.0

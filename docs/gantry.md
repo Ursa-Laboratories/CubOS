@@ -131,7 +131,9 @@ Use this file when:
 ## CNC Fields
 
 `gantry_type` is required at the gantry YAML root and identifies the physical
-machine family. Supported values are `cub` and `cub_xl`.
+machine family. Supported values are `cub`, `cub_xl`, and
+`genmitsu_4040_pro_max`. The 4040-PRO MAX has its own type because its
+400 x 400 mm frame does not share the Cub XL / PROVerXL 4030 fixed geometry.
 
 `factory_z_travel_mm` is required and must be greater than zero. It is the
 out-of-box vertical travel range for the gantry family/workcell and is not

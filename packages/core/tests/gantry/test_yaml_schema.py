@@ -92,6 +92,12 @@ class TestGantryYamlSchema:
         schema = GantryYamlSchema.model_validate(data)
         assert schema.gantry_type == "cub"
 
+    def test_genmitsu_4040_pro_max_gantry_type_is_accepted(self):
+        data = _valid_gantry_dict()
+        data["gantry_type"] = "genmitsu_4040_pro_max"
+        schema = GantryYamlSchema.model_validate(data)
+        assert schema.gantry_type == "genmitsu_4040_pro_max"
+
     def test_unknown_gantry_type_rejected(self):
         data = _valid_gantry_dict()
         data["gantry_type"] = "other_machine"

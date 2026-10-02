@@ -348,7 +348,7 @@ export default function GantryEditor({
             </div>
           ) : (
             <>
-              {/* Top-level identity: the only two things an operator needs
+              {/* Top-level identity: the two things an operator needs
                   at a glance — which machine this is, and where it's
                   plugged in. */}
               <div style={cardStyle}>
@@ -362,8 +362,9 @@ export default function GantryEditor({
                     options={[
                       { value: "cub", label: "Cub" },
                       { value: "cub_xl", label: "Cub XL" },
+                      { value: "genmitsu_4040_pro_max", label: "Genmitsu 4040-PRO MAX" },
                     ]}
-                    onChange={(v) => commit({ ...config, gantry_type: v as "cub" | "cub_xl" })}
+                    onChange={(v) => commit({ ...config, gantry_type: v as GantryConfig["gantry_type"] })}
                     dirty={d.gantry_type}
                     required
                   />
@@ -673,7 +674,7 @@ export default function GantryEditor({
 function isValidGantry(config: GantryConfig | null | undefined): boolean {
   if (!config || typeof config !== "object") return false;
   if (typeof config.serial_port !== "string") return false;
-  if (config.gantry_type !== "cub" && config.gantry_type !== "cub_xl") return false;
+  if (!["cub", "cub_xl", "genmitsu_4040_pro_max"].includes(config.gantry_type)) return false;
 
   const wv = config.working_volume;
   if (!wv || typeof wv !== "object") return false;

@@ -155,6 +155,13 @@ describe("GantryEditor", () => {
     expect(card).not.toHaveTextContent("Working Volume");
   });
 
+  it("offers the Genmitsu 4040-PRO MAX as a distinct gantry type", () => {
+    renderGantry({ gantry: gantryFixture({ gantry_type: "genmitsu_4040_pro_max" }) });
+
+    expect(screen.getByLabelText(/Gantry type/)).toHaveValue("genmitsu_4040_pro_max");
+    expect(screen.getByRole("option", { name: "Genmitsu 4040-PRO MAX" })).toBeInTheDocument();
+  });
+
   it("never renders a Y-axis motion control (unnecessary for operators)", async () => {
     const user = userEvent.setup();
     renderGantry();
