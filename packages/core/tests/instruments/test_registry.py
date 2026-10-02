@@ -429,11 +429,14 @@ class TestGetSupportedVendors:
     def test_camera_vendors(self):
         assert get_supported_vendors("camera") == ["flir", "mount_only", "opencv", "raspberry_pi"]
 
+    def test_capper_vendors(self):
+        assert get_supported_vendors("capper") == ["mock", "nano_text", "pawduino"]
+
     def test_filmetrics_vendors(self):
         assert get_supported_vendors("filmetrics") == ["kla"]
 
     def test_lighting_vendors(self):
-        assert get_supported_vendors("lighting") == ["pawduino"]
+        assert get_supported_vendors("lighting") == ["nano_text", "pawduino"]
 
     def test_mounted_tool_vendors(self):
         assert get_supported_vendors("mounted_tool") == ["mount_only"]
