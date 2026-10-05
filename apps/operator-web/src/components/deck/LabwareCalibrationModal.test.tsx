@@ -149,10 +149,40 @@ describe("LabwareCalibrationModal", () => {
     expect(typeSelect).toHaveTextContent("Tip rack");
     expect(typeSelect).toHaveTextContent("Well plate");
     expect(typeSelect).toHaveTextContent("Vial");
+    expect(typeSelect).toHaveTextContent("Vial rack / grid");
+    expect(typeSelect).toHaveTextContent("Tip disposal");
 
     await user.selectOptions(typeSelect, "well_plate");
     // The only well plate is auto-selected and its targets are announced.
     expect(screen.getByText("A1, A2")).toBeInTheDocument();
+  });
+
+  it("offers addressable vial racks and tip disposal when the deck is empty", async () => {
+    const user = userEvent.setup();
+    render(
+      <LabwareCalibrationModal
+        open
+        onClose={() => undefined}
+        deck={{ filename: "new_deck.yaml", labware: [] }}
+        gantry={gantryResponse()}
+        position={position()}
+        onSaveDeck={async () => undefined}
+      />,
+    );
+
+    const typeSelect = screen.getByLabelText("Labware type");
+    await user.selectOptions(typeSelect, "vial_grid");
+    expect(screen.getByLabelText("Labware")).toHaveTextContent(
+      "Ursa 9-position 20 mL vial rack",
+    );
+    expect(screen.getByLabelText("Labware")).toHaveTextContent(
+      "Ursa 12-position 4 mL vial rack",
+    );
+
+    await user.selectOptions(typeSelect, "tip_disposal");
+    expect(screen.getByLabelText("Labware")).toHaveTextContent(
+      "Tip disposal / trash",
+    );
   });
 
   it("shows the reference instrument picker only for multi-instrument gantries", () => {
