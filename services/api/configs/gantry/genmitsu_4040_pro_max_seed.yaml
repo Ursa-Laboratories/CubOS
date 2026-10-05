@@ -27,7 +27,7 @@ grbl_settings:
   soft_limits: false
   hard_limits: true
   homing_enable: true
-  homing_dir_mask: 3
+  homing_dir_mask: 0
   homing_pull_off: 10.0
   steps_per_mm_x: 800.0
   steps_per_mm_y: 800.0
