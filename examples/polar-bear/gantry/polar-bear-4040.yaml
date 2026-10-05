@@ -45,7 +45,7 @@ instruments:
     type: camera
     vendor: flir
     camera_id: 0
-    backend: pyspin
+    backend: aravis
     offset_x: 0.0
     offset_y: 0.0
     depth: 0.0

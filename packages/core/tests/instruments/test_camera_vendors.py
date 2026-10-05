@@ -77,11 +77,12 @@ class TestHardwareGuards:
         with pytest.raises(CameraConfigError, match="Unknown FLIR backend"):
             FlirCamera(backend="webrtc")
 
-    def test_gentl_backend_offline_lifecycle(self, tmp_path):
-        # FLIR/Point Grey is the vendor; pyspin vs gentl is just the SDK
+    @pytest.mark.parametrize("backend", ["gentl", "aravis"])
+    def test_alternate_backend_offline_lifecycle(self, backend, tmp_path):
+        # FLIR/Point Grey is the vendor; the backend is just the SDK
         # binding, so the offline placeholder path must work identically
-        # for both.
-        camera = FlirCamera(backend="gentl", offline=True)
+        # for all choices.
+        camera = FlirCamera(backend=backend, offline=True)
         camera.connect()
         assert camera.health_check() is True
         saved = camera.capture(save_path=str(tmp_path / "shot.png"))
@@ -501,6 +502,132 @@ class TestFlirGentlHardwarePath:
         assert acquirer.destroyed is True
         assert harvester.reset_called is True
 
+
+class FakeAravisBuffer:
+    def __init__(self, status="SUCCESS", width=2, height=1):
+        self.status = status
+        self.width = width
+        self.height = height
+
+    def get_status(self):
+        return self.status
+
+    def get_image_width(self):
+        return self.width
+
+    def get_image_height(self):
+        return self.height
+
+    def get_data(self):
+        return bytes(range(self.width * self.height * 3))
+
+
+class FakeAravisCamera:
+    def __init__(self, formats=None, buffer=None):
+        self.formats = formats or ["RGB8"]
+        self.buffer = buffer or FakeAravisBuffer()
+        self.pixel_format = None
+        self.timeout = None
+
+    def dup_available_pixel_formats_as_strings(self):
+        return self.formats
+
+    def set_pixel_format_from_string(self, value):
+        self.pixel_format = value
+
+    def acquisition(self, timeout):
+        self.timeout = timeout
+        return self.buffer
+
+
+class FakeNumpyArray:
+    def __init__(self, data):
+        self.data = data
+        self.shape = None
+
+    def reshape(self, *shape):
+        self.shape = shape
+        return self
+
+    def copy(self):
+        return self
+
+
+def _install_fake_aravis(monkeypatch, cameras):
+    aravis = SimpleNamespace(
+        update_device_list=lambda: None,
+        get_n_devices=lambda: len(cameras),
+        get_device_id=lambda index: f"device-{index}",
+        Camera=SimpleNamespace(
+            new=lambda device_id: cameras[int(device_id.rsplit("-", 1)[1])]
+        ),
+        BufferStatus=SimpleNamespace(SUCCESS="SUCCESS"),
+    )
+    repository = SimpleNamespace(Aravis=aravis)
+    gi = SimpleNamespace(
+        require_version=lambda namespace, version: None,
+        repository=repository,
+    )
+    monkeypatch.setitem(sys.modules, "gi", gi)
+    monkeypatch.setitem(sys.modules, "gi.repository", repository)
+    monkeypatch.setitem(
+        sys.modules,
+        "numpy",
+        SimpleNamespace(
+            uint8="uint8",
+            frombuffer=lambda data, dtype: FakeNumpyArray(data),
+        ),
+    )
+    return aravis
+
+
+class TestFlirAravisHardwarePath:
+    def test_connect_capture_disconnect(self, monkeypatch, tmp_path):
+        aravis_camera = FakeAravisCamera()
+        _install_fake_aravis(monkeypatch, [aravis_camera])
+        monkeypatch.setitem(sys.modules, "cv2", FakeCv2())
+
+        camera = FlirCamera(camera_id=0, backend="aravis", offline=False)
+        camera.connect()
+        assert camera.health_check() is True
+        assert FlirCamera.is_available(backend="aravis") is True
+        assert aravis_camera.pixel_format == "RGB8"
+
+        saved = camera.capture(save_path=str(tmp_path / "shot.png"))
+        assert saved == str(tmp_path / "shot.png")
+        assert (tmp_path / "shot.png").read_bytes() == b"fake-image"
+        assert aravis_camera.timeout == 3_000_000
+
+        camera.disconnect()
+        assert camera.health_check() is False
+
+    def test_connect_no_cameras(self, monkeypatch):
+        _install_fake_aravis(monkeypatch, [])
+        camera = FlirCamera(backend="aravis", offline=False)
+        with pytest.raises(CameraConnectionError, match="No FLIR cameras"):
+            camera.connect()
+
+    def test_connect_rejects_unsupported_pixel_formats(self, monkeypatch):
+        _install_fake_aravis(
+            monkeypatch, [FakeAravisCamera(formats=["Mono12Packed"])]
+        )
+        camera = FlirCamera(backend="aravis", offline=False)
+        with pytest.raises(CameraConnectionError, match="no supported 8-bit"):
+            camera.connect()
+
+    def test_capture_rejects_incomplete_buffer(self, monkeypatch, tmp_path):
+        aravis_camera = FakeAravisCamera(
+            buffer=FakeAravisBuffer(status="MISSING_PACKETS")
+        )
+        _install_fake_aravis(monkeypatch, [aravis_camera])
+        monkeypatch.setitem(sys.modules, "cv2", FakeCv2())
+        camera = FlirCamera(backend="aravis", offline=False)
+        camera.connect()
+        with pytest.raises(CameraCaptureError, match="incomplete"):
+            camera.capture(save_path=str(tmp_path / "x.png"))
+
+
+class TestFlirGentlHardwarePathContinued:
     def test_connect_no_cameras(self, monkeypatch):
         harvester = FakeHarvester(device_info_list=[])
         _install_fake_harvesters(monkeypatch, harvester)

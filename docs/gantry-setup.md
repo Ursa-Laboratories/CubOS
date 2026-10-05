@@ -228,8 +228,11 @@ instruments:
 **`camera` / `flir`** (or `opencv`) — an acquiring camera for the `capture`
 and `image_well` protocol commands (see [Protocol YAML: Lighting and imaging
 commands](protocol-yaml.md#lighting-and-imaging-commands)). `flir` drives a
-FLIR camera through the proprietary Spinnaker/PySpin SDK (manual install
-from https://www.flir.com/products/spinnaker-sdk/); `opencv` drives a
+FLIR camera. Select `backend: pyspin` for the proprietary Spinnaker/PySpin
+SDK, `backend: gentl` for Spinnaker's GenTL producer, or `backend: aravis`
+for the Linux Aravis 0.8 USB3 Vision stack. On Debian, Aravis requires the
+`gir1.2-aravis-0.8`, `python3-opencv`, and `python3-numpy` system packages.
+`opencv` drives a
 plain USB webcam (`camera_id: -1` auto-detects the first responsive index).
 Offline, both write placeholder PNGs so dry runs exercise the full
 capture/persistence path:
@@ -240,6 +243,7 @@ instruments:
     type: camera
     vendor: flir
     camera_id: 0
+    backend: aravis
     offline: true
     offset_x: 0.0
     offset_y: 0.0
