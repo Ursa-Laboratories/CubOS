@@ -30,6 +30,23 @@
 - Updated the light path to hub port `1.1` after `ID?` identified
   `/dev/ttyUSB1` as `LIGHT_MODULE`; `/dev/ttyUSB2` still identified as
   `CAP_MODULE` on hub port `1.4`.
+- Added the Linux Aravis 0.8 backend for the Point Grey/FLIR camera because
+  Spinnaker/PySpin does not support the station's Python 3.13 runtime. The Pi
+  has `gir1.2-aravis-0.8`, `python3-opencv`, and `python3-numpy` installed,
+  plus a persistent `video`-group udev rule for USB vendor `1e10`.
+- Changed only the Polar Bear camera backend from `pyspin` to `aravis`. The
+  pre-change live config tree is backed up at
+  `/home/polar/cubos-data/backups/configs-before-aravis-20261002-214417`.
+  The Pi clock is stale, so that directory timestamp predates the actual
+  2026-10-05 deployment date.
+- Captured a hardware frame from the Grasshopper3 GS3-U3-32S4C at 2048x1536,
+  and confirmed the Operator calibration wizard now displays a live preview.
+  Focused camera tests pass on the Pi: 41 passed.
+- Restarting CubOS preserved the open browser wizard's recorded pipette and
+  capper values. Restoring server-side calibration mode through
+  `prepare-origin` also performed the endpoint's built-in homing cycle. The
+  gantry ended Idle at X 259.514, Y 380.388, Z 84.558 with calibration mode
+  active. No subsequent jog or protocol movement was issued.
 
 ## Offline validation
 
@@ -51,9 +68,19 @@ Do not run a protocol or continue deck calibration yet.
   `/dev/ttyUSB1=LIGHT_MODULE`. The cap Nano remains on hub port `1.4`, with
   `ID?` confirming `/dev/ttyUSB2=CAP_MODULE`. The Picus by-id path and FLIR
   camera enumeration are unchanged.
-- Instrument offsets, capper engagement depth, the deck origin, and FLIR
-  capture remain uncalibrated.
+- The pipette and capper are marked recorded in the still-open browser wizard,
+  but the wizard has not reached its final save step. The live YAML therefore
+  still contains zero instrument offsets/depths. Do not refresh, reset, or
+  close that wizard before completing and saving calibration.
+- Camera centering and its distance-from-block value remain to be recorded.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
 immediately if any axis moves away from back-right-top.
+
+For the current calibration session, use only the wizard jog controls to move
+the camera from home back over the calibration block mark. Confirm the live
+preview is centered, enter the measured distance from the camera to the top of
+the block, and click **Record camera**. Continue through the wizard and use its
+final save action so the recorded pipette, camera, capper, and copied lighting
+offsets are written to the live YAML.
