@@ -21,6 +21,15 @@
   `/home/polar/cubos-data/backups/configs-before-4040-type-20261002-170532`.
 - Deployed the new type to the Pi and restarted `cubos`; the service returned
   healthy with no active protocol and the gantry disconnected.
+- After confirming that the earlier home moved X left, Y forward, and Z up,
+  changed the tracked and live homing mask to `$23=0`. The controller setting
+  was written through the CubOS GRBL-settings API and read back as `$23=0`.
+  `$27` read back as the expected `10`; reconnect returned `Idle` with no
+  calibration warning and no active protocol. No homing or jog command was
+  issued while applying these settings.
+- Updated the light path to hub port `1.1` after `ID?` identified
+  `/dev/ttyUSB1` as `LIGHT_MODULE`; `/dev/ttyUSB2` still identified as
+  `CAP_MODULE` on hub port `1.4`.
 
 ## Offline validation
 
@@ -42,9 +51,6 @@ Do not run a protocol or continue deck calibration yet.
   `/dev/ttyUSB1=LIGHT_MODULE`. The cap Nano remains on hub port `1.4`, with
   `ID?` confirming `/dev/ttyUSB2=CAP_MODULE`. The Picus by-id path and FLIR
   camera enumeration are unchanged.
-- The last connected session also reported `$27: expected 10, got 1`. Re-read
-  controller settings after reconnect and reconcile the controller with the
-  YAML before trusting coordinates.
 - Instrument offsets, capper engagement depth, the deck origin, and FLIR
   capture remain uncalibrated.
 
