@@ -497,7 +497,7 @@ export default function App() {
     setImportError(null);
     setDeckFile(null);
     setDeckImportedFrom(null);
-    setLocalDeck(null);
+    setLocalDeck({ filename: "unsaved", labware: [] });
   };
   const handleNewProtocol = async () => {
     if (!(await confirmDiscard(protocolDirty, "Discard unsaved protocol changes and start a new protocol?"))) return;

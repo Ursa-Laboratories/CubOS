@@ -642,6 +642,20 @@ describe("CubOS editor interactions", () => {
     await waitFor(() => expect(screen.getByDisplayValue("Renamed Plate")).toBeInTheDocument());
   });
 
+  it("starts an empty working deck that can add and calibrate labware", async () => {
+    const user = userEvent.setup();
+    renderApp();
+    await waitForSettingsLoad();
+
+    await importConfig(user, "Gantry config", "cubos.yaml");
+    await user.click(screen.getByRole("button", { name: "Deck" }));
+    await user.click(screen.getByRole("button", { name: "New" }));
+
+    expect(screen.getByRole("button", { name: "New Labware" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Calibrate labware" })).toBeEnabled();
+    expect(screen.getByText("Add at least one labware item before saving.")).toBeInTheDocument();
+  });
+
   it("imports a deck config into cub_deck.yaml", async () => {
     const user = userEvent.setup();
     const state = createState();
