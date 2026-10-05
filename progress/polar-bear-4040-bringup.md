@@ -57,10 +57,15 @@
   for the existing 9-position 20 mL and 12-position 4 mL vial racks and for
   tip disposal. The updated picker now offers Tip rack, Well plate, Vial,
   Vial rack / grid, and Tip disposal.
+- Calibrating an item on a new deck now keeps the result in the browser
+  working copy until the operator enters a deck filename and clicks **Save**;
+  it no longer risks writing a file named `unsaved`.
 - Pre-deployment config backups for those UI changes are at
   `/home/polar/cubos-data/backups/configs-before-labware-ui-20261002-222352`
   and
   `/home/polar/cubos-data/backups/configs-before-new-deck-fix-20261002-222707`.
+  The follow-up unsaved-deck fix backup is at
+  `/home/polar/cubos-data/backups/configs-before-unsaved-deck-fix-20261002-223129`.
 
 ## Offline validation
 
@@ -68,7 +73,8 @@
 - Operator `GantryEditor` tests: 25 passed.
 - Operator TypeScript build and Vite production build passed locally and on
   the Pi.
-- Operator App and labware-calibration tests: 78 passed locally and on the Pi.
+- Operator App, Deck editor, and labware-calibration tests: 100 passed locally;
+  the focused 22-test Deck editor suite also passed on the Pi.
 - Both the tracked and live Polar Bear YAML load as
   `genmitsu_4040_pro_max` with no built-in fixed structures.
 
