@@ -188,6 +188,12 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
     : null;
 
   const handleCalibrationSave = async (filename: string, body: DeckConfig) => {
+    if (!selectedFile && filename === "unsaved") {
+      setLabware(body.labware);
+      setSaveError(null);
+      onLocalChange(buildDeckResponse(body.labware, "unsaved", deck));
+      return;
+    }
     await Promise.resolve(onSave(filename, body));
     setLabware(body.labware);
     setSaveError(null);
