@@ -6,9 +6,9 @@
 - Pi: `polar@192.168.2.2`
 - Pi repository: `/home/polar/CubOS`
 - Live config: `/home/polar/cubos-data/configs/gantry/polar-bear-4040.yaml`
-- Machine: Genmitsu 4040-PRO MAX with 400/400/80 mm GRBL travel
-- CubOS usable volume: 390/390/70 mm, reserving the configured 10 mm
-  homing pull-off
+- Machine: Genmitsu 4040-PRO MAX
+- Calibrated CubOS usable volume: X 0–259.514, Y 0–380.388,
+  Z 4.558–84.558 mm, with a 10 mm homing pull-off
 
 ## Completed
 
@@ -47,6 +47,20 @@
   `prepare-origin` also performed the endpoint's built-in homing cycle. The
   gantry ended Idle at X 259.514, Y 380.388, Z 84.558 with calibration mode
   active. No subsequent jog or protocol movement was issued.
+- The gantry calibration wizard was subsequently completed and saved. Live
+  offsets are pipette `(94.7, -2.5, depth 0)`, camera and lighting
+  `(195.357, -29.195, depth -87.321)`, and capper
+  `(0, 0, depth -32)`. The capper engagement depth remains `0` pending its
+  dedicated physical setup.
+- Fixed the Operator **New** deck action so it creates an empty working deck
+  instead of leaving labware creation disabled. Added calibration templates
+  for the existing 9-position 20 mL and 12-position 4 mL vial racks and for
+  tip disposal. The updated picker now offers Tip rack, Well plate, Vial,
+  Vial rack / grid, and Tip disposal.
+- Pre-deployment config backups for those UI changes are at
+  `/home/polar/cubos-data/backups/configs-before-labware-ui-20261002-222352`
+  and
+  `/home/polar/cubos-data/backups/configs-before-new-deck-fix-20261002-222707`.
 
 ## Offline validation
 
@@ -54,12 +68,14 @@
 - Operator `GantryEditor` tests: 25 passed.
 - Operator TypeScript build and Vite production build passed locally and on
   the Pi.
+- Operator App and labware-calibration tests: 78 passed locally and on the Pi.
 - Both the tracked and live Polar Bear YAML load as
   `genmitsu_4040_pro_max` with no built-in fixed structures.
 
 ## Physical validation pending
 
-Do not run a protocol or continue deck calibration yet.
+Do not run a protocol until the deck labware is calibrated and the resulting
+deck YAML passes setup validation.
 
 - The powered homing attempt moved X left and Y forward while Z moved upward.
   CubOS requires `$H` to move toward back-right-top. The confirmed correction
@@ -68,19 +84,17 @@ Do not run a protocol or continue deck calibration yet.
   `/dev/ttyUSB1=LIGHT_MODULE`. The cap Nano remains on hub port `1.4`, with
   `ID?` confirming `/dev/ttyUSB2=CAP_MODULE`. The Picus by-id path and FLIR
   camera enumeration are unchanged.
-- The pipette and capper are marked recorded in the still-open browser wizard,
-  but the wizard has not reached its final save step. The live YAML therefore
-  still contains zero instrument offsets/depths. Do not refresh, reset, or
-  close that wizard before completing and saving calibration.
-- Camera centering and its distance-from-block value remain to be recorded.
+- Create and save the Polar Bear deck, then calibrate the physical vial rack,
+  tip disposal, well plate, and tip rack through the Operator wizard.
+- Verify the exact rack/plate models and pitches against the physical parts
+  before recording A1/A2. Do not substitute the 20 mL vial-rack template for
+  a 4 mL rack or vice versa.
+- Calibrate the capper engagement depth before using cap/decap commands.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
 immediately if any axis moves away from back-right-top.
 
-For the current calibration session, use only the wizard jog controls to move
-the camera from home back over the calibration block mark. Confirm the live
-preview is centered, enter the measured distance from the camera to the top of
-the block, and click **Record camera**. Continue through the wizard and use its
-final save action so the recorded pipette, camera, capper, and copied lighting
-offsets are written to the live YAML.
+For deck calibration, use the pipette as the reference instrument and follow
+the wizard one item at a time. Save the new deck YAML before leaving the Deck
+tab; unsaved labware exists only in the browser working copy.
