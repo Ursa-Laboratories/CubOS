@@ -109,13 +109,22 @@ against the physical labware and the complete protocol passes setup validation.
   vial-rack template for a 4 mL rack or vice versa.
 - Complete `contactangle_protocol.yaml` beyond its one-step pickup draft and
   run setup validation again before considering a physical run.
-- Setup validation currently blocks `contact_angle_a1.yaml`: `vial_rack` was
-  saved as `well_plate`, so it is not cappable; the configured 59.3 mm tip
-  extension makes `safe_z=78` and the vial action plane exceed the gantry's
-  Z maximum; and the tip-disposal action plane exceeds Z max by 0.928 mm.
-  Preserve the recorded XY/Z coordinates while correcting the vial-grid
-  schema and physically verifying the tip length, safe clearance, and capper
-  engagement depth. Do not bypass these validation failures.
+- The live `contactangle_deck.yaml` now defines `vial_rack` as a capped
+  `vial_grid` for 5 mL vials (`76 mm` tall, `27 mm` diameter), preserving its
+  calibrated positions and pitches. Its tip rack now uses the operator's
+  measured `25 mm` tip length instead of `59.3 mm`. The deck backup before
+  conversion is
+  `/home/polar/cubos-data/backups/contactangle_deck-before-vial-grid-20261003-174313.yaml`.
+- For empty-deck commissioning only, the live pipette depth was changed from
+  the uncalibrated `0.0` default to provisional `-25.0 mm`, making the
+  attached 25 mm tip's net depth zero in CubOS coordinates. The prior gantry
+  config is backed up at
+  `/home/polar/cubos-data/backups/polar-bear-4040-before-provisional-pipette-depth-20261003-174514.yaml`.
+  This depth must be physically calibrated before running with labware.
+- With `polar-bear-4040.yaml`, `contactangle_deck.yaml`, and
+  `contact_angle_a1.yaml`, setup validation now passes with no errors after a
+  CubOS service restart. No homing, jogging, or protocol movement was
+  performed while applying these corrections.
 - Calibrate the capper engagement depth before using cap/decap commands.
 
 Before the next homing test, clear the full travel area, keep a hand at the
