@@ -181,6 +181,14 @@ against the physical labware and the complete protocol passes setup validation.
   `/home/polar/cubos-data/backups/z-ceiling-fix-20261006-185100`.
 - The failed protocol was inactive before deployment. No unlock, home, jog,
   resume, instrument actuation, or protocol command was issued.
+- A one-step live validation protocol was created at
+  `protocol/z_ceiling_camera_test.yaml`; it performs one standard white-light
+  image of relocated A1 and passes setup validation. The first reconnect
+  attempt after the alarm blocked waiting for the GRBL serial connection, so
+  physical validation stopped before homing or executing the test. The hung
+  client was cleared and CubOS was left active with the gantry disconnected;
+  the controller requires a physical power cycle before another connection
+  attempt.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
