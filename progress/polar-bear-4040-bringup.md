@@ -189,6 +189,13 @@ against the physical labware and the complete protocol passes setup validation.
   client was cleared and CubOS was left active with the gantry disconnected;
   the controller requires a physical power cycle before another connection
   attempt.
+- After the operator power-cycled the gantry, a fresh CubOS process still
+  received no response to a bounded 45-second connect attempt. The stable
+  `/dev/serial/by-path/...0:2...` link remained present, but GRBL did not
+  answer. CubOS was restarted to clear the blocked connection handler and
+  left active with no run and the gantry disconnected. No homing or camera
+  test motion occurred. Check the CNC main power, emergency-stop state, and
+  controller-side USB/power connections before retrying.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
