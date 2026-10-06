@@ -293,9 +293,19 @@ against the physical labware and the complete protocol passes setup validation.
   The pickup-only A2 protocol passed offline setup validation. After a fresh
   service restart and successful home to `(259.514, 380.388, 84.558)`, its
   physical run completed `2/2` steps as campaign 14 and retracted to a high
-  inspection position. Physical confirmation that A2 is firmly attached is
-  pending; CubOS has no tip-presence sensor and execution success alone does
-  not prove attachment.
+  inspection position, but the operator confirmed that A2 had not attached.
+  The rack `pickup_z` was lowered another 1 mm to `70.427`, with the preceding
+  deck backed up at
+  `/home/polar/cubos-data/backups/tip-pickup-depth-20261006-195403/contactangle_deck.yaml`.
+  The revised setup passed offline validation and its A2 pickup-only run
+  completed `2/2` steps as campaign 15, but A2 again did not attach. The rack
+  `pickup_z` was lowered a third 1 mm increment to `69.427`, with the preceding
+  deck backed up at
+  `/home/polar/cubos-data/backups/tip-pickup-depth-20261006-195521/contactangle_deck.yaml`.
+  That setup passed offline validation and its A2 pickup-only run completed
+  `2/2` steps as campaign 16. Physical confirmation that A2 is firmly attached
+  after this third run is pending; CubOS has no tip-presence sensor and
+  execution success alone does not prove attachment.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
