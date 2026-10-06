@@ -18,6 +18,11 @@ Position = Any
 
 # GRBL reports WPos to 3 decimals; anything under this is not lateral travel.
 _XY_SAME_TOL_MM = 0.01
+# Do not command the carriage exactly to the configured soft-limit ceiling.
+# GRBL evaluates machine coordinates at higher precision than the displayed
+# three-decimal WPos, so a displayed/configured boundary can still produce
+# ALARM:2 after coordinate transforms and floating-point rounding.
+_Z_CEILING_CLEARANCE_MM = 0.5
 
 
 class InstrumentedGantry:
@@ -127,11 +132,11 @@ class InstrumentedGantry:
     ) -> float | None:
         """Instrument-tip Z at which XY travel clears every mounted tool.
 
-        The carriage rides ``working_volume.z_max`` (or ``safe_z`` if that
-        is higher for this instrument), so a tool hanging lower than
-        *instrument* still clears the deck. ``safe_z`` remains the hover
-        and retract plane. Returns ``None`` only when neither ``safe_z``
-        nor a working volume is configured.
+        The carriage rides just below ``working_volume.z_max`` so a tool
+        hanging lower than *instrument* still clears the deck without
+        commanding the exact GRBL soft-limit boundary. ``safe_z`` remains
+        the hover and retract plane. Returns ``None`` only when neither
+        ``safe_z`` nor a working volume is configured.
         """
         instr = self._resolve_instrument(instrument)
         candidates = []
@@ -141,14 +146,24 @@ class InstrumentedGantry:
         # config; without it only safe_z (the active tool's own clearance) applies.
         ceiling = self._gantry_z_ceiling()
         if ceiling is not None:
-            candidates.append(ceiling - self._effective_depth(instr))
+            ceiling_tip_z = (
+                ceiling
+                - _Z_CEILING_CLEARANCE_MM
+                - self._effective_depth(instr)
+            )
+            candidates.append(ceiling_tip_z)
         if not candidates:
             self.logger.warning(
                 "No safe_z or working_volume configured; XY travel for %s "
                 "will not lift first.", instr.name,
             )
             return None
-        return max(candidates)
+        travel_z = max(candidates)
+        if ceiling is not None:
+            # A configured safe_z can itself translate beyond the carriage
+            # ceiling for an unusually deep tool. The hardware ceiling wins.
+            travel_z = min(travel_z, ceiling_tip_z)
+        return travel_z
 
     def _xy_changes(self, gantry_x: float, gantry_y: float) -> bool:
         """Whether a move to gantry XY leaves the current XY.

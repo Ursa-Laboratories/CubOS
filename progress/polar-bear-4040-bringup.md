@@ -166,6 +166,22 @@ against the physical labware and the complete protocol passes setup validation.
   eight live protocol steps. The preceding live protocol is backed up at
   `/home/polar/cubos-data/backups/contact-angle-before-focus-height-20261006-183736.yaml`.
 
+## GRBL Z-ceiling clearance (2026-10-06)
+
+- The first XY travel attempted `G01 Z84.558 F3000.0`, exactly equal to the
+  configured Z maximum, and GRBL raised `ALARM:2`. Displayed WPos and the
+  controller's internal machine-coordinate precision can differ at that
+  boundary.
+- Multi-tool XY travel now keeps the carriage `0.5 mm` below the configured
+  ceiling. On this station the travel command becomes Z `84.058`; hover,
+  action, and configured `safe_z` targets are otherwise unchanged.
+- Focused Pi validation: `50 passed` in
+  `packages/core/tests/gantry/test_instrument_mount.py`. The pre-deployment
+  source and test are backed up at
+  `/home/polar/cubos-data/backups/z-ceiling-fix-20261006-185100`.
+- The failed protocol was inactive before deployment. No unlock, home, jog,
+  resume, instrument actuation, or protocol command was issued.
+
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
 immediately if any axis moves away from back-right-top.
