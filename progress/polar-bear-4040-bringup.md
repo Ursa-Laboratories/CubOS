@@ -223,6 +223,13 @@ against the physical labware and the complete protocol passes setup validation.
   The final gantry state was connected and Idle at
   `(35.274, 97.718, 84.058)` with no active protocol. No pipette or capper
   action occurred.
+- A subsequent non-moving capper I/O check used CubOS's configured
+  `NanoTextCapper` driver. The Nano accepted the `CAP_MODULE` identity probe,
+  the cap sensor consistently reported no cap, `MAGNET ON` and `MAGNET OFF`
+  were both acknowledged, the final cleanup sent `MAGNET OFF` again, and the
+  driver health check passed. The gantry did not move and remained connected
+  and Idle at `(35.274, 97.718, 84.058)` with no active protocol. A positive
+  cap-present sensor check and the controlled decap/recap motion test remain.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
