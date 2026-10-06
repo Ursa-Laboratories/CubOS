@@ -234,6 +234,22 @@ against the physical labware and the complete protocol passes setup validation.
   CubOS driver check reported `cap_present=true` and passed its health check.
   No magnet command or gantry movement was issued. The cap sensor has now
   passed both absent and present states; controlled decap/recap motion remains.
+- Before the capper-only motion test, live `cnc.safe_z` was raised from
+  `78.0` to `84.0` because the former mapped the capper to carriage Z `38.0`,
+  `0.39 mm` below its calibrated contact target. The new approach maps to
+  carriage Z `44.0`, about `5.6 mm` above contact. The preceding gantry config
+  is backed up at
+  `/home/polar/cubos-data/backups/capper-safe-z-20261006-194500/polar-bear-4040.yaml`.
+  Both the two-step capper test and full eight-step protocol passed offline
+  setup validation after this change.
+- The operator-authorized A1 decap/recap test successfully decapped, but recap
+  failed after three release-confirmation attempts: the sensor remained
+  `cap_present=True` although each magnet-off command was acknowledged. CubOS
+  retracted the capper to the corrected safe plane and stopped with the
+  gantry connected and Idle at `(96.210, 371.895, 44.000)`. A separate
+  non-moving check confirmed firmware status `CAP=DETECTED MAGNET=OFF` and
+  sent another acknowledged magnet-off cleanup. The vial/cap state requires
+  physical reconciliation before any further protocol motion.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
