@@ -147,7 +147,12 @@ def _actuate_retract_confirm(
     last_reading: Any = None
     last_error: BaseException | None = None
     for _attempt in range(attempts):
-        context.gantry.move(instrument, (x, y, engage_z))  # (re-)engage
+        action_z = (
+            engage_z
+            if capturing
+            else engage_z - capper.release_overtravel_mm
+        )
+        context.gantry.move(instrument, (x, y, action_z))  # (re-)engage
         try:
             if capturing:
                 capper.capture_cap()

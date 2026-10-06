@@ -161,6 +161,25 @@ class TestCapSequencing:
         cap(ctx, "capper", "vial_1")
         assert gantry.instruments["capper"].read_cap_present() is False
 
+    def test_release_overtravel_only_changes_cap_engagement(self):
+        capper = _make_capper(release_overtravel_mm=0.5)
+        capper.capture_cap()
+        ctx, gantry = _untracked_context(capper=capper)
+        gantry.trace.clear()
+
+        cap(ctx, "capper", "vial_1")
+
+        assert gantry.trace[1] == (
+            "move", (10.0, 20.0, 30.0 + capper.engage_depth_mm - 0.5),
+        )
+
+        capper = _make_capper(release_overtravel_mm=0.5)
+        ctx, gantry = _untracked_context(capper=capper)
+        decap(ctx, "capper", "vial_1")
+        assert gantry.trace[1] == (
+            "move", (10.0, 20.0, 30.0 + capper.engage_depth_mm),
+        )
+
     def test_release_confirm_reads_after_retract_with_beam_realistic_sensor(self):
         """Regression: the real line-break sensor reads cap-present at engage
         depth even after a successful release -- the released cap sits on the
