@@ -250,6 +250,15 @@ against the physical labware and the complete protocol passes setup validation.
   non-moving check confirmed firmware status `CAP=DETECTED MAGNET=OFF` and
   sent another acknowledged magnet-off cleanup. The vial/cap state requires
   physical reconciliation before any further protocol motion.
+- The operator confirmed the released magnet was physically off and manually
+  removed the cap retained by residual attraction. Pickup height remains
+  unchanged because decap succeeded. A new capper setting,
+  `release_overtravel_mm`, now applies additional downward seating only to
+  recap attempts. The station is provisionally configured for `0.5 mm`.
+  Focused capper validation passes (`71 passed`), and both the capper-only and
+  full experiment setups validate. Previous source and config are backed up at
+  `/home/polar/cubos-data/backups/capper-release-overtravel-20261006-200000`.
+  A repeat capper-only hardware cycle is still required before the experiment.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
