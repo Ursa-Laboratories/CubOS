@@ -1,0 +1,73 @@
+protocol:
+  - pick_up_tip:
+      position: tip_rack_green.A1
+      speed: 50
+
+  # Record the empty destination under both lighting conditions.
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.A1
+      image_height: 112
+      light: contact
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: before_dispense_contact
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.A1
+      image_height: 112
+      light: white
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: before_dispense_white
+
+  - decap:
+      instrument: capper
+      vial: vial_rack.A1
+  - aspirate:
+      position: vial_rack.A1
+      volume_ul: 10
+      speed: 50
+      height: 0
+  - cap:
+      instrument: capper
+      vial: vial_rack.A1
+  - dispense:
+      position: ursa_wellplate.A1
+      volume_ul: 10
+      speed: 50
+      height: 0
+
+  # Record the dispensed drop under the same two lighting conditions.
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.A1
+      image_height: 112
+      light: contact
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: after_dispense_contact
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.A1
+      image_height: 112
+      light: white
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: after_dispense_white
+
+  - drop_tip:
+      position: tip_disposal_1
+      speed: 50

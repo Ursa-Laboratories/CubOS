@@ -60,6 +60,11 @@
 - Calibrating an item on a new deck now keeps the result in the browser
   working copy until the operator enters a deck filename and clicks **Save**;
   it no longer risks writing a file named `unsaved`.
+- The calibrated contact-angle deck is now saved as
+  `contactangle_deck.yaml` with `ursa_wellplate`, `tip_disposal_1`,
+  `tip_rack_green`, and `vial_rack` entries. A draft protocol was saved as
+  `contactangle_protocol.yaml`. Its sole step is currently `pick_up_tip` at
+  `tip_rack_green.A1`; setup validation passes. The protocol has not been run.
 - Pre-deployment config backups for those UI changes are at
   `/home/polar/cubos-data/backups/configs-before-labware-ui-20261002-222352`
   and
@@ -77,11 +82,17 @@
   the focused 22-test Deck editor suite also passed on the Pi.
 - Both the tracked and live Polar Bear YAML load as
   `genmitsu_4040_pro_max` with no built-in fixed structures.
+- The Polar branch now exposes the existing no-state `dispense` operation as
+  a YAML protocol command. The contact-angle A1 workflow is staged at
+  `examples/polar-bear/protocol/contact-angle-a1.yaml`; 154 focused command,
+  registry, tip-state, and motion-bounds tests pass locally. The Pi became
+  unreachable before this change and protocol could be deployed or validated
+  against the live config.
 
 ## Physical validation pending
 
-Do not run a protocol until the deck labware is calibrated and the resulting
-deck YAML passes setup validation.
+Do not run a protocol until the saved deck calibration has been checked
+against the physical labware and the complete protocol passes setup validation.
 
 - The powered homing attempt moved X left and Y forward while Z moved upward.
   CubOS requires `$H` to move toward back-right-top. The confirmed correction
@@ -90,11 +101,13 @@ deck YAML passes setup validation.
   `/dev/ttyUSB1=LIGHT_MODULE`. The cap Nano remains on hub port `1.4`, with
   `ID?` confirming `/dev/ttyUSB2=CAP_MODULE`. The Picus by-id path and FLIR
   camera enumeration are unchanged.
-- Create and save the Polar Bear deck, then calibrate the physical vial rack,
-  tip disposal, well plate, and tip rack through the Operator wizard.
-- Verify the exact rack/plate models and pitches against the physical parts
-  before recording A1/A2. Do not substitute the 20 mL vial-rack template for
-  a 4 mL rack or vice versa.
+- Verify the saved rack/plate models, pitches, and recorded positions against
+  the physical parts before the first run. Do not substitute the 20 mL
+  vial-rack template for a 4 mL rack or vice versa.
+- Complete `contactangle_protocol.yaml` beyond its one-step pickup draft and
+  run setup validation again before considering a physical run.
+- Deploy the standalone `dispense` registration and save the staged A1
+  workflow after the direct Ethernet connection to the Pi is restored.
 - Calibrate the capper engagement depth before using cap/decap commands.
 
 Before the next homing test, clear the full travel area, keep a hand at the

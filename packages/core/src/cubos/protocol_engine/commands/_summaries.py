@@ -117,6 +117,13 @@ def aspirate(args: Dict[str, Any]) -> str:
     )
 
 
+def dispense(args: Dict[str, Any]) -> str:
+    return _join(
+        _volume(args["volume_ul"]),
+        f"to {args['position']}",
+    )
+
+
 def blowout(args: Dict[str, Any]) -> str:
     return f"at {args['position']}"
 

@@ -1269,6 +1269,7 @@ _PIPETTE_COMMANDS = frozenset({
     "aspirate",
     "blowout",
     "clear_well",
+    "dispense",
     "drop_tip",
     "flush_pipette",
     "mix",
@@ -1522,7 +1523,7 @@ def _validate_pipette_command(
             )
         return violations, tip_state
 
-    if command_name in {"aspirate", "blowout", "mix"}:
+    if command_name in {"aspirate", "blowout", "dispense", "mix"}:
         violations.extend(_require_attached_tip(
             step_index=step_index,
             command_name=command_name,

@@ -313,6 +313,7 @@ def aspirate(
     return pipette.aspirate(volume_ul, speed)
 
 
+@protocol_command("dispense", summary=_summaries.dispense)
 def dispense(
     context: ProtocolContext,
     position: str,
@@ -322,8 +323,9 @@ def dispense(
 ) -> Any:
     """Move pipette to *position*, then dispense.
 
-    Not exposed as a YAML protocol command — use ``transfer`` instead,
-    which correctly tracks source labware for DB logging.
+    Standalone dispensing is intended for no-state protocols that need an
+    intervening operation between aspiration and dispense. Durable fluid
+    tracking requires ``transfer`` or ``serial_transfer`` instead.
     """
     if _tracked_fluid_state(context):
         raise ProtocolExecutionError(
