@@ -125,7 +125,15 @@ against the physical labware and the complete protocol passes setup validation.
   `contact_angle_a1.yaml`, setup validation now passes with no errors after a
   CubOS service restart. No homing, jogging, or protocol movement was
   performed while applying these corrections.
-- Calibrate the capper engagement depth before using cap/decap commands.
+- The capper was centered over capped `vial_rack.A1` and lowered until its
+  magnet face touched the cap at gantry `(96.274, 372.680, 38.390)`. Against
+  the saved vial target `(96.210, 371.895, 71.428)` and capper depth `-40.0`,
+  the live calibration is offset `(-0.064, -0.785)` with
+  `engage_depth_mm: 6.962`. Setup validation passes. The pre-calibration
+  gantry config is backed up at
+  `/home/polar/cubos-data/backups/polar-bear-4040-before-capper-calibration-20261006-184432.yaml`.
+  A controlled cap sensor/magnet test is still required before relying on a
+  complete physical decap/cap cycle.
 
 ## Plate relocation and camera alignment (2026-10-06)
 
