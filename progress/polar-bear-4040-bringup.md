@@ -159,9 +159,11 @@ against the physical labware and the complete protocol passes setup validation.
 - The operator then confirmed sharp focus over relocated A1 at gantry
   `(35.274, 97.718, 67.390)`. With camera depth `-62.321` and well surface Z
   `6.186`, the corresponding labware-relative `image_height` is `123.525 mm`.
-  Both live `image_well` steps and the tracked example use that value. Setup
-  validation passes for all eight live protocol steps. The preceding live
-  protocol is backed up at
+  The operator subsequently chose `image_height: 125` as the start of each
+  ten-plane curvature stack (`0.2 mm` steps, ending at `123.2 mm`); the plane
+  nearest the confirmed focus is `123.6 mm`. Both live `image_well` steps and
+  the tracked example use the `125 mm` start. Setup validation passes for all
+  eight live protocol steps. The preceding live protocol is backed up at
   `/home/polar/cubos-data/backups/contact-angle-before-focus-height-20261006-183736.yaml`.
 
 Before the next homing test, clear the full travel area, keep a hand at the

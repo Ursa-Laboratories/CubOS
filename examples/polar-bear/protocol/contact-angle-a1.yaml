@@ -7,7 +7,7 @@ protocol:
   - image_well:
       camera: camera
       well: ursa_wellplate.A1
-      image_height: 123.525
+      image_height: 125
       light: white
       mode: curvature
       z_steps: 10
@@ -18,7 +18,7 @@ protocol:
   - image_well:
       camera: camera
       well: ursa_wellplate.A1
-      image_height: 123.525
+      image_height: 125
       light: white
       mode: curvature
       z_steps: 10
@@ -48,7 +48,7 @@ protocol:
   - image_well:
       camera: camera
       well: ursa_wellplate.A1
-      image_height: 123.525
+      image_height: 125
       light: white
       mode: curvature
       z_steps: 10
@@ -59,7 +59,7 @@ protocol:
   - image_well:
       camera: camera
       well: ursa_wellplate.A1
-      image_height: 123.525
+      image_height: 125
       light: white
       mode: curvature
       z_steps: 10
