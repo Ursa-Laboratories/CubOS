@@ -262,10 +262,14 @@ against the physical labware and the complete protocol passes setup validation.
 - The repeat capper-only cycle passed both decap and recap (`2/2` steps,
   campaign 11), confirming that `release_overtravel_mm: 0.5` clears the cap
   sensor after release.
-- A subsequent full experiment reached dispense after successful tip pickup,
+- A subsequent full experiment reached dispense after CubOS recorded a tip
+  pickup,
   first image stack, decap, 10 uL aspiration, and recap. Its `height: 0`
   dispense commanded gantry Z `6.186`; the operator stopped the motion and the
-  disposable tip bent. CubOS retained motor control and reported the pipette
+  disposable tip bent. The operator later confirmed that no disposable tip
+  had actually attached; the physical pickup therefore failed even though
+  CubOS's software-only tip state advanced. CubOS retained motor control and
+  reported the pipette
   still held 10 uL. The operator powered down, removed the bent tip/liquid,
   inspected the station, and later released the E-stop. No attempt was made to
   resume that interrupted run.
@@ -277,11 +281,21 @@ against the physical labware and the complete protocol passes setup validation.
   the operator during the 20 mm move. The controller reset discarded the live
   stopped coordinates, but the target command was gantry Z `26.186`. The
   operator physically identified the desired dispense point as 2 mm below
-  that stopped position, yielding gantry Z `24.186` and protocol
-  `dispense height: 18`. The full protocol now uses fresh tip A3 and passes
-  setup validation with that height. The still-attached A2 dry-test tip must
-  be removed before the next run, and the gantry must be re-homed after the
-  E-stop reset.
+  that stopped position. Because the pickup had failed, that observation did
+  not include the configured 25 mm tip extension and cannot establish the
+  final dispense height. The protocol currently contains the provisional
+  `dispense height: 18`, uses fresh tip A3, and passes setup validation, but it
+  must not run until pickup and an attached-tip clearance check pass.
+- Tip-rack `pickup_z` was lowered by 2 mm, from `73.427` to `71.427`, without
+  changing the 25 mm tip length or any instrument calibration. The prior deck
+  file is backed up at
+  `/home/polar/cubos-data/backups/tip-pickup-depth-20261006-203000/contactangle_deck.yaml`.
+  The pickup-only A2 protocol passed offline setup validation. After a fresh
+  service restart and successful home to `(259.514, 380.388, 84.558)`, its
+  physical run completed `2/2` steps as campaign 14 and retracted to a high
+  inspection position. Physical confirmation that A2 is firmly attached is
+  pending; CubOS has no tip-presence sensor and execution success alone does
+  not prove attachment.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
