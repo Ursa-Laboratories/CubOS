@@ -31,6 +31,9 @@ class FakeGantry:
     def move_to_labware(self, instrument, position):
         self.trace.append(("approach", (position.x, position.y)))
 
+    def multi_tool_safe_travel_z(self, instrument):
+        return self.safe_z
+
     def move(self, instrument, position, travel_z=None):
         self.trace.append(("move", position, travel_z))
 
@@ -146,10 +149,11 @@ class TestImageWell:
         assert light_log == [("white", 5)]
         assert lights.status().channels == {"white": 0, "contact": 0}
         trace = context.gantry.trace
-        assert trace[0] == ("approach", (WELL.x, WELL.y))
-        assert trace[1] == ("move", (WELL.x, WELL.y, WELL.z + 30.0), None)
-        # Final motion: retract to safe_z.
-        assert trace[-1] == ("move", (WELL.x, WELL.y, SAFE_Z), SAFE_Z)
+        assert trace[0] == (
+            "move", (WELL.x, WELL.y, WELL.z + 30.0), SAFE_Z,
+        )
+        # Final motion: retract to the high carriage clearance plane.
+        assert trace[-1] == ("move", (WELL.x, WELL.y, SAFE_Z), None)
 
     def test_curvature_z_stack(self):
         context = _context({"cam": _camera(), "lights": _lights()})
@@ -162,8 +166,7 @@ class TestImageWell:
         assert any("z=55-500mm" in path for path in saved)
         planes = [
             entry[1][2] - WELL.z
-            for entry in context.gantry.trace
-            if entry[0] == "move" and entry[2] is None
+            for entry in context.gantry.trace[:3]
         ]
         assert planes == [30.0, 29.5, 29.0]
 
@@ -180,7 +183,7 @@ class TestImageWell:
                            image_height=30.0, lights="lights")
         assert saved == []
         assert lights.status().channels == {"white": 0, "contact": 0}
-        assert context.gantry.trace[-1] == ("move", (WELL.x, WELL.y, SAFE_Z), SAFE_Z)
+        assert context.gantry.trace[-1] == ("move", (WELL.x, WELL.y, SAFE_Z), None)
 
     def test_works_without_lights(self):
         context = _context({"cam": _camera()})
@@ -285,7 +288,7 @@ class TestImageWellFailurePaths:
         saved = image_well(context, camera="cam", well="plate.B1",
                            image_height=30.0, lights="lights")
         assert saved == []
-        assert context.gantry.trace[-1] == ("move", (WELL.x, WELL.y, SAFE_Z), SAFE_Z)
+        assert context.gantry.trace[-1] == ("move", (WELL.x, WELL.y, SAFE_Z), None)
 
     def test_no_safe_z_skips_retract(self):
         context = _context({"cam": _camera()})
@@ -301,7 +304,7 @@ class TestImageWellFailurePaths:
         original_move = context.gantry.move
 
         def move_failing_retract(instrument, position, travel_z=None):
-            if travel_z is not None:
+            if position[2] == SAFE_Z and travel_z is None:
                 raise RuntimeError("limit on retract")
             original_move(instrument, position, travel_z)
 

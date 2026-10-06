@@ -233,7 +233,8 @@ def image_well(
     names the lighting *instrument* and defaults to the gantry's lighting
     instrument when it has exactly one. Capture and lighting failures log
     and continue; motion failures raise. Lights-off and the retract to
-    ``safe_z`` run even on failure. Returns the saved image paths.
+    high carriage clearance run even on failure. Returns the saved image
+    paths.
     """
     camera_instr = _get_camera(context, camera)
     lighting = _resolve_lighting(context, lights)
@@ -318,18 +319,21 @@ def image_well(
             )
             return False
 
+    planes = (
+        [image_height]
+        if mode == "standard"
+        else [
+            image_height - index * z_step_mm for index in range(z_steps)
+        ]
+    )
+    clearance_z = context.gantry.multi_tool_safe_travel_z(camera)
+
     try:
-        context.gantry.move_to_labware(camera, coord)
-        planes = (
-            [image_height]
-            if mode == "standard"
-            else [
-                image_height - index * z_step_mm for index in range(z_steps)
-            ]
-        )
-        for plane in planes:
+        for index, plane in enumerate(planes):
             context.gantry.move(
-                camera, (coord.x, coord.y, coord.z + plane),
+                camera,
+                (coord.x, coord.y, coord.z + plane),
+                travel_z=clearance_z if index == 0 else None,
             )
             time.sleep(_SETTLE_S)
             if mode == "standard":
@@ -347,15 +351,15 @@ def image_well(
             _lights("all_off")
     finally:
         _lights("all_off")
-        safe_z = context.gantry.safe_z
-        if safe_z is not None:
+        if clearance_z is not None:
             try:
                 context.gantry.move(
-                    camera, (coord.x, coord.y, safe_z), travel_z=safe_z,
+                    camera, (coord.x, coord.y, clearance_z),
                 )
             except Exception as exc:
                 context.logger.error(
-                    "image_well: retract to safe_z failed; manual hardware "
+                    "image_well: retract to the carriage clearance plane "
+                    "failed; manual hardware "
                     "check required: %s", exc, exc_info=True,
                 )
 

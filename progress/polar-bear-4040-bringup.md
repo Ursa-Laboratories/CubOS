@@ -197,6 +197,22 @@ against the physical labware and the complete protocol passes setup validation.
   test motion occurred. Check the CNC main power, emergency-stop state, and
   controller-side USB/power connections before retrying.
 
+- A later reconnect and back-right-top home succeeded. The one-step camera
+  test then cleared the original upper boundary and reached A1 XY, confirming
+  the `84.058 mm` ceiling clearance. Before imaging, however, `image_well`
+  used the shared instrument `safe_z` (`78 mm`) as a camera approach plane.
+  The camera depth `-62.321 mm` transformed that into carriage Z `15.679 mm`.
+  The physical lower Z switch asserted at WPos Z `17.404 mm` (`Pn:Z`) and the
+  controller stopped with `ALARM:3`; no image or instrument action occurred.
+- `image_well` now uses the high multi-tool carriage clearance for its first
+  XY transit and final retract. For this station that means carriage Z
+  `84.058 mm`, followed by the calibrated A1 imaging position near carriage Z
+  `68.865 mm`; it never visits the low shared `safe_z` plane. Focused testing
+  in a temporary Pi checkout passes: `30 passed` in
+  `packages/core/tests/protocol_engine/test_camera_commands.py`. Deployment
+  and the repeat camera-only hardware test are pending after the operator
+  clears the active lower-limit condition.
+
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
 immediately if any axis moves away from back-right-top.
