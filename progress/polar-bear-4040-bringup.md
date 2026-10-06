@@ -85,9 +85,12 @@
 - The Polar branch now exposes the existing no-state `dispense` operation as
   a YAML protocol command. The contact-angle A1 workflow is staged at
   `examples/polar-bear/protocol/contact-angle-a1.yaml`; 154 focused command,
-  registry, tip-state, and motion-bounds tests pass locally. The Pi became
-  unreachable before this change and protocol could be deployed or validated
-  against the live config.
+  registry, tip-state, and motion-bounds tests pass locally and on the Pi.
+  The change is deployed at Pi commit `77366e8c`, and the workflow is saved as
+  `/home/polar/cubos-data/configs/protocol/contact_angle_a1.yaml`. The existing
+  `contactangle_protocol.yaml` was preserved. The pre-deployment live-config
+  backup is
+  `/home/polar/cubos-data/backups/configs-before-contact-angle-protocol-20261003-173042`.
 
 ## Physical validation pending
 
@@ -106,8 +109,13 @@ against the physical labware and the complete protocol passes setup validation.
   vial-rack template for a 4 mL rack or vice versa.
 - Complete `contactangle_protocol.yaml` beyond its one-step pickup draft and
   run setup validation again before considering a physical run.
-- Deploy the standalone `dispense` registration and save the staged A1
-  workflow after the direct Ethernet connection to the Pi is restored.
+- Setup validation currently blocks `contact_angle_a1.yaml`: `vial_rack` was
+  saved as `well_plate`, so it is not cappable; the configured 59.3 mm tip
+  extension makes `safe_z=78` and the vial action plane exceed the gantry's
+  Z maximum; and the tip-disposal action plane exceeds Z max by 0.928 mm.
+  Preserve the recorded XY/Z coordinates while correcting the vial-grid
+  schema and physically verifying the tip length, safe clearance, and capper
+  engagement depth. Do not bypass these validation failures.
 - Calibrate the capper engagement depth before using cap/decap commands.
 
 Before the next homing test, clear the full travel area, keep a hand at the
