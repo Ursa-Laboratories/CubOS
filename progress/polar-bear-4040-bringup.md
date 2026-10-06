@@ -212,6 +212,17 @@ against the physical labware and the complete protocol passes setup validation.
   `packages/core/tests/protocol_engine/test_camera_commands.py`. Deployment
   and the repeat camera-only hardware test are pending after the operator
   clears the active lower-limit condition.
+- The fix was deployed after backing up the previous live camera command and
+  test at
+  `/home/polar/cubos-data/backups/camera-clearance-fix-20261006-193000`.
+  The live focused test again passed (`30 passed`). The operator-authorized
+  recovery home completed at back-right-top, and the single-step
+  `z_ceiling_camera_test.yaml` run completed successfully with one executed
+  step (campaign 9). It captured
+  `/home/polar/.cubos/images/campaign_9/z_ceiling_validation_20261006-191721.tiff`.
+  The final gantry state was connected and Idle at
+  `(35.274, 97.718, 84.058)` with no active protocol. No pipette or capper
+  action occurred.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
