@@ -128,10 +128,13 @@ against the physical labware and the complete protocol passes setup validation.
 - The capper was centered over capped `vial_rack.A1` and lowered until its
   magnet face touched the cap at gantry `(96.274, 372.680, 38.390)`. Against
   the saved vial target `(96.210, 371.895, 71.428)` and capper depth `-40.0`,
-  the live calibration is offset `(-0.064, -0.785)` with
-  `engage_depth_mm: 6.962`. Setup validation passes. The pre-calibration
-  gantry config is backed up at
+  the measured contact setting is `engage_depth_mm: 6.962`. The operator
+  subsequently chose to retain capper XY offsets `(0.0, 0.0)`; setup
+  validation passes with those final values. The pre-calibration gantry
+  config is backed up at
   `/home/polar/cubos-data/backups/polar-bear-4040-before-capper-calibration-20261006-184432.yaml`.
+  The intermediate nonzero-XY config is backed up at
+  `/home/polar/cubos-data/backups/polar-bear-4040-before-capper-xy-reset-20261006-184540.yaml`.
   A controlled cap sensor/magnet test is still required before relying on a
   complete physical decap/cap cycle.
 
