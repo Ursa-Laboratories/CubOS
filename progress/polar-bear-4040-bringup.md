@@ -145,6 +145,13 @@ against the physical labware and the complete protocol passes setup validation.
 - CubOS was refreshed after the correction and showed the new plate values.
   The gantry remained connected and Idle; no home, jog, or protocol command
   was issued.
+- The operator then confirmed sharp focus over relocated A1 at gantry
+  `(35.274, 97.718, 67.390)`. With camera depth `-62.321` and well surface Z
+  `6.186`, the corresponding labware-relative `image_height` is `123.525 mm`.
+  Both live `image_well` steps and the tracked example use that value. Setup
+  validation passes for all eight live protocol steps. The preceding live
+  protocol is backed up at
+  `/home/polar/cubos-data/backups/contact-angle-before-focus-height-20261006-183736.yaml`.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
