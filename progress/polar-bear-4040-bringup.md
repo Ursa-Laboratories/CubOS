@@ -127,6 +127,25 @@ against the physical labware and the complete protocol passes setup validation.
   performed while applying these corrections.
 - Calibrate the capper engagement depth before using cap/decap commands.
 
+## Plate relocation and camera alignment (2026-10-06)
+
+- The operator physically moved the well plate before centering the camera on
+  A1 and A2. The observed gantry positions were A1 `(35.274, 97.718, 73.390)`
+  and A2 `(35.274, 85.218, 73.390)`.
+- Both observations preserve the expected 12.5 mm A1-to-A2 pitch. Using the
+  independently calibrated camera mount offset `(195.357, -29.195)` places
+  the relocated plate at A1 `(230.631, 68.523, 6.186)` and A2
+  `(230.631, 56.023, 6.186)`.
+- A provisional edit had incorrectly absorbed the plate translation into the
+  camera and lighting offsets. That edit was corrected: camera and lighting
+  XY offsets are restored to `(195.357, -29.195)`, while the new A1/A2 values
+  are saved in `contactangle_deck.yaml`. Other deck entries were preserved.
+- The pre-correction live gantry and deck files are backed up at
+  `/home/polar/cubos-data/backups/plate-move-correction-20261006-182140`.
+- CubOS was refreshed after the correction and showed the new plate values.
+  The gantry remained connected and Idle; no home, jog, or protocol command
+  was issued.
+
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
 immediately if any axis moves away from back-right-top.
