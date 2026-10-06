@@ -303,9 +303,20 @@ against the physical labware and the complete protocol passes setup validation.
   deck backed up at
   `/home/polar/cubos-data/backups/tip-pickup-depth-20261006-195521/contactangle_deck.yaml`.
   That setup passed offline validation and its A2 pickup-only run completed
-  `2/2` steps as campaign 16. Physical confirmation that A2 is firmly attached
-  after this third run is pending; CubOS has no tip-presence sensor and
-  execution success alone does not prove attachment.
+  `2/2` steps as campaign 16. The operator physically confirmed that A2 was
+  firmly attached, establishing `pickup_z: 69.427` as the working pickup
+  height. The operator then manually removed the test tip at the high
+  inspection position.
+- Because the earlier well-clearance observation was made with no physical
+  tip attached, its carriage height could not be reused directly. A combined
+  test preserved tip state in one run: it picked up A3, then approached A1 at
+  target/carriage Z `66.186`, `56.186`, and `51.186`. The last height places
+  the end of the measured 25 mm tip at the same physical height as the bare
+  nozzle during the earlier Z `26.186` observation. Offline setup validation
+  passed, and campaign 17 completed all `4/4` steps. The gantry is connected
+  and Idle at `(135.931, 71.023, 51.186)`. Physical confirmation that A3 is
+  attached, centered, and clear of the plate is pending before the final
+  2 mm descent.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
