@@ -230,6 +230,10 @@ against the physical labware and the complete protocol passes setup validation.
   driver health check passed. The gantry did not move and remained connected
   and Idle at `(35.274, 97.718, 84.058)` with no active protocol. A positive
   cap-present sensor check and the controlled decap/recap motion test remain.
+- With the operator holding a loose cap at the pickup/sensor face, a second
+  CubOS driver check reported `cap_present=true` and passed its health check.
+  No magnet command or gantry movement was issued. The cap sensor has now
+  passed both absent and present states; controlled decap/recap motion remains.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
