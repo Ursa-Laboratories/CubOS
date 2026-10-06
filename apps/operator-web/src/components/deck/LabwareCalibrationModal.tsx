@@ -12,6 +12,7 @@ import type {
   LabwareConfig,
 } from "../../types";
 import JogPanel, { MIN_JOG_STEP } from "../gantry/JogPanel";
+import CameraPreview from "../gantry/CameraPreview";
 import { createJogPacer, jogPaceMs } from "../gantry/jogPacing";
 
 interface Props {
@@ -882,6 +883,9 @@ export default function LabwareCalibrationModal({
                         </div>
                       )}
                     </div>
+                    {selectedInstrument?.type === "camera" && selectedInstrumentName && (
+                      <CameraPreview instrument={selectedInstrumentName} />
+                    )}
                     <JogPanel
                       xyStep={xyStep}
                       zStep={zStep}
