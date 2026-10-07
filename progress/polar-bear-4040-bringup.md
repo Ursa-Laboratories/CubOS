@@ -514,6 +514,14 @@ against the physical labware and the complete protocol passes setup validation.
   at relative image height 122.8 mm for each X offset from -4 through +4 mm.
   Offset-first labels also include `height_122p8mm`. The protocol passes full
   setup validation, is selected in CubOS, and no run was started.
+- At 15:10:11 on 2026-10-07 the gantry's CH341 USB serial device reset from
+  `/dev/ttyUSB0` to `/dev/ttyUSB3`. Two attempted A2 starts failed during the
+  pre-run gantry health check with `SerialException`; no protocol step or
+  movement began. CubOS retained a stale serial handle, so the gantry session
+  was disconnected and reconnected through the configured stable by-path.
+  A live GRBL settings read then succeeded, the gantry reported Connected/Idle
+  at the unchanged `(75.89, 301.24, 56.0)` position, and the selected A2
+  protocol remained valid. The local port-8742 SSH tunnel was also renewed.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
