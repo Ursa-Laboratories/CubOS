@@ -356,6 +356,12 @@ against the physical labware and the complete protocol passes setup validation.
   driver completed `TIP_EJECT`. The bare pipette then retracted vertically to
   `(75.89, 301.24, 84.0)`. The final controller state is connected/Idle with
   no move error. The validated full experiment remains configured to pick A4.
+- The operator reported that the configured disposal action Z `30.0` was too
+  low and requested an inspection point 28 mm below the high-clearance pose.
+  With no tip attached, the run inactive, and the gantry connected/Idle at
+  `(75.89, 301.24, 84.0)`, CubOS moved Z only to `56.0`. The controller
+  returned connected/Idle with no move error. Physical confirmation is
+  pending before changing `tip_disposal_1.location.z`.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
