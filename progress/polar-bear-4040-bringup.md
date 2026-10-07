@@ -366,6 +366,13 @@ against the physical labware and the complete protocol passes setup validation.
   `/home/polar/cubos-data/backups/tip-disposal-height-20261006-201026/contactangle_deck.yaml`.
   The complete eight-step experiment passes setup validation with the revised
   disposal height.
+- At the operator's request, the live experiment aspiration changed from
+  labware-relative `height: 0` to `height: -10`, placing the tracked tip 10 mm
+  below the calibrated vial-rim reference during its 10 uL draw. The previous
+  protocol is backed up at
+  `/home/polar/cubos-data/backups/aspirate-height-minus10-20261006-201330/contact_angle_a1.yaml`.
+  No hardware moved, and the complete eight-step setup again passes bounds and
+  semantic validation.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
