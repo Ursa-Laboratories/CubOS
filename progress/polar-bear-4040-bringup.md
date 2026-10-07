@@ -505,9 +505,15 @@ against the physical labware and the complete protocol passes setup validation.
   planes from relative image height 125.0 through 123.2 mm. Filenames begin
   with `left_4mm` through `center_0mm` to `right_4mm`, so every offset stack
   groups directly in file listings; there is no
-  before-dispense image. The protocol is selected, passes full setup
-  validation, and the gantry is connected/Idle. No protocol motion was
-  started.
+  before-dispense image. It completed as campaign 29 with all 15 steps and
+  90 measurements, consuming tip A7.
+- The companion A2 single-height lateral study is
+  `/home/polar/cubos-data/configs/protocol/contact_angle_a2_lateral_offset_single_height.yaml`.
+  It uses fresh tip A8, aspirates 10 uL from vial A1 at `height: -10`,
+  dispenses into well A2 at `height: 21`, then captures one white-light image
+  at relative image height 122.8 mm for each X offset from -4 through +4 mm.
+  Offset-first labels also include `height_122p8mm`. The protocol passes full
+  setup validation, is selected in CubOS, and no run was started.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
