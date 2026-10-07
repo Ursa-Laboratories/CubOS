@@ -502,8 +502,9 @@ against the physical labware and the complete protocol passes setup validation.
   `height: -10`, recaps, dispenses once into `ursa_wellplate.A1` at the
   confirmed `height: 21`, then captures nine white-light curvature stacks at
   X offsets `-4` through `+4` mm in 1 mm increments. Each offset gets ten
-  planes from relative image height 125.0 through 123.2 mm. Labels explicitly
-  identify `left_4mm` through `center_0mm` to `right_4mm`; there is no
+  planes from relative image height 125.0 through 123.2 mm. Filenames begin
+  with `left_4mm` through `center_0mm` to `right_4mm`, so every offset stack
+  groups directly in file listings; there is no
   before-dispense image. The protocol is selected, passes full setup
   validation, and the gantry is connected/Idle. No protocol motion was
   started.
