@@ -324,6 +324,16 @@ against the physical labware and the complete protocol passes setup validation.
   confirmation that this is the intended dispense height is pending. If it is
   confirmed, the equivalent protocol-relative well height is `43.0` mm
   (`6.186 + 43.0 = 49.186`) for a tracked 25 mm attached tip.
+- The operator reported that Z `49.186` was still too high and authorized an
+  additional 10.000 mm Z-only descent. With the run inactive and controller
+  state rechecked, CubOS moved to `(135.931, 71.023, 39.186)` and returned
+  connected/Idle with no move error. This corresponds to protocol-relative
+  `height: 33.0`; physical confirmation is pending.
+- The operator requested a further 10.000 mm Z-only descent. CubOS rechecked
+  the inactive run and exact starting position, moved to
+  `(135.931, 71.023, 29.186)`, and again returned connected/Idle with no move
+  error. This corresponds to protocol-relative `height: 23.0`; physical
+  confirmation is pending before any further descent.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
