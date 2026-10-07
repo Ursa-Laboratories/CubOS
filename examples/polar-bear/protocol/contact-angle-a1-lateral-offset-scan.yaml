@@ -1,0 +1,143 @@
+# A1 lateral camera-position study after a single 10 uL dispense.
+# Nine X positions span 8 mm in 1 mm increments: -4 mm (left) to +4 mm (right).
+# Each position captures a 10-plane white-light curvature stack.
+protocol:
+- pick_up_tip:
+    position: tip_rack_green.A7
+    speed: 50
+- decap:
+    instrument: capper
+    vial: vial_rack.A1
+- aspirate:
+    position: vial_rack.A1
+    volume_ul: 10
+    speed: 50
+    height: -10
+- cap:
+    instrument: capper
+    vial: vial_rack.A1
+- dispense:
+    position: ursa_wellplate.A1
+    volume_ul: 10
+    speed: 50
+    height: 21
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: -4
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_left_4mm_white
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: -3
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_left_3mm_white
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: -2
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_left_2mm_white
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: -1
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_left_1mm_white
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: 0
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_center_0mm_white
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: 1
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_right_1mm_white
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: 2
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_right_2mm_white
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: 3
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_right_3mm_white
+- image_well:
+    camera: camera
+    well: ursa_wellplate.A1
+    image_height: 125
+    x_offset_mm: 4
+    y_offset_mm: 0
+    light: white
+    mode: curvature
+    z_steps: 10
+    z_step_mm: 0.2
+    lights: lights
+    brightness: 25
+    label: ursa_wellplate.A1_after_dispense_right_4mm_white
+- drop_tip:
+    position: tip_disposal_1
+    speed: 50

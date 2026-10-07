@@ -465,6 +465,57 @@ def _append_scan_targets(
         )
 
 
+def _append_image_well_targets(
+    targets: list[ProtocolMotionTarget],
+    *,
+    step_args: dict[str, Any],
+    deck: Deck,
+    gantry: GantryConfig,
+) -> None:
+    camera = step_args.get("camera")
+    well = step_args.get("well")
+    image_height = _height_arg(step_args, "image_height")
+    x_offset = _height_arg(step_args, "x_offset_mm")
+    y_offset = _height_arg(step_args, "y_offset_mm")
+    if (
+        not isinstance(camera, str)
+        or not isinstance(well, str)
+        or image_height is None
+        or x_offset is None
+        or y_offset is None
+    ):
+        return
+    try:
+        coord = deck.resolve_coordinate(well)
+    except (KeyError, ValueError):
+        return
+    deepest_height = image_height
+    if step_args.get("mode", "standard") == "curvature":
+        z_steps = step_args.get("z_steps", 11)
+        z_step_mm = step_args.get("z_step_mm", 0.2)
+        if (
+            isinstance(z_steps, int)
+            and z_steps >= 1
+            and _is_finite_number(z_step_mm)
+        ):
+            deepest_height -= (z_steps - 1) * float(z_step_mm)
+    image_x = coord.x + x_offset
+    image_y = coord.y + y_offset
+    for suffix, z in (
+        ("safe_z", gantry.resolved_safe_z),
+        ("action_z", coord.z + deepest_height),
+    ):
+        _append_target(
+            targets,
+            target=well,
+            suffix=suffix,
+            instrument=camera,
+            x=image_x,
+            y=image_y,
+            z=z,
+        )
+
+
 def _append_pipette_targets(
     targets: list[ProtocolMotionTarget],
     *,
@@ -603,6 +654,13 @@ def collect_protocol_motion_targets(
                 deck=deck,
                 gantry=gantry,
                 pipette_tip_extension=pipette_tip_extension,
+            )
+        elif step.command_name == "image_well":
+            _append_image_well_targets(
+                targets,
+                step_args=step.args,
+                deck=deck,
+                gantry=gantry,
             )
         else:
             pipette_tip_extension = _append_pipette_targets(

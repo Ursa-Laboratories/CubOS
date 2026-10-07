@@ -170,6 +170,30 @@ class TestImageWell:
         ]
         assert planes == [30.0, 29.5, 29.0]
 
+    def test_xy_offsets_shift_stack_and_retract(self):
+        context = _context({"cam": _camera(), "lights": _lights()})
+        image_well(
+            context,
+            camera="cam",
+            well="plate.B1",
+            image_height=30.0,
+            lights="lights",
+            mode="curvature",
+            z_steps=2,
+            z_step_mm=0.5,
+            x_offset_mm=-4.0,
+            y_offset_mm=1.5,
+        )
+        assert context.gantry.trace[0] == (
+            "move", (WELL.x - 4.0, WELL.y + 1.5, WELL.z + 30.0), SAFE_Z,
+        )
+        assert context.gantry.trace[1] == (
+            "move", (WELL.x - 4.0, WELL.y + 1.5, WELL.z + 29.5), None,
+        )
+        assert context.gantry.trace[-1] == (
+            "move", (WELL.x - 4.0, WELL.y + 1.5, SAFE_Z), None,
+        )
+
     def test_capture_failure_continues_and_retracts(self):
         camera = _camera()
 
@@ -260,6 +284,16 @@ class TestImageWellValidation:
         with pytest.raises(ProtocolExecutionError, match="image_height"):
             image_well(_context({"cam": _camera()}), camera="cam",
                        well="plate.B1", image_height=float("nan"))
+
+    def test_non_finite_xy_offset(self):
+        with pytest.raises(ProtocolExecutionError, match="x_offset_mm"):
+            image_well(
+                _context({"cam": _camera()}),
+                camera="cam",
+                well="plate.B1",
+                image_height=30.0,
+                x_offset_mm=float("nan"),
+            )
 
     def test_curvature_z_steps_must_be_positive(self):
         with pytest.raises(ProtocolExecutionError, match="z_steps"):

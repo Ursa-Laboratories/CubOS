@@ -212,6 +212,8 @@ def image_well(
     brightness: int | None = None,
     z_steps: int = _CURVATURE_DEFAULT_Z_STEPS,
     z_step_mm: float = _CURVATURE_DEFAULT_Z_STEP_MM,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> list[str]:
     """Move the camera over *well*, light it, capture, lights off, retract.
 
@@ -232,7 +234,9 @@ def image_well(
     ``image_height`` is a labware-relative offset (mm above the well's
     surface Z), like ``measure``'s ``measurement_height``. ``lights``
     names the lighting *instrument* and defaults to the gantry's lighting
-    instrument when it has exactly one. Capture and lighting failures log
+    instrument when it has exactly one. ``x_offset_mm`` and ``y_offset_mm``
+    shift the camera from the calibrated well center while keeping image
+    attribution on that well. Capture and lighting failures log
     and continue; motion failures raise. Lights-off and the retract to
     high carriage clearance run even on failure. Returns the saved image
     paths.
@@ -247,6 +251,12 @@ def image_well(
     try:
         _assert_finite_number(
             image_height, field_name="image_height", source="image_well",
+        )
+        _assert_finite_number(
+            x_offset_mm, field_name="x_offset_mm", source="image_well",
+        )
+        _assert_finite_number(
+            y_offset_mm, field_name="y_offset_mm", source="image_well",
         )
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
@@ -294,6 +304,8 @@ def image_well(
 
     saved_paths: list[str] = []
     base_label = label or f"{well}"
+    image_x = coord.x + float(x_offset_mm)
+    image_y = coord.y + float(y_offset_mm)
 
     def _capture_one(shot_label: str) -> None:
         path = build_image_path(context, shot_label, camera)
@@ -333,7 +345,7 @@ def image_well(
         for index, plane in enumerate(planes):
             context.gantry.move(
                 camera,
-                (coord.x, coord.y, coord.z + plane),
+                (image_x, image_y, coord.z + plane),
                 travel_z=clearance_z if index == 0 else None,
             )
             time.sleep(_SETTLE_S)
@@ -355,7 +367,7 @@ def image_well(
         if clearance_z is not None:
             try:
                 context.gantry.move(
-                    camera, (coord.x, coord.y, clearance_z),
+                    camera, (image_x, image_y, clearance_z),
                 )
             except Exception as exc:
                 context.logger.error(

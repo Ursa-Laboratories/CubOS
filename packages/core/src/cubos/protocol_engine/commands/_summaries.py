@@ -211,9 +211,15 @@ def capture(args: Dict[str, Any]) -> str:
 
 
 def image_well(args: Dict[str, Any]) -> str:
+    x_offset = float(args.get("x_offset_mm", 0.0))
+    y_offset = float(args.get("y_offset_mm", 0.0))
+    offset = ""
+    if x_offset or y_offset:
+        offset = f"offset ({x_offset:+g}, {y_offset:+g}) mm"
     return _join(
         f"{args['camera']} @ {_position(args['well'])}",
         str(args.get("mode", "standard")),
+        offset,
     )
 
 

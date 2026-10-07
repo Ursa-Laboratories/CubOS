@@ -489,6 +489,24 @@ against the physical labware and the complete protocol passes setup validation.
   `/home/polar/cubos-data/backups/b2-pbr-dim-20261006-213300/`.
   B2 PBR-DIM is selected in CubOS and reports `Protocol is valid`; no motion
   was started.
+- The B2 PBR-DIM protocol completed as campaign 27 with both expected B2
+  image stacks, consuming tip A6. `image_well` now accepts finite
+  `x_offset_mm` and `y_offset_mm` values, applies them to every plane and the
+  final retract while preserving well attribution, and includes the offset
+  targets in setup bounds validation. The deployed files are backed up at
+  `/home/polar/cubos-data/backups/image-well-xy-offsets-20261007-130242/`;
+  focused camera and bounds tests pass on the Pi (`71 passed`).
+- The live lateral-position study is
+  `/home/polar/cubos-data/configs/protocol/contact_angle_a1_lateral_offset_scan.yaml`.
+  It picks fresh tip A7, decaps and draws 10 uL from `vial_rack.A1` at
+  `height: -10`, recaps, dispenses once into `ursa_wellplate.A1` at the
+  confirmed `height: 21`, then captures nine white-light curvature stacks at
+  X offsets `-4` through `+4` mm in 1 mm increments. Each offset gets ten
+  planes from relative image height 125.0 through 123.2 mm. Labels explicitly
+  identify `left_4mm` through `center_0mm` to `right_4mm`; there is no
+  before-dispense image. The protocol is selected, passes full setup
+  validation, and the gantry is connected/Idle. No protocol motion was
+  started.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
