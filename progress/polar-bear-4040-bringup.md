@@ -441,6 +441,22 @@ against the physical labware and the complete protocol passes setup validation.
   `/home/polar/cubos-data/backups/b1-pama-eg-20261006-210804/`.
   B1 PAMA-EG is selected in CubOS and reports `Protocol is valid`; no motion
   was started.
+- The B1 PAMA-EG protocol completed as campaign 21. Both before- and
+  after-dispense B1 image stacks are present with the expected `pama_eg`
+  labels and labware-relative heights. CubOS then reported no active run and
+  the gantry connected/Idle at `(75.89, 301.24, 56.0)`.
+- The next live protocol is
+  `/home/polar/cubos-data/configs/protocol/contact_angle_b2_pbr_eg.yaml`.
+  It advances to fresh tip `tip_rack_green.A4`, targets
+  `ursa_wellplate.B2`, labels the image stacks
+  `ursa_wellplate.B2_pbr_eg_before_dispense_white` and
+  `ursa_wellplate.B2_pbr_eg_after_dispense_white`, and retains the confirmed
+  10 uL aspiration from `vial_rack.A1` at `height: -10`, dispense
+  `height: 21`, white-light curvature imaging, vial recapping, and tip
+  disposal. The B1 source is backed up at
+  `/home/polar/cubos-data/backups/b2-pbr-eg-20261006-211458/`.
+  B2 PBR-EG is selected in CubOS and reports `Protocol is valid`; no motion
+  was started.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
