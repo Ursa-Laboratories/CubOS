@@ -317,6 +317,13 @@ against the physical labware and the complete protocol passes setup validation.
   and Idle at `(135.931, 71.023, 51.186)`. Physical confirmation that A3 is
   attached, centered, and clear of the plate is pending before the final
   2 mm descent.
+- With the protocol inactive and the controller confirmed connected and Idle
+  at `(135.931, 71.023, 51.186)`, the operator authorized the final clearance
+  move. CubOS lowered Z only by 2.000 mm to `49.186`; X/Y remained fixed over
+  A1, the controller returned Idle, and no move error was reported. Physical
+  confirmation that this is the intended dispense height is pending. If it is
+  confirmed, the equivalent protocol-relative well height is `43.0` mm
+  (`6.186 + 43.0 = 49.186`) for a tracked 25 mm attached tip.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
