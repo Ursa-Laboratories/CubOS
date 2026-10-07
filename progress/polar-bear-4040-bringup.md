@@ -336,8 +336,18 @@ against the physical labware and the complete protocol passes setup validation.
   confirmation is pending before any further descent.
 - The operator requested a final 2.000 mm Z-only adjustment. CubOS moved from
   Z `29.186` to `27.186` at the same A1 X/Y, returning connected/Idle with no
-  move error. This corresponds to protocol-relative `height: 21.0`; physical
-  confirmation is pending.
+  move error. This corresponds to protocol-relative `height: 21.0`; the
+  operator physically confirmed that the attached tip is at the intended
+  bottom-of-well dispense position.
+- The live full experiment now uses confirmed dispense `height: 21` and fresh
+  tip A4 because A3 was consumed by clearance calibration. Aspirate remains at
+  `height: 0`; a requested 10 mm deeper aspiration would use `height: -10`
+  because negative labware-relative height lowers the tool. The previous
+  protocol is backed up at
+  `/home/polar/cubos-data/backups/confirmed-well-dispense-20261006-200408/contact_angle_a1.yaml`.
+  The revised eight-step experiment passes offline setup validation. No full
+  experiment was started; the A3 calibration tip remains physically attached
+  at the confirmed A1 position until the operator authorizes retraction.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
