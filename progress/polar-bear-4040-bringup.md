@@ -346,8 +346,16 @@ against the physical labware and the complete protocol passes setup validation.
   protocol is backed up at
   `/home/polar/cubos-data/backups/confirmed-well-dispense-20261006-200408/contact_angle_a1.yaml`.
   The revised eight-step experiment passes offline setup validation. No full
-  experiment was started; the A3 calibration tip remains physically attached
-  at the confirmed A1 position until the operator authorizes retraction.
+  experiment was started; at that point the A3 calibration tip remained
+  physically attached at the confirmed A1 position pending authorized
+  retraction.
+- The operator authorized disposal of the A3 calibration tip. After verifying
+  the run was inactive and the gantry was connected/Idle at the exact expected
+  A1 pose, CubOS retracted vertically to Z `84.0`, traveled at that clearance
+  to the configured disposal, descended to Z `30.0`, and the configured Picus
+  driver completed `TIP_EJECT`. The bare pipette then retracted vertically to
+  `(75.89, 301.24, 84.0)`. The final controller state is connected/Idle with
+  no move error. The validated full experiment remains configured to pick A4.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
