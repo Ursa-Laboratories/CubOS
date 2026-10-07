@@ -373,6 +373,15 @@ against the physical labware and the complete protocol passes setup validation.
   `/home/polar/cubos-data/backups/aspirate-height-minus10-20261006-201330/contact_angle_a1.yaml`.
   No hardware moved, and the complete eight-step setup again passes bounds and
   semantic validation.
+- Camera filenames from the successful full run used only the explicit
+  `before_dispense_white` / `after_dispense_white` labels, although each image
+  remained correctly attributed to `ursa_wellplate.A1` in the experiment
+  database. The live protocol labels now include the target explicitly:
+  `ursa_wellplate.A1_before_dispense_white` and
+  `ursa_wellplate.A1_after_dispense_white`. The previous protocol is backed up
+  at
+  `/home/polar/cubos-data/backups/image-label-well-20261006-204159/contact_angle_a1.yaml`.
+  The complete setup passes validation and no hardware moved.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
