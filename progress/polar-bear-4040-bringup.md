@@ -382,6 +382,16 @@ against the physical labware and the complete protocol passes setup validation.
   at
   `/home/polar/cubos-data/backups/image-label-well-20261006-204159/contact_angle_a1.yaml`.
   The complete setup passes validation and no hardware moved.
+- Curvature-stack filenames now report the protocol's labware-relative image
+  height instead of the controller carriage Z. For `image_height: 125`, ten
+  planes, and `z_step_mm: 0.2`, future filenames run from
+  `height=125-000mm` through `height=123-200mm`; the calculation is
+  `image_height - index * z_step_mm`. This is combined with the explicit well
+  labels above. The prior live camera source and focused test are backed up at
+  `/home/polar/cubos-data/backups/image-height-filenames-20261006-205000`.
+  Focused camera validation passes (`30 passed`), CubOS was restarted and
+  reconnected without motion at home, and the complete experiment setup
+  passes validation.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop

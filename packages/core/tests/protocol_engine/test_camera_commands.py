@@ -161,9 +161,9 @@ class TestImageWell:
                            image_height=30.0, lights="lights", label="b1",
                            mode="curvature", z_steps=3, z_step_mm=0.5)
         assert len(saved) == 3
-        # Labels encode the absolute deck-frame Z of each plane
-        # (WELL.z=26.0 + relative plane 29.5 = 55.5), not the relative offset.
-        assert any("z=55-500mm" in path for path in saved)
+        # Labels encode the requested labware-relative image height for each
+        # plane: 30.0, 29.5, and 29.0 mm.
+        assert any("height=29-500mm" in path for path in saved)
         planes = [
             entry[1][2] - WELL.z
             for entry in context.gantry.trace[:3]

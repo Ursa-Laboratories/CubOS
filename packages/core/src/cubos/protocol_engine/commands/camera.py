@@ -217,9 +217,10 @@ def image_well(
 
     * ``standard`` — one shot: descend to ``well.z + image_height``.
     * ``curvature`` — Z-stack: descend ``z_step_mm`` per plane for
-      ``z_steps`` planes; images are labeled ``{label}_z={absolute_z}mm_b{brightness}``,
-      where ``absolute_z`` is the carriage WPos Z at that plane (well Z +
-      offset + camera depth), matching the gantry readout.
+      ``z_steps`` planes; images are labeled
+      ``{label}_height={image_height}mm_b{brightness}``, where the recorded
+      height is the labware-relative image height for that plane
+      (``image_height - index * z_step_mm``).
 
     Lighting is part of the shot, not a separate step: ``light`` picks
     ``"off"`` (ambient), a lighting channel (e.g. ``"white"`` or
@@ -339,11 +340,11 @@ def image_well(
             if mode == "standard":
                 shot_label = base_label
             else:
-                # Label with the carriage WPos Z the operator sees on the
-                # gantry readout, not the deck-frame focal plane.
-                wpos_z = coord.z + plane + context.gantry.instruments[camera].effective_depth
-                z_text = f"{wpos_z:.3f}".replace(".", "-")
-                shot_label = f"{base_label}_z={z_text}mm_b{level}"
+                # Label with the requested labware-relative image height so
+                # the filename directly reflects the protocol's image_height
+                # and each descending Z-stack step.
+                height_text = f"{plane:.3f}".replace(".", "-")
+                shot_label = f"{base_label}_height={height_text}mm_b{level}"
             if lights_off:
                 _capture_one(shot_label)
             elif _lights("set_channel", channel, level):
