@@ -360,8 +360,12 @@ against the physical labware and the complete protocol passes setup validation.
   low and requested an inspection point 28 mm below the high-clearance pose.
   With no tip attached, the run inactive, and the gantry connected/Idle at
   `(75.89, 301.24, 84.0)`, CubOS moved Z only to `56.0`. The controller
-  returned connected/Idle with no move error. Physical confirmation is
-  pending before changing `tip_disposal_1.location.z`.
+  returned connected/Idle with no move error. The operator confirmed this
+  height, so live `tip_disposal_1.location.z` is now `56.0`. The previous deck
+  is backed up at
+  `/home/polar/cubos-data/backups/tip-disposal-height-20261006-201026/contactangle_deck.yaml`.
+  The complete eight-step experiment passes setup validation with the revised
+  disposal height.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
