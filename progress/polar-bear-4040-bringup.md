@@ -392,6 +392,21 @@ against the physical labware and the complete protocol passes setup validation.
   Focused camera validation passes (`30 passed`), CubOS was restarted and
   reconnected without motion at home, and the complete experiment setup
   passes validation.
+- A separate live protocol is ready for the next contact-angle sample at
+  `/home/polar/cubos-data/configs/protocol/contact_angle_b1_pama_water.yaml`.
+  It picks a fresh tip from `tip_rack_green.A1`, images well
+  `ursa_wellplate.B1` before and after dispensing with labels
+  `ursa_wellplate.B1_PAMA_water_before_dispense_white` and
+  `ursa_wellplate.B1_PAMA_water_after_dispense_white`, decaps and aspirates
+  10 uL from `vial_rack.A1` at `height: -10`, recaps the vial, dispenses into
+  B1 at the confirmed `height: 21`, and drops the tip at the confirmed
+  disposal height. The original A1 protocol was preserved and backed up at
+  `/home/polar/cubos-data/backups/b1-pama-water-20261006-205040/contact_angle_a1.yaml`.
+  The B1 protocol passes complete setup validation and is selected in the
+  CubOS UI. The gantry remains connected/Idle at home and no protocol motion
+  was started. Before running, remove the manually attached pipette tip left
+  from the prior inspection so the first pick-up-tip step starts with a bare
+  pipette.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
