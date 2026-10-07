@@ -407,6 +407,24 @@ against the physical labware and the complete protocol passes setup validation.
   was started. Before running, remove the manually attached pipette tip left
   from the prior inspection so the first pick-up-tip step starts with a bare
   pipette.
+- The B1 PAMA-water protocol completed as campaign 19. Both ten-plane image
+  stacks are present under `/home/polar/.cubos/images/campaign_19` with the
+  expected B1, sample, before/after, and labware-relative height fields in
+  their filenames. After the run, CubOS reported no active protocol and the
+  gantry connected/Idle at the configured disposal pose
+  `(75.89, 301.24, 56.0)`.
+- The next live protocol is
+  `/home/polar/cubos-data/configs/protocol/contact_angle_b2_pbd_water.yaml`.
+  It advances to fresh tip `tip_rack_green.A2`, images and dispenses into
+  `ursa_wellplate.B2`, labels the two image stacks
+  `ursa_wellplate.B2_pbd_water_before_dispense_white` and
+  `ursa_wellplate.B2_pbd_water_after_dispense_white`, and retains the
+  confirmed 10 uL aspiration from `vial_rack.A1` at `height: -10`, dispense
+  `height: 21`, white-light curvature stack, recapping, and tip disposal.
+  The source B1 protocol is backed up at
+  `/home/polar/cubos-data/backups/b2-pbd-water-20261006-205930/`.
+  B2 is selected in CubOS and reports `Protocol is valid`; no B2 protocol
+  motion was started.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
