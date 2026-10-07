@@ -522,6 +522,14 @@ against the physical labware and the complete protocol passes setup validation.
   A live GRBL settings read then succeeded, the gantry reported Connected/Idle
   at the unchanged `(75.89, 301.24, 56.0)` position, and the selected A2
   protocol remained valid. The local port-8742 SSH tunnel was also renewed.
+- The gantry CH341 connection subsequently reset several more times between
+  15:24 and 16:00, repeatedly invalidating CubOS's serial handle. After a
+  fresh disconnect/reconnect and successful GRBL read, the one-step validated
+  `pipette_hover_a2.yaml` move completed. The pipette is centered over
+  `ursa_wellplate.A2` at safe hover without descending; final carriage pose is
+  `(135.931, 58.523, 59.0)`, Connected/Idle. The repeated kernel-level USB
+  disconnects indicate a cable, hub, connector, controller power, or USB power
+  stability issue that should be corrected before a long unattended run.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
