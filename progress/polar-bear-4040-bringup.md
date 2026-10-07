@@ -334,6 +334,10 @@ against the physical labware and the complete protocol passes setup validation.
   `(135.931, 71.023, 29.186)`, and again returned connected/Idle with no move
   error. This corresponds to protocol-relative `height: 23.0`; physical
   confirmation is pending before any further descent.
+- The operator requested a final 2.000 mm Z-only adjustment. CubOS moved from
+  Z `29.186` to `27.186` at the same A1 X/Y, returning connected/Idle with no
+  move error. This corresponds to protocol-relative `height: 21.0`; physical
+  confirmation is pending.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
