@@ -539,6 +539,10 @@ against the physical labware and the complete protocol passes setup validation.
   calibrated tip from `tip_rack_green.A1` and retracted to safe hover. Final
   carriage pose is `(206.918, 358.94, 84.0)`, Connected/Idle, with no active
   protocol.
+- After the operator manually removed the A1 tip, the validated
+  `pipette_pickup_a12_and_retract.yaml` sequence picked a fresh tip from
+  `tip_rack_green.A12` and retracted to safe hover. Final carriage pose is
+  `(206.918, 259.94, 84.0)`, Connected/Idle, with no active protocol.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
