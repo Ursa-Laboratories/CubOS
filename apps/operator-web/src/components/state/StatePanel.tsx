@@ -27,6 +27,7 @@ function formatVolume(value: number): string {
 }
 
 interface ResolveFormState {
+  fluidStateId: number;
   operation: OperationView;
   resolution: string;
   operator: string;
@@ -47,9 +48,8 @@ export default function StatePanel() {
   const tips = useTipState(selectedId);
   const caps = useCapState(selectedId);
   const reconciliation = useReconciliation(selectedId);
-  const resolveMutation = useResolveReconciliation(selectedId);
-
   const [resolveForm, setResolveForm] = useState<ResolveFormState | null>(null);
+  const resolveMutation = useResolveReconciliation(resolveForm?.fluidStateId ?? null);
   const [resolveError, setResolveError] = useState<string | null>(null);
 
   const reconciliationItems = useMemo(
@@ -58,12 +58,13 @@ export default function StatePanel() {
   );
 
   const openResolveForm = (operation: OperationView) => {
+    if (selectedId === null) return;
     setResolveError(null);
-    setResolveForm({ operation, resolution: "applied", operator: "", reason: "" });
+    setResolveForm({ fluidStateId: selectedId, operation, resolution: "applied", operator: "", reason: "" });
   };
 
   const submitResolve = async () => {
-    if (!resolveForm) return;
+    if (!resolveForm || resolveForm.fluidStateId !== selectedId) return;
     if (!resolveForm.operator.trim() || !resolveForm.reason.trim()) {
       setResolveError("Operator and reason are both required.");
       return;
@@ -95,7 +96,12 @@ export default function StatePanel() {
           <select
             aria-label="Fluid state"
             value={selectedId ?? ""}
-            onChange={(event) => setExplicitSelectedId(event.target.value ? Number(event.target.value) : null)}
+            disabled={resolveMutation.isPending}
+            onChange={(event) => {
+              setExplicitSelectedId(event.target.value ? Number(event.target.value) : null);
+              setResolveForm(null);
+              setResolveError(null);
+            }}
             style={selectStyle}
           >
             <option value="">Select a fluid state…</option>
@@ -152,7 +158,7 @@ export default function StatePanel() {
             </div>
           )}
 
-          {resolveForm && (
+          {resolveForm && resolveForm.fluidStateId === selectedId && (
             <div style={resolveFormStyle}>
               <div style={theme.sectionLabel}>
                 Resolve {resolveForm.operation.domain} operation {resolveForm.operation.operation_key}

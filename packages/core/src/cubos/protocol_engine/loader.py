@@ -7,54 +7,19 @@ from pathlib import Path
 import yaml
 from pydantic import ValidationError
 
-# Hints for legacy top-level scan/measure command fields. These fields are
-# rejected at the registry-derived schema layer with Pydantic's generic
-# "Extra inputs are not permitted"; intercepting on field name lets us
-# substitute a rename- or semantic-shift hint that points at the new
-# field name (and, for `indentation_limit`, the magnitude→signed-offset
-# semantic flip).
-_LEGACY_TOP_LEVEL_HINTS: dict[str, str] = {
-    "safe_approach_height": (
-        "`safe_approach_height` was renamed to `interwell_scan_height` "
-        "(labware-relative offset above the well surface for between-wells "
-        "XY travel)."
-    ),
-    "indentation_limit": (
-        "`indentation_limit` was renamed to `indentation_limit_height` and "
-        "its meaning changed: it is now a *signed* labware-relative offset "
-        "(mm above the well surface; negative = below), not a sign-agnostic "
-        "descent magnitude. Convert e.g. `indentation_limit: 5.0` to "
-        "`indentation_limit_height: -5.0`."
-    ),
-    "z_limit": (
-        "`z_limit` is no longer supported. Use `indentation_limit_height` "
-        "(signed labware-relative offset, mm above the well surface)."
-    ),
-    "entry_travel_height": (
-        "`entry_travel_height` is no longer supported. Inter-labware/entry "
-        "travel uses the gantry's `safe_z` (absolute deck-frame Z)."
-    ),
-    "interwell_travel_height": (
-        "`interwell_travel_height` was renamed to `interwell_scan_height`."
-    ),
-}
-
 # Side-effect import: triggers all @protocol_command decorators so that
 # the CommandRegistry is populated before any YAML is validated.
 from . import commands as _commands  # noqa: F401
 
 from .compiler import CommandCall, compile_protocol
-from .errors import ProtocolLoaderError
+from .errors import LEGACY_COMMAND_HINTS, ProtocolLoaderError
 from .protocol import Protocol
 from .registry import CommandRegistry
 from .yaml_schema import ProtocolYamlSchema
 
 
 def _format_loader_exception(path: Path, error: Exception) -> str:
-    """Return a concise, actionable error message with fix guidance.
-
-    Mirrors ``packages/core/src/cubos/deck/loader.py::_format_loader_exception``.
-    """
+    """Return a concise, actionable error message with fix guidance."""
     detail = str(error)
 
     if isinstance(error, ValidationError):
@@ -77,12 +42,9 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
             guidance = "Add the missing required argument shown in the error location."
         elif (
             ("extra_forbidden" in error_type or "Extra inputs are not permitted" in detail)
-            and offending_field in _LEGACY_TOP_LEVEL_HINTS
+            and offending_field in LEGACY_COMMAND_HINTS
         ):
-            # Legacy top-level fields land here as generic "extra inputs not
-            # permitted" — surface the rename / semantic-shift hint instead so
-            # users migrating from staging see what to change.
-            guidance = _LEGACY_TOP_LEVEL_HINTS[offending_field]
+            guidance = LEGACY_COMMAND_HINTS[offending_field]
         elif "extra_forbidden" in error_type or "Extra inputs are not permitted" in detail:
             guidance = "Remove unknown arguments; only registered parameters are allowed."
         elif "exactly one command" in detail:

@@ -277,6 +277,26 @@ def test_download_data_zip_layout(tmp_path):
         assert metadata["measurement_counts"]["asmi"] == 1
 
 
+@pytest.mark.parametrize("second_grid", [[400.0, 500.0], [410.0, 510.0], [500.0, 400.0], [400.0]])
+def test_wide_spectra_require_identical_wavelength_grids(tmp_path, second_grid):
+    path = tmp_path / "spectra.db"
+    first_grid = [400.0, 500.0]
+    with DataStore(path) as store:
+        campaign = store.create_campaign("Spectra with distinct calibrations")
+        for well, grid in (("A1", first_grid), ("A2", second_grid)):
+            experiment = store.create_experiment(campaign, "plate", well)
+            store.log_measurement(experiment, InstrumentMeasurement(
+                measurement_type=MeasurementType.UVVIS_SPECTRUM,
+                payload={"wavelength_nm": grid, "intensity_au": [1.0] * len(grid)},
+                metadata={"integration_time_s": 0.1},
+            ))
+
+    with zipfile.ZipFile(io.BytesIO(export_campaign_data_zip(path, campaign))) as archive:
+        assert ("uvvis/spectra_wide.csv" in archive.namelist()) == (second_grid == first_grid)
+        curves = _zip_csv(archive, "uvvis/curves.csv")
+        assert [float(row["wavelength_nm"]) for row in curves if row["well_id"] == "A2"] == second_grid
+
+
 def test_download_data_keeps_legacy_asmi_raw_files(tmp_path):
     db_path = tmp_path / "panda_data.db"
     campaign_id = _seed_store(db_path)

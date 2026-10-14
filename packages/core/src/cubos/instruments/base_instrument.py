@@ -1,8 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Optional
 import logging
-
-logger = logging.getLogger(__name__)
+import math
 
 
 class InstrumentError(Exception):
@@ -11,26 +10,10 @@ class InstrumentError(Exception):
 
 
 class BaseInstrument(ABC):
-    """Abstract base class for all instruments.
+    """Instrument identity, mounting geometry, and hardware lifecycle.
 
-    All instruments accept an ``offline`` flag. When True, connect/disconnect
-    are no-ops, health_check returns True, and instrument-specific methods
-    return synthetic data without touching hardware.
-
-    Z semantics
-    -----------
-    CubOS uses a +Z-up deck frame.
-
-    Instruments don't carry labware-relative motion heights. The protocol
-    commands own them:
-
-    * ``measurement_height`` (action plane, labware-relative offset) is a
-      first-class argument to ``measure`` and ``scan``.
-    * ``interwell_scan_height`` (between-wells XY-travel offset) is a
-      first-class argument to ``scan``.
-
-    Inter-labware travel and the entry approach for the first well of a
-    scan use the gantry-level ``safe_z`` (absolute deck-frame Z).
+    ``offline=True`` disables hardware access. Labware-relative action heights
+    belong to protocol commands; instruments carry only mounting offsets.
     """
 
     def __init__(
@@ -41,6 +24,9 @@ class BaseInstrument(ABC):
         depth: float = 0.0,
         offline: bool = False,
     ):
+        for field, value in (("offset_x", offset_x), ("offset_y", offset_y), ("depth", depth)):
+            if not math.isfinite(value):
+                raise ValueError(f"{field} must be finite, got {value!r}.")
         self.name = name or self.__class__.__name__
         self.offset_x = offset_x
         self.offset_y = offset_y

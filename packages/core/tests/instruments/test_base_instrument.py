@@ -94,3 +94,10 @@ def test_custom_offset_and_depth():
     assert instr.offset_x == -10.5
     assert instr.offset_y == 20.0
     assert instr.depth == -5.0
+
+
+@pytest.mark.parametrize("field", ["offset_x", "offset_y", "depth"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_nonfinite_mount_geometry_is_rejected(field, value):
+    with pytest.raises(ValueError, match=rf"{field} must be finite"):
+        MockInstrument(**{field: value})

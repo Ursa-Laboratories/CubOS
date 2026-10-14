@@ -7,6 +7,7 @@ const {
   allocateLoopbackPort,
   assertRuntimePaths,
   getRuntimePaths,
+  isBackendUrl,
   seedConfigs,
   startBackend,
   waitForBackend,
@@ -84,15 +85,15 @@ async function launch() {
   await mainWindow.loadFile(path.join(__dirname, "..", "assets", "loading.html"));
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    if (url.startsWith(baseUrl)) return { action: "allow" };
+    if (isBackendUrl(url, baseUrl)) return { action: "allow" };
     if (url.startsWith("https://") || url.startsWith("http://")) void shell.openExternal(url);
     return { action: "deny" };
   });
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    if (!url.startsWith(baseUrl)) event.preventDefault();
+    if (!isBackendUrl(url, baseUrl)) event.preventDefault();
   });
 
-  await waitForBackend(baseUrl, backend.child);
+  await waitForBackend(baseUrl, backend);
   await mainWindow.loadURL(baseUrl);
   await mainWindow.webContents.executeJavaScript(
     "document.fonts.ready.then(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))))",

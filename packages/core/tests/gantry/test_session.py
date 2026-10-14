@@ -435,6 +435,58 @@ def test_movement_error_does_not_mark_reconnect_required_for_bounds_violation(tm
     assert exc_info.value.requires_reconnect is False
 
 
+@pytest.mark.parametrize("action", ["jog", "jog_blocking"])
+@pytest.mark.parametrize("axis", ["x", "y", "z"])
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_jog_rejects_nonfinite_current_position(tmp_path, action, axis, value):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.coords[axis] = value
+
+    with pytest.raises(MovementOutOfBoundsError, match="finite current") as exc_info:
+        getattr(session, action)(x=1.0)
+
+    assert exc_info.value.requires_reconnect is True
+    assert not any(call[0] == "jog" for call in fake.calls)
+
+
+@pytest.mark.parametrize("changed_state", ["bounds", "pending_calibration", "unverified_calibration"])
+def test_queued_move_rechecks_current_safety_state(monkeypatch, tmp_path, changed_state):
+    queued = []
+
+    class DeferredThread:
+        def __init__(self, *, target, args, daemon):
+            queued.append((target, args))
+
+        def start(self):
+            pass
+
+    monkeypatch.setattr("cubos.gantry.session.threading.Thread", DeferredThread)
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.move_to(x=200.0, y=20.0, z=30.0)
+
+    if changed_state == "bounds":
+        config = session.connected_gantry_config
+        config["working_volume"]["x_max"] = 100.0
+        session.refresh_connected_config("gantry.yaml", config)
+        expected_error = "outside configured gantry working volume"
+    elif changed_state == "pending_calibration":
+        session._calibration_pending_config = session.connected_gantry_config
+        expected_error = "Save the finalized calibration"
+    else:
+        session._calibration_frame_unverified = True
+        expected_error = "Calibration origin did not verify"
+
+    worker, args = queued.pop()
+    worker(*args)
+
+    assert expected_error in session.position().move_error
+    assert not any(call[0] == "move_to" for call in fake.calls)
+
+
 def test_move_worker_publishes_and_resets_errors(tmp_path):
     class OneFailureGantry(FakeGantry):
         def __init__(self, config=None):

@@ -8,6 +8,10 @@ process restart.
 from __future__ import annotations
 
 import time
+import json
+from pathlib import Path
+
+import pytest
 
 from cubos_api.models.runs import RunRecord
 from cubos_api.services.run_store import RunStore
@@ -100,3 +104,116 @@ def test_sequences_are_independent_per_run(tmp_path):
     store.append_event("run-b", state="running", message="b1")
     assert [e.sequence for e in store.events("run-a")] == [1, 2]
     assert [e.sequence for e in store.events("run-b")] == [1, 2]
+
+
+@pytest.mark.parametrize("tail", [b'{"sequence":2', b'{"message":"\xe2\x82'])
+def test_restart_recovers_truncated_event_and_preserves_tail(tmp_path, tail):
+    store = _store(tmp_path)
+    _create(store)
+    path = store.run_dir("run-a") / "events.jsonl"
+    path.write_bytes(path.read_bytes() + tail)
+
+    reopened = _store(tmp_path)
+    assert [e.sequence for e in reopened.events("run-a")] == [1]
+    reopened.append_event("run-a", state="failed", message="server restarted")
+
+    assert [e.sequence for e in reopened.events("run-a")] == [1, 2]
+    assert path.with_suffix(".jsonl.partial").read_bytes() == tail
+
+
+def test_restart_preserves_complete_event_without_newline(tmp_path):
+    store = _store(tmp_path)
+    _create(store)
+    path = store.run_dir("run-a") / "events.jsonl"
+    path.write_bytes(path.read_bytes().rstrip(b"\n"))
+
+    reopened = _store(tmp_path)
+    reopened.append_event("run-a", state="failed", message="server restarted")
+
+    assert [e.sequence for e in reopened.events("run-a")] == [1, 2]
+    assert not path.with_suffix(".jsonl.partial").exists()
+
+
+@pytest.mark.parametrize("corruption", [b"not json\n", b"not json\n{}", b"not json\r{}", b"{}"])
+def test_complete_corruption_is_not_ignored_or_rewritten(tmp_path, corruption):
+    store = _store(tmp_path)
+    _create(store)
+    path = store.run_dir("run-a") / "events.jsonl"
+    content = path.read_bytes() + corruption
+    path.write_bytes(content)
+    reopened = _store(tmp_path)
+
+    with pytest.raises(ValueError):
+        reopened.events("run-a")
+    with pytest.raises(ValueError):
+        reopened.append_event("run-a", state="failed", message="server restarted")
+    assert path.read_bytes() == content
+
+
+def test_restarted_sequence_uses_recorded_sequence_not_line_count(tmp_path):
+    store = _store(tmp_path)
+    _create(store)
+    path = store.run_dir("run-a") / "events.jsonl"
+    event = json.loads(path.read_text())
+    event["sequence"] = 7
+    path.write_text(json.dumps(event) + "\n")
+
+    reopened = _store(tmp_path)
+    event = reopened.append_event("run-a", state="running", message="resumed")
+
+    assert event.sequence == 8
+
+
+def test_interrupted_run_recovery_accepts_truncated_event(tmp_path):
+    from cubos_api.config import CubOSSettings
+    from cubos_api.services.run_manager import RunManager
+
+    store = _store(tmp_path)
+    _create(store)
+    path = store.run_dir("run-a") / "events.jsonl"
+    path.write_bytes(path.read_bytes() + b'{"sequence":2')
+
+    manager = RunManager(CubOSSettings(config_dir=tmp_path / "configs", run_dir=store.base_dir))
+
+    assert manager.get("run-a").state == "failed"
+    assert manager.events("run-a")[-1].state == "failed"
+
+
+def test_failed_record_replace_preserves_previous_record(tmp_path, monkeypatch):
+    from cubos_api.services import yaml_io
+
+    store = _store(tmp_path)
+    record = _create(store)
+    original_files = set(store.run_dir("run-a").iterdir())
+    record.state = "running"
+
+    def fail_replace(*args):
+        raise OSError("disk unavailable")
+
+    monkeypatch.setattr(yaml_io.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="disk unavailable"):
+        store.write(record)
+
+    assert store.read("run-a").state == "queued"
+    assert set(store.run_dir("run-a").iterdir()) == original_files
+
+
+def test_failed_event_append_is_recovered_before_retry(tmp_path, monkeypatch):
+    store = _store(tmp_path)
+    _create(store)
+    path = store.run_dir("run-a") / "events.jsonl"
+    original_open = Path.open
+
+    def interrupted_append(*args, **kwargs):
+        with original_open(path, "a", encoding="utf-8") as handle:
+            handle.write('{"sequence":2')
+            raise OSError("disk full")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "open", interrupted_append)
+        with pytest.raises(OSError, match="disk full"):
+            store.append_event("run-a", state="running", message="interrupted")
+
+    event = store.append_event("run-a", state="failed", message="retry")
+    assert event.sequence == 2
+    assert [e.sequence for e in store.events("run-a")] == [1, 2]

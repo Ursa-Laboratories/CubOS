@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
+import yaml
 from pydantic import ValidationError
 
+from cubos.gantry.session import GantrySession
 from cubos.gantry.yaml_schema import GantryYamlSchema
 
 
@@ -25,6 +29,33 @@ def _valid_gantry_dict() -> dict:
 
 
 class TestGantryYamlSchema:
+
+    @pytest.mark.parametrize("field", ["x_min", "x_max", "y_min", "y_max", "z_min", "z_max"])
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_nonfinite_working_volume_bound_rejected(self, field, value):
+        data = _valid_gantry_dict()
+        data["working_volume"][field] = value
+
+        with pytest.raises(ValidationError) as exc_info:
+            GantryYamlSchema.model_validate(data)
+
+        error = exc_info.value.errors()[0]
+        assert error["loc"] == ("working_volume", field)
+        assert error["type"] == "finite_number"
+
+    def test_nonfinite_working_volume_prevents_hardware_construction(self, tmp_path):
+        data = _valid_gantry_dict()
+        data["working_volume"]["x_max"] = float("nan")
+        path = tmp_path / "gantry.yaml"
+        path.write_text(yaml.safe_dump(data), encoding="utf-8")
+        factory = MagicMock()
+        session = GantrySession(gantry_factory=factory)
+
+        with pytest.raises(ValidationError, match="x_max"):
+            session.connect(path)
+
+        factory.assert_not_called()
+        assert session.connected is False
 
     def test_valid_gantry_yaml_parses_all_fields(self):
         data = _valid_gantry_dict()
