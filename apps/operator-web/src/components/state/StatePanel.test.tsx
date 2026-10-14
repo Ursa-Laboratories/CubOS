@@ -116,7 +116,7 @@ const RECONCILIATION: ReconciliationResponse = {
   items: [RECONCILIATION_ITEM],
 };
 
-function installFetchMock(overrides: { reconciliation?: ReconciliationResponse } = {}) {
+function installFetchMock(overrides: { reconciliation?: ReconciliationResponse; states?: FluidStateSummary[]; resolve?: () => Promise<Response> } = {}) {
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
@@ -125,7 +125,7 @@ function installFetchMock(overrides: { reconciliation?: ReconciliationResponse }
     const path = url.pathname;
     const method = init?.method ?? "GET";
 
-    if (path === "/api/v1/fluid-states" && method === "GET") return jsonResponse([SUMMARY]);
+    if (path === "/api/v1/fluid-states" && method === "GET") return jsonResponse(overrides.states ?? [SUMMARY]);
     if (path === "/api/v1/fluid-states/1" && method === "GET") return jsonResponse(DETAIL);
     if (path === "/api/v1/fluid-states/1/tips") return jsonResponse(TIPS);
     if (path === "/api/v1/fluid-states/1/caps") return jsonResponse(CAPS);
@@ -133,6 +133,7 @@ function installFetchMock(overrides: { reconciliation?: ReconciliationResponse }
       return jsonResponse(overrides.reconciliation ?? RECONCILIATION);
     }
     if (path === "/api/v1/fluid-states/1/reconciliation/resolve" && method === "POST") {
+      if (overrides.resolve) return overrides.resolve();
       return jsonResponse({
         domain: "fluid",
         operation_key: "indeterminate",
@@ -227,6 +228,34 @@ describe("StatePanel", () => {
       operator: "alexc",
       reason: "confirmed via camera review",
     });
+  });
+
+  it("discards a pending reconciliation when another fluid state is selected", async () => {
+    const fetchMock = installFetchMock({ states: [SUMMARY, { ...SUMMARY, id: 2, label: "second" }] });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByPlaceholderText("Your name or initials"), "alexc");
+    await user.type(screen.getByPlaceholderText(/What did you observe/), "Confirmed transfer");
+    await user.selectOptions(screen.getByLabelText("Fluid state"), "2");
+    expect(screen.queryByRole("button", { name: "Submit resolution" })).not.toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText("Fluid state"), "1");
+    expect(screen.queryByRole("button", { name: "Submit resolution" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, init]) => init?.method === "POST")).toBe(false);
+  });
+
+  it("holds the selected state while a reconciliation is being saved", async () => {
+    let finish!: (response: Response) => void;
+    installFetchMock({ resolve: () => new Promise<Response>((resolve) => { finish = resolve; }) });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Resolve" }));
+    await user.type(screen.getByPlaceholderText("Your name or initials"), "alexc");
+    await user.type(screen.getByPlaceholderText(/What did you observe/), "Confirmed transfer");
+    await user.click(screen.getByRole("button", { name: "Submit resolution" }));
+    expect(screen.getByLabelText("Fluid state")).toBeDisabled();
+    finish(jsonResponse({ status: "applied" }));
+    await waitFor(() => expect(screen.getByLabelText("Fluid state")).toBeEnabled());
   });
 
   it("shows an empty state when no fluid state is selected", async () => {

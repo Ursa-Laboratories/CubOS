@@ -81,6 +81,15 @@ def test_cubos_settings_loads_persisted_config_dir(restore_config_dir):
         assert settings.configs_dir == Path(d).resolve()
 
 
+@pytest.mark.parametrize("payload", [None, [], "config", 12, True])
+def test_cubos_settings_ignores_non_object_json(restore_config_dir, payload):
+    from cubos_api import config
+
+    restore_config_dir.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert config._load_user_settings() == {}
+
+
 def test_cubos_config_dir_env_wins_over_persisted_settings(monkeypatch, restore_config_dir, tmp_path):
     persisted = tmp_path / "persisted"
     env_dir = tmp_path / "env"

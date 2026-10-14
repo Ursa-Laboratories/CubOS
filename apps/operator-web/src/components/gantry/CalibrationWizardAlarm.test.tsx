@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import CalibrationWizard from "./CalibrationWizard";
@@ -74,6 +74,33 @@ async function advanceToOriginJog(user: ReturnType<typeof userEvent.setup>) {
 describe("CalibrationWizard alarm recovery", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it("stops held jogging when the touch gesture is cancelled", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(async () => jsonResponse(position()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { unmount } = render(
+      <CalibrationWizard open onClose={() => undefined}
+        gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
+        position={position()} onSaveCalibrated={async () => undefined} />,
+    );
+    const zDown = await advanceToOriginJog(user);
+    vi.useFakeTimers();
+    try {
+      const jogCalls = () => fetchMock.mock.calls.filter(([input]) => input === "/api/v1/gantry/jog").length;
+      fireEvent.touchStart(zDown);
+      await act(async () => { await vi.advanceTimersByTimeAsync(350); });
+      expect(jogCalls()).toBeGreaterThan(1);
+      fireEvent.touchCancel(zDown);
+      expect(fetchMock).toHaveBeenCalledWith("/api/v1/gantry/jog-cancel", expect.anything());
+      const count = jogCalls();
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      expect(jogCalls()).toBe(count);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
   });
 
   it("shows the power-cycle instruction when recovery reports connection loss", async () => {

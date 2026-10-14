@@ -31,6 +31,12 @@ def _make_volume(
 
 class TestWorkingVolume:
 
+    @pytest.mark.parametrize("field", ["x_min", "x_max", "y_min", "y_max", "z_min", "z_max"])
+    @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+    def test_rejects_nonfinite_bounds(self, field, value):
+        with pytest.raises(ValueError, match="must be finite"):
+            _make_volume(**{field: value})
+
     def test_contains_interior_point(self):
         vol = _make_volume()
         assert vol.contains(150.0, 100.0, 40.0) is True

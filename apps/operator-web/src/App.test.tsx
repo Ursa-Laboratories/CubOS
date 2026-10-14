@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
@@ -26,6 +26,7 @@ type ApiState = {
 let lastSubmittedBody: Record<string, unknown> | null = null;
 
 type FetchMockOptions = {
+  previewWells?: (config: WellPlateConfig) => Response | Promise<Response>;
   protocolRun?: (init?: RequestInit) => Promise<Response>;
   protocolCancel?: () => Response | Promise<Response>;
   runStatus?: () => ProtocolRunStatus;
@@ -339,7 +340,7 @@ function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
       return jsonResponse({ status: "ok" });
     }
     if (path === "/api/v1/deck/preview-wells" && method === "POST") {
-      return jsonResponse(previewWells(body as WellPlateConfig));
+      return options.previewWells?.(body as WellPlateConfig) ?? jsonResponse(previewWells(body as WellPlateConfig));
     }
     if (path === "/api/v1/fluid-states" && method === "GET") {
       return jsonResponse(options.fluidStates ?? []);
@@ -681,6 +682,30 @@ describe("CubOS editor interactions", () => {
     await user.type(screen.getByLabelText("Calibration A1 X"), "111");
 
     expect(await screen.findByText("A1: (111, 20, 30)")).toBeInTheDocument();
+  });
+
+  it("ignores an older well preview that completes after a newer edit", async () => {
+    const user = userEvent.setup();
+    let finishOlder!: (response: Response) => void;
+    const previews = vi.fn((config: WellPlateConfig) => {
+      if (config.calibration.a1?.x === 111) {
+        return new Promise<Response>((resolve) => { finishOlder = resolve; });
+      }
+      return jsonResponse(previewWells(config));
+    });
+    installFetchMock(createState(), { previewWells: previews });
+    renderApp();
+    await waitForSettingsLoad();
+    await user.click(screen.getByRole("button", { name: "Deck" }));
+    await importConfig(user, "Deck config", "deck.yaml");
+    await screen.findByText("A1: (10, 20, 30)");
+    fireEvent.change(screen.getByLabelText("Calibration A1 X"), { target: { value: "111" } });
+    await waitFor(() => expect(finishOlder).toBeTypeOf("function"));
+    fireEvent.change(screen.getByLabelText("Calibration A1 X"), { target: { value: "222" } });
+    await screen.findByText("A1: (222, 20, 30)");
+    await act(async () => { finishOlder(jsonResponse({ A1: { x: 111, y: 20, z: 30 } })); });
+    expect(screen.getByText("A1: (222, 20, 30)")).toBeInTheDocument();
+    expect(screen.queryByText("A1: (111, 20, 30)")).not.toBeInTheDocument();
   });
 
   it("loads and saves gantry instruments across tab switches", async () => {

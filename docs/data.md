@@ -44,7 +44,7 @@ position, and pipette `transfer` updates labware contents.
 | `samples.csv` | One row per well: what was dispensed into it and how many measurements each instrument took. |
 | `<instrument>/measurements.csv` | One row per measurement: instrument settings and recorded values. |
 | `<instrument>/curves.csv` | One row per recorded data point (long format), ready to plot by well. |
-| `uvvis/spectra_wide.csv` | Wavelength rows, one column per spectrum (`<well> <time>`). |
+| `uvvis/spectra_wide.csv` | Wavelength rows, one column per spectrum (`<well> <time>`). Included when all spectra share the same wavelength grid; `curves.csv` always retains each spectrum's recorded wavelengths. |
 | `asmi/raw/` | The original per-well ASMI CSVs and `metadata.csv`, for existing scripts. |
 | `camera/images/` | The captured image files. |
 | `metadata.json` | Campaign details, CubOS version, and analysis settings. |

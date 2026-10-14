@@ -386,9 +386,7 @@ class GantrySession:
         generation = self._jog_cancel_generation
         with self._lock:
             if generation != self._jog_cancel_generation:
-                # A jog cancel arrived while this request waited on the
-                # operation lock. Sending the jog now would restart motion
-                # the operator just stopped, so drop it.
+                # Drop queued jogs that would restart motion after a cancel.
                 return
             self._validate_jog_target_locked(x=x, y=y, z=z)
             try:
@@ -497,13 +495,8 @@ class GantrySession:
     def prepare_calibration_origin(self) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
             self._apply_calibration_grbl_baseline_locked()
-            # Hard limits ($21) are the only motion backstop while soft
-            # limits are disabled below, and hobby controllers ship with
-            # them off — without this, a jog past a travel end grinds and
-            # silently skips steps, corrupting the calibration being taken.
-            # Enforced for the calibration window only; finalize/abort
-            # restore the prior value (finalize keeps $21=1 when the gantry
-            # YAML configures hard_limits).
+            # Hard limits protect calibration while soft limits are off.
+            # Restore prior $21 on abort; finalize retains it when configured.
             if gantry.hard_limits_enabled() is False:
                 gantry.set_hard_limits_enabled(True)
                 self._calibration_restore_hard_limits = True
@@ -686,10 +679,7 @@ class GantrySession:
         with self._lock:
             gantry = self._require_connected()
             self._require_verified_calibration_frame_locked()
-            # A GRBL-settings mismatch (self._calibration_warning) is advisory,
-            # not blocking: commissioning machines legitimately differ from the
-            # selected gantry YAML, and the operator owns that decision. The
-            # warning is still computed and surfaced; it no longer blocks runs.
+            # GRBL-settings mismatches are advisory during commissioning.
             if not gantry.is_healthy():
                 raise GantrySessionHealthCheckError("Gantry is not connected")
 
@@ -738,6 +728,7 @@ class GantrySession:
         self._move_error = None
         try:
             with self._lock:
+                self._validate_manual_move_target_locked(x=x, y=y, z=z)
                 self._require_connected().move_to(x=x, y=y, z=z)
         except Exception as exc:
             self.logger.error("Background move to (%s, %s, %s) failed: %s", x, y, z, exc, exc_info=True)
@@ -958,7 +949,10 @@ class GantrySession:
                 requires_reconnect=True,
             )
         try:
-            return {axis: float(raw[axis]) for axis in ("x", "y", "z")}
+            position = {axis: float(raw[axis]) for axis in ("x", "y", "z")}
+            if not all(math.isfinite(value) for value in position.values()):
+                raise ValueError("Non-finite current position")
+            return position
         except (KeyError, TypeError, ValueError) as exc:
             raise MovementOutOfBoundsError(
                 "Jog working-volume checks require finite current gantry "

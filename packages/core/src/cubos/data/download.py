@@ -113,7 +113,7 @@ def _uvvis(zf, put, rows, start) -> None:
     put("uvvis/curves.csv", ["measurement_id", "well_id", "wavelength_nm", "intensity"], curves)
 
     grid = spectra[0][1]
-    if all(len(w) == len(grid) for _, w, _ in spectra):
+    if all(wavelengths == grid for _, wavelengths, _ in spectra):
         headers = _unique([
             f"{row['experiment_well_id'] or 'no_well'} {_parse_time(row['timestamp']):%H:%M:%S}"
             for row, _, _ in spectra
@@ -347,6 +347,7 @@ _README_SECTIONS: dict[str, list[str]] = {
         "  curves.csv        one row per wavelength point (long format, for plotting by well).",
         "  spectra_wide.csv  the same spectra side by side: one wavelength column, then one",
         "                    column per spectrum named '<well> <HH:MM:SS>'.",
+        "                    Included only when all spectra have identical wavelength grids.",
         "  Intensity is the detector reading as reported by the spectrometer.",
     ],
     "asmi": [
