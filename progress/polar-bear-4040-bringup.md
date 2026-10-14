@@ -543,6 +543,12 @@ against the physical labware and the complete protocol passes setup validation.
   `pipette_pickup_a12_and_retract.yaml` sequence picked a fresh tip from
   `tip_rack_green.A12` and retracted to safe hover. Final carriage pose is
   `(206.918, 259.94, 84.0)`, Connected/Idle, with no active protocol.
+- Safe-height transfers now send X and Y together in one GRBL linear move,
+  giving a straight diagonal lateral path after the lift instead of an
+  X-then-Y L-shaped path. The focused driver and multi-tool safety suite
+  passes on the Pi (`69 passed, 8 subtests passed`). The update is deployed
+  and CubOS was restarted and reconnected without motion; an unloaded
+  physical diagonal-transfer check is still pending.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
