@@ -530,6 +530,15 @@ against the physical labware and the complete protocol passes setup validation.
   `(135.931, 58.523, 59.0)`, Connected/Idle. The repeated kernel-level USB
   disconnects indicate a cable, hub, connector, controller power, or USB power
   stability issue that should be corrected before a long unattended run.
+- On 2026-10-14 CubOS was reconnected through the stable gantry by-path after
+  the stale serial handle caused an initial homing write error. Homing then
+  completed at `(259.514, 380.388, 84.558)`. A validated A1 hover move
+  completed, after which an unexpected manual downward jog was stopped at
+  Z=28.756 before further work. After the operator confirmed the deck was
+  clear, campaign 34 ran `pipette_pickup_a1_and_retract.yaml`: it picked the
+  calibrated tip from `tip_rack_green.A1` and retracted to safe hover. Final
+  carriage pose is `(206.918, 358.94, 84.0)`, Connected/Idle, with no active
+  protocol.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
