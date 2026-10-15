@@ -15,6 +15,7 @@ from cubos.instruments.uvvis_ccs.models import UVVisSpectrum
 from cubos.protocol_engine.measurements import InstrumentMeasurement, MeasurementType
 
 if TYPE_CHECKING:
+    from .execution_records import ExecutionRecords
     from .fluid_state import FluidContainerSnapshot, FluidStateSnapshot, FluidStateSummary
 
 DATA_DB_PATH_ENV = "CUBOS_DATA_DB_PATH"
@@ -398,6 +399,13 @@ class DataStore:
         self._migrate_fluid_operations_schema()
         self._create_fluid_operation_indexes()
         self._conn.commit()
+        from .execution_records import migrate_execution_records
+        migrate_execution_records(self._conn)
+
+    @property
+    def execution_records(self) -> "ExecutionRecords":
+        from .execution_records import ExecutionRecords
+        return ExecutionRecords(self._conn)
 
     def _migrate_fluid_operations_schema(self) -> None:
         """Expand the operation journal without weakening legacy data.
@@ -718,8 +726,12 @@ class DataStore:
         result: Union[
             InstrumentMeasurement, UVVisSpectrum, MeasurementResult, CureResult, str,
         ],
+        step_execution_id: str | None = None,
+        metadata: dict | None = None,
     ) -> tuple[int, int]:
         """Atomically create an experiment and its measurement row."""
+        if self._conn.in_transaction:
+            raise RuntimeError("Measurement logging requires no existing SQLite transaction")
         with self._conn:
             experiment_id = self._create_experiment_row(
                 campaign_id=campaign_id,
@@ -728,7 +740,7 @@ class DataStore:
                 well_id=well_id,
                 contents_json=contents_json,
             )
-            measurement_id = self._log_measurement_row(experiment_id, result)
+            measurement_id = self._log_measurement_row(experiment_id, result, step_execution_id, metadata)
         return experiment_id, measurement_id
 
     def log_measurement(
@@ -737,6 +749,8 @@ class DataStore:
         result: Union[
             InstrumentMeasurement, UVVisSpectrum, MeasurementResult, CureResult, str,
         ],
+        step_execution_id: str | None = None,
+        metadata: dict | None = None,
     ) -> int:
         """Log a measurement result, dispatching by type.
 
@@ -750,11 +764,56 @@ class DataStore:
         Raises:
             TypeError: If *result* is not a recognised measurement type.
         """
+        if self._conn.in_transaction:
+            raise RuntimeError("Measurement logging requires no existing SQLite transaction")
         with self._conn:
-            measurement_id = self._log_measurement_row(experiment_id, result)
+            measurement_id = self._log_measurement_row(experiment_id, result, step_execution_id, metadata)
         return measurement_id
 
     def _log_measurement_row(
+        self,
+        experiment_id: int,
+        result: InstrumentMeasurement | UVVisSpectrum | MeasurementResult | CureResult | str,
+        step_execution_id: str | None = None,
+        metadata: dict | None = None,
+    ) -> int:
+        if step_execution_id is not None:
+            row = self._conn.execute(
+                "SELECT r.campaign_id, e.campaign_id FROM step_executions s "
+                "JOIN protocol_runs r ON r.run_id = s.run_id "
+                "JOIN experiments e ON e.id = ? WHERE s.step_execution_id = ?",
+                (experiment_id, step_execution_id),
+            ).fetchone()
+            if row is None or row[0] != row[1]:
+                raise ValueError("Measurement step must exist and match the experiment campaign")
+        merged = dict(result.metadata) if isinstance(result, InstrumentMeasurement) else {}
+        if metadata is not None:
+            merged.update(metadata)
+        from .record_metadata import sanitize
+        encoded = json.dumps(sanitize(merged), allow_nan=False) if merged or metadata is not None else None
+        measurement_id = self._log_measurement_value(experiment_id, result)
+        if isinstance(result, InstrumentMeasurement):
+            kind = result.measurement_type.value
+            if kind.startswith("potentiostat"):
+                table = "potentiostat_measurements"
+            else:
+                table = {
+                    MeasurementType.UVVIS_SPECTRUM: "uvvis_measurements",
+                    MeasurementType.ASMI_INDENTATION: "asmi_measurements",
+                    MeasurementType.FILMETRICS_THICKNESS: "filmetrics_measurements",
+                    MeasurementType.UV_CURING_EXPOSURE: "uv_curing_measurements",
+                }[result.measurement_type]
+        else:
+            table = ("uvvis_measurements" if isinstance(result, UVVisSpectrum) else
+                     "filmetrics_measurements" if isinstance(result, MeasurementResult) else
+                     "uv_curing_measurements" if isinstance(result, CureResult) else "camera_measurements")
+        self._conn.execute(
+            f"UPDATE {table} SET step_execution_id = ?, metadata_json = ? WHERE id = ?",
+            (step_execution_id, encoded, measurement_id),
+        )
+        return measurement_id
+
+    def _log_measurement_value(
         self,
         experiment_id: int,
         result: Union[
@@ -1041,7 +1100,6 @@ class DataStore:
             "VALUES (?, ?)",
             (experiment_id, image_path),
         )
-        self._conn.commit()
         return cursor.lastrowid
 
     # ── Durable fluid state ────────────────────────────────────────────────

@@ -7,7 +7,8 @@ import logging
 from typing import Any, Dict, TYPE_CHECKING
 
 from ..errors import ProtocolExecutionError
-from ..measurements import normalize_measurement
+from ..measurements import normalize_measurement, is_measurement_result
+from ..measurement_trace import invoke, persistence_kwargs, recording_error, record_resolved
 from ..registry import protocol_command
 from . import _summaries
 from ..scan_args import normalize_scan_arguments, surface_detection_enabled
@@ -122,7 +123,7 @@ def measure(
         raise
 
     try:
-        _, _, well_z, action_z = engage_at_labware(
+        action_x, action_y, well_z, action_z = engage_at_labware(
             context, instrument, position,
             measurement_height=measurement_height,
             command_label="measure",
@@ -147,7 +148,10 @@ def measure(
     )
     if kwargs == kwargs_probe and "well_z" not in kwargs:
         kwargs = kwargs_probe
-    result = callable_method(**kwargs)
+    result, call_metadata = invoke(
+        context, instr, callable_method, kwargs, position=position,
+        action_xyz=(action_x, action_y, action_z),
+    )
 
     if context.data_store is not None and context.campaign_id is not None:
         try:
@@ -174,14 +178,20 @@ def measure(
                 well_id=target.location_id,
                 contents_json=contents_json,
                 result=measurement,
+                **persistence_kwargs(context, call_metadata, measurement, target, contents),
             )
         except TypeError as exc:
+            if is_measurement_result(result):
+                recording_error(context, exc)
+            else:
+                record_resolved(context, measurement_result_status="unsupported")
             logger.warning(
                 "Measurement result from %s.%s at position %s is not "
                 "persistable: %s",
                 instrument, method, position, exc,
             )
         except Exception as exc:
+            recording_error(context, exc)
             logger.warning(
                 "Failed to log measurement for position %s: %s",
                 position, exc, exc_info=True,

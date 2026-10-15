@@ -3,9 +3,32 @@
 from __future__ import annotations
 
 from pathlib import Path
+from contextlib import contextmanager
+from contextvars import ContextVar
+from io import StringIO
 from typing import Any
 
 import yaml
+
+
+_SOURCES = ContextVar("cubos_yaml_sources", default={})
+
+
+def read_yaml_source(path: str | Path) -> bytes:
+    resolved = str(Path(path).resolve())
+    captured = _SOURCES.get().get(resolved)
+    return captured if captured is not None else Path(path).read_bytes()
+
+
+@contextmanager
+def frozen_yaml_sources(sources):
+    values = {**_SOURCES.get(), **{str(Path(k).resolve()): v.encode("utf-8") if isinstance(v, str) else v
+                                for k, v in sources.items()}}
+    token = _SOURCES.set(values)
+    try:
+        yield
+    finally:
+        _SOURCES.reset(token)
 
 
 class DuplicateKeyError(yaml.constructor.ConstructorError):
@@ -46,5 +69,6 @@ class CubosSafeLoader(yaml.SafeLoader):
 def load_yaml_file(path: str | Path) -> Any:
     """Load a YAML file using CubOS duplicate-key protection."""
     resolved = Path(path)
-    with resolved.open(encoding="utf-8") as handle:
-        return yaml.load(handle, Loader=CubosSafeLoader)
+    stream = StringIO(read_yaml_source(resolved).decode("utf-8"))
+    stream.name = str(resolved)
+    return yaml.load(stream, Loader=CubosSafeLoader)

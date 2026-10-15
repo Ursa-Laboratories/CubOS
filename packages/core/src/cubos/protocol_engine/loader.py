@@ -5,6 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import yaml
+import hashlib
+from cubos.yaml_utils import read_yaml_source
+from cubos.data.record_metadata import sanitize
 from pydantic import ValidationError
 
 # Hints for legacy top-level scan/measure command fields. These fields are
@@ -108,8 +111,8 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
 def load_protocol_from_yaml(path: str | Path) -> Protocol:
     """Load a protocol YAML file and return an executable Protocol."""
     path = Path(path)
-    with path.open() as f:
-        raw = yaml.safe_load(f)
+    source_bytes = read_yaml_source(path)
+    raw = yaml.safe_load(source_bytes)
     if raw is None:
         raw = {}
     schema = ProtocolYamlSchema.model_validate(raw)
@@ -117,11 +120,15 @@ def load_protocol_from_yaml(path: str | Path) -> Protocol:
         CommandCall(command=step_schema.command, args=step_schema.args)
         for step_schema in schema.protocol
     ]
-    return compile_protocol(
+    protocol = compile_protocol(
         calls,
         source_path=path,
         positions=schema.positions or {},
     )
+    protocol.source_bytes = source_bytes
+    protocol.source_snapshot = sanitize(raw)
+    protocol.source_sha256 = hashlib.sha256(source_bytes).hexdigest() if sanitize(raw) == raw else None
+    return protocol
 
 
 def load_protocol_from_yaml_safe(path: str | Path) -> Protocol:

@@ -9,6 +9,10 @@ import time
 from pathlib import Path
 from typing import Any, Iterable
 
+import yaml
+
+from cubos.data.record_metadata import sanitize
+
 from cubos_api.models.runs import RunEvent, RunRecord
 
 
@@ -64,12 +68,16 @@ class RunStore:
             "protocol.yaml": protocol_yaml,
         }
         for name, content in inputs.items():
-            _atomic_write(directory / name, content)
-        record.digests = {
+            safe_content = yaml.safe_dump(sanitize(yaml.safe_load(content)), sort_keys=False)
+            _atomic_write(directory / name, safe_content)
+            if safe_content != content:
+                record.digests[name.removesuffix(".yaml") + "_snapshot_sha256"] = sha256_text(safe_content)
+        record.metadata = sanitize(record.metadata)
+        record.digests.update({
             "gantry_sha256": sha256_text(gantry_yaml),
             "deck_sha256": sha256_text(deck_yaml),
             "protocol_sha256": sha256_text(protocol_yaml),
-        }
+        })
         record.artifacts = list(INPUT_ARTIFACTS) + ["events.jsonl", "run.json"]
         self.write(record)
         self.append_event(record.run_id, state="queued", message="run accepted")
@@ -84,7 +92,7 @@ class RunStore:
     def write(self, record: RunRecord) -> None:
         _atomic_write(
             self.run_dir(record.run_id) / "run.json",
-            record.model_dump_json(indent=2) + "\n",
+            json.dumps(sanitize(record.model_dump()), indent=2) + "\n",
         )
 
     def _next_sequence(self, run_id: str) -> int:
@@ -96,7 +104,7 @@ class RunStore:
         """
         cached = self._sequence_cache.get(run_id)
         if cached is None:
-            cached = len(self.events(run_id))
+            cached = max((event.sequence for event in self.events(run_id)), default=0)
         cached += 1
         self._sequence_cache[run_id] = cached
         return cached
@@ -115,6 +123,8 @@ class RunStore:
         # observer runs on the execution thread while the API thread can
         # still append lifecycle events (e.g. a cancel request).
         with self._sequence_lock:
+            if run_id not in self._sequence_cache:
+                self._repair_tail(run_id)
             event = RunEvent(
                 sequence=self._next_sequence(run_id),
                 timestamp=time.time(),
@@ -131,15 +141,37 @@ class RunStore:
         path = self.run_dir(run_id) / "events.jsonl"
         if not path.is_file():
             return []
-        return [
-            RunEvent.model_validate_json(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        raw = path.read_bytes()
+        lines = raw.splitlines(keepends=True)
+        events = []
+        for index, line in enumerate(lines):
+            if not line.strip():
+                continue
+            try:
+                events.append(RunEvent.model_validate_json(line))
+            except ValueError:
+                if index != len(lines) - 1 or line.endswith(b"\n"):
+                    raise
+        return events
+
+    def _repair_tail(self, run_id: str) -> None:
+        path = self.run_dir(run_id) / "events.jsonl"
+        if not path.exists():
+            return
+        raw = path.read_bytes()
+        self.events(run_id)
+        if raw and not raw.endswith(b"\n"):
+            last = raw.rsplit(b"\n", 1)[-1]
+            try:
+                RunEvent.model_validate_json(last)
+            except ValueError:
+                path.write_bytes(raw[:len(raw) - len(last)])
+            else:
+                path.write_bytes(raw + b"\n")
 
     def write_result(self, record: RunRecord, result: Any) -> None:
         path = self.run_dir(record.run_id) / "result.json"
-        _atomic_write(path, json.dumps(result, indent=2, sort_keys=True, default=str) + "\n")
+        _atomic_write(path, json.dumps(sanitize(result), indent=2, sort_keys=True, default=str) + "\n")
         if "result.json" not in record.artifacts:
             record.artifacts.append("result.json")
 

@@ -26,6 +26,8 @@ def _synthetic_spectrum(integration_time_s: float = 0.24) -> UVVisSpectrum:
         wavelengths=wavelengths,
         intensities=intensities,
         integration_time_s=integration_time_s,
+        metadata={"synthetic": True, "offline": True, "intensity_source": "synthetic",
+                  "intensity_unit": "arbitrary_unit", "correction_state": "unknown"},
     )
 
 
@@ -163,6 +165,9 @@ class ThorlabsUVVisCCS(UVVisCCSInstrument):
             wavelengths=self._wavelengths,
             intensities=intensities,
             integration_time_s=integration_time,
+            metadata={"synthetic": False, "offline": False,
+                      "intensity_source": "tlccs_getScanData",
+                      "intensity_unit": "arbitrary_unit", "correction_state": "unknown"},
         )
 
     def get_device_info(self) -> list[str]:

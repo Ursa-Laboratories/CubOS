@@ -37,6 +37,20 @@ class InstrumentMeasurement:
     payload: dict[str, Any]
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self):
+        metadata = dict(self.metadata)
+        metadata.setdefault("schema_version", 1)
+        metadata.setdefault("correction_state", "unknown")
+        metadata.setdefault("processing", metadata["correction_state"])
+        acquisition = {key: metadata.get("acquisition_" + key)
+                       for key in ("started_at", "ended_at", "duration_ns")}
+        acquisition["source"] = (
+            "instrument_result" if any(value is not None for value in acquisition.values())
+            else "unknown"
+        )
+        metadata.setdefault("acquisition", acquisition)
+        object.__setattr__(self, "metadata", metadata)
+
 
 _POTENTIOSTAT_TECHNIQUES = {
     "ocp": MeasurementType.POTENTIOSTAT_OCP,
@@ -113,6 +127,9 @@ def _potentiostat_base_metadata(
     return {
         **dict(raw_result.metadata),
         "technique": raw_result.technique,
+        "units": {"time_s": "s", "voltage_v": "V", "current_a": "A"},
+        "units_source": "result_model",
+        "correction_state": raw_result.metadata.get("correction_state", "unknown"),
         "vendor": raw_result.vendor,
         "instrument_name": instrument_name,
         "method_name": method_name,
@@ -174,7 +191,11 @@ def normalize_measurement(
                 "intensity_au": list(raw_result.intensities),
             },
             metadata={
+                **dict(raw_result.metadata),
                 "integration_time_s": raw_result.integration_time_s,
+                "units": {"wavelength_nm": "nm", "intensity_au": "arbitrary_unit"},
+                "units_source": "result_model",
+                "correction_state": raw_result.metadata.get("correction_state", "unknown"),
                 "instrument_name": instrument_name,
                 "method_name": method_name,
             },
@@ -188,6 +209,9 @@ def normalize_measurement(
                 "goodness_of_fit": raw_result.goodness_of_fit,
             },
             metadata={
+                "units": {"thickness_nm": "nm", "goodness_of_fit": "dimensionless"},
+                "units_source": "result_model",
+                "correction_state": "unknown",
                 "instrument_name": instrument_name,
                 "method_name": method_name,
             },
@@ -202,6 +226,10 @@ def normalize_measurement(
                 "cure_timestamp_s": raw_result.timestamp,
             },
             metadata={
+                "units": {"intensity_percent": "percent", "exposure_time_s": "s",
+                          "cure_timestamp_s": "s"},
+                "units_source": "result_model",
+                "correction_state": "unknown",
                 "instrument_name": instrument_name,
                 "method_name": method_name,
             },
@@ -217,6 +245,10 @@ def normalize_measurement(
             "directions": [s["direction"] for s in steps],
         }
         metadata = {
+            "units": {"sample_timestamps": "s", "z_positions_mm": "mm",
+                      "raw_forces_n": "N", "corrected_forces_n": "N"},
+            "units_source": "result_model",
+            "correction_state": "baseline_corrected_force",
             "baseline_avg": raw_result.get("baseline_avg", 0.0),
             "baseline_std": raw_result.get("baseline_std", 0.0),
             "force_exceeded": raw_result.get("force_exceeded", False),

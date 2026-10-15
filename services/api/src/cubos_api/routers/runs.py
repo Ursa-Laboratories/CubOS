@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Response, Query
 from fastapi.responses import FileResponse
 from cubos.data import CapStateError, FluidStateError, TipStateError
 from cubos.protocol_engine.loader import load_protocol_from_yaml
@@ -19,6 +19,7 @@ from cubos_api.models.runs import (
     RunPlanResponse,
     RunRecord,
     RunSubmission,
+    RunStepsResponse,
 )
 from cubos_api.services.run_manager import (
     RunConflictError,
@@ -112,8 +113,12 @@ def get_run_plan(run_id: str) -> RunPlanResponse:
     has to survive a page reload mid-run and still render a completed run.
     """
     manager = get_run_manager()
-    if manager.get(run_id) is None:
+    record = manager.get(run_id)
+    if record is None:
         raise HTTPException(404, f"run {run_id!r} was not found")
+    saved = record.metadata.get("protocol", {}).get("plan")
+    if saved is not None:
+        return RunPlanResponse(run_id=run_id, steps=[PlanStep(**{**step, "summary": step.get("summary", step["command"])}) for step in saved])
     protocol_path = manager.store.run_dir(run_id) / "protocol.yaml"
     if not protocol_path.is_file():
         raise HTTPException(404, f"run {run_id!r} has no stored protocol")
@@ -153,3 +158,12 @@ def download_run_artifact(run_id: str, name: str) -> FileResponse:
     if path is None:
         raise HTTPException(404, f"artifact {name!r} was not found")
     return FileResponse(path, filename=name)
+
+
+@router.get("/{run_id}/steps", response_model=RunStepsResponse)
+def get_run_steps(run_id: str, after_sequence: int = Query(0, ge=0), limit: int = Query(100, ge=1, le=1000)) -> RunStepsResponse:
+    manager = get_run_manager()
+    if manager.get(run_id) is None:
+        raise HTTPException(404, f"run {run_id!r} was not found")
+    steps = manager.steps(run_id, after_sequence=after_sequence, limit=limit)
+    return RunStepsResponse(run_id=run_id, steps=steps, next_after_sequence=steps[-1]["sequence"] if steps else after_sequence)

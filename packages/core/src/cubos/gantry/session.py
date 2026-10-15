@@ -26,6 +26,7 @@ from cubos.gantry.limit_recovery import (
 )
 from cubos.gantry.yaml_schema import GantryYamlSchema
 from cubos.protocol_engine.setup import setup_protocol
+from cubos.protocol_engine.execution_trace import recorded_run, current_trace
 
 
 @dataclass(frozen=True)
@@ -668,6 +669,7 @@ class GantrySession:
             )
         return result, messages
 
+    @recorded_run("connected_session")
     def run_protocol(
         self,
         *,
@@ -685,6 +687,8 @@ class GantrySession:
         data_store = None
         with self._lock:
             gantry = self._require_connected()
+            if current_trace():
+                current_trace().update_metadata(connected_gantry_snapshot=self._connected_gantry_config)
             self._require_verified_calibration_frame_locked()
             # A GRBL-settings mismatch (self._calibration_warning) is advisory,
             # not blocking: commissioning machines legitimately differ from the
@@ -721,10 +725,17 @@ class GantrySession:
                         "Gantry health check failed before protocol execution; "
                         "aborting."
                     )
+                context.connections_observed = True
                 results = protocol.execute(context)
             finally:
                 if context is not None:
-                    context.gantry.disconnect_instruments()
+                    try:
+                        context.gantry.disconnect_instruments()
+                    except Exception as exc:
+                        if current_trace():
+                            current_trace().cleanup_error(exc)
+                        else:
+                            raise
                 if data_store is not None:
                     data_store.close()
         return ProtocolRunResult(
