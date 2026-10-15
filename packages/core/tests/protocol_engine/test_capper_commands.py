@@ -176,9 +176,23 @@ class TestCapSequencing:
             "read_cap_present",
         ]
 
-    def test_release_shimmy_moves_sideways_and_back_before_retract(self):
-        capper = _make_capper(cap_release_shimmy_y_mm=2.0)
+    def test_release_shimmy_runs_plus_minus_center_only_after_failed_cap(self):
+        capper = _make_capper(
+            cap_release_shimmy_y_mm=5.0,
+            capture_retries=1,
+        )
         capper.capture_cap()
+        original_release = capper.release_cap
+        release_attempt = {"count": 0}
+
+        def fail_first_release():
+            release_attempt["count"] += 1
+            if release_attempt["count"] == 1:
+                capper.actuation_log.append("release_cap")
+                return
+            original_release()
+
+        capper.release_cap = fail_first_release
         ctx, gantry = _untracked_context(capper=capper)
         gantry.trace.clear()
         cap(ctx, "capper", "vial_1")
@@ -187,11 +201,25 @@ class TestCapSequencing:
             ("approach", Coordinate3D(x=10.0, y=20.0, z=30.0)),
             ("move", (10.0, 20.0, engage_z)),
             "release_cap",
-            ("move", (10.0, 22.0, engage_z)),
+            ("move", (10.0, 20.0, SAFE_Z)),
+            "read_cap_present",
+            ("move", (10.0, 20.0, engage_z)),
+            "release_cap",
+            ("move", (10.0, 25.0, engage_z)),
+            ("move", (10.0, 15.0, engage_z)),
             ("move", (10.0, 20.0, engage_z)),
             ("move", (10.0, 20.0, SAFE_Z)),
             "read_cap_present",
         ]
+
+    def test_successful_cap_does_not_shimmy(self):
+        capper = _make_capper(cap_release_shimmy_y_mm=5.0)
+        capper.capture_cap()
+        ctx, gantry = _untracked_context(capper=capper)
+        gantry.trace.clear()
+        cap(ctx, "capper", "vial_1")
+        assert ("move", (10.0, 25.0, 22.0)) not in gantry.trace
+        assert ("move", (10.0, 15.0, 22.0)) not in gantry.trace
 
     def test_cap_absent_after_cap(self):
         capper = _make_capper()

@@ -588,10 +588,15 @@ def _append_capper_targets(
     if command_name == "cap":
         shimmy = config.get("cap_release_shimmy_y_mm", 0.0)
         if _is_finite_number(shimmy) and float(shimmy):
-            _append_target(
-                targets, target=vial, suffix="release_shimmy_y",
-                instrument=instrument, x=x, y=y + float(shimmy), z=action_z,
-            )
+            shimmy = float(shimmy)
+            for suffix, target_y in (
+                ("release_shimmy_y_plus", y + shimmy),
+                ("release_shimmy_y_minus", y - shimmy),
+            ):
+                _append_target(
+                    targets, target=vial, suffix=suffix,
+                    instrument=instrument, x=x, y=target_y, z=action_z,
+                )
 
 
 def _append_pipette_targets(

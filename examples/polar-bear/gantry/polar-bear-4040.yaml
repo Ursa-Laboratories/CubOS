@@ -70,7 +70,7 @@ instruments:
     engage_depth_mm: 0.0
     capture_retries: 2
     capture_settle_s: 1.0
-    cap_release_shimmy_y_mm: 2.0
+    cap_release_shimmy_y_mm: 5.0
     offset_x: 0.0
     offset_y: 0.0
     depth: 0.0

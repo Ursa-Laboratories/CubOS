@@ -25,9 +25,10 @@ hardcoded in the protocol commands:
   sensor.
 * ``release_overtravel_mm`` -- additional downward travel used only while
   releasing a cap, so seating pressure can overcome residual attraction.
-* ``cap_release_shimmy_y_mm`` -- signed Y displacement performed after a
-  cap is released onto the vial and before retracting, then reversed at
-  the same Z to break residual magnetic adhesion to the capper.
+* ``cap_release_shimmy_y_mm`` -- Y sweep amplitude used only when a capping
+  attempt fails its post-retract sensor check. The recovery retry moves from
+  centre to ``+amplitude``, then ``-amplitude``, then centre at the same Z
+  before retracting and checking again.
 """
 
 from __future__ import annotations

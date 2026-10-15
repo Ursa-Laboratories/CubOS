@@ -160,14 +160,20 @@ def _actuate_retract_confirm(
                 capper.release_cap()
             if capper.capture_settle_s > 0:
                 time.sleep(capper.capture_settle_s)
-            if not capturing and capper.cap_release_shimmy_y_mm:
-                shimmy_y = y + capper.cap_release_shimmy_y_mm
-                context.gantry.move(
-                    instrument, (x, shimmy_y, action_z), travel_z=action_z,
-                )
-                context.gantry.move(
-                    instrument, (x, y, action_z), travel_z=action_z,
-                )
+            # A capping retry means the previous release was still sensed at
+            # the tool after retracting.  Sweep to both sides only on that
+            # failed-cap recovery attempt, then return to the vial centre
+            # before retracting and checking again.
+            if (
+                not capturing
+                and _attempt > 0
+                and capper.cap_release_shimmy_y_mm
+            ):
+                shimmy = capper.cap_release_shimmy_y_mm
+                for shimmy_y in (y + shimmy, y - shimmy, y):
+                    context.gantry.move(
+                        instrument, (x, shimmy_y, action_z), travel_z=action_z,
+                    )
         except CapperError as exc:
             last_reading = None
             last_error = exc

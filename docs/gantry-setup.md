@@ -302,10 +302,11 @@ required, not driver defaults — every capper's decap/cap motion sequence
 comes entirely from this config, never hardcoded. `vendor: mock` is an
 offline-only in-memory simulation useful for dry runs without any Arduino
 attached. `cap_release_shimmy_y_mm` is optional and defaults to `0`; a
-nonzero signed value moves that many millimetres in Y and back after the cap
-is released onto the vial, at the engagement height, before retracting. Use
-it when residual magnetism can keep the released cap attached to the tool.
-The shimmy is part of capping only; decapping retracts directly after capture.
+nonzero value enables failed-capping recovery. The first capping attempt
+releases, retracts, and checks normally. If the sensor still sees the cap, the
+retry engages and moves from centre to `+value` in Y, then `-value`, then back
+to centre before retracting and checking again. The shimmy is never performed
+during decapping or after a successful first capping attempt.
 
 **`mounted_tool` / `mount_only`** — any other passive mounted tool tracked
 for offsets only (no actuation, no sensor):
