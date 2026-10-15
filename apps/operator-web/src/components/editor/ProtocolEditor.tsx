@@ -632,6 +632,10 @@ export default function ProtocolEditor({
                   Put pick-up and drop-tip steps inside the block for a fresh tip per well, or leave them outside
                   to reuse one tip. You can build several repeated blocks in the same protocol.
                 </p>
+                <p style={sectionSubtextStyle}>
+                  For fresh tips, set pick-up position to the rack name (for example, tip_rack), so each copy
+                  automatically takes the next available tip instead of returning to one explicit slot.
+                </p>
               </div>
               <div style={repeatControlsStyle}>
                 <label style={toolbarFieldStyle}>

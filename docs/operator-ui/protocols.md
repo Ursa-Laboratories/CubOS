@@ -35,7 +35,10 @@ The repeat builder expands steps in place; it does not save a hidden loop. This
 makes the exact run order visible before validation.
 
 - For a **fresh tip at every well**, include `pick_up_tip` and `drop_tip` in
-  the selected From/Through range. The whole block is copied for each well.
+  the selected From/Through range. Set the pickup position to the rack key
+  alone (for example, `tip_rack_green`) so CubOS auto-selects the next unused
+  tip for every copy; an explicit `tip_rack_green.A1` would target A1 again.
+  The whole block is copied for each well.
 - To **reuse one tip**, put `pick_up_tip` before the selected range and
   `drop_tip` after it. Only the actions between them are copied.
 - Do not put `pick_up_tip` inside the block while leaving `drop_tip` outside:
