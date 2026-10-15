@@ -1,0 +1,240 @@
+# Six-well 5 uL contact-angle run using one tip.
+#
+# For every destination well:
+# - decap vial A1, aspirate 5 uL at the established -10 mm height, and recap;
+# - dispense and blow out at the established +21 mm well height;
+# - lift the pipette exactly 5 mm before returning its piston home;
+# - capture the established 10-plane white-light stack (125.0 to 123.2 mm).
+
+positions:
+  pipette_a1_lift_5mm: [230.631, 68.523, 32.186]
+  pipette_a2_lift_5mm: [230.631, 56.023, 32.186]
+  pipette_a3_lift_5mm: [230.631, 43.523, 32.186]
+  pipette_b1_lift_5mm: [218.131, 68.523, 32.186]
+  pipette_b2_lift_5mm: [218.131, 56.023, 32.186]
+  pipette_b3_lift_5mm: [218.131, 43.523, 32.186]
+
+protocol:
+  - pick_up_tip:
+      position: tip_rack_green.A1
+      speed: 50
+
+  - decap:
+      instrument: capper
+      vial: vial_rack.A1
+  - aspirate:
+      position: vial_rack.A1
+      volume_ul: 5
+      speed: 50
+      height: -10
+  - cap:
+      instrument: capper
+      vial: vial_rack.A1
+  - dispense:
+      position: ursa_wellplate.A1
+      volume_ul: 5
+      speed: 50
+      height: 21
+  - blowout:
+      position: ursa_wellplate.A1
+      speed: 50
+      height: 21
+  - move:
+      instrument: pipette
+      position: pipette_a1_lift_5mm
+  - pipette_home: {}
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.A1
+      image_height: 125
+      light: white
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: ursa_wellplate.A1_5uL_after_dispense_white
+
+  - decap:
+      instrument: capper
+      vial: vial_rack.A1
+  - aspirate:
+      position: vial_rack.A1
+      volume_ul: 5
+      speed: 50
+      height: -10
+  - cap:
+      instrument: capper
+      vial: vial_rack.A1
+  - dispense:
+      position: ursa_wellplate.A2
+      volume_ul: 5
+      speed: 50
+      height: 21
+  - blowout:
+      position: ursa_wellplate.A2
+      speed: 50
+      height: 21
+  - move:
+      instrument: pipette
+      position: pipette_a2_lift_5mm
+  - pipette_home: {}
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.A2
+      image_height: 125
+      light: white
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: ursa_wellplate.A2_5uL_after_dispense_white
+
+  - decap:
+      instrument: capper
+      vial: vial_rack.A1
+  - aspirate:
+      position: vial_rack.A1
+      volume_ul: 5
+      speed: 50
+      height: -10
+  - cap:
+      instrument: capper
+      vial: vial_rack.A1
+  - dispense:
+      position: ursa_wellplate.A3
+      volume_ul: 5
+      speed: 50
+      height: 21
+  - blowout:
+      position: ursa_wellplate.A3
+      speed: 50
+      height: 21
+  - move:
+      instrument: pipette
+      position: pipette_a3_lift_5mm
+  - pipette_home: {}
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.A3
+      image_height: 125
+      light: white
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: ursa_wellplate.A3_5uL_after_dispense_white
+
+  - decap:
+      instrument: capper
+      vial: vial_rack.A1
+  - aspirate:
+      position: vial_rack.A1
+      volume_ul: 5
+      speed: 50
+      height: -10
+  - cap:
+      instrument: capper
+      vial: vial_rack.A1
+  - dispense:
+      position: ursa_wellplate.B1
+      volume_ul: 5
+      speed: 50
+      height: 21
+  - blowout:
+      position: ursa_wellplate.B1
+      speed: 50
+      height: 21
+  - move:
+      instrument: pipette
+      position: pipette_b1_lift_5mm
+  - pipette_home: {}
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.B1
+      image_height: 125
+      light: white
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: ursa_wellplate.B1_5uL_after_dispense_white
+
+  - decap:
+      instrument: capper
+      vial: vial_rack.A1
+  - aspirate:
+      position: vial_rack.A1
+      volume_ul: 5
+      speed: 50
+      height: -10
+  - cap:
+      instrument: capper
+      vial: vial_rack.A1
+  - dispense:
+      position: ursa_wellplate.B2
+      volume_ul: 5
+      speed: 50
+      height: 21
+  - blowout:
+      position: ursa_wellplate.B2
+      speed: 50
+      height: 21
+  - move:
+      instrument: pipette
+      position: pipette_b2_lift_5mm
+  - pipette_home: {}
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.B2
+      image_height: 125
+      light: white
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: ursa_wellplate.B2_5uL_after_dispense_white
+
+  - decap:
+      instrument: capper
+      vial: vial_rack.A1
+  - aspirate:
+      position: vial_rack.A1
+      volume_ul: 5
+      speed: 50
+      height: -10
+  - cap:
+      instrument: capper
+      vial: vial_rack.A1
+  - dispense:
+      position: ursa_wellplate.B3
+      volume_ul: 5
+      speed: 50
+      height: 21
+  - blowout:
+      position: ursa_wellplate.B3
+      speed: 50
+      height: 21
+  - move:
+      instrument: pipette
+      position: pipette_b3_lift_5mm
+  - pipette_home: {}
+  - image_well:
+      camera: camera
+      well: ursa_wellplate.B3
+      image_height: 125
+      light: white
+      mode: curvature
+      z_steps: 10
+      z_step_mm: 0.2
+      lights: lights
+      brightness: 25
+      label: ursa_wellplate.B3_5uL_after_dispense_white
+
+  - drop_tip:
+      position: tip_disposal_1
+      speed: 50
