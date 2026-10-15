@@ -628,6 +628,10 @@ export default function ProtocolEditor({
                 <p style={sectionSubtextStyle}>
                   Build one block for a template well, then replace that block with copies for the checked wells.
                 </p>
+                <p style={sectionSubtextStyle}>
+                  Put pick-up and drop-tip steps inside the block for a fresh tip per well, or leave them outside
+                  to reuse one tip. You can build several repeated blocks in the same protocol.
+                </p>
               </div>
               <div style={repeatControlsStyle}>
                 <label style={toolbarFieldStyle}>
@@ -716,7 +720,7 @@ export default function ProtocolEditor({
                   Build Repeated Steps
                 </button>
                 <span style={sectionSubtextStyle}>
-                  Image labels receive the target well suffix automatically.
+                  Labels receive the target well suffix automatically.
                 </span>
               </div>
               {repeatError && <div style={positionErrorStyle}>{repeatError}</div>}

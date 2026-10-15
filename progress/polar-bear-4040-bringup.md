@@ -569,6 +569,14 @@ against the physical labware and the complete protocol passes setup validation.
   without motion; no protocol is active and the gantry is Connected/Idle at
   the unchanged `(206.918, 259.94, 84.0)`. Physical offset, blowout/home, and
   decap shimmy checks are still pending.
+- A follow-up audit confirmed the features are implemented in shared CubOS
+  layers rather than Polar-only handlers. Registry tests now require every
+  capper vendor to expose the configurable release shimmy and require the
+  Picus no-home blowout default. The Protocol editor explains fresh-tip versus
+  shared-tip repeat ranges and supports applying several repeat expansions in
+  one protocol; focused checks pass (`55` registry and `39` editor tests).
+  The 2 mm shimmy remains a Polar station setting because automatically moving
+  every capper laterally without a station clearance value would be unsafe.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop

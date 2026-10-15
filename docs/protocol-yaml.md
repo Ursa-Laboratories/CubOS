@@ -122,6 +122,11 @@ Two conventions apply throughout:
   `source_x_offset_mm`/`source_y_offset_mm` and
   `destination_x_offset_mm`/`destination_y_offset_mm`.
 
+These command fields belong to the shared CubOS protocol engine. They are
+available to every station and vendor using the corresponding generic command;
+the Polar Bear gantry file only supplies that station's calibrated values and
+its chosen cap-release shimmy distance.
+
 Commands available in YAML:
 
 - `home`

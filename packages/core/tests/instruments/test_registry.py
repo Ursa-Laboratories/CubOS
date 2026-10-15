@@ -501,6 +501,15 @@ class TestConfigFields:
         ) in fields
         assert "offset_x" not in {field.name for field in fields}
 
+    def test_cap_release_shimmy_is_available_to_every_capper_vendor(self):
+        for vendor in get_supported_vendors("capper"):
+            fields = {field.name: field for field in config_fields("capper", vendor)}
+            assert fields["decap_release_shimmy_y_mm"].default == 0.0
+
+    def test_picus_blowout_stays_out_by_default(self):
+        fields = {field.name: field for field in config_fields("pipette", "sartorius")}
+        assert fields["blowout_go_home"].default is False
+
     def test_config_fields_unknown_vendor_raises_clear_error(self):
         with pytest.raises(ValueError, match="asmi/missing_vendor"):
             config_fields("asmi", "missing_vendor")
