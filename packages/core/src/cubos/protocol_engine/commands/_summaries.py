@@ -128,6 +128,10 @@ def blowout(args: Dict[str, Any]) -> str:
     return f"at {args['position']}"
 
 
+def pipette_home(args: Dict[str, Any]) -> str:
+    return "piston home"
+
+
 def mix(args: Dict[str, Any]) -> str:
     return _join(
         str(args["position"]),
@@ -246,6 +250,7 @@ __all__ = [
     "mix",
     "move",
     "pause",
+    "pipette_home",
     "pick_up_tip",
     "purge_pipette",
     "rinse_well",

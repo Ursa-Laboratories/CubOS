@@ -549,6 +549,26 @@ against the physical labware and the complete protocol passes setup validation.
   passes on the Pi (`69 passed, 8 subtests passed`). The update is deployed
   and CubOS was restarted and reconnected without motion; an unloaded
   physical diagonal-transfer check is still pending.
+- On 2026-10-15 CubOS gained signed `x_offset_mm`/`y_offset_mm` fields for
+  generic move, measure, scan/cure, cap/decap, and direct pipette operations;
+  transfer commands expose separate source and destination offsets. Bounds
+  and semantic validation use the shifted positions. The Protocol editor now
+  has a **Repeat Steps Across Wells** builder that expands a selected block
+  from a template well to checked wells and suffixes image labels with each
+  target well. The Picus blowout default and live Polar config now leave the
+  piston at blowout (`blowout_go_home: false`); the new `pipette_home` command
+  returns it home only when explicitly placed after a move clear of liquid.
+  Polar decap now uses `decap_release_shimmy_y_mm: 2.0`, moving +2 mm Y and
+  back at engagement height after capture, before retract. The pre-deployment
+  source/config backup is
+  `/home/polar/cubos-data/backups/2026-10-15-instrument-offsets-loop/`.
+  Core tests pass (`2592 passed, 20 skipped, 14 subtests`) and the focused
+  Protocol editor suite passes (`38 passed`); the full UI suite has 364 passes
+  and two pre-existing labware-calibration expectation failures from the
+  station's earlier calibration behavior. CubOS was restarted and reconnected
+  without motion; no protocol is active and the gantry is Connected/Idle at
+  the unchanged `(206.918, 259.94, 84.0)`. Physical offset, blowout/home, and
+  decap shimmy checks are still pending.
 
 Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop

@@ -138,6 +138,21 @@ class TestAspirateCommand:
         aspirate(ctx, position="plate_1.A1", volume_ul=100.0)
         ctx.gantry.move_to_labware.assert_called_once_with("pipette", coord)
 
+    def test_applies_signed_xy_offsets(self):
+        from cubos.protocol_engine.commands.pipette import aspirate
+
+        ctx = _mock_context(resolve_return=Coordinate3D(x=10.0, y=20.0, z=75.0))
+        aspirate(
+            ctx, position="plate_1.A1", volume_ul=10.0,
+            x_offset_mm=2.0, y_offset_mm=-3.0,
+        )
+        ctx.gantry.move_to_labware.assert_called_once_with(
+            "pipette", (12.0, 17.0, 75.0),
+        )
+        ctx.gantry.move.assert_called_once_with(
+            "pipette", (12.0, 17.0, 75.0),
+        )
+
     def test_descends_to_well_bottom_after_approach(self):
         """aspirate descends to the labware reference Z by default."""
         from cubos.protocol_engine.commands.pipette import aspirate
@@ -272,6 +287,18 @@ class TestBlowoutCommand:
         ctx = _mock_context(has_pipette=False)
         with pytest.raises(ProtocolExecutionError, match="[Nn]o pipette"):
             blowout(ctx, position="plate_1.A1")
+
+
+class TestPipetteHomeCommand:
+
+    def test_homes_without_gantry_motion(self):
+        from cubos.protocol_engine.commands.pipette import pipette_home
+
+        ctx = _mock_context()
+        pipette_home(ctx)
+        _get_pipette(ctx).home.assert_called_once_with()
+        ctx.gantry.move.assert_not_called()
+        ctx.gantry.move_to_labware.assert_not_called()
 
 
 # ─── mix tests ────────────────────────────────────────────────────────────────

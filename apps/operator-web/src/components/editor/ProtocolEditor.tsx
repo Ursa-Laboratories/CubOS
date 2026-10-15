@@ -142,6 +142,57 @@ function defaultArgsForCommand(cmd: CommandInfo, choices: ProtocolChoices): Reco
   return args;
 }
 
+function replaceWellTarget(value: unknown, sourceTarget: string, targetTarget: string): unknown {
+  if (typeof value === "string") return value === sourceTarget ? targetTarget : value;
+  if (Array.isArray(value)) {
+    return value.map((item) => replaceWellTarget(item, sourceTarget, targetTarget));
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [
+        key,
+        replaceWellTarget(item, sourceTarget, targetTarget),
+      ]),
+    );
+  }
+  return value;
+}
+
+export function expandStepsAcrossWells(
+  steps: ProtocolStep[],
+  startStep: number,
+  endStep: number,
+  labwareKey: string,
+  templateWell: string,
+  targetWells: string[],
+): ProtocolStep[] {
+  if (startStep < 1 || endStep < startStep || endStep > steps.length) {
+    throw new Error(`Choose a valid step range between 1 and ${steps.length}.`);
+  }
+  if (!labwareKey || !templateWell || targetWells.length === 0) {
+    throw new Error("Choose labware, a template well, and at least one target well.");
+  }
+  const sourceTarget = `${labwareKey}.${templateWell}`;
+  const block = steps.slice(startStep - 1, endStep);
+  const expanded = targetWells.flatMap((well) => {
+    const targetTarget = `${labwareKey}.${well}`;
+    return block.map((step) => {
+      const args = replaceWellTarget(
+        structuredClone(step.args), sourceTarget, targetTarget,
+      ) as Record<string, unknown>;
+      if (typeof args.label === "string" && args.label.trim()) {
+        args.label = `${args.label}_${well}`;
+      }
+      return { command: step.command, args };
+    });
+  });
+  return [
+    ...steps.slice(0, startStep - 1),
+    ...expanded,
+    ...steps.slice(endStep),
+  ];
+}
+
 export default function ProtocolEditor({
   configs,
   selectedFile,
@@ -189,12 +240,28 @@ export default function ProtocolEditor({
   const [saveAs, setSaveAs] = useState("");
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const repeatableLabware = deck.labware.filter(
+    (entry) => entry.wells && Object.keys(entry.wells).length > 0,
+  );
+  const initialRepeatLabware = repeatableLabware[0];
+  const initialRepeatWells = Object.keys(initialRepeatLabware?.wells ?? {});
+  const [repeatLabware, setRepeatLabware] = useState(initialRepeatLabware?.key ?? "");
+  const [repeatTemplateWell, setRepeatTemplateWell] = useState(initialRepeatWells[0] ?? "");
+  const [repeatTargetWells, setRepeatTargetWells] = useState<string[]>(initialRepeatWells);
+  const [repeatStartStep, setRepeatStartStep] = useState(1);
+  const [repeatEndStep, setRepeatEndStep] = useState(Math.max(1, loadedSteps?.length ?? 1));
+  const [repeatError, setRepeatError] = useState<string | null>(null);
   const [requestConfirm, confirmDialog] = useConfirm();
 
   const commandsByName = Object.fromEntries(commands.map((c) => [c.name, c]));
   const choices = buildProtocolChoices(deck, gantry, positionRows, instrumentMethods, instrumentMethodParams);
   const positionErrors = validatePositionRows(positionRows);
   const hasPositionErrors = positionErrors.length > 0;
+  const selectedRepeatLabware = repeatableLabware.find(
+    (entry) => entry.key === repeatLabware,
+  ) ?? repeatableLabware[0];
+  const selectedRepeatLabwareKey = selectedRepeatLabware?.key ?? "";
+  const repeatWellIds = Object.keys(selectedRepeatLabware?.wells ?? {});
 
   const commit = (next: ProtocolStep[]) => {
     setSteps(next);
@@ -273,6 +340,43 @@ export default function ProtocolEditor({
     }
     next[i] = { ...next[i], args: updatedArgs };
     commit(next);
+  };
+
+  const changeRepeatLabware = (key: string) => {
+    const entry = repeatableLabware.find((candidate) => candidate.key === key);
+    const wells = Object.keys(entry?.wells ?? {});
+    setRepeatLabware(key);
+    setRepeatTemplateWell(wells[0] ?? "");
+    setRepeatTargetWells(wells);
+    setRepeatError(null);
+  };
+
+  const toggleRepeatWell = (well: string) => {
+    setRepeatTargetWells((current) => (
+      current.includes(well)
+        ? current.filter((candidate) => candidate !== well)
+        : repeatWellIds.filter((candidate) => [...current, well].includes(candidate))
+    ));
+    setRepeatError(null);
+  };
+
+  const repeatStepsAcrossWells = () => {
+    try {
+      const orderedTargets = repeatWellIds.filter((well) => repeatTargetWells.includes(well));
+      const next = expandStepsAcrossWells(
+        steps,
+        repeatStartStep,
+        repeatEndStep,
+        selectedRepeatLabwareKey,
+        repeatTemplateWell,
+        orderedTargets,
+      );
+      commit(next);
+      setRepeatEndStep(Math.max(1, next.length));
+      setRepeatError(null);
+    } catch (error) {
+      setRepeatError(error instanceof Error ? error.message : String(error));
+    }
   };
 
   const addPosition = () => {
@@ -516,6 +620,108 @@ export default function ProtocolEditor({
               </div>
             )}
           </div>
+
+          {repeatableLabware.length > 0 && hasSteps && (
+            <div style={repeatPanelStyle}>
+              <div>
+                <h3 style={sectionTitleStyle}>Repeat Steps Across Wells</h3>
+                <p style={sectionSubtextStyle}>
+                  Build one block for a template well, then replace that block with copies for the checked wells.
+                </p>
+              </div>
+              <div style={repeatControlsStyle}>
+                <label style={toolbarFieldStyle}>
+                  <span style={toolbarLabelStyle}>From step</span>
+                  <input
+                    aria-label="Repeat from step"
+                    type="number"
+                    min={1}
+                    max={Math.max(1, steps.length)}
+                    value={repeatStartStep}
+                    onChange={(event) => setRepeatStartStep(Number(event.target.value))}
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={toolbarFieldStyle}>
+                  <span style={toolbarLabelStyle}>Through step</span>
+                  <input
+                    aria-label="Repeat through step"
+                    type="number"
+                    min={1}
+                    max={Math.max(1, steps.length)}
+                    value={repeatEndStep}
+                    onChange={(event) => setRepeatEndStep(Number(event.target.value))}
+                    style={inputStyle}
+                  />
+                </label>
+                <label style={toolbarFieldStyle}>
+                  <span style={toolbarLabelStyle}>Labware</span>
+                  <select
+                    aria-label="Repeat labware"
+                    value={selectedRepeatLabwareKey}
+                    onChange={(event) => changeRepeatLabware(event.target.value)}
+                    style={selectStyle}
+                  >
+                    {repeatableLabware.map((entry) => (
+                      <option key={entry.key} value={entry.key}>{entry.key}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={toolbarFieldStyle}>
+                  <span style={toolbarLabelStyle}>Template well</span>
+                  <select
+                    aria-label="Template well"
+                    value={repeatTemplateWell}
+                    onChange={(event) => setRepeatTemplateWell(event.target.value)}
+                    style={selectStyle}
+                  >
+                    {repeatWellIds.map((well) => (
+                      <option key={well} value={well}>{well}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div style={repeatWellToolbarStyle}>
+                <span style={toolbarLabelStyle}>Target wells</span>
+                <button
+                  type="button"
+                  onClick={() => setRepeatTargetWells(repeatWellIds)}
+                  style={reorderBtnStyle}
+                >
+                  Select all
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRepeatTargetWells([])}
+                  style={reorderBtnStyle}
+                >
+                  Clear
+                </button>
+              </div>
+              <div style={repeatWellGridStyle}>
+                {repeatWellIds.map((well) => (
+                  <label key={well} style={repeatWellStyle}>
+                    <input
+                      type="checkbox"
+                      aria-label={`Repeat target ${well}`}
+                      checked={repeatTargetWells.includes(well)}
+                      onChange={() => toggleRepeatWell(well)}
+                    />
+                    {well}
+                  </label>
+                ))}
+              </div>
+              <div style={repeatActionStyle}>
+                <button type="button" onClick={repeatStepsAcrossWells} style={addBtnStyle}>
+                  Build Repeated Steps
+                </button>
+                <span style={sectionSubtextStyle}>
+                  Image labels receive the target well suffix automatically.
+                </span>
+              </div>
+              {repeatError && <div style={positionErrorStyle}>{repeatError}</div>}
+            </div>
+          )}
 
           {steps.map((step, i) => {
             const cmd = commandsByName[step.command];
@@ -1595,6 +1801,52 @@ const namedPositionsStyle: React.CSSProperties = {
   borderRadius: theme.radius.md,
   padding: 14,
   marginTop: 8,
+};
+
+const repeatPanelStyle: React.CSSProperties = {
+  ...theme.card,
+  padding: 14,
+  marginTop: 8,
+};
+
+const repeatControlsStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
+  gap: 8,
+  alignItems: "end",
+  marginTop: 10,
+};
+
+const repeatWellToolbarStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
+  flexWrap: "wrap",
+  marginTop: 12,
+};
+
+const repeatWellGridStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fill, minmax(58px, 1fr))",
+  gap: 6,
+  marginTop: 6,
+};
+
+const repeatWellStyle: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 5,
+  color: theme.color.text,
+  fontSize: 12,
+  cursor: "pointer",
+};
+
+const repeatActionStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  flexWrap: "wrap",
+  marginTop: 10,
 };
 
 const namedPositionsHeaderStyle: React.CSSProperties = {

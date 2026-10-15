@@ -64,6 +64,8 @@ def _engage(
     *,
     command_label: str,
     height: float = 0.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> tuple[float, float, float]:
     """Wrap ``engage_at_labware`` so configuration errors surface as
     ``ProtocolExecutionError`` instead of bare ``ValueError``s — matching
@@ -77,6 +79,7 @@ def _engage(
         x, y, _, action_z = engage_at_labware(
             context, "pipette", position,
             measurement_height=height, command_label=command_label,
+            x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
         )
         return x, y, action_z
     except ValueError as exc:
@@ -300,6 +303,8 @@ def aspirate(
     volume_ul: float,
     speed: float = 50.0,
     height: float = 0.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then aspirate."""
     if _tracked_fluid_state(context):
@@ -309,7 +314,10 @@ def aspirate(
             "known destination. Use transfer or serial_transfer."
         )
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="aspirate", height=height)
+    _engage(
+        context, position, command_label="aspirate", height=height,
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )
     return pipette.aspirate(volume_ul, speed)
 
 
@@ -320,6 +328,8 @@ def dispense(
     volume_ul: float,
     speed: float = 50.0,
     height: float = 0.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then dispense.
 
@@ -333,7 +343,10 @@ def dispense(
             "active because its source is unknown. Use transfer or serial_transfer."
         )
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="dispense", height=height)
+    _engage(
+        context, position, command_label="dispense", height=height,
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )
     return pipette.dispense(volume_ul, speed)
 
 
@@ -343,11 +356,22 @@ def blowout(
     position: str,
     speed: float = 50.0,
     height: float = 0.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
-    """Move pipette to *position*, then blowout."""
+    """Move pipette to *position*, then blow out without homing afterward."""
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="blowout", height=height)
+    _engage(
+        context, position, command_label="blowout", height=height,
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )
     pipette.blowout(speed)
+
+
+@protocol_command("pipette_home", summary=_summaries.pipette_home)
+def pipette_home(context: ProtocolContext) -> None:
+    """Return the pipette piston home at its current gantry position."""
+    _get_pipette(context).home()
 
 
 @protocol_command("mix", summary=_summaries.mix)
@@ -358,6 +382,8 @@ def mix(
     cycles: int = 3,
     speed: float = 50.0,
     height: float = 0.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Any:
     """Move pipette to *position* at *height*, then mix ``cycles`` times
     between that height and 1 mm above it."""
@@ -380,7 +406,10 @@ def mix(
             context.notify_step("step_skipped", reason=_ALREADY_APPLIED)
             return None
     try:
-        tip = _engage(context, position, command_label="mix", height=height)
+        tip = _engage(
+            context, position, command_label="mix", height=height,
+            x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+        )
         result = pipette.mix(
             volume_ul, cycles, speed, gantry=context.gantry, position=tip,
         )
@@ -406,6 +435,8 @@ def pick_up_tip(
     context: ProtocolContext,
     position: str,
     speed: float = 50.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
     """Move pipette to *position*, then pick up a tip.
 
@@ -475,7 +506,10 @@ def pick_up_tip(
             )
 
     try:
-        _engage(context, position, command_label="pick_up_tip")
+        _engage(
+            context, position, command_label="pick_up_tip",
+            x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+        )
         pipette.pick_up_tip(speed)
     except BaseException as exc:
         if operation_key is not None:
@@ -506,6 +540,10 @@ def transfer(
     destination_height: Optional[float] = None,
     liquid_class: Optional[str] = None,
     require_uncapped: Optional[List[str]] = None,
+    source_x_offset_mm: float = 0.0,
+    source_y_offset_mm: float = 0.0,
+    destination_x_offset_mm: float = 0.0,
+    destination_y_offset_mm: float = 0.0,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*.
 
@@ -709,6 +747,10 @@ def transfer(
                 stroke_index=stroke_index,
                 stroke_count=stroke_count,
                 blow_out=stroke_index == stroke_count - 1,
+                source_x_offset_mm=source_x_offset_mm,
+                source_y_offset_mm=source_y_offset_mm,
+                destination_x_offset_mm=destination_x_offset_mm,
+                destination_y_offset_mm=destination_y_offset_mm,
             )
     finally:
         context.active_substep = previous_substep
@@ -731,6 +773,10 @@ def _execute_transfer_stroke(
     stroke_index: int,
     stroke_count: int,
     blow_out: bool = False,
+    source_x_offset_mm: float = 0.0,
+    source_y_offset_mm: float = 0.0,
+    destination_x_offset_mm: float = 0.0,
+    destination_y_offset_mm: float = 0.0,
 ) -> None:
     """Journal, actuate, and commit exactly one transfer stroke.
 
@@ -772,11 +818,15 @@ def _execute_transfer_stroke(
         _engage(
             context, source, command_label="transfer.aspirate",
             height=source_height,
+            x_offset_mm=source_x_offset_mm,
+            y_offset_mm=source_y_offset_mm,
         )
         pipette.aspirate(commanded_volume_ul, speed)
         _engage(
             context, destination, command_label="transfer.dispense",
             height=destination_height,
+            x_offset_mm=destination_x_offset_mm,
+            y_offset_mm=destination_y_offset_mm,
         )
         pipette.dispense(commanded_volume_ul, speed)
         if blow_out:
@@ -812,6 +862,8 @@ def drop_tip(
     context: ProtocolContext,
     position: str,
     speed: float = 50.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
     """Move pipette to *position*, then drop the tip.
 
@@ -846,7 +898,10 @@ def drop_tip(
             return
 
     try:
-        _engage(context, position, command_label="drop_tip")
+        _engage(
+            context, position, command_label="drop_tip",
+            x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+        )
         pipette.drop_tip(speed)
     except BaseException as exc:
         if operation_key is not None:
@@ -900,6 +955,10 @@ def serial_transfer(
     speed: float = 50.0,
     source_height: float = 0.0,
     destination_height: float = 0.0,
+    source_x_offset_mm: float = 0.0,
+    source_y_offset_mm: float = 0.0,
+    destination_x_offset_mm: float = 0.0,
+    destination_y_offset_mm: float = 0.0,
 ) -> None:
     """Transfer from *source* to each well along a row or column.
 
@@ -947,7 +1006,11 @@ def serial_transfer(
             context.active_substep = f"{index}:{destination}"
             transfer(context, source=source, destination=destination,
                      volume_ul=vol, speed=speed, source_height=source_height,
-                     destination_height=destination_height)
+                     destination_height=destination_height,
+                     source_x_offset_mm=source_x_offset_mm,
+                     source_y_offset_mm=source_y_offset_mm,
+                     destination_x_offset_mm=destination_x_offset_mm,
+                     destination_y_offset_mm=destination_y_offset_mm)
     finally:
         context.active_substep = previous_substep
 

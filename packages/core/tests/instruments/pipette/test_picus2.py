@@ -439,6 +439,12 @@ class TestCommands:
         assert fake.sent("BLOW_OUT") == ["BLOW_OUT 0 5 1500"]
         assert pip.loaded_volume_ul == 0.0
 
+    def test_blowout_does_not_home_by_default(self):
+        pip, fake = connected()
+        pip.aspirate(500.0)
+        pip.blowout()
+        assert fake.sent("BLOW_OUT") == ["BLOW_OUT 0 5 3000"]
+
     def test_mix_is_a_host_side_two_height_loop(self):
         pip, fake = connected()
         gantry = MagicMock()

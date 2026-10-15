@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import ProtocolEditor from "./ProtocolEditor";
+import ProtocolEditor, { expandStepsAcrossWells } from "./ProtocolEditor";
 import type { CommandInfo, DeckResponse, GantryResponse, ProtocolResponse, ProtocolStep } from "../../types";
 
 const COMMANDS: CommandInfo[] = [
@@ -119,6 +119,29 @@ function renderProtocol(overrides: Partial<React.ComponentProps<typeof ProtocolE
 }
 
 describe("ProtocolEditor", () => {
+  it("expands a step block across wells and labels each image for processing", () => {
+    const result = expandStepsAcrossWells(
+      [
+        { command: "aspirate", args: { position: "plate_1.A1", volume_ul: 10 } },
+        { command: "image_well", args: { position: "plate_1.A1", label: "after_dispense" } },
+        { command: "wait", args: { seconds: 1 } },
+      ],
+      1,
+      2,
+      "plate_1",
+      "A1",
+      ["A2", "B1"],
+    );
+
+    expect(result).toEqual([
+      { command: "aspirate", args: { position: "plate_1.A2", volume_ul: 10 } },
+      { command: "image_well", args: { position: "plate_1.A2", label: "after_dispense_A2" } },
+      { command: "aspirate", args: { position: "plate_1.B1", volume_ul: 10 } },
+      { command: "image_well", args: { position: "plate_1.B1", label: "after_dispense_B1" } },
+      { command: "wait", args: { seconds: 1 } },
+    ]);
+  });
+
   it("adds Rinse with a potentiostat and vial choices and saves the selected depth", async () => {
     const user = userEvent.setup();
     const rinse: CommandInfo = {

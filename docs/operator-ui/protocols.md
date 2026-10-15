@@ -25,6 +25,9 @@ Running also needs the gantry connected.
 4. **Add step.** Choose a command and click **Add** to append a card.
    Positions are addressed by the Component IDs from your deck file
    (`plate.A1`) or by named positions.
+   **Repeat Steps Across Wells** can then copy any consecutive block of steps
+   from a template well to the checked wells. The expanded steps remain visible
+   and editable before saving; image labels receive the target well suffix.
 5. **Fluid state tracking.** Whether this run records liquid volumes, tips,
    and caps. See [below](#track-liquid-state-across-runs).
 6. **Validate.** Checks the saved protocol against the saved gantry and deck

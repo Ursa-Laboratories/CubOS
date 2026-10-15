@@ -115,6 +115,12 @@ Two conventions apply throughout:
 - **Height arguments** (`measurement_height`, `interwell_scan_height`, pipette
   `height`, …) are labware-relative offsets in mm: positive is above the
   labware surface Z, negative is below.
+- **Lateral offsets** (`x_offset_mm` and `y_offset_mm`) are signed millimetre
+  adjustments from the resolved target: positive follows the gantry's +X/+Y
+  direction and negative follows -X/-Y. `move`, `measure`, `scan`, `cure`,
+  `cap`, `decap`, and the direct pipette commands support them. Transfers use
+  `source_x_offset_mm`/`source_y_offset_mm` and
+  `destination_x_offset_mm`/`destination_y_offset_mm`.
 
 Commands available in YAML:
 
@@ -128,6 +134,7 @@ Commands available in YAML:
 - `pick_up_tip`
 - `aspirate`
 - `blowout`
+- `pipette_home`
 - `mix`
 - `transfer`
 - `serial_transfer`
@@ -181,6 +188,8 @@ approach and ends **above** the target (no descent).
   ceiling (`max(safe_z, z_max - instrument depth)`) before XY travel so every
   mounted tool clears the deck; a Z-only move is sent as-is. Applies **only**
   to literal/named targets; supplying it with a deck target is an error.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
+  adjustments applied to the resolved destination.
 
 ### `measure`
 
@@ -199,6 +208,8 @@ instrument method, and persist the result if a campaign is attached.
   to the sensor-detected sample surface instead and must be at or below `0`.
 - `method_kwargs` *(dict, default `{}`)* — forwarded verbatim to the instrument
   method. See [method_kwargs](#method_kwargs) below.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
+  adjustments applied to the resolved well.
 
 ### `scan`
 
@@ -217,6 +228,8 @@ instrument method at each well. Returns a `{well_id: result}` mapping.
   sample surface instead and must be at or below `0`.
 - `delay_s` *(float, default `0.0`)* — seconds to pause between wells.
 - `method_kwargs` *(dict, default `null`)* — forwarded to the method per well.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — apply the same signed
+  lateral adjustment at every well in the scan.
 
 ### `pause`
 
@@ -271,11 +284,21 @@ Move to a position and aspirate.
 
 #### `blowout`
 
-Move to a position and blow out.
+Move to a position and blow out. Sartorius Picus blowout does not return the
+piston home automatically, preventing a return stroke from drawing liquid back
+into a submerged tip. Move the tip clear, then call `pipette_home` explicitly.
 
 - `position` *(str, required)* — deck target.
 - `speed` *(float, default `50.0`)* — blowout speed.
 - `height` *(float, default `0.0`)* — engage offset.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
+  adjustments from the target.
+
+#### `pipette_home`
+
+Return the pipette piston to its home position without moving the gantry. Call
+this only after a separate `move` has lifted or moved the tip clear of liquid.
+No arguments.
 
 #### `mix`
 
@@ -374,11 +397,14 @@ Instruments](gantry-setup.md#define-instruments)). Both take:
   gantry.
 - `vial` *(str, required)* — deck target naming the vial (or vial-grid
   position) to decap/cap.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
+  adjustments from the resolved vial position.
 
 Motion is fixed and built entirely from generic gantry primitives, never
 hardcoded per vial: **approach** at `safe_z` → **engage** at the
 instrument's configured `engage_depth_mm` (a labware-relative Z offset) →
-**capture**/**release** (sensor-confirmed, retried up to the instrument's
+**capture**/**release** (with the configured decap Y shimmy, if any;
+sensor-confirmed and retried up to the instrument's
 `capture_retries`) → **retract** to `safe_z`. The tool is left above the
 vial; the next command lifts to the working-volume ceiling before any XY
 travel. A sensor timeout or a reading
