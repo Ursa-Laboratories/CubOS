@@ -29,6 +29,9 @@ from cubos.validation.bounds import validate_protocol_motion_bounds
 from cubos.validation.errors import ProtocolSemanticValidationError, SetupValidationError
 from cubos.validation.protocol_semantics import validate_protocol_semantics
 
+from .execution_trace import recorded_run, current_trace
+from cubos.yaml_utils import read_yaml_source
+
 ProtocolInput = str | os.PathLike[str] | Protocol
 
 
@@ -146,6 +149,7 @@ def setup_protocol(
     return protocol, context
 
 
+@recorded_run("full_session")
 def run_on_hardware(
     gantry_path: str | Path,
     deck_path: str | Path,
@@ -216,11 +220,12 @@ def run_on_hardware(
         if mock_mode:
             gantry = Gantry(offline=True)
         else:
-            with open(gantry_path) as f:
-                raw_config = yaml.safe_load(f)
+            raw_config = yaml.safe_load(read_yaml_source(gantry_path))
             gantry = Gantry(config=raw_config)
 
     owns_data_store = False
+    if data_store is None and current_trace() is not None:
+        data_store = current_trace().store
     if data_store is None:
         from cubos.data import DataStore
 
@@ -314,6 +319,7 @@ def run_on_hardware(
             raise GantryHealthCheckError(
                 "Gantry health check failed before protocol execution; aborting."
             )
+        context.connections_observed = True
         return protocol.execute(context)
     except BaseException:
         run_failed = True
@@ -330,12 +336,16 @@ def run_on_hardware(
                 try:
                     context.gantry.disconnect_instruments()
                 except Exception as exc:
+                    if current_trace():
+                        current_trace().cleanup_error(exc)
                     logger.error(
                         "disconnect_instruments failed: %s", exc, exc_info=True,
                     )
                 try:
                     gantry.disconnect()
                 except Exception as exc:
+                    if current_trace():
+                        current_trace().cleanup_error(exc)
                     logger.error("cubos.gantry.disconnect failed: %s", exc, exc_info=True)
         finally:
             if data_store is not None and campaign_id is not None:

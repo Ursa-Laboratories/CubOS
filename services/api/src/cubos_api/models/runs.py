@@ -71,6 +71,9 @@ class StepEventData(BaseModel):
     command: str
     substep: str | None = None
     outcome: StepOutcome
+    run_id: str | None = None
+    step_execution_id: str | None = None
+    parent_step_execution_id: str | None = None
     duration_s: float | None = None
     error: str | None = None
     reason: str | None = None
@@ -94,13 +97,17 @@ class RunRecord(BaseModel):
     created_at: float
     started_at: float | None = None
     finished_at: float | None = None
-    mock_mode: bool = False
+    mock_mode: bool | None = None
     metadata: Dict[str, Any] = Field(default_factory=dict)
     digests: Dict[str, str] = Field(default_factory=dict)
     result: Any = None
     error: str | None = None
     artifacts: List[str] = Field(default_factory=list)
     fluid_state_id: int | None = None
+    core_status: str | None = Field(default=None, description="Committed runtime outcome, independent of API artifact publication.")
+    artifacts_pending: bool = Field(default=False, description="Runtime has finished while this API worker is still publishing outputs; API state remains running or cancel_requested until publication ends.")
+    recording_errors: List[Any] = Field(default_factory=list)
+    recovered_at: str | None = None
 
 
 class RunEventsResponse(BaseModel):
@@ -115,6 +122,7 @@ class PlanStep(BaseModel):
     command: str
     summary: str
     args: Dict[str, Any] = Field(default_factory=dict)
+    source: Dict[str, Any] = Field(default_factory=dict)
 
 
 class RunPlanResponse(BaseModel):
@@ -132,3 +140,9 @@ class RunPlanResponse(BaseModel):
 class RunArtifactsResponse(BaseModel):
     run_id: str
     artifacts: List[str]
+
+
+class RunStepsResponse(BaseModel):
+    run_id: str
+    steps: List[Dict[str, Any]]
+    next_after_sequence: int

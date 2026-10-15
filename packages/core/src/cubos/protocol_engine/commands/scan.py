@@ -10,7 +10,10 @@ from typing import TYPE_CHECKING, Any, Dict
 from cubos.deck.labware.well_plate import WellPlate
 
 from ..errors import ProtocolExecutionError
-from ..measurements import normalize_measurement
+from ..measurements import normalize_measurement, is_measurement_result
+from ..measurement_trace import (
+    invoke, persistence_kwargs, recording_error, record_resolved, well_scope,
+)
 from ..registry import protocol_command
 from . import _summaries
 from ..scan_args import normalize_scan_arguments, surface_detection_enabled
@@ -177,71 +180,85 @@ def scan(
             context.logger.info("Pausing %.1fs between wells", delay_s)
             time.sleep(delay_s)
 
-        well = plate_obj.get_well_center(well_id)
-        if i == 0:
-            context.gantry.move_to_labware(instrument, well)
-            context.gantry.move(instrument, (well.x, well.y, approach_z))
-        else:
-            context.gantry.move(
-                instrument, (well.x, well.y, approach_z), travel_z=approach_z,
+        with well_scope(context, {"instrument": instrument, "method": method,
+                                  "position": f"{plate}.{well_id}",
+                                  "measurement_height": measurement_height}, i):
+            well = plate_obj.get_well_center(well_id)
+            if i == 0:
+                context.gantry.move_to_labware(instrument, well)
+                context.gantry.move(instrument, (well.x, well.y, approach_z))
+            else:
+                context.gantry.move(
+                    instrument, (well.x, well.y, approach_z), travel_z=approach_z,
+                )
+            context.gantry.move(instrument, (well.x, well.y, action_z))
+
+            # Use the shared dispatch helper so closed-loop methods get the
+            # same gantry-injection + None-gantry guard + finite-number guard
+            # as `measure`, instead of scan reimplementing them inline.
+            kwargs = inject_runtime_args(
+                callable_method, normalized.method_kwargs, context,
+                well_z=well_z,
+                measurement_height=measurement_height,
+                indentation_limit_height=indentation_limit_height,
             )
-        context.gantry.move(instrument, (well.x, well.y, action_z))
+            result, call_metadata = invoke(
+                context, instr, callable_method, kwargs,
+                position=f"{plate}.{well_id}", action_xyz=(well.x, well.y, action_z),
+            )
+            results[well_id] = result
 
-        # Use the shared dispatch helper so closed-loop methods get the
-        # same gantry-injection + None-gantry guard + finite-number guard
-        # as `measure`, instead of scan reimplementing them inline.
-        kwargs = inject_runtime_args(
-            callable_method, normalized.method_kwargs, context,
-            well_z=well_z,
-            measurement_height=measurement_height,
-            indentation_limit_height=indentation_limit_height,
-        )
-        result = callable_method(**kwargs)
-        results[well_id] = result
-
-        if (
-            context.data_store is not None
-            and context.campaign_id is not None
-            and well_id in persistence_targets
-        ):
-            try:
-                measurement = normalize_measurement(
-                    instrument_name=instrument,
-                    method_name=method,
-                    raw_result=result,
-                )
-                persistence_target = persistence_targets[well_id]
-                if tracked_contents_index is not None:
-                    contents = contents_for_target(
-                        tracked_contents_index,
-                        persistence_target,
+            if (
+                context.data_store is not None
+                and context.campaign_id is not None
+                and well_id in persistence_targets
+            ):
+                try:
+                    measurement = normalize_measurement(
+                        instrument_name=instrument,
+                        method_name=method,
+                        raw_result=result,
                     )
-                else:
-                    contents = context.data_store.get_contents(
-                        context.campaign_id,
-                        persistence_target.labware_key,
-                        persistence_target.location_id,
+                    persistence_target = persistence_targets[well_id]
+                    if tracked_contents_index is not None:
+                        contents = contents_for_target(
+                            tracked_contents_index,
+                            persistence_target,
+                        )
+                    else:
+                        contents = context.data_store.get_contents(
+                            context.campaign_id,
+                            persistence_target.labware_key,
+                            persistence_target.location_id,
+                        )
+                    contents_json = json.dumps(contents) if contents else "[]"
+                    context.data_store.log_experiment_measurement(
+                        campaign_id=context.campaign_id,
+                        labware_key=persistence_target.labware_key,
+                        labware_name=persistence_target.labware_name,
+                        well_id=persistence_target.location_id,
+                        contents_json=contents_json,
+                        result=measurement,
+                        **persistence_kwargs(
+                            context, call_metadata, measurement, persistence_target, contents,
+                        ),
                     )
-                contents_json = json.dumps(contents) if contents else "[]"
-                context.data_store.log_experiment_measurement(
-                    campaign_id=context.campaign_id,
-                    labware_key=persistence_target.labware_key,
-                    labware_name=persistence_target.labware_name,
-                    well_id=persistence_target.location_id,
-                    contents_json=contents_json,
-                    result=measurement,
-                )
-            except TypeError as exc:
-                logger.warning(
-                    "Measurement result from %s.%s at well %s is not "
-                    "persistable: %s",
-                    instrument, method, well_id, exc,
-                )
-            except Exception as exc:
-                logger.warning(
-                    "Failed to log measurement for well %s: %s",
-                    well_id, exc, exc_info=True,
-                )
+                except TypeError as exc:
+                    if is_measurement_result(result):
+                        recording_error(context, exc)
+                    else:
+                        record_resolved(context, measurement_result_status="unsupported")
+                    logger.warning(
+                        "Measurement result from %s.%s at well %s is not "
+                        "persistable: %s",
+                        instrument, method, well_id, exc,
+                    )
+                except Exception as exc:
+                    recording_error(context, exc)
+                    logger.warning(
+                        "Failed to log measurement for well %s: %s",
+                        well_id, exc, exc_info=True,
+                    )
 
     if sorted_wells:
         last_well = plate_obj.get_well_center(sorted_wells[-1])

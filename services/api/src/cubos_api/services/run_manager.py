@@ -3,18 +3,20 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
+from contextlib import contextmanager
 import tempfile
 import threading
 import time
-import traceback
+from datetime import datetime
 import uuid
-from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from cubos.data import DataStore
+from cubos.data.record_metadata import sanitize
 from cubos.deck import load_deck_from_yaml
 from cubos.deck.errors import DeckLoaderError
 
@@ -38,32 +40,10 @@ class RunPolicyError(ValueError):
 
 
 def _jsonable(value: Any) -> Any:
-    if is_dataclass(value):
-        return _jsonable(asdict(value))
-    if hasattr(value, "model_dump"):
-        return _jsonable(value.model_dump())
     cubos_result_fields = ("status", "steps_executed", "campaign_id", "results")
-    if any(hasattr(value, name) for name in cubos_result_fields):
-        return {
-            name: _jsonable(getattr(value, name))
-            for name in cubos_result_fields
-            if hasattr(value, name)
-        }
-    if hasattr(value, "__dict__") and vars(value):
-        return {
-            str(key): _jsonable(item)
-            for key, item in vars(value).items()
-            if not str(key).startswith("_")
-        }
-    if isinstance(value, dict):
-        return {str(key): _jsonable(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple, set)):
-        return [_jsonable(item) for item in value]
-    if isinstance(value, Path):
-        return str(value)
-    if isinstance(value, (str, int, float, bool)) or value is None:
-        return value
-    return str(value)
+    if any(hasattr(value, name) for name in cubos_result_fields) and not isinstance(value, dict):
+        return sanitize({name: _jsonable(getattr(value, name)) for name in cubos_result_fields if hasattr(value, name)})
+    return sanitize(value)
 
 
 def _check_protocol_policy(
@@ -99,6 +79,7 @@ def _mock_execute(
     deck_path: Path,
     protocol_path: Path,
     step_observer: Any | None = None,
+    data_store: Any | None = None,
 ) -> Any:
     from cubos.protocol_engine.setup import setup_protocol
 
@@ -109,6 +90,7 @@ def _mock_execute(
         gantry=None,
         mock_mode=True,
         step_observer=step_observer,
+        data_store=data_store,
     )
     context.gantry.connect_instruments()
     try:
@@ -123,16 +105,27 @@ class RunManager:
         self.store = RunStore(settings.ensure_run_dir())
         self._lock = threading.Lock()
         self._active_run_id: str | None = None
+        self._bundles: dict[str, tuple[str, str, str]] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
         self._recover_interrupted_runs()
 
     def _recover_interrupted_runs(self) -> None:
-        for record in self.store.incomplete_records():
-            record.state = "failed"
-            record.finished_at = time.time()
-            record.error = "server restarted before the run reached a terminal state"
-            self.store.write_error(record, record.error)
-            self.store.append_event(record.run_id, state="failed", message=record.error)
-            self.store.write(record)
+        from cubos.protocol_engine.execution_trace import recover_abandoned_runs
+        store = DataStore(self.settings.data_db_path) if Path(self.settings.data_db_path).expanduser().is_file() else None
+        try:
+            if store is not None:
+                recover_abandoned_runs(store)
+            for record in self.store.incomplete_records():
+                if store is None or store.execution_records.get_run(record.run_id) is None:
+                    record.state = "failed"
+                    record.finished_at = None
+                    record.core_status = "interrupted"
+                    record.error = "execution interrupted; completion time unknown"
+                    record.recovered_at = datetime.now().astimezone().isoformat()
+                    self.store.write(record)
+        finally:
+            if store is not None:
+                store.close()
 
     @property
     def active_run_id(self) -> str | None:
@@ -147,6 +140,9 @@ class RunManager:
             if self.store.exists(run_id) or self.store.run_dir(run_id).exists():
                 raise RunConflictError(f"run {run_id!r} already exists")
 
+            with self._read_records() as records:
+                if records is not None and records.get_run(run_id) is not None:
+                    raise RunConflictError(f"run {run_id!r} already exists in the experiment database")
             gantry_yaml, deck_yaml, protocol_yaml = self._resolve_bundle(submission)
             self._validate_bundle(gantry_yaml, deck_yaml, protocol_yaml)
             fluid_state_id = self._resolve_run_state(deck_yaml, submission.state)
@@ -164,6 +160,8 @@ class RunManager:
                 deck_yaml=deck_yaml,
                 protocol_yaml=protocol_yaml,
             )
+            self._bundles[run_id] = (gantry_yaml, deck_yaml, protocol_yaml)
+            self._cancel_events[run_id] = threading.Event()
             self._active_run_id = run_id
 
         thread = threading.Thread(
@@ -176,7 +174,50 @@ class RunManager:
         return record
 
     def get(self, run_id: str) -> RunRecord | None:
-        return self.store.read(run_id)
+        record = self.store.read(run_id)
+        if record is None:
+            return None
+        with self._read_records() as records:
+            traced = records.get_run(run_id) if records is not None else None
+        if traced:
+            record.core_status = traced["status"]
+            previous_state = record.state
+            record.state = {"completed": "succeeded", "interrupted": "failed", "paused": "running"}.get(traced["status"], traced["status"])
+            # API state includes output publication; core_status reports the
+            # already committed physical/runtime outcome independently.
+            record.artifacts_pending = (self.active_run_id == run_id and previous_state in {"queued", "running", "cancel_requested"} and traced["status"] in {"completed", "failed", "cancelled", "interrupted"})
+            if record.artifacts_pending:
+                record.state = "cancel_requested" if previous_state == "cancel_requested" else "running"
+            elif previous_state == "cancel_requested" and traced["status"] == "running":
+                record.state = "cancel_requested"
+            record.metadata = traced["metadata"]
+            record.recording_errors = traced.get("recording_errors") or []
+            record.recovered_at = traced.get("recovered_at")
+            for field, source in (("started_at", "started_at"), ("finished_at", "ended_at")):
+                value = traced.get(source)
+                setattr(record, field, datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp() if value else None)
+        return record
+
+    @contextmanager
+    def _read_records(self):
+        from cubos.data.execution_records import ExecutionRecords
+        path = Path(self.settings.data_db_path).expanduser().resolve()
+        try:
+            connection = sqlite3.connect(path.as_uri() + "?mode=ro", uri=True)
+        except sqlite3.OperationalError:
+            if not path.exists():
+                yield None
+                return
+            raise
+        try:
+            exists = connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='protocol_runs'").fetchone()
+            yield ExecutionRecords(connection) if exists else None
+        finally:
+            connection.close()
+
+    def steps(self, run_id: str, *, after_sequence: int = 0, limit: int = 100):
+        with self._read_records() as records:
+            return records.list_steps(run_id, after_sequence=after_sequence, limit=limit) if records is not None else []
 
     def events(self, run_id: str):
         return self.store.events(run_id)
@@ -192,6 +233,7 @@ class RunManager:
                 raise RunConflictError(f"run {run_id!r} is already {record.state}")
             if self._active_run_id != run_id:
                 raise RunConflictError(f"run {run_id!r} is not active")
+            self._cancel_events[run_id].set()
             record.state = "cancel_requested"
             self.store.append_event(
                 run_id,
@@ -289,21 +331,81 @@ class RunManager:
             if tmp_path is not None:
                 tmp_path.unlink(missing_ok=True)
 
+    def _projection_error(self, run_id: str, exc: Exception, data_store=None) -> None:
+        log.error("Run %s API projection failed (%s)", run_id, type(exc).__name__)
+        if data_store is not None:
+            try:
+                traced = data_store.execution_records.get_run(run_id)
+                if traced is not None:
+                    errors = list(traced.get("recording_errors") or [])
+                    errors.append({"type": type(exc).__name__, "stage": "api_projection", "message_omitted": True})
+                    data_store.execution_records.update_run(run_id, recording_errors=errors)
+            except Exception:
+                log.error("Run %s projection failure could not be recorded", run_id)
+
     def _execute(self, run_id: str) -> None:
+        from cubos.protocol_engine.execution_trace import RunRecorder, ProtocolCancelled
+        from cubos.yaml_utils import frozen_yaml_sources
+
+        data_store = None
+        record = None
+        try:
+            record = self.store.read(run_id)
+            if record is None:
+                return
+            directory = self.store.run_dir(run_id)
+            bundle = self._bundles.pop(run_id)
+            sources = {directory / name: content for name, content in zip(("gantry.yaml", "deck.yaml", "protocol.yaml"), bundle)}
+            data_store = DataStore(self.settings.data_db_path)
+            record.state = "running"
+            record.started_at = time.time()
+            try:
+                self.store.append_event(run_id, state="running", message="execution started")
+                self.store.write(record)
+            except Exception as exc:
+                self._projection_error(run_id, exc)
+            observer = RunStoreStepObserver(self.store, run_id)
+            metadata = {"user_metadata": record.metadata, "lifecycle_scope": "api_session",
+                        "requested_mock_mode": record.mock_mode,
+                        "requested_setup": {name: yaml.safe_load(content) for name, content in
+                                            zip(("gantry.yaml", "deck.yaml", "protocol.yaml"), bundle)}}
+            with RunRecorder(data_store, run_id=run_id, metadata=metadata, cancel_event=self._cancel_events[run_id]), frozen_yaml_sources(sources):
+                raw_result = self._dispatch(record, directory, observer, data_store)
+            record.state = "succeeded"
+            record.result = _jsonable(raw_result)
+            record.finished_at = time.time()
+            try:
+                self.store.write_result(record, record.result)
+                self.store.append_event(run_id, state="succeeded", message="execution completed")
+                self.store.write(record)
+            except Exception as exc:
+                self._projection_error(run_id, exc, data_store)
+        except Exception as exc:
+            log.error("CubOS run %s failed (%s)", run_id, type(exc).__name__)
+            if record is not None:
+                record.state = "cancelled" if isinstance(exc, ProtocolCancelled) else "failed"
+                record.finished_at = time.time()
+                record.error = type(exc).__name__
+                try:
+                    self.store.write_error(record, record.error)
+                    self.store.append_event(run_id, state=record.state, message=record.error)
+                    self.store.write(record)
+                except Exception as projection_exc:
+                    self._projection_error(run_id, projection_exc, data_store)
+        finally:
+            try:
+                if data_store is not None:
+                    data_store.close()
+            finally:
+                with self._lock:
+                    self._bundles.pop(run_id, None)
+                    self._cancel_events.pop(run_id, None)
+                    if self._active_run_id == run_id:
+                        self._active_run_id = None
+
+    def _dispatch(self, record, directory, step_observer, data_store):
         from cubos_api.routers import gantry as gantry_router
-
-        record = self.store.read(run_id)
-        if record is None:
-            return
-        directory = self.store.run_dir(run_id)
-        record.state = "running"
-        record.started_at = time.time()
-        self.store.append_event(run_id, state="running", message="execution started")
-        self.store.write(record)
-
-        # Advisory progress reporting; see cubos.protocol_engine.observer for
-        # why an observer can never fail a run.
-        step_observer = RunStoreStepObserver(self.store, run_id)
+        run_id = record.run_id
         gate_acquired = False
         try:
             gantry_router.begin_run(protocol_file="protocol.yaml")
@@ -314,6 +416,7 @@ class RunManager:
                     deck_path=directory / "deck.yaml",
                     protocol_path=directory / "protocol.yaml",
                     step_observer=step_observer,
+                    data_store=data_store,
                 )
             else:
                 # Manual bring-up handles (Camera view preview, lighting) hold
@@ -332,34 +435,11 @@ class RunManager:
                     fluid_state_id=record.fluid_state_id,
                     step_observer=step_observer,
                 )
-            result = _jsonable(raw_result)
-            record = self.store.read(run_id) or record
-            record.state = "succeeded"
-            record.result = result
-            record.finished_at = time.time()
-            self.store.write_result(record, result)
-            self.store.append_event(run_id, state="succeeded", message="execution completed")
-            self.store.write(record)
-        except Exception as exc:  # noqa: BLE001 - persist complete failure details
-            log.exception("CubOS run %s failed", run_id)
-            record = self.store.read(run_id) or record
-            cancelled = record.state == "cancel_requested"
-            record.state = "cancelled" if cancelled else "failed"
-            record.finished_at = time.time()
-            record.error = f"{type(exc).__name__}: {exc}"
-            self.store.write_error(record, traceback.format_exc())
-            self.store.append_event(
-                run_id,
-                state=record.state,
-                message=record.error,
-            )
-            self.store.write(record)
+            return raw_result
+
         finally:
             if gate_acquired:
                 gantry_router.end_run()
-            with self._lock:
-                if self._active_run_id == run_id:
-                    self._active_run_id = None
 
 
 _manager: RunManager | None = None

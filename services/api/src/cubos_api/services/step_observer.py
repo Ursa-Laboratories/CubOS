@@ -50,14 +50,21 @@ class RunStoreStepObserver:
         error: Optional[str] = None,
         reason: Optional[str] = None,
     ) -> None:
+        from cubos.protocol_engine.execution_trace import current_trace
+        trace = current_trace()
+        step_id = trace.active_step_id if trace else None
+        parent_id = trace.stack[-2]["id"] if trace and len(trace.stack) > 1 else None
         data = StepEventData(
+            run_id=trace.run_id if trace else self._run_id,
+            step_execution_id=step_id,
+            parent_step_execution_id=parent_id,
             index=index,
             command=command,
             substep=substep,
             outcome=outcome,
             duration_s=duration_s,
-            error=error,
-            reason=reason,
+            error="command failed" if error else None,
+            reason="command skipped" if reason else None,
         )
         self._store.append_event(
             self._run_id,
@@ -105,7 +112,7 @@ class RunStoreStepObserver:
             substep=substep,
             outcome="failed",
             duration_s=duration_s,
-            error=error,
+            error="command failed" if error else None,
         )
 
     def step_skipped(
@@ -121,7 +128,7 @@ class RunStoreStepObserver:
             command=command,
             substep=substep,
             outcome="skipped",
-            reason=reason,
+            reason="command skipped" if reason else None,
         )
 
 

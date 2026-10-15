@@ -9,7 +9,7 @@ no setup and no external database server required.
 By default, results are written to:
 
 ```text
-data/databases/panda_data.db
+~/.cubos/panda_data.db
 ```
 
 Set `CUBOS_DATA_DB_PATH` to write a run to a different file. After a
@@ -32,6 +32,11 @@ successful run, analysis-friendly CSV exports are also written under
 
 `scan` stores one experiment row per well, `measure` one row for the target
 position, and pipette `transfer` updates labware contents.
+
+For command outcomes, per-well step links, timing, and an offline example, see
+[Run and step records](run-records.md). Execution records share this database in
+`protocol_runs` and `step_executions`; existing measurement tables carry nullable
+`step_execution_id` and `metadata_json` fields.
 
 ## Download Data ZIP
 

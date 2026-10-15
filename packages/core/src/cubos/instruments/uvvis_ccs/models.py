@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -18,6 +18,7 @@ class UVVisSpectrum:
     wavelengths: tuple[float, ...]
     intensities: tuple[float, ...]
     integration_time_s: float
+    metadata: dict = field(default_factory=dict)
 
     @property
     def is_valid(self) -> bool:

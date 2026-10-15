@@ -29,3 +29,8 @@ def _real_protocol_commands():
     yield
     if set(CommandRegistry.instance().command_names) != _REAL_COMMANDS:
         restore_protocol_commands()
+
+
+@pytest.fixture(autouse=True)
+def _isolated_execution_database(monkeypatch, tmp_path):
+    monkeypatch.setenv("CUBOS_DATA_DB_PATH", str(tmp_path / "protocol-records.db"))

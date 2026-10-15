@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING, Any, Iterator, List, Optional
 
 from cubos.deck.labware.tip_rack import (
@@ -46,6 +46,27 @@ _ALREADY_APPLIED = "already applied on a previous run"
 
 if TYPE_CHECKING:
     from ..runtime import ProtocolContext
+
+
+def _trace_scope(
+    context: ProtocolContext,
+    command: str,
+    parameters: dict | None = None,
+    *,
+    iteration_index: int | None = None,
+):
+    scope = getattr(context, "trace_scope", None)
+    return (
+        scope(command, parameters, iteration_index=iteration_index)
+        if callable(scope)
+        else nullcontext()
+    )
+
+
+def _record_resolved(context: ProtocolContext, **values: Any) -> None:
+    record = getattr(context, "record_resolved", None)
+    if callable(record):
+        record(**values)
 
 
 def _get_pipette(context: ProtocolContext):
@@ -264,8 +285,6 @@ def _mark_transfer_stroke_uncertain(
         )
 
 
-
-
 def _tip_rack_key(position: str) -> str:
     """Return the deck path used to resolve *position*'s owning TipRack.
 
@@ -371,6 +390,7 @@ def mix(
             speed=speed,
             height=height,
         )
+        _record_resolved(context, operation_key=operation_key)
         if not should_execute:
             context.logger.info(
                 "Skipping already-applied fluid operation %s", operation_key,
@@ -449,6 +469,13 @@ def pick_up_tip(
                 f"Tip-state preflight failed for pick_up_tip at {position!r}: "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
+        _record_resolved(
+            context,
+            tip_position=f"{rack_key}.{resolved_tip_id}",
+            tip_id=resolved_tip_id,
+            tip_extension_mm=extension_mm,
+            operation_key=operation_key,
+        )
         if not should_execute:
             pipette.set_attached_tip_extension(extension_mm)
             context.logger.info(
@@ -472,6 +499,13 @@ def pick_up_tip(
                 "(slot is unknown or already consumed)."
             )
 
+    _record_resolved(
+        context,
+        tip_position=position,
+        tip_id=tip_id,
+        tip_extension_mm=rack.tip_length,
+        operation_key=operation_key,
+    )
     try:
         _engage(context, position, command_label="pick_up_tip")
         pipette.pick_up_tip(speed)
@@ -691,23 +725,38 @@ def transfer(
                 context.active_substep = (
                     f"{previous_substep}:{suffix}" if previous_substep else suffix
                 )
-            _execute_transfer_stroke(
+            with _trace_scope(
                 context,
-                pipette,
-                source=source,
-                destination=destination,
-                source_target=source_target,
-                destination_target=destination_target,
-                stroke_volume_ul=stroke_volume,
-                speed=speed,
-                source_height=resolved_source_height,
-                destination_height=resolved_destination_height,
-                correction=correction,
-                tracked=tracked,
-                stroke_index=stroke_index,
-                stroke_count=stroke_count,
-                blow_out=stroke_index == stroke_count - 1,
-            )
+                "transfer.stroke",
+                {
+                    "source": source,
+                    "destination": destination,
+                    "requested_volume_ul": stroke_volume,
+                    "speed": speed,
+                    "source_height": resolved_source_height,
+                    "destination_height": resolved_destination_height,
+                    "stroke_count": stroke_count,
+                    "blow_out": stroke_index == stroke_count - 1,
+                },
+                iteration_index=stroke_index,
+            ):
+                _execute_transfer_stroke(
+                    context,
+                    pipette,
+                    source=source,
+                    destination=destination,
+                    source_target=source_target,
+                    destination_target=destination_target,
+                    stroke_volume_ul=stroke_volume,
+                    speed=speed,
+                    source_height=resolved_source_height,
+                    destination_height=resolved_destination_height,
+                    correction=correction,
+                    tracked=tracked,
+                    stroke_index=stroke_index,
+                    stroke_count=stroke_count,
+                    blow_out=stroke_index == stroke_count - 1,
+                )
     finally:
         context.active_substep = previous_substep
 
@@ -751,6 +800,7 @@ def _execute_transfer_stroke(
             destination_target=destination_target,
             volume_ul=stroke_volume_ul,
         )
+        _record_resolved(context, operation_key=operation_key)
         if not should_execute:
             context.logger.info(
                 "Skipping already-applied fluid operation %s (stroke %d/%d)",
@@ -766,6 +816,13 @@ def _execute_transfer_stroke(
             return
 
     commanded_volume_ul = correction.apply(stroke_volume_ul)
+    _record_resolved(
+        context,
+        commanded_volume_ul=commanded_volume_ul,
+        source_height=source_height,
+        destination_height=destination_height,
+        operation_key=operation_key,
+    )
     try:
         _engage(
             context, source, command_label="transfer.aspirate",
@@ -943,9 +1000,28 @@ def serial_transfer(
         for index, (well_id, vol) in enumerate(zip(well_ids, volumes)):
             destination = f"{plate}.{well_id}"
             context.active_substep = f"{index}:{destination}"
-            transfer(context, source=source, destination=destination,
-                     volume_ul=vol, speed=speed, source_height=source_height,
-                     destination_height=destination_height)
+            with _trace_scope(
+                context,
+                "transfer",
+                {
+                    "source": source,
+                    "destination": destination,
+                    "volume_ul": vol,
+                    "speed": speed,
+                    "source_height": source_height,
+                    "destination_height": destination_height,
+                },
+                iteration_index=index,
+            ):
+                transfer(
+                    context,
+                    source=source,
+                    destination=destination,
+                    volume_ul=vol,
+                    speed=speed,
+                    source_height=source_height,
+                    destination_height=destination_height,
+                )
     finally:
         context.active_substep = previous_substep
 
@@ -962,7 +1038,14 @@ def serial_transfer(
 
 
 @contextmanager
-def _substep_scope(context: ProtocolContext, suffix: str) -> Iterator[None]:
+def _substep_scope(
+    context: ProtocolContext,
+    suffix: str,
+    *,
+    command: str | None = None,
+    parameters: dict | None = None,
+    iteration_index: int | None = None,
+) -> Iterator[None]:
     """Nest *suffix* under the current ``active_substep``, then restore it.
 
     Mirrors the manual save/restore ``transfer``/``serial_transfer`` already
@@ -971,21 +1054,25 @@ def _substep_scope(context: ProtocolContext, suffix: str) -> Iterator[None]:
     """
     previous = context.active_substep
     context.active_substep = f"{previous}:{suffix}" if previous else suffix
-    started = time.monotonic()
-    context.notify_step("step_started")
     try:
-        yield
-    except BaseException as exc:
-        context.notify_step(
-            "step_failed",
-            duration_s=time.monotonic() - started,
-            error=f"{type(exc).__name__}: {exc}",
-        )
-        raise
-    else:
-        context.notify_step(
-            "step_completed", duration_s=time.monotonic() - started,
-        )
+        with _trace_scope(
+            context, command or suffix, parameters, iteration_index=iteration_index
+        ):
+            started = time.monotonic()
+            context.notify_step("step_started")
+            try:
+                yield
+            except BaseException as exc:
+                context.notify_step(
+                    "step_failed",
+                    duration_s=time.monotonic() - started,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                raise
+            else:
+                context.notify_step(
+                    "step_completed", duration_s=time.monotonic() - started
+                )
     finally:
         context.active_substep = previous
 
@@ -1100,6 +1187,7 @@ def _resolve_stock_source(
             f"{command_label} stock selection failed: {exc}"
         ) from exc
     position = target_position(target)
+    _record_resolved(context, source=position)
     # Recorded run artifact for the automatic choice: the resolved position
     # is logged here for operator-readable narration, and durably lands in
     # the fluid_operations journal row `transfer` (below) begins -- that
@@ -1146,6 +1234,7 @@ def _resolve_waste_target(
             f"{command_label} waste selection failed: {exc}"
         ) from exc
     position = target_position(target)
+    _record_resolved(context, waste=position)
     context.logger.info(
         "%s automatic waste selection: solution=%r -> %s",
         command_label, solution, position,
@@ -1199,14 +1288,39 @@ def rinse_well(
             context, source=source, solution=solution, volume_ul=volume_ul,
             command_label="rinse_well",
         )
-        with _substep_scope(context, f"{cycle_scope}:fill"):
+        with _substep_scope(
+            context,
+            f"{cycle_scope}:fill",
+            command="transfer",
+            parameters={
+                "source": resolved_source,
+                "destination": well,
+                "volume_ul": volume_ul,
+                "speed": speed,
+                "source_height": source_height,
+                "destination_height": well_height,
+            },
+            iteration_index=cycle,
+        ):
             _transfer_or_skip(
                 context, source=resolved_source, destination=well,
                 volume_ul=volume_ul, speed=speed,
                 source_height=source_height, destination_height=well_height,
             )
         if mix_repetitions > 0:
-            with _substep_scope(context, f"{cycle_scope}:mix"):
+            with _substep_scope(
+                context,
+                f"{cycle_scope}:mix",
+                command="mix",
+                parameters={
+                    "position": well,
+                    "volume_ul": mix_volume_ul or volume_ul,
+                    "cycles": mix_repetitions,
+                    "speed": speed,
+                    "height": well_height or 0.0,
+                },
+                iteration_index=cycle,
+            ):
                 mix(
                     context, well, mix_volume_ul or volume_ul,
                     cycles=mix_repetitions, speed=speed,
@@ -1216,7 +1330,20 @@ def rinse_well(
             context, waste=waste, solution=solution, volume_ul=volume_ul,
             command_label="rinse_well",
         )
-        with _substep_scope(context, f"{cycle_scope}:remove"):
+        with _substep_scope(
+            context,
+            f"{cycle_scope}:remove",
+            command="transfer",
+            parameters={
+                "source": well,
+                "destination": resolved_waste,
+                "volume_ul": volume_ul,
+                "speed": speed,
+                "source_height": well_height,
+                "destination_height": waste_height,
+            },
+            iteration_index=cycle,
+        ):
             _transfer_or_skip(
                 context, source=well, destination=resolved_waste,
                 volume_ul=volume_ul, speed=speed,
@@ -1260,7 +1387,20 @@ def flush_pipette(
             context, waste=waste, solution=solution, volume_ul=volume_ul,
             command_label="flush_pipette",
         )
-        with _substep_scope(context, f"flush:cycle{cycle}"):
+        with _substep_scope(
+            context,
+            f"flush:cycle{cycle}",
+            command="transfer",
+            parameters={
+                "source": resolved_source,
+                "destination": resolved_waste,
+                "volume_ul": volume_ul,
+                "speed": speed,
+                "source_height": source_height,
+                "destination_height": waste_height,
+            },
+            iteration_index=cycle,
+        ):
             _transfer_or_skip(
                 context, source=resolved_source, destination=resolved_waste,
                 volume_ul=volume_ul, speed=speed,
@@ -1307,7 +1447,19 @@ def purge_pipette(
         context, waste=waste, solution=solution, volume_ul=volume_ul,
         command_label="purge_pipette",
     )
-    with _substep_scope(context, "purge"):
+    with _substep_scope(
+        context,
+        "purge",
+        command="transfer",
+        parameters={
+            "source": resolved_source,
+            "destination": resolved_waste,
+            "volume_ul": volume_ul,
+            "speed": speed,
+            "source_height": source_height,
+            "destination_height": waste_height,
+        },
+    ):
         _transfer_or_skip(
             context, source=resolved_source, destination=resolved_waste,
             volume_ul=volume_ul, speed=speed,
@@ -1363,18 +1515,32 @@ def clear_well(
             ) from exc
         resolved_volume_ul = float(current) - float(target_volume_ul)
 
+    _record_resolved(context, removal_volume_ul=resolved_volume_ul)
     if resolved_volume_ul <= 1e-9:
         context.logger.info(
             "clear_well %s: already at or below target_volume_ul=%g; skipping.",
             well, target_volume_ul,
         )
+        context.notify_step("step_skipped", reason="already at or below target volume")
         return
 
     resolved_waste = _resolve_waste_target(
         context, waste=waste, solution=solution, volume_ul=resolved_volume_ul,
         command_label="clear_well",
     )
-    with _substep_scope(context, "clear"):
+    with _substep_scope(
+        context,
+        "clear",
+        command="transfer",
+        parameters={
+            "source": well,
+            "destination": resolved_waste,
+            "volume_ul": resolved_volume_ul,
+            "speed": speed,
+            "source_height": well_height,
+            "destination_height": waste_height,
+        },
+    ):
         _transfer_or_skip(
             context, source=well, destination=resolved_waste,
             volume_ul=resolved_volume_ul, speed=speed,

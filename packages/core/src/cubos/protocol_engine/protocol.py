@@ -81,12 +81,14 @@ class Protocol:
             len(self._steps),
             f" from {self.source_path}" if self.source_path else "",
         )
-        results: List[Any] = []
-        for step in self._steps:
-            result = step.execute(context)
-            results.append(result)
-        self.logger.info("Protocol complete.")
-        return results
+        from .execution_trace import protocol_recording
+        with protocol_recording(self, context):
+            results: List[Any] = []
+            for step in self._steps:
+                result = step.execute(context)
+                results.append(result)
+            self.logger.info("Protocol complete.")
+            return results
 
     def validate(self) -> None:
         """Validate the protocol offline against its setup metadata.

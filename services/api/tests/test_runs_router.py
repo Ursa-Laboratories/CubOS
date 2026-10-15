@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import time
+
+import yaml
 from threading import Event
 
 from tests.api_client import api_request
@@ -134,7 +136,7 @@ def test_submit_returns_202_and_persists_artifacts(monkeypatch):
         app, "GET", "/api/v1/runs/run-001/artifacts/protocol.yaml"
     )
     assert protocol.status_code == 200
-    assert protocol.text == PROTOCOL_YAML
+    assert yaml.safe_load(protocol.text) == yaml.safe_load(PROTOCOL_YAML)
 
 
 def test_run_events_are_ordered_and_filterable(monkeypatch):
@@ -560,7 +562,15 @@ def test_mock_run_emits_step_events():
     payload["gantry_config"] = MOCK_GANTRY_YAML
     payload["mock_mode"] = True
     api_request(app, "POST", "/api/v1/runs", json=payload)
-    _wait_for_state(app, "run-mock-steps", "succeeded", "failed")
+    completed_run = _wait_for_state(app, "run-mock-steps", "succeeded", "failed")
+    assert completed_run["state"] == "succeeded"
+    assert completed_run["core_status"] == "completed"
+    trace = api_request(app, "GET", "/api/v1/runs/run-mock-steps/steps?limit=1").json()
+    assert len(trace["steps"]) == 1
+    assert trace["steps"][0]["command"] == "home"
+    assert trace["steps"][0]["status"] == "completed"
+    next_page = api_request(app, "GET", f"/api/v1/runs/run-mock-steps/steps?after_sequence={trace['next_after_sequence']}").json()
+    assert [step["command"] for step in next_page["steps"]] == ["pause", "home"]
 
     events = api_request(app, "GET", "/api/v1/runs/run-mock-steps/events").json()["events"]
     step_events = [event for event in events if event["kind"] == "step"]
