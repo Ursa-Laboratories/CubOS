@@ -585,8 +585,8 @@ def _append_capper_targets(
             targets, target=vial, suffix=suffix, instrument=instrument,
             x=target_x, y=target_y, z=target_z,
         )
-    if command_name == "decap":
-        shimmy = config.get("decap_release_shimmy_y_mm", 0.0)
+    if command_name == "cap":
+        shimmy = config.get("cap_release_shimmy_y_mm", 0.0)
         if _is_finite_number(shimmy) and float(shimmy):
             _append_target(
                 targets, target=vial, suffix="release_shimmy_y",

@@ -290,7 +290,7 @@ instruments:
     engage_depth_mm: -15.0
     capture_retries: 2
     capture_settle_s: 1.0
-    decap_release_shimmy_y_mm: 0.0
+    cap_release_shimmy_y_mm: 0.0
 ```
 
 `park_position` is retired: `decap`/`cap` leave the tool at `safe_z` above
@@ -301,10 +301,11 @@ carries the key loads with a warning and the key is ignored; delete it.
 required, not driver defaults — every capper's decap/cap motion sequence
 comes entirely from this config, never hardcoded. `vendor: mock` is an
 offline-only in-memory simulation useful for dry runs without any Arduino
-attached. `decap_release_shimmy_y_mm` is optional and defaults to `0`; a
-nonzero signed value moves that many millimetres in Y and back after a
-successful cap capture, at the engagement height, before retracting. Use it
-only when the station needs a small lateral release from residual magnetism.
+attached. `cap_release_shimmy_y_mm` is optional and defaults to `0`; a
+nonzero signed value moves that many millimetres in Y and back after the cap
+is released onto the vial, at the engagement height, before retracting. Use
+it when residual magnetism can keep the released cap attached to the tool.
+The shimmy is part of capping only; decapping retracts directly after capture.
 
 **`mounted_tool` / `mount_only`** — any other passive mounted tool tracked
 for offsets only (no actuation, no sensor):

@@ -25,9 +25,9 @@ hardcoded in the protocol commands:
   sensor.
 * ``release_overtravel_mm`` -- additional downward travel used only while
   releasing a cap, so seating pressure can overcome residual attraction.
-* ``decap_release_shimmy_y_mm`` -- signed Y displacement performed after a
-  cap is captured and before retracting, then reversed at the same Z to
-  break residual mechanical or magnetic adhesion to the vial.
+* ``cap_release_shimmy_y_mm`` -- signed Y displacement performed after a
+  cap is released onto the vial and before retracting, then reversed at
+  the same Z to break residual magnetic adhesion to the capper.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class CapperInstrument(BaseInstrument):
         capture_retries: int = 2,
         capture_settle_s: float = 1.0,
         release_overtravel_mm: float = 0.0,
-        decap_release_shimmy_y_mm: float = 0.0,
+        cap_release_shimmy_y_mm: float = 0.0,
         name: Optional[str] = None,
         offset_x: float = 0.0,
         offset_y: float = 0.0,
@@ -70,8 +70,8 @@ class CapperInstrument(BaseInstrument):
         self.release_overtravel_mm = _finite_nonnegative(
             release_overtravel_mm, "release_overtravel_mm",
         )
-        self.decap_release_shimmy_y_mm = _finite_number(
-            decap_release_shimmy_y_mm, "decap_release_shimmy_y_mm",
+        self.cap_release_shimmy_y_mm = _finite_number(
+            cap_release_shimmy_y_mm, "cap_release_shimmy_y_mm",
         )
 
     @abstractmethod

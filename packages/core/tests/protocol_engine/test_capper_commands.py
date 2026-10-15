@@ -146,8 +146,8 @@ class TestDecapSequencing:
         assert gantry.trace[1] == ("move", (11.5, 18.0, 22.0))
         assert gantry.trace[-2] == ("move", (11.5, 18.0, SAFE_Z))
 
-    def test_release_shimmy_moves_sideways_and_back_before_retract(self):
-        capper = _make_capper(decap_release_shimmy_y_mm=2.0)
+    def test_cap_release_shimmy_does_not_run_during_decap(self):
+        capper = _make_capper(cap_release_shimmy_y_mm=2.0)
         ctx, gantry = _untracked_context(capper=capper)
         decap(ctx, "capper", "vial_1")
         engage_z = 30.0 + capper.engage_depth_mm
@@ -155,8 +155,6 @@ class TestDecapSequencing:
             ("approach", Coordinate3D(x=10.0, y=20.0, z=30.0)),
             ("move", (10.0, 20.0, engage_z)),
             "capture_cap",
-            ("move", (10.0, 22.0, engage_z)),
-            ("move", (10.0, 20.0, engage_z)),
             ("move", (10.0, 20.0, SAFE_Z)),
             "read_cap_present",
         ]
@@ -174,6 +172,23 @@ class TestCapSequencing:
             ("approach", Coordinate3D(x=10.0, y=20.0, z=30.0)),
             ("move", (10.0, 20.0, engage_z)),
             "release_cap",
+            ("move", (10.0, 20.0, SAFE_Z)),
+            "read_cap_present",
+        ]
+
+    def test_release_shimmy_moves_sideways_and_back_before_retract(self):
+        capper = _make_capper(cap_release_shimmy_y_mm=2.0)
+        capper.capture_cap()
+        ctx, gantry = _untracked_context(capper=capper)
+        gantry.trace.clear()
+        cap(ctx, "capper", "vial_1")
+        engage_z = 30.0 + capper.engage_depth_mm
+        assert gantry.trace == [
+            ("approach", Coordinate3D(x=10.0, y=20.0, z=30.0)),
+            ("move", (10.0, 20.0, engage_z)),
+            "release_cap",
+            ("move", (10.0, 22.0, engage_z)),
+            ("move", (10.0, 20.0, engage_z)),
             ("move", (10.0, 20.0, SAFE_Z)),
             "read_cap_present",
         ]

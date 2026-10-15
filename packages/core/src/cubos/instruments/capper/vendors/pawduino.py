@@ -76,7 +76,7 @@ class PawduinoCapper(CapperInstrument):
         capture_retries: int = 2,
         capture_settle_s: float = 1.0,
         release_overtravel_mm: float = 0.0,
-        decap_release_shimmy_y_mm: float = 0.0,
+        cap_release_shimmy_y_mm: float = 0.0,
         port: str = "",
         baud_rate: int = 115200,
         command_timeout: float = 30.0,
@@ -92,7 +92,7 @@ class PawduinoCapper(CapperInstrument):
             capture_retries=capture_retries,
             capture_settle_s=capture_settle_s,
             release_overtravel_mm=release_overtravel_mm,
-            decap_release_shimmy_y_mm=decap_release_shimmy_y_mm,
+            cap_release_shimmy_y_mm=cap_release_shimmy_y_mm,
             name=name, offset_x=offset_x, offset_y=offset_y,
             depth=depth, offline=offline,
         )

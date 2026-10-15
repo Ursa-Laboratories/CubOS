@@ -160,8 +160,8 @@ def _actuate_retract_confirm(
                 capper.release_cap()
             if capper.capture_settle_s > 0:
                 time.sleep(capper.capture_settle_s)
-            if capturing and capper.decap_release_shimmy_y_mm:
-                shimmy_y = y + capper.decap_release_shimmy_y_mm
+            if not capturing and capper.cap_release_shimmy_y_mm:
+                shimmy_y = y + capper.cap_release_shimmy_y_mm
                 context.gantry.move(
                     instrument, (x, shimmy_y, action_z), travel_z=action_z,
                 )
