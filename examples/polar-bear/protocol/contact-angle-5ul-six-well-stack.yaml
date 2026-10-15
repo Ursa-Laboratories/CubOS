@@ -1,7 +1,7 @@
 # Six-well 5 uL contact-angle run using one tip.
 #
 # For every destination well:
-# - decap vial A1, aspirate 5 uL at the established -10 mm height, and recap;
+# - decap vial A1, aspirate 5 uL at height -45 mm, and recap;
 # - blow out the full aspirated volume at the established +21 mm well height;
 # - capture the established 10-plane white-light stack (125.0 to 123.2 mm);
 # - return the pipette piston home after imaging, immediately before the next decap.
@@ -17,7 +17,7 @@ protocol:
     position: vial_rack.A1
     volume_ul: 5
     speed: 50
-    height: -10
+    height: -45
 - cap:
     instrument: capper
     vial: vial_rack.A1
@@ -44,7 +44,7 @@ protocol:
     position: vial_rack.A1
     volume_ul: 5
     speed: 50
-    height: -10
+    height: -45
 - cap:
     instrument: capper
     vial: vial_rack.A1
@@ -71,7 +71,7 @@ protocol:
     position: vial_rack.A1
     volume_ul: 5
     speed: 50
-    height: -10
+    height: -45
 - cap:
     instrument: capper
     vial: vial_rack.A1
@@ -98,7 +98,7 @@ protocol:
     position: vial_rack.A1
     volume_ul: 5
     speed: 50
-    height: -10
+    height: -45
 - cap:
     instrument: capper
     vial: vial_rack.A1
@@ -125,7 +125,7 @@ protocol:
     position: vial_rack.A1
     volume_ul: 5
     speed: 50
-    height: -10
+    height: -45
 - cap:
     instrument: capper
     vial: vial_rack.A1
@@ -152,7 +152,7 @@ protocol:
     position: vial_rack.A1
     volume_ul: 5
     speed: 50
-    height: -10
+    height: -45
 - cap:
     instrument: capper
     vial: vial_rack.A1
