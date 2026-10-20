@@ -597,6 +597,16 @@ immediately if any axis moves away from back-right-top.
   inspected before an operator explicitly resumes or re-homes it; no
   automatic resume was attempted.
 
+- Later on 2026-10-20, the compatible one-line origin validator change was
+  deployed against the Pi's own backed-up `origin.py` and `cubos.service` was
+  restarted successfully. `polar-bear-4040-xmin-minus20.yaml` is now selected
+  and loads with working volume X[-20, 259.514], while
+  `contactangle_deck_original_positions.yaml` retains the original plate
+  coordinates (A1 X=230.631 mm). The 162-step
+  `contact_angle_water_1to10ul_two_replicates.yaml` setup validates as
+  "Protocol is valid." The gantry was left disconnected and no homing,
+  jogging, resume, or protocol movement was attempted.
+
 For deck calibration, use the pipette as the reference instrument and follow
 the wizard one item at a time. Save the new deck YAML before leaving the Deck
 tab; unsaved labware exists only in the browser working copy.
