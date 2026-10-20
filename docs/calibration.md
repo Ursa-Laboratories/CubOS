@@ -80,7 +80,8 @@ working-volume invariants.
 
 - **`deck_origin`** (default, described above) — calibration assigns zero at
   the front-left origin point you touch and writes `working_volume` minima of
-  `0.0` (`x_min`, `y_min`, non-negative `z_min`); the Z reference height and
+  `0.0`; verified travel beyond that corner may use negative `x_min` or
+  `y_min`, while `z_min` remains non-negative. The Z reference height and
   homed readback set the maxima.
 - **`home_origin`** — calibration instead assigns zero at the homed
   back-right-top corner. `working_volume` maxima come out `0.0` (`x_max`,

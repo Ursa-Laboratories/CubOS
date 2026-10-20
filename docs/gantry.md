@@ -33,7 +33,9 @@ for it.
 
 - **`deck_origin`** (default) — the [Coordinate Convention](#coordinate-convention)
   above: work-position zero sits at the front-left-bottom deck corner.
-  `working_volume` has `x_min: 0.0`, `y_min: 0.0`, and non-negative `z_min`;
+  `working_volume` normally starts at `x_min: 0.0`, `y_min: 0.0`, and a
+  non-negative `z_min`. A negative X/Y minimum is allowed when the machine
+  has verified clear travel beyond the deck corner;
   homing drives to the back-right-top corner, whose work position equals the
   `working_volume` maxima.
 - **`home_origin`** — work-position zero sits at the homed back-right-top
@@ -163,8 +165,8 @@ requirements below describe the default `deck_origin` policy; under
 
 Protocol setup requires (`deck_origin`, the default):
 
-- `x_min: 0.0`
-- `y_min: 0.0`
+- `x_min <= 0.0`
+- `y_min <= 0.0`
 - non-negative `z_min`
 
 Use [Calibration](calibration.md) to measure the physical working

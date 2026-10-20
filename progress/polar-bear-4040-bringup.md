@@ -587,12 +587,15 @@ immediately if any axis moves away from back-right-top.
   at step 7/162 during the first A1 camera move with GRBL in `Hold:0`; only
   the first 1 uL A1 transfer completed. The plate calibration was restored to
   A1/A2 X=230.631 mm in `contactangle_deck_original_positions.yaml`. The
-  intended correction was applied only to the live gantry working volume by
-  selecting `polar-bear-4040-xmin-minus20.yaml` with X min=-20 mm. The
-  1–10 uL two-replicate protocol then passed setup validation with centered
-  camera positions and no per-step X/Y offsets. The controller remains in
-  feed hold and must be inspected before an operator explicitly resumes or
-  re-homes it; no automatic resume was attempted.
+  intended correction belongs only in the gantry working volume. The deployed
+  release rejects a negative X minimum under `origin_policy: deck_origin`, so
+  `polar-bear-4040-xmin-minus20.yaml` was saved but not left active. The valid
+  pre-change gantry backup is selected with X min=0. A shared-core change now
+  allows verified negative X/Y margins beyond a deck-origin corner; it must be
+  deployed before selecting the minus-20 config and revalidating the centered
+  D-row camera positions. The controller remains in feed hold and must be
+  inspected before an operator explicitly resumes or re-homes it; no
+  automatic resume was attempted.
 
 For deck calibration, use the pipette as the reference instrument and follow
 the wizard one item at a time. Save the new deck YAML before leaving the Deck

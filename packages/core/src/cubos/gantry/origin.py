@@ -4,8 +4,10 @@ CubOS gantry configs select one of two coordinate frames via
 ``GantryConfig.origin_policy``:
 
 * ``deck_origin`` (default): WPos zero at the front-left-bottom deck
-  corner; +X operator-right, +Y back, +Z up. The reachable working volume
-  is non-negative (``x_min == 0``, ``y_min == 0``, ``z_min >= 0``).
+  corner; +X operator-right, +Y back, +Z up. X/Y minima may be negative
+  when the machine can safely travel beyond the deck corner, while the
+  deck origin itself must remain reachable (``x_min <= 0``,
+  ``y_min <= 0``, ``z_min >= 0``).
 * ``home_origin``: WPos zero at the homed back-right-top corner. The
   reachable working volume is non-positive (``x_max == 0``, ``y_max == 0``,
   ``z_max <= 0``), mirror-symmetric with ``deck_origin``.
@@ -148,20 +150,19 @@ def format_set_work_position_command(
 def validate_deck_origin_minima(config: GantryConfig) -> None:
     """Validate that a gantry config is in the deck-origin frame shape."""
     volume = config.working_volume
-    non_zero_xy_mins = [
+    positive_xy_mins = [
         (axis, value)
         for axis, value in (
             ("x_min", volume.x_min),
             ("y_min", volume.y_min),
         )
-        if abs(value) > _ZERO_TOLERANCE
+        if value > _ZERO_TOLERANCE
     ]
-    if non_zero_xy_mins:
-        formatted = ", ".join(f"{axis}={value}" for axis, value in non_zero_xy_mins)
+    if positive_xy_mins:
+        formatted = ", ".join(f"{axis}={value}" for axis, value in positive_xy_mins)
         raise ValueError(
-            "Deck-origin calibration requires working_volume X/Y minima at 0.0; "
-            f"got {formatted}. Use a deck-origin gantry config before setting "
-            "front-left-bottom origin."
+            "Deck-origin calibration requires working_volume X/Y minima at or "
+            f"below 0.0 so the deck origin remains reachable; got {formatted}."
         )
     if volume.z_min < -_ZERO_TOLERANCE:
         raise ValueError(

@@ -26,7 +26,8 @@ class OriginPolicy(str, Enum):
     """Which physical corner WPos zero is calibrated to.
 
     ``DECK_ORIGIN`` (default): WPos zero at the front-left-bottom deck
-    corner; the entire reachable working volume is non-negative.
+    corner. X/Y minima may be negative when the machine has usable travel
+    beyond that deck corner; Z remains non-negative.
     ``HOME_ORIGIN``: WPos zero at the homed back-right-top corner; the
     entire reachable working volume is non-positive (mirror-symmetric with
     ``DECK_ORIGIN``).
