@@ -582,6 +582,18 @@ Before the next homing test, clear the full travel area, keep a hand at the
 gantry power switch, connect through CubOS, verify live `$23=0`, and stop
 immediately if any axis moves away from back-right-top.
 
+- On 2026-10-20 a proposed 20 mm plate-coordinate shift was found to be the
+  wrong correction: it displaced the A1 blowout by 20 mm. The run cancelled
+  at step 7/162 during the first A1 camera move with GRBL in `Hold:0`; only
+  the first 1 uL A1 transfer completed. The plate calibration was restored to
+  A1/A2 X=230.631 mm in `contactangle_deck_original_positions.yaml`. The
+  intended correction was applied only to the live gantry working volume by
+  selecting `polar-bear-4040-xmin-minus20.yaml` with X min=-20 mm. The
+  1–10 uL two-replicate protocol then passed setup validation with centered
+  camera positions and no per-step X/Y offsets. The controller remains in
+  feed hold and must be inspected before an operator explicitly resumes or
+  re-homes it; no automatic resume was attempted.
+
 For deck calibration, use the pipette as the reference instrument and follow
 the wizard one item at a time. Save the new deck YAML before leaving the Deck
 tab; unsaved labware exists only in the browser working copy.
