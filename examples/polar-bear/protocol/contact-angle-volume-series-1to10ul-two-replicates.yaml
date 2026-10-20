@@ -9,7 +9,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 1
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -49,7 +49,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 2
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -89,7 +89,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 3
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -129,7 +129,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 4
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -169,7 +169,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 5
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -209,7 +209,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 6
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -249,7 +249,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 7
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -289,7 +289,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 8
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -329,7 +329,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 9
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -369,7 +369,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 10
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -409,7 +409,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 1
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -449,7 +449,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 2
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -489,7 +489,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 3
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -529,7 +529,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 4
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -569,7 +569,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 5
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -609,7 +609,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 6
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -629,7 +629,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D1_06uL_primary
   - image_well:
       camera: camera
@@ -641,7 +640,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D1_06uL_backup
   - pipette_home: null
   - decap:
@@ -651,7 +649,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 7
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -671,7 +669,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D2_07uL_primary
   - image_well:
       camera: camera
@@ -683,7 +680,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D2_07uL_backup
   - pipette_home: null
   - decap:
@@ -693,7 +689,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 8
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -713,7 +709,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D3_08uL_primary
   - image_well:
       camera: camera
@@ -725,7 +720,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D3_08uL_backup
   - pipette_home: null
   - decap:
@@ -735,7 +729,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 9
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -755,7 +749,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D4_09uL_primary
   - image_well:
       camera: camera
@@ -767,7 +760,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D4_09uL_backup
   - pipette_home: null
   - decap:
@@ -777,7 +769,7 @@ protocol:
       position: vial_rack.A1
       volume_ul: 10
       speed: 50
-      height: -45
+      height: -15
   - cap:
       instrument: capper
       vial: vial_rack.A1
@@ -797,7 +789,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D5_10uL_primary
   - image_well:
       camera: camera
@@ -809,7 +800,6 @@ protocol:
       brightness: 25
       z_steps: 10
       z_step_mm: 0.2
-      x_offset_mm: 2.5
       label: water_volume_series_rep2_D5_10uL_backup
   - pipette_home: null
   - drop_tip:
