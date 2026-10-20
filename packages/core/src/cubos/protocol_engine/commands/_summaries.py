@@ -215,6 +215,13 @@ def capture(args: Dict[str, Any]) -> str:
 
 
 def image_well(args: Dict[str, Any]) -> str:
+    sweep_start = args.get("x_sweep_start_mm")
+    sweep_stop = args.get("x_sweep_stop_mm")
+    if sweep_start is not None or sweep_stop is not None:
+        return _join(
+            f"{args['camera']} @ {_position(args['well'])}",
+            f"X sweep {sweep_start} to {sweep_stop} mm",
+        )
     x_offset = float(args.get("x_offset_mm", 0.0))
     y_offset = float(args.get("y_offset_mm", 0.0))
     offset = ""

@@ -728,6 +728,65 @@ def test_image_well_omitted_lights_passes():
     assert violations == []
 
 
+@pytest.mark.parametrize(
+    ("extra_args", "message"),
+    [
+        ({"x_sweep_start_mm": -4.0}, "provided together"),
+        ({
+            "x_sweep_start_mm": -4.0,
+            "x_sweep_stop_mm": 4.0,
+            "x_sweep_step_mm": 0.0,
+        }, "non-zero"),
+        ({
+            "x_sweep_start_mm": -4.0,
+            "x_sweep_stop_mm": 4.0,
+            "x_sweep_step_mm": -1.0,
+        }, "points away"),
+        ({
+            "x_sweep_start_mm": -4.0,
+            "x_sweep_stop_mm": 4.0,
+            "mode": "curvature",
+        }, "standard"),
+        ({
+            "x_sweep_start_mm": -4.0,
+            "x_sweep_stop_mm": 4.0,
+            "x_offset_mm": 1.0,
+        }, "either x_offset_mm"),
+    ],
+)
+def test_image_well_invalid_x_sweep_emits_violation(extra_args, message):
+    instrumented_gantry, deck = _board_and_deck()
+    args = {
+        "camera": "asmi",
+        "well": "plate.A1",
+        "image_height": 0.0,
+        **extra_args,
+    }
+    protocol = _protocol(args, command_name="image_well")
+
+    violations = validate_protocol_semantics(
+        protocol, instrumented_gantry, deck, _gantry_config(),
+    )
+
+    assert any(message in violation.message for violation in violations)
+
+
+def test_image_well_valid_x_sweep_passes():
+    instrumented_gantry, deck = _board_and_deck()
+    protocol = _protocol({
+        "camera": "asmi",
+        "well": "plate.A1",
+        "image_height": 0.0,
+        "x_sweep_start_mm": -4.0,
+        "x_sweep_stop_mm": 4.0,
+        "x_sweep_step_mm": 1.0,
+    }, command_name="image_well")
+
+    assert validate_protocol_semantics(
+        protocol, instrumented_gantry, deck, _gantry_config(),
+    ) == []
+
+
 @pytest.mark.parametrize("command_name,args", [
     ("pause", {"seconds": 0.1}),
     ("breakpoint", {"message": "continue"}),

@@ -495,6 +495,16 @@ to `safe_z` — with lights-off and the retract guaranteed even on failure.
   (defaults 0.2 mm × 11) with contact lights at 50% (or `brightness`),
   labeling each image `{label}_z{z}mm_b{brightness}`.
 - `brightness` *(int, optional)* — override the mode's default level.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0`)* — shift a single
+  capture from the calibrated well center while preserving attribution to
+  that well.
+- `x_sweep_start_mm`, `x_sweep_stop_mm` *(float, optional pair)* — in
+  `standard` mode, capture an inclusive X sweep between these offsets. The
+  camera approaches the first point through clearance, then moves directly
+  between X positions at the image height and retracts after the last image.
+- `x_sweep_step_mm` *(float, default `1`)* — signed spacing between sweep
+  positions. Its sign must point from the start toward the stop. Sweep image
+  labels are prefixed with `left_*`, `center_*`, or `right_*`.
 
 Capture and lighting failures **log and continue** (an image is never
 worth failing a run over) and the command returns the list of image paths

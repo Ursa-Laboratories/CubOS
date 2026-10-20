@@ -528,20 +528,33 @@ def _append_image_well_targets(
             and _is_finite_number(z_step_mm)
         ):
             deepest_height -= (z_steps - 1) * float(z_step_mm)
-    image_x = coord.x + x_offset
     image_y = coord.y + y_offset
-    for suffix, z in (
-        ("safe_z", gantry.resolved_safe_z),
-        ("action_z", coord.z + deepest_height),
-    ):
+    sweep_start = step_args.get("x_sweep_start_mm")
+    sweep_stop = step_args.get("x_sweep_stop_mm")
+    if _is_finite_number(sweep_start) and _is_finite_number(sweep_stop):
+        image_offsets = [float(sweep_start), float(sweep_stop)]
+    else:
+        image_offsets = [x_offset]
+    for index, image_offset in enumerate(image_offsets):
+        image_x = coord.x + image_offset
+        if index == 0:
+            _append_target(
+                targets,
+                target=well,
+                suffix="safe_z",
+                instrument=camera,
+                x=image_x,
+                y=image_y,
+                z=gantry.resolved_safe_z,
+            )
         _append_target(
             targets,
             target=well,
-            suffix=suffix,
+            suffix=("action_z" if len(image_offsets) == 1 else f"sweep_{index}_action_z"),
             instrument=camera,
             x=image_x,
             y=image_y,
-            z=z,
+            z=coord.z + deepest_height,
         )
 
 

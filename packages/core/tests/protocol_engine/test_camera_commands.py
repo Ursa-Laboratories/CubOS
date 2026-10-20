@@ -194,6 +194,51 @@ class TestImageWell:
             "move", (WELL.x - 4.0, WELL.y + 1.5, SAFE_Z), None,
         )
 
+    def test_x_sweep_moves_laterally_at_image_height_and_retracts_once(
+        self, monkeypatch,
+    ):
+        import cubos.protocol_engine.commands.camera as camera_module
+
+        monkeypatch.setattr(camera_module.time, "sleep", lambda _seconds: None)
+        camera, lights = _camera(), _lights()
+        context = _context({"cam": camera, "lights": lights})
+        light_log = []
+        original = lights.set_channel
+
+        def logging_set_channel(channel, brightness):
+            light_log.append((channel, brightness))
+            original(channel, brightness)
+
+        lights.set_channel = logging_set_channel
+        saved = image_well(
+            context,
+            camera="cam",
+            well="plate.B1",
+            image_height=30.0,
+            lights="lights",
+            brightness=25,
+            label="b1",
+            x_sweep_start_mm=-2.0,
+            x_sweep_stop_mm=2.0,
+            x_sweep_step_mm=1.0,
+        )
+
+        assert len(saved) == 5
+        assert light_log == [("white", 25)]
+        assert context.gantry.trace == [
+            ("move", (WELL.x - 2.0, WELL.y, WELL.z + 30.0), SAFE_Z),
+            ("move", (WELL.x - 1.0, WELL.y, WELL.z + 30.0), WELL.z + 30.0),
+            ("move", (WELL.x, WELL.y, WELL.z + 30.0), WELL.z + 30.0),
+            ("move", (WELL.x + 1.0, WELL.y, WELL.z + 30.0), WELL.z + 30.0),
+            ("move", (WELL.x + 2.0, WELL.y, WELL.z + 30.0), WELL.z + 30.0),
+            ("move", (WELL.x + 2.0, WELL.y, SAFE_Z), None),
+        ]
+        names = [Path(path).name for path in saved]
+        assert names[0].startswith("left_2mm_b1_")
+        assert names[2].startswith("center_0mm_b1_")
+        assert names[-1].startswith("right_2mm_b1_")
+        assert lights.status().channels == {"white": 0, "contact": 0}
+
     def test_capture_failure_continues_and_retracts(self):
         camera = _camera()
 
@@ -307,6 +352,42 @@ class TestImageWellValidation:
                        well="plate.B1", image_height=30.0,
                        mode="curvature", z_step_mm=-0.1)
 
+    @pytest.mark.parametrize(
+        ("kwargs", "message"),
+        [
+            ({"x_sweep_start_mm": -4.0}, "provided together"),
+            ({
+                "x_sweep_start_mm": -4.0,
+                "x_sweep_stop_mm": 4.0,
+                "x_sweep_step_mm": 0.0,
+            }, "non-zero"),
+            ({
+                "x_sweep_start_mm": -4.0,
+                "x_sweep_stop_mm": 4.0,
+                "x_sweep_step_mm": -1.0,
+            }, "points away"),
+            ({
+                "x_sweep_start_mm": -4.0,
+                "x_sweep_stop_mm": 4.0,
+                "mode": "curvature",
+            }, "standard"),
+            ({
+                "x_sweep_start_mm": -4.0,
+                "x_sweep_stop_mm": 4.0,
+                "x_offset_mm": 1.0,
+            }, "either x_offset_mm"),
+        ],
+    )
+    def test_invalid_x_sweep(self, kwargs, message):
+        with pytest.raises(ProtocolExecutionError, match=message):
+            image_well(
+                _context({"cam": _camera()}),
+                camera="cam",
+                well="plate.B1",
+                image_height=30.0,
+                **kwargs,
+            )
+
 
 class TestImageWellFailurePaths:
     def test_lighting_failure_skips_capture_and_continues(self):
@@ -359,6 +440,12 @@ class TestSummaries:
         assert "a1" in _summaries.capture({"instrument": "cam", "label": "a1"})
         assert "standard" in _summaries.image_well(
             {"camera": "cam", "well": "plate.B1"})
+        assert "X sweep -4 to 4 mm" in _summaries.image_well({
+            "camera": "cam",
+            "well": "plate.B1",
+            "x_sweep_start_mm": -4,
+            "x_sweep_stop_mm": 4,
+        })
 
 
 class TestLightsAutoDiscovery:

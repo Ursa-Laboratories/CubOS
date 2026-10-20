@@ -2061,6 +2061,60 @@ def _validate_image_well_command(
             field_name="lights instrument",
             instrumented_gantry=instrumented_gantry,
         ))
+    sweep_start = args.get("x_sweep_start_mm")
+    sweep_stop = args.get("x_sweep_stop_mm")
+    sweep_step = args.get("x_sweep_step_mm", 1.0)
+    sweep_requested = sweep_start is not None or sweep_stop is not None
+    if sweep_requested:
+        if sweep_start is None or sweep_stop is None:
+            violations.append(_violation(
+                step_index,
+                "image_well",
+                "x_sweep_start_mm and x_sweep_stop_mm must be provided together.",
+            ))
+        else:
+            for field_name, value in (
+                ("x_sweep_start_mm", sweep_start),
+                ("x_sweep_stop_mm", sweep_stop),
+                ("x_sweep_step_mm", sweep_step),
+            ):
+                violation = _finite_field_violation(
+                    step_index, "image_well", field_name, value,
+                )
+                if violation is not None:
+                    violations.append(violation)
+            if not violations:
+                difference = float(sweep_stop) - float(sweep_start)
+                if float(sweep_step) == 0.0:
+                    violations.append(_violation(
+                        step_index,
+                        "image_well",
+                        "x_sweep_step_mm must be non-zero.",
+                    ))
+                elif difference * float(sweep_step) < 0:
+                    violations.append(_violation(
+                        step_index,
+                        "image_well",
+                        "x_sweep_step_mm points away from x_sweep_stop_mm.",
+                    ))
+                elif math.floor(abs(difference / float(sweep_step))) + 1 > 1000:
+                    violations.append(_violation(
+                        step_index,
+                        "image_well",
+                        "X sweep exceeds 1000 positions.",
+                    ))
+        if args.get("mode", "standard") != "standard":
+            violations.append(_violation(
+                step_index,
+                "image_well",
+                "X sweeps require mode 'standard'.",
+            ))
+        if args.get("x_offset_mm", 0.0) != 0.0:
+            violations.append(_violation(
+                step_index,
+                "image_well",
+                "use either x_offset_mm or x_sweep_* fields, not both.",
+            ))
     if violations:
         return violations
     well = args.get("well")
