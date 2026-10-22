@@ -74,6 +74,25 @@ jobs:
       - name: Run API tests
         run: python -m pytest services/api/tests -q
 
+  sila:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install CubOS, API, and SiLA dependencies
+        run: |
+          pip install -e packages/core
+          pip install -e "services/api[dev]"
+          pip install -e "services/sila[dev]"
+
+      - name: Run SiLA tests
+        run: python -m pytest services/sila/tests -q
+
   web:
     runs-on: ubuntu-latest
 
