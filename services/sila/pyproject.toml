@@ -1,0 +1,29 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "cubos-sila"
+version = "0.1.0"
+description = "SiLA 2 interface to the CubOS appliance API"
+requires-python = ">=3.11"
+dependencies = [
+    "unitelabs-cdk==0.16.0",
+    "unitelabs-sila==0.11.0",
+    "httpx>=0.28,<0.29",
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+cubos-sila = "cubos_sila.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cubos_sila"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../../packages/core/src", "../api/src"]
+testpaths = ["tests"]
+asyncio_mode = "auto"

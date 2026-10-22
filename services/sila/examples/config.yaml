@@ -1,0 +1,14 @@
+server_uuid: 66eb55c9-37e4-5a0c-bcf6-926d08742fba
+server_name: CubOS mock demonstration
+host: 127.0.0.1
+port: 50051
+discovery: false
+api_url: http://127.0.0.1:8742
+allow_hardware: false
+presets:
+  mock-measurement:
+    description: Offline Filmetrics measurement through the CubOS protocol engine
+    gantry_file: mock/gantry.yaml
+    deck_file: mock/deck.yaml
+    protocol_file: mock/protocol.yaml
+    mock_mode: true
