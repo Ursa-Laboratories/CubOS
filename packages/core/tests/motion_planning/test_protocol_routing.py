@@ -826,3 +826,110 @@ def test_hardware_orchestrator_plans_before_offline_instrument_connect(tmp_path)
 
     assert results == [None]
     assert store.finished == [(7, "completed")]
+
+
+def _standalone_call(command, position="destination", height=0.0):
+    args = {"position": position, "height": height, "speed": 25.0}
+    if command != "blowout":
+        args["volume_ul"] = 100.0
+    return CommandCall(command, args)
+
+
+def test_standalone_yaml_executes_exact_plans_and_pause_preserves_pose(tmp_path, monkeypatch):
+    import importlib
+    from cubos.protocol_engine.loader import load_protocol_from_yaml
+
+    context, controller, pipette = _context()
+    path = tmp_path / "standalone.yaml"
+    path.write_text("""protocol:
+- pick_up_tip: {position: tips.A1}
+- aspirate: {position: source, volume_ul: 100, speed: 25, height: -5}
+- pause: {seconds: 300, reason: settling}
+- dispense: {position: destination, volume_ul: 100, speed: 25, height: -3}
+- blowout: {position: destination, speed: 25, height: 0}
+- drop_tip: {position: waste}
+""")
+    pause_poses = []
+    pause_module = importlib.import_module("cubos.protocol_engine.commands.pause")
+    monkeypatch.setattr(pause_module.time, "sleep", lambda seconds: pause_poses.append(
+        (seconds, controller.get_coordinates(), list(pipette.actions)),
+    ))
+    action_poses = {}
+    for command in ("aspirate", "dispense", "blowout"):
+        original = getattr(pipette, command)
+        def record(*args, _command=command, _original=original):
+            action_poses[_command] = controller.get_coordinates()
+            return _original(*args)
+        setattr(pipette, command, Mock(side_effect=record))
+    # Any fallback to legacy engagement fails the test.
+    monkeypatch.setattr(context.gantry, "move_to_labware", Mock(side_effect=AssertionError("legacy move")))
+
+    load_protocol_from_yaml(path).execute(context)
+
+    assert pipette.actions == ["pick_up_tip", "aspirate:100.0", "dispense:100.0", "blowout", "drop_tip"]
+    assert pause_poses == [(300.0, {"x": 60.0, "y": 60.0, "z": 35.0}, ["pick_up_tip", "aspirate:100.0"])]
+    assert context.planned_motion_steps[2].plans == ()
+    assert action_poses == {
+        "aspirate": {"x": 60.0, "y": 60.0, "z": 35.0},
+        "dispense": {"x": 80.0, "y": 60.0, "z": 37.0},
+        "blowout": {"x": 80.0, "y": 60.0, "z": 40.0},
+    }
+    pipette.aspirate.assert_called_once_with(100.0, 25.0)
+    pipette.dispense.assert_called_once_with(100.0, 25.0)
+    pipette.blowout.assert_called_once_with(25.0)
+    assert controller.moves == [
+        (segment.end.x, segment.end.y, segment.end.z, None)
+        for plan in context.motion_plans for segment in plan.segments
+    ]
+
+
+@pytest.mark.parametrize("command", ["aspirate", "dispense", "blowout"])
+def test_standalone_blocked_destination_rejects_before_pickup(command):
+    context, controller, pipette = _context(blocker=True)
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        _standalone_call("aspirate", "source"),
+        _standalone_call(command),
+    ])
+    with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+        protocol.execute(context)
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+@pytest.mark.parametrize("command", ["aspirate", "dispense", "blowout"])
+def test_standalone_missing_tip_rejects_before_movement(command):
+    context, controller, pipette = _context()
+    with pytest.raises(ProtocolExecutionError, match="requires an attached pipette tip"):
+        compile_protocol([_standalone_call(command)]).execute(context)
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+@pytest.mark.parametrize("command", ["aspirate", "dispense", "blowout"])
+def test_standalone_durable_tracking_rejects_before_pickup(command):
+    context, controller, pipette = _context()
+    context.fluid_state_id = 1
+    context.campaign_id = 1
+    context.data_store = Mock()
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        _standalone_call(command),
+    ])
+    with pytest.raises(ProtocolExecutionError, match="durable fluid tracking"):
+        protocol.execute(context)
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+@pytest.mark.parametrize("command", ["aspirate", "dispense", "blowout"])
+def test_standalone_out_of_bounds_height_rejects_before_pickup(command):
+    context, controller, pipette = _context()
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        _standalone_call(command, height=100),
+    ])
+    with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+        protocol.execute(context)
+    assert controller.moves == []
+    assert pipette.actions == []
