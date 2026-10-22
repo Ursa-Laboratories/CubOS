@@ -481,7 +481,7 @@ def _append_pipette_targets(
     gantry: GantryConfig,
     tip_extension: float,
 ) -> float:
-    if command_name in {"aspirate", "blowout", "mix"}:
+    if command_name in {"aspirate", "dispense", "blowout", "mix"}:
         height = _height_arg(step_args, "height")
         if height is None:
             return tip_extension

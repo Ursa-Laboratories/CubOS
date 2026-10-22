@@ -293,6 +293,18 @@ def _mark_tip_uncertain(
         )
 
 
+def _engage_standalone(
+    context: ProtocolContext, position: str, *, command: str, height: float,
+) -> None:
+    if getattr(context.deck, "planning_enabled", False) is True:
+        from ..routing import prepared_step
+
+        planned = prepared_step(context, command)
+        context.routing_session.execute(planned.plans[0])
+    else:
+        _engage(context, position, command_label=command, height=height)
+
+
 @protocol_command("aspirate", summary=_summaries.aspirate)
 def aspirate(
     context: ProtocolContext,
@@ -309,10 +321,11 @@ def aspirate(
             "known destination. Use transfer or serial_transfer."
         )
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="aspirate", height=height)
+    _engage_standalone(context, position, command="aspirate", height=height)
     return pipette.aspirate(volume_ul, speed)
 
 
+@protocol_command("dispense", summary=_summaries.dispense)
 def dispense(
     context: ProtocolContext,
     position: str,
@@ -320,18 +333,14 @@ def dispense(
     speed: float = 50.0,
     height: float = 0.0,
 ) -> Any:
-    """Move pipette to *position*, then dispense.
-
-    Not exposed as a YAML protocol command — use ``transfer`` instead,
-    which correctly tracks source labware for DB logging.
-    """
+    """Move pipette to *position*, then dispense without durable fluid tracking."""
     if _tracked_fluid_state(context):
         raise ProtocolExecutionError(
             "Standalone dispense is disabled while durable fluid tracking is "
             "active because its source is unknown. Use transfer or serial_transfer."
         )
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="dispense", height=height)
+    _engage_standalone(context, position, command="dispense", height=height)
     return pipette.dispense(volume_ul, speed)
 
 
@@ -343,8 +352,14 @@ def blowout(
     height: float = 0.0,
 ) -> None:
     """Move pipette to *position*, then blowout."""
+    if _tracked_fluid_state(context):
+        raise ProtocolExecutionError(
+            "Standalone blowout is disabled while durable fluid tracking is "
+            "active because its source and volume are unknown. Use transfer "
+            "with blow_out=True."
+        )
     pipette = _get_pipette(context)
-    _engage(context, position, command_label="blowout", height=height)
+    _engage_standalone(context, position, command="blowout", height=height)
     pipette.blowout(speed)
 
 

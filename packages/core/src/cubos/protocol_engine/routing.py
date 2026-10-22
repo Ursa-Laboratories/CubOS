@@ -30,7 +30,7 @@ from .errors import ProtocolExecutionError
 
 SUPPORTED_PLANNED_COMMANDS = frozenset({
     "move", "pick_up_tip", "transfer", "mix", "drop_tip", "capture",
-    "measure_color", "photo_pause",
+    "measure_color", "photo_pause", "pause", "aspirate", "dispense", "blowout",
 })
 
 
@@ -66,6 +66,14 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
         _build_scene_from_context(context)
         for step in protocol.steps:
             args = step.args
+            if (
+                step.command_name in {"aspirate", "dispense", "blowout"}
+                and context.fluid_state_id is not None
+            ):
+                raise InvalidGeometryError(
+                    f"Standalone {step.command_name} is disabled while durable fluid "
+                    "tracking is active. Use transfer or serial_transfer."
+                )
             if step.command_name == "transfer" and args.get("require_uncapped"):
                 raise InvalidGeometryError(
                     "routing v1 transfer does not support require_uncapped because "
@@ -102,7 +110,7 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
             elif step.command_name == "transfer":
                 _motion_for(context.deck, _fixture_key(context.deck, args["source"]))
                 _motion_for(context.deck, _fixture_key(context.deck, args["destination"]))
-            elif step.command_name in {"mix", "drop_tip"}:
+            elif step.command_name in {"mix", "drop_tip", "aspirate", "dispense", "blowout"}:
                 _motion_for(context.deck, _fixture_key(context.deck, args["position"]))
             elif step.command_name in {"capture", "measure_color"}:
                 command = step.command_name
@@ -249,7 +257,7 @@ class RoutingSession:
                 value = PreparedMotionStep(command, (plan,), {})
                 current_target = None
                 current_instrument = args["instrument"]
-            elif command == "photo_pause":
+            elif command in {"photo_pause", "pause"}:
                 value = PreparedMotionStep(command, (), {})
             elif command == "pick_up_tip":
                 value, current, state, current_target, consumed = self._plan_pickup(
@@ -274,6 +282,18 @@ class RoutingSession:
                     current_target=current_target,
                     current_instrument=current_instrument,
                 )
+                current_instrument = "pipette"
+            elif command in {"aspirate", "dispense", "blowout"}:
+                if state.attached_tip_extension_mm <= 0:
+                    raise InvalidGeometryError(f"{command} requires an attached pipette tip.")
+                plan, current = self._plan_engage(
+                    current, args["position"], float(args.get("height", 0.0)),
+                    "pipette", state, command=command, operation=command,
+                    previous_target=current_target,
+                    previous_instrument=current_instrument,
+                )
+                value = PreparedMotionStep(command, (plan,), {})
+                current_target = _fixture_key(self.context.deck, args["position"])
                 current_instrument = "pipette"
             elif command == "mix":
                 value, current, current_target = self._plan_mix(
