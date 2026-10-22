@@ -91,6 +91,7 @@ The runtime package is split by responsibility:
 - `packages/core/src/cubos/data/` provides SQLite persistence and analysis helpers.
 - `packages/core/src/cubos/tools/` contains operator-facing validation, calibration, and run tools.
 - `services/api/` contains the sole FastAPI backend (`cubos_api`).
+- `services/sila/` exposes protocol presets and run artifacts to SiLA 2 clients through that API.
 - `apps/operator-web/` contains the browser client for that API.
 - `sdk/python/` contains the Python client and `cubos-send` CLI for `/api/v1`.
 - `deploy/docker/` contains the production application image contract.
@@ -115,6 +116,7 @@ full documentation instead of treating this README as the source of truth.
 - [Run a Protocol with YAML](docs/protocol-yaml.md)
 - [Python Protocols](docs/protocol-python.md)
 - [Data](docs/data.md)
+- [SiLA 2 Server](docs/sila.md)
 - [Gantry Bring-Up](docs/admin/gantry-bring-up.md)
 - [Troubleshooting & Recovery](docs/troubleshooting.md)
 - [API Reference](docs/reference/index.md)

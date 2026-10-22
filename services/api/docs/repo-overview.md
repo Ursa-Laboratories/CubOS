@@ -1,17 +1,21 @@
 # CubOS API and client overview
 
-The monorepo contains one runtime, one HTTP service, and two clients:
+The monorepo contains one runtime, one HTTP service, and clients including an
+optional SiLA 2 adapter:
 
 ```text
 apps/operator-web/  ----\
                           >---- /api/v1 ---- services/api/ ---- packages/core/
 sdk/python/         ----/
+services/sila/      ----/  <- external SiLA 2 clients
 ```
 
 `packages/core/` owns CubOS validation, deck geometry, movement, protocols,
 instruments, calibration primitives, and data storage. `services/api/` exposes
 those capabilities through `cubos_api`. The operator web and Python SDK are
 clients of that same API and do not implement a second runtime.
+The optional [SiLA server](../../../docs/sila.md) delegates protocol presets,
+progress, cancellation requests, and artifact retrieval to that API as well.
 
 ## Key directories
 
@@ -21,6 +25,7 @@ clients of that same API and do not implement a second runtime.
 | `services/api/src/cubos_api/` | FastAPI service |
 | `apps/operator-web/src/` | React operator client |
 | `sdk/python/src/cubos_client/` | Python SDK and sender CLI |
+| `services/sila/src/cubos_sila/` | SiLA 2 appliance server |
 | `deploy/docker/` | Raspberry Pi appliance image |
 | `deploy/windows/` | Windows operator installer |
 
