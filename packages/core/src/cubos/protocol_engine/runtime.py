@@ -37,6 +37,13 @@ class ProtocolContext:
     active_substep: str | None = None
     step_observer: Optional[StepObserver] = None
     _manual_operation_sequence: int = 0
+    routing_session: Any = None
+    planned_motion_steps: Dict[int, Any] = field(default_factory=dict)
+    motion_plans: list[Any] = field(default_factory=list)
+
+    def serialized_motion_plans(self) -> list[dict[str, Any]]:
+        """Return the exact immutable plans consumed by runtime/simulation."""
+        return [plan.to_dict() for plan in self.motion_plans]
 
     def notify_step(self, hook: str, /, **kwargs: Any) -> None:
         """Emit *hook* to the configured observer, scoped to the active step.
