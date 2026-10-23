@@ -8,6 +8,8 @@ Gantry motion, instruments, protocols, and experiment data in one system.
 
 [Get started](#quick-start) · [See Operator](#meet-operator) · [Write a protocol](docs/protocol-yaml.md) · [Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
 
+[![Tests](https://github.com/Ursa-Laboratories/CubOS/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/Ursa-Laboratories/CubOS/actions/workflows/tests.yml?query=branch%3Amain)
+[![Changed core coverage: at least 90% required](https://img.shields.io/badge/Changed_core_coverage-%E2%89%A590%25_required-32745B?style=flat-square)](.github/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-233C78?style=flat-square)](LICENSE)
 [![Python core](https://img.shields.io/badge/Python_core-3.10%2B-52617A?style=flat-square)](packages/core/pyproject.toml)
 [![Operator](https://img.shields.io/badge/Interface-Operator-233C78?style=flat-square)](docs/operator-ui.md)
@@ -161,6 +163,8 @@ npm --prefix apps/operator-web run build
 python -m mkdocs build --strict
 python -m mkdocs serve
 ```
+
+The test badge tracks the latest `main` workflow. The coverage badge describes the CI requirement: at least 90% of added or changed core Python lines must be covered on pull requests. It is not an overall repository coverage percentage.
 
 Use the [contribution guide](CONTRIBUTING.md) for focused validation and hardware-facing changes. Vendor SDKs are optional extras; install only what your instruments need. Hardware validation is separate from offline software tests.
 
