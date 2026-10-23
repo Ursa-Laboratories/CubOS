@@ -45,28 +45,6 @@ Use the browser for day-to-day operation, YAML or Python to express experiments,
 
 [Take the Operator tour →](docs/operator-ui.md)
 
-## Three files describe the experiment
-
-<img src="docs/images/cubos-workflow.svg" alt="Gantry: machine and instruments. Deck: labware and positions. Protocol: ordered steps. Together they feed CubOS validation, execution, and saved results." width="100%" />
-
-| File | What it describes | Guide |
-|---|---|---|
-| **Gantry** | Machine geometry, connection settings, mounted instruments, and calibration. | [Set up a gantry](docs/gantry-setup.md) |
-| **Deck** | Plates, vials, tip racks, holders, and their calibrated positions. | [Arrange labware](docs/deck.md) |
-| **Protocol** | Ordered actions: move, transfer, mix, measure, scan, capture, and more. | [Write the steps](docs/protocol-yaml.md) |
-
-The same labware names connect your deck to your protocol. This minimal example homes the gantry and moves the ASMI instrument above `plate.A1`:
-
-```yaml
-protocol:
-  - home: {}
-  - move:
-      instrument: asmi
-      position: plate.A1
-```
-
-That is a real motion protocol when run on hardware. Start by validating the bundled example offline below. For experiments built programmatically, use [Python protocols](docs/protocol-python.md).
-
 ## More than motion
 
 | Capability | What CubOS provides |
