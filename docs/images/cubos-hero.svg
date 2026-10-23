@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="640" viewBox="0 0 1600 640" role="img" aria-labelledby="title desc">
+<title id="title">CubOS — Open-source lab automation</title>
+<desc id="desc">A Python control layer for CNC-based lab automation. A conceptual deck diagram shows a tool moving between wells. This is an illustration, not a hardware drawing.</desc>
+<defs><pattern id="grid" width="48" height="48" patternUnits="userSpaceOnUse"><path d="M48 0H0V48" fill="none" stroke="#D7E1F2" stroke-width="1"/></pattern></defs>
+<rect width="1600" height="640" rx="24" fill="#F6F4ED"/>
+<g font-family="Arial,Helvetica,sans-serif" fill="#233C78">
+<text x="76" y="84" font-size="22" letter-spacing="4">URSA LABS / CUBOS</text>
+<text x="70" y="240" font-size="136" font-weight="600" letter-spacing="-7">CubOS</text>
+<text x="76" y="340" font-size="68" letter-spacing="-2">Open-source</text>
+<text x="76" y="416" font-size="68" letter-spacing="-2">lab automation.</text>
+<text x="80" y="483" font-size="27" fill="#52617A">A Python control layer for CNC-based lab automation.</text>
+</g>
+<g transform="translate(930 115)">
+<rect width="596" height="392" rx="16" fill="#EAF0F8"/>
+<rect width="596" height="392" rx="16" fill="url(#grid)"/>
+<g fill="none" stroke="#B1C0D8" stroke-width="2"><path d="M24 48V24H48M548 24H572V48M24 344V368H48M548 368H572V344"/></g>
+<rect x="44" y="90" width="110" height="234" rx="12" fill="#F6F4ED" stroke="#B1C0D8" stroke-width="2"/>
+<g fill="#D7E1F2" stroke="#8FA6CB" stroke-width="2"><circle cx="76" cy="119" r="10"/><circle cx="121" cy="119" r="10"/><circle cx="76" cy="155" r="10"/><circle cx="121" cy="155" r="10"/><circle cx="76" cy="191" r="10"/><circle cx="121" cy="191" r="10"/><circle cx="76" cy="227" r="10"/><circle cx="121" cy="227" r="10"/><circle cx="76" cy="263" r="10"/><circle cx="121" cy="263" r="10"/><circle cx="76" cy="299" r="10"/><circle cx="121" cy="299" r="10"/></g><rect x="194" y="90" width="350" height="234" rx="12" fill="#233C78"/>
+<g><circle cx="221" cy="119" r="8" fill="#F6F4ED"/><circle cx="254" cy="119" r="8" fill="#F6F4ED"/><circle cx="287" cy="119" r="8" fill="#F6F4ED"/><circle cx="320" cy="119" r="8" fill="#F6F4ED"/><circle cx="353" cy="119" r="8" fill="#F6F4ED"/><circle cx="386" cy="119" r="8" fill="#F6F4ED"/><circle cx="419" cy="119" r="8" fill="#F6F4ED"/><circle cx="452" cy="119" r="8" fill="#F6F4ED"/><circle cx="485" cy="119" r="8" fill="#F6F4ED"/><circle cx="518" cy="119" r="8" fill="#F6F4ED"/><circle cx="221" cy="154" r="8" fill="#F6F4ED"/><circle cx="254" cy="154" r="8" fill="#F6F4ED"/><circle cx="287" cy="154" r="8" fill="#F6F4ED"/><circle cx="320" cy="154" r="8" fill="#F6F4ED"/><circle cx="353" cy="154" r="8" fill="#F6F4ED"/><circle cx="386" cy="154" r="8" fill="#D7B769"/><circle cx="419" cy="154" r="8" fill="#F6F4ED"/><circle cx="452" cy="154" r="8" fill="#F6F4ED"/><circle cx="485" cy="154" r="8" fill="#F6F4ED"/><circle cx="518" cy="154" r="8" fill="#F6F4ED"/><circle cx="221" cy="189" r="8" fill="#7F98C1"/><circle cx="254" cy="189" r="8" fill="#7F98C1"/><circle cx="287" cy="189" r="8" fill="#7F98C1"/><circle cx="320" cy="189" r="8" fill="#7F98C1"/><circle cx="353" cy="189" r="8" fill="#7F98C1"/><circle cx="386" cy="189" r="8" fill="#7F98C1"/><circle cx="419" cy="189" r="8" fill="#7F98C1"/><circle cx="452" cy="189" r="8" fill="#7F98C1"/><circle cx="485" cy="189" r="8" fill="#7F98C1"/><circle cx="518" cy="189" r="8" fill="#7F98C1"/><circle cx="221" cy="224" r="8" fill="#7F98C1"/><circle cx="254" cy="224" r="8" fill="#7F98C1"/><circle cx="287" cy="224" r="8" fill="#7F98C1"/><circle cx="320" cy="224" r="8" fill="#7F98C1"/><circle cx="353" cy="224" r="8" fill="#7F98C1"/><circle cx="386" cy="224" r="8" fill="#7F98C1"/><circle cx="419" cy="224" r="8" fill="#7F98C1"/><circle cx="452" cy="224" r="8" fill="#7F98C1"/><circle cx="485" cy="224" r="8" fill="#7F98C1"/><circle cx="518" cy="224" r="8" fill="#7F98C1"/><circle cx="221" cy="259" r="8" fill="#7F98C1"/><circle cx="254" cy="259" r="8" fill="#7F98C1"/><circle cx="287" cy="259" r="8" fill="#7F98C1"/><circle cx="320" cy="259" r="8" fill="#7F98C1"/><circle cx="353" cy="259" r="8" fill="#7F98C1"/><circle cx="386" cy="259" r="8" fill="#7F98C1"/><circle cx="419" cy="259" r="8" fill="#7F98C1"/><circle cx="452" cy="259" r="8" fill="#7F98C1"/><circle cx="485" cy="259" r="8" fill="#7F98C1"/><circle cx="518" cy="259" r="8" fill="#7F98C1"/><circle cx="221" cy="294" r="8" fill="#7F98C1"/><circle cx="254" cy="294" r="8" fill="#7F98C1"/><circle cx="287" cy="294" r="8" fill="#7F98C1"/><circle cx="320" cy="294" r="8" fill="#7F98C1"/><circle cx="353" cy="294" r="8" fill="#7F98C1"/><circle cx="386" cy="294" r="8" fill="#7F98C1"/><circle cx="419" cy="294" r="8" fill="#7F98C1"/><circle cx="452" cy="294" r="8" fill="#7F98C1"/><circle cx="485" cy="294" r="8" fill="#7F98C1"/><circle cx="518" cy="294" r="8" fill="#7F98C1"/></g>
+<path d="M99 70V46H386V133" fill="none" stroke="#233C78" stroke-width="3" stroke-dasharray="7 7"/>
+<circle cx="386" cy="154" r="19" fill="none" stroke="#D7B769" stroke-width="2"/>
+<path d="M386 179V200M361 154H340M411 154H432" stroke="#D7B769" stroke-width="2"/>
+<rect x="369" y="5" width="34" height="72" rx="7" fill="#233C78"/>
+<path d="M376 77H396L389 129H383Z" fill="#233C78"/>
+<g font-family="Arial,Helvetica,sans-serif" font-size="15" letter-spacing="2" fill="#52617A"><text x="46" y="355">TIPS</text><text x="196" y="355">DECK / PROTOCOL / DATA</text></g>
+</g>
+<path d="M0 563H1600V616Q1600 640 1576 640H24Q0 640 0 616Z" fill="#233C78"/>
+<g font-family="Arial,Helvetica,sans-serif" font-size="21" letter-spacing="3" fill="#F6F4ED"><text x="80" y="610">DEFINE</text><text x="460" y="610">VALIDATE</text><text x="895" y="610">EXECUTE</text><text x="1310" y="610">RECORD</text></g>
+</svg>
