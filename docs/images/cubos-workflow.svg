@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="340" viewBox="0 0 1600 340" role="img" aria-labelledby="title desc">
+<title id="title">Three files. One experiment.</title>
+<desc id="desc">Gantry YAML defines the machine and instruments. Deck YAML defines labware and positions. Protocol YAML defines the ordered steps. CubOS validates the setup, executes the protocol, and saves results.</desc>
+<rect width="1600" height="340" rx="20" fill="#F6F4ED"/>
+<path d="M550 44V210M1070 44V210" stroke="#D7E1F2" stroke-width="2"/>
+<g font-family="Arial,Helvetica,sans-serif">
+<g fill="#52617A" font-size="19" letter-spacing="3"><text x="60" y="66">01 / GANTRY</text><text x="595" y="66">02 / DECK</text><text x="1115" y="66">03 / PROTOCOL</text></g>
+<g fill="#233C78" font-size="43" letter-spacing="-1"><text x="56" y="129">Know the machine.</text><text x="591" y="129">Map the bench.</text><text x="1111" y="129">Write the steps.</text></g>
+<g fill="#52617A" font-size="24"><text x="60" y="181">Geometry · instruments · calibration</text><text x="595" y="181">Labware · holders · positions</text><text x="1115" y="181">Actions · targets · parameters</text></g>
+<rect x="40" y="242" width="1520" height="66" rx="8" fill="#233C78"/>
+<g fill="#F6F4ED" font-size="24"><text x="72" y="284">CubOS</text><text x="595" y="284">Validate → Execute → Save results</text></g>
+</g></svg>

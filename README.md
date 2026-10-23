@@ -1,170 +1,177 @@
-# CubOS
+<div align="center">
 
-CubOS is a Python control layer for CNC-based lab automation. It connects
-GRBL gantry motion, mounted instruments, deck labware, YAML protocols, offline
-motion validation, and SQLite-backed experiment data into one operator and
-developer workflow.
+<img src="docs/images/cubos-hero.svg" alt="CubOS — Open-source lab automation. A Python control layer for CNC-based lab automation." width="100%" />
 
-Supported by [Ursa Labs](https://ursalabs.ai).
+### Open-source lab automation.
+
+Gantry motion, instruments, protocols, and experiment data in one system.
+
+[Get started](#quick-start) · [See Operator](#meet-operator) · [Write a protocol](docs/protocol-yaml.md) · [Documentation](#documentation) · [Contribute](CONTRIBUTING.md)
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-233C78?style=flat-square)](LICENSE)
+[![Python core](https://img.shields.io/badge/Python_core-3.10%2B-52617A?style=flat-square)](packages/core/pyproject.toml)
+[![Operator](https://img.shields.io/badge/Interface-Operator-233C78?style=flat-square)](docs/operator-ui.md)
+[![SiLA 2](https://img.shields.io/badge/Integration-SiLA_2-32745B?style=flat-square)](docs/sila.md)
+
+</div>
+
+---
+
+CubOS is an open-source Python control layer for CNC-based lab automation, built and supported by [Ursa Labs](https://ursalabs.ai). It connects GRBL gantry motion, mounted instruments, deck labware, YAML protocols, offline motion validation, and SQLite-backed experiment data into one operator and developer workflow.
+
+## Software that reaches the bench
 
 <p align="center">
-  <img src="docs/images/cubos-demo.gif" alt="A CubOS-driven gantry running an automated protocol over a 96-well plate" width="360">
+  <img src="docs/images/cubos-demo.gif" alt="Recorded footage of a CubOS-driven gantry running a protocol over a 96-well plate" width="420" />
 </p>
 
-Use CubOS to:
+<p align="center"><em>A recorded CubOS hardware demonstration over a 96-well plate.</em></p>
 
-- define gantry, deck, and protocol state in versioned YAML files
-- validate concrete motion targets before connecting to hardware
-- run reproducible measurement and liquid-handling protocols
-- persist experiment state and measurement data for later analysis
-- extend the platform with new instruments, labware, and command handlers
+| Prepare | Run | Learn |
+|---|---|---|
+| Define the machine, labware, and steps in readable configs. | Coordinate gantry motion and instrument actions through one protocol engine. | Review saved measurements, run records, and tracked fluid state. |
 
-The Operator web interface loads the same gantry, deck, and protocol YAML
-configs, visualizes the deck, and drives calibration and protocol runs with
-per-container fluid state tracking — shown here with the PANDA
-liquid-handling platform's configs loaded and a seeded fluid state:
+Use the browser for day-to-day operation, YAML or Python to express experiments, and the API to connect other software to your station.
 
-![CubOS Operator interface with PANDA gantry, deck, and protocol configs loaded](docs/images/operator-ui.png)
+## Meet Operator
 
-CubOS can move real lab hardware. Always validate configs offline, calibrate
-the gantry work frame, keep an E-stop reachable, and start with minimal motion
-before running scans, indentation, dispensing, or other instrument actions.
+![CubOS Operator showing a protocol, PANDA deck layout, and initial fluid volumes](docs/images/operator-ui.png)
 
-## Installation
+*Operator with PANDA liquid-handling configs and a seeded fluid state. This screenshot shows configuration and visualization; the gantry is disconnected.*
 
-See [Getting Started](docs/getting-started.md) for full, OS-specific
-installation instructions (Windows/macOS/Linux prerequisites, venv setup,
-instrument extras, serial port discovery). Docs are the source of truth for
-installation steps — this README doesn't duplicate them.
+**See the setup before you run it.** Operator brings gantry setup, calibration, deck visualization, protocol editing, validation, and results into the browser. Its fluid-state tools let you define starting contents and inspect the volumes and compositions tracked by CubOS.
 
-## Quick Start
+[Take the Operator tour →](docs/operator-ui.md)
 
-Validate an example setup without moving hardware:
+## Three files describe the experiment
+
+<img src="docs/images/cubos-workflow.svg" alt="Gantry: machine and instruments. Deck: labware and positions. Protocol: ordered steps. Together they feed CubOS validation, execution, and saved results." width="100%" />
+
+| File | What it describes | Guide |
+|---|---|---|
+| **Gantry** | Machine geometry, connection settings, mounted instruments, and calibration. | [Set up a gantry](docs/gantry-setup.md) |
+| **Deck** | Plates, vials, tip racks, holders, and their calibrated positions. | [Arrange labware](docs/deck.md) |
+| **Protocol** | Ordered actions: move, transfer, mix, measure, scan, capture, and more. | [Write the steps](docs/protocol-yaml.md) |
+
+The same labware names connect your deck to your protocol. This minimal example homes the gantry and moves the ASMI instrument above `plate.A1`:
+
+```yaml
+protocol:
+  - home: {}
+  - move:
+      instrument: asmi
+      position: plate.A1
+```
+
+That is a real motion protocol when run on hardware. Start by validating the bundled example offline below. For experiments built programmatically, use [Python protocols](docs/protocol-python.md).
+
+## More than motion
+
+| Capability | What CubOS provides |
+|---|---|
+| **Liquid handling** | Tip pickup, transfers, mixing, serial transfers, and compound rinse/flush workflows. |
+| **Measurement & imaging** | Instrument methods at named positions, plate scans, camera capture, and lighting commands. |
+| **Offline validation** | Schema, protocol semantics, and concrete motion-target checks before hardware connection. Initial-fluid seeds enable liquid-volume simulation. |
+| **Experiment records** | SQLite-backed measurements, campaign data, run artifacts, and exports for analysis. |
+| **Fluid state** | Optional persisted volumes, compositions, and tip usage, with reconciliation required after ambiguous interrupted operations. |
+| **Extensibility** | Instrument interfaces, vendor drivers, labware definitions, and external driver-package registration. |
+
+Tracked fluid state describes the software's record of operations; it is not an independent measurement of the liquid on the deck. See [fluid tracking](docs/fluid-state.md), [data](docs/data.md), and the [instrument guide](packages/core/src/cubos/instruments/README.md) for details and limits.
+
+## Quick start
+
+**Try an offline setup check first.** No gantry connection is needed. These commands use macOS/Linux shell syntax and Python 3.10+ for the core package; Operator requires Python 3.11+.
 
 ```bash
-pip install -e packages/core
+git clone https://github.com/Ursa-Laboratories/CubOS.git
+cd CubOS
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e packages/core
+
 python -m cubos.tools.validate_setup \
   packages/core/configs/gantry/cub_xl_asmi.yaml \
   packages/core/configs/deck/asmi_deck.yaml \
   packages/core/configs/protocol/asmi/move_a1.yaml
 ```
 
-For real hardware, calibrate the gantry YAML before running protocols:
+**Want the browser interface?** Follow [Getting Started](docs/getting-started.md) to install the API, build Operator, and launch it. That guide also covers Windows, instrument dependencies, and preinstalled stations.
 
-```bash
-python -m cubos.tools.calibrate_gantry packages/core/configs/gantry/cub_xl_asmi.yaml
-```
+> [!IMPORTANT]
+> CubOS controls real hardware. Before a physical run, commission and calibrate your machine, confirm that the deck matches its configuration, validate the exact setup, check physical clearance, and keep an E-stop reachable. A passing offline check does not establish physical safety or measurement accuracy.
 
-After calibration, confirm physical jog direction with the interactive test:
+[Bring up a machine](docs/admin/gantry-bring-up.md) · [Calibrate](docs/calibration.md) · [Run your first protocol](docs/protocol-yaml.md)
 
-```bash
-python -m cubos.tools.hello_world \
-  --gantry packages/core/configs/gantry/cub_xl_asmi.yaml
-```
+## Connect it to your workflow
 
-Then run a minimal protocol:
-
-```bash
-python -m cubos.tools.run_protocol \
-  packages/core/configs/gantry/cub_xl_asmi.yaml \
-  packages/core/configs/deck/asmi_deck.yaml \
-  packages/core/configs/protocol/asmi/move_a1.yaml
-```
-
-## How CubOS Is Organized
-
-A runnable experiment is defined by three YAML files:
+Operator, the Python client, and the SiLA 2 service reach the same CubOS HTTP API. The API keeps one persistent gantry session responsible for hardware access and run execution.
 
 ```text
-packages/core/configs/
-  gantry/     # machine envelope, serial port, homing, instruments
-  deck/       # labware placement, holder nesting, calibration anchors
-  protocol/   # ordered experiment steps
+Operator browser ──────┐
+Python SDK / CLI ──────┼── CubOS HTTP API ── Gantry session ── Hardware
+SiLA 2 service ────────┘                         │
+                                         Runs & results
 ```
 
-The runtime package is split by responsibility:
-
-- `packages/core/src/cubos/gantry/` handles GRBL communication, coordinates, and machine geometry.
-- `packages/core/src/cubos/deck/` loads labware definitions and resolves deck positions.
-- `packages/core/src/cubos/protocol_engine/` validates and executes protocol commands.
-- `packages/core/src/cubos/instruments/` contains instrument drivers, mocks, and registry metadata.
-- `packages/core/src/cubos/data/` provides SQLite persistence and analysis helpers.
-- `packages/core/src/cubos/tools/` contains operator-facing validation, calibration, and run tools.
-- `services/api/` contains the sole FastAPI backend (`cubos_api`).
-- `services/sila/` exposes protocol presets and run artifacts to SiLA 2 clients through that API.
-- `apps/operator-web/` contains the browser client for that API.
-- `sdk/python/` contains the Python client and `cubos-send` CLI for `/api/v1`.
-- `deploy/docker/` contains the production application image contract.
-- `deploy/windows/` contains the Windows operator installer.
-
-Both the operator web app and Python SDK call the same `/api/v1` FastAPI
-surface. The API uses `cubos.gantry.session.GantrySession` as the sole persistent
-hardware owner. The session owns serial locking, cached
-position/status, manual movement guards, calibration soft-limit state, protocol
-execution against the connected gantry, campaign creation, and run persistence.
-
-For configuration details, command semantics, and operator procedures, use the
-full documentation instead of treating this README as the source of truth.
+- **[Python SDK & CLI](sdk/python/README.md)** — submit protocol bundles, follow runs, request cancellation, and retrieve artifacts.
+- **[HTTP API](services/api/README.md)** — integrate software with the station's versioned `/api/v1` interface.
+- **[SiLA 2](docs/sila.md)** — expose administrator-configured protocol presets to lab orchestrators, with progress and artifact retrieval.
 
 ## Documentation
 
-- [Getting Started](docs/getting-started.md)
-- [Configuration](docs/configuration.md)
-- [Calibration](docs/calibration.md)
-- [Gantry](docs/gantry.md)
-- [Deck](docs/deck.md)
-- [Run a Protocol with YAML](docs/protocol-yaml.md)
-- [Python Protocols](docs/protocol-python.md)
-- [Data](docs/data.md)
-- [SiLA 2 Server](docs/sila.md)
-- [Gantry Bring-Up](docs/admin/gantry-bring-up.md)
-- [Troubleshooting & Recovery](docs/troubleshooting.md)
-- [API Reference](docs/reference/index.md)
+| I want to… | Start here |
+|---|---|
+| Install CubOS or open an existing station | [Getting Started](docs/getting-started.md) |
+| Operate a workcell from the browser | [Operator guide](docs/operator-ui.md) |
+| Configure a machine and deck | [Configuration](docs/configuration.md) · [Gantry setup](docs/gantry-setup.md) · [Deck](docs/deck.md) |
+| Calibrate or commission hardware | [Calibration](docs/calibration.md) · [Gantry bring-up](docs/admin/gantry-bring-up.md) |
+| Write an experiment | [YAML protocols](docs/protocol-yaml.md) · [Python protocols](docs/protocol-python.md) |
+| Understand recorded state and results | [Fluid tracking](docs/fluid-state.md) · [Data](docs/data.md) |
+| Diagnose a problem | [Troubleshooting & recovery](docs/troubleshooting.md) |
+| Extend CubOS | [Contributing](CONTRIBUTING.md) · [API reference](docs/reference/index.md) |
 
-Build and serve the documentation locally:
+## Built to be opened up
 
-```bash
-pip install -e "packages/core[docs]"
-mkdocs serve
-```
+CubOS is [MIT licensed](LICENSE). The runtime, Operator, API, Python client, and deployment tooling live together in this repository.
 
-## Development
+| Location | Responsibility |
+|---|---|
+| [`packages/core/`](packages/core/) | Gantry control, deck geometry, protocols, instruments, validation, and data |
+| [`services/api/`](services/api/) | FastAPI backend and persistent hardware session |
+| [`apps/operator-web/`](apps/operator-web/) | Operator browser interface |
+| [`sdk/python/`](sdk/python/) | Python client and `cubos-send` command |
+| [`services/sila/`](services/sila/) | SiLA 2 integration through the HTTP API |
+| [`deploy/`](deploy/) | Docker, Windows, and Raspberry Pi deployment resources |
 
-Install developer dependencies and run the test suite:
+<details>
+<summary><strong>For developers: install, test, and build the docs</strong></summary>
 
-```bash
-pip install -e "packages/core[dev,docs]"
-python -m pytest packages/core/tests -q
-```
-
-Install and validate the server and web workspace:
+From the repository root, with a Python 3.11+ virtual environment active:
 
 ```bash
-pip install -e packages/core
-pip install -e "services/api[dev]"
-python -m pytest services/api/tests -q
-python -m pytest sdk/python/tests -q
-cd apps/operator-web
-npm ci
-npm run lint
-npm run test -- --run
-npm run build
+python -m pip install -e "packages/core[dev,docs]"
+python -m pip install -e "services/api[dev]" -e "sdk/python[dev]"
+python -m pytest packages/core/tests services/api/tests sdk/python/tests -q
+
+npm --prefix apps/operator-web ci
+npm --prefix apps/operator-web run lint
+npm --prefix apps/operator-web run test -- --run
+npm --prefix apps/operator-web run build
+
+python -m mkdocs build --strict
+python -m mkdocs serve
 ```
 
-For hardware-adjacent changes, also run focused setup validation for the
-affected gantry, deck, and protocol combination:
+Use the [contribution guide](CONTRIBUTING.md) for focused validation and hardware-facing changes. Vendor SDKs are optional extras; install only what your instruments need. Hardware validation is separate from offline software tests.
 
-```bash
-python -m cubos.tools.validate_setup \
-  packages/core/configs/gantry/cub_xl_asmi.yaml \
-  packages/core/configs/deck/asmi_deck.yaml \
-  packages/core/configs/protocol/asmi/indentation.yaml
-```
+</details>
 
-Run `mkdocs build --strict` before publishing documentation changes.
+---
 
-## Supported by Ursa Labs
+<div align="center">
 
-CubOS is built and supported by [Ursa Labs](https://ursalabs.ai). Visit
-[ursalabs.ai](https://ursalabs.ai) to learn more about the platform and the
-hardware it runs on.
+**Open-source lab automation.**
+
+Built and supported by [Ursa Labs](https://ursalabs.ai) · [MIT license](LICENSE) · [Get started](docs/getting-started.md)
+
+</div>
