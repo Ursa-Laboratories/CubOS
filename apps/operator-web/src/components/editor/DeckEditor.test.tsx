@@ -393,7 +393,7 @@ describe("DeckEditor", () => {
       },
     });
 
-    await user.click(screen.getByRole("button", { name: "New Labware" }));
+    await user.click(screen.getByRole("button", { name: "Calibrate labware" }));
     await user.selectOptions(screen.getByLabelText("Labware type"), "tip_disposal");
     await user.selectOptions(screen.getByLabelText("Labware"), "new:generic_tip_disposal");
     await user.type(screen.getByLabelText("Name"), "Tip Trash");
