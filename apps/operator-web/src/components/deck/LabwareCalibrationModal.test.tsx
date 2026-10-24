@@ -13,6 +13,8 @@ import type {
   WellPlateConfig,
 } from "../../types";
 
+vi.mock("../gantry/CameraPreview", () => ({ default: () => null }));
+
 function wellPlate(): WellPlateConfig {
   return {
     type: "well_plate",

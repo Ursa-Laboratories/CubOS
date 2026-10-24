@@ -658,7 +658,7 @@ describe("CubOS editor interactions", () => {
     await user.click(screen.getByRole("button", { name: "New" }));
 
     expect(screen.getByRole("button", { name: "New Labware" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Calibrate labware" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Calibrate labware" })).toBeDisabled();
     expect(screen.getByText("Add at least one labware item before saving.")).toBeInTheDocument();
   });
 
