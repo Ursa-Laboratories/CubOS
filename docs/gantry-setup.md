@@ -137,7 +137,7 @@ instruments:
   pipette:
     type: pipette
     vendor: sartorius
-    pipette_model: picus2_1ch_1000   # or picus2_1ch_10, picus2_1ch_120, picus2_1ch_5000
+    pipette_model: picus2_1ch_1000   # or picus2_1ch_10, picus2_1ch_120, picus2_1ch_5000, picus2_8ch_300
     port: "/dev/ttyACM0"
     offline: true
     offset_x: 180.0
@@ -149,6 +149,11 @@ instruments:
     # blowout_delay_ms: 3000
     # whole_microlitres_only: false  # force integer uL on the wire
 ```
+
+`picus2_8ch_300` (LH-747361) supports 10–300 µL per channel in 0.2 µL
+increments through the same driver. All eight channels operate together.
+Deck protocols still target and track one well/tip at a time; automatic
+eight-well targeting and fluid/tip inventory accounting are not supported.
 
 The pipette asks for on-screen confirmation before accepting host motor
 control; the driver satisfies that during `connect()` and, if it times out,

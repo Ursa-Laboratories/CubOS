@@ -141,6 +141,7 @@ class TestPicusModels:
             "picus2_1ch_1000",
             "picus2_1ch_120",
             "picus2_1ch_5000",
+            "picus2_8ch_300",
         ]
 
     def test_published_vendor_figures(self):
@@ -159,8 +160,15 @@ class TestPicusModels:
         )
         assert extra_large.volume_increment_ul == 5.0
 
-    def test_all_single_channel(self):
-        assert {cfg.channels for cfg in PICUS2_MODELS.values()} == {1}
+    @pytest.mark.parametrize("model", PICUS2_MODELS)
+    def test_channel_count(self, model):
+        assert PICUS2_MODELS[model].channels == (8 if "8ch" in model else 1)
+
+    def test_8ch_300_model(self):
+        config = PICUS2_MODELS["picus2_8ch_300"]
+        assert (config.min_volume, config.max_volume) == (10.0, 300.0)
+        assert config.volume_increment_ul == 0.2
+        assert config.name in SartoriusPicus2Pipette.CONFIG_FIELD_CHOICES["pipette_model"]
 
     def test_family(self):
         assert {cfg.family for cfg in PICUS2_MODELS.values()} == {PipetteFamily.PICUS2}
@@ -204,6 +212,30 @@ class TestSpeedMapping:
 
 
 class TestVolumeQuantization:
+
+    def test_8ch_300_bounds_and_increment(self):
+        pip = SartoriusPicus2Pipette(pipette_model="picus2_8ch_300", offline=True)
+        assert pip._quantize(10.0) == 10.0
+        assert pip._quantize(300.0) == 300.0
+        assert pip._quantize(100.09) == 100.0
+        assert pip._quantize(100.11) == pytest.approx(100.2)
+        for volume in (9.8, 300.2):
+            with pytest.raises(PipetteCommandError, match="outside"):
+                pip._quantize(volume)
+
+    def test_8ch_300_tracks_volume_per_channel(self):
+        pip, fake = connected(
+            script={"GET_NOMINAL_VOLUME": (["300"], "OK")},
+            pipette_model="picus2_8ch_300",
+        )
+        assert pip.aspirate(300.0).loaded_volume_ul == 300.0
+        with pytest.raises(PipetteCommandError, match="already loaded"):
+            pip.aspirate(10.0)
+        assert pip.dispense(100.2).loaded_volume_ul == pytest.approx(199.8)
+        assert fake.sent("RUN_ASPIRATE") == ["RUN_ASPIRATE 300.0 5"]
+        assert fake.sent("RUN_DISPENSE") == ["RUN_DISPENSE 100.2 5"]
+        pip.blowout()
+        pip.disconnect()
 
     def test_rounds_to_the_model_increment(self):
         pip = SartoriusPicus2Pipette(pipette_model="picus2_1ch_1000", offline=True)

@@ -23,6 +23,7 @@ interface Props {
   position: GantryPosition | null;
   onSaveDeck: (filename: string, config: DeckConfig) => Promise<void>;
   initialMode?: "new" | "calibrate";
+  saveToFile?: boolean;
 }
 
 // Deck coordinates are the zero-offset instrument frame: the engine resolves
@@ -182,6 +183,7 @@ export default function LabwareCalibrationModal({
   position,
   onSaveDeck,
   initialMode = "calibrate",
+  saveToFile = true,
 }: Props) {
   const [mode, setMode] = useState<"new" | "calibrate">(initialMode);
   const [step, setStep] = useState(0);
@@ -938,9 +940,11 @@ export default function LabwareCalibrationModal({
 
             {step === 2 && activeConfig && (
               <div>
-                <h3 style={sectionTitleStyle}>Review &amp; Save</h3>
+                <h3 style={sectionTitleStyle}>{saveToFile ? "Review & Save" : "Review & Add"}</h3>
                 <p style={instructionStyle}>
-                  Saving writes these positions into {deck?.filename} for {selectedItem ? selectedItem.key : `new labware “${newKey}”`}.
+                  {saveToFile
+                    ? `Saving writes these positions into ${deck?.filename} for ${selectedItem ? selectedItem.key : `new labware “${newKey}”`}.`
+                    : "Add this labware to your draft, then save the deck with a filename."}
                   {anyRecorded && ` Recorded values are converted to the deck frame: ${compensationSummary}.`}
                 </p>
                 <div style={summaryGridStyle}>
@@ -980,7 +984,7 @@ export default function LabwareCalibrationModal({
                     disabled={busy || !allCaptured}
                     style={buttonStateStyle(primaryButtonStyle, busy || !allCaptured)}
                   >
-                    {busy ? "Saving…" : "Save labware calibration"}
+                    {busy ? "Saving…" : saveToFile ? "Save labware calibration" : "Add to deck"}
                   </button>
                 </div>
               </div>

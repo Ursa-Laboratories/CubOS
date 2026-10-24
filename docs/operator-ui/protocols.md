@@ -5,8 +5,9 @@ CubOS executes against the loaded gantry and deck. This page shows how to
 build one in the **Protocol** tab, validate it without moving anything, run
 it, and watch it progress.
 
-The **Protocol** tab unlocks once a gantry and a deck config are loaded.
-Running also needs the gantry connected.
+The **Protocol** tab unlocks once a saved gantry and deck are loaded.
+Running also needs the gantry connected. Start with a protocol supplied
+by your lab, or use **New** to build one.
 
 ## The Protocol Tab
 
@@ -55,7 +56,8 @@ station.
 6. **Validate.** Checks the saved protocol against the saved gantry and deck
    files without moving anything: every target must resolve, every move
    must stay inside the working volume once the instrument's offset and
-   depth are applied, and every instrument method must exist.
+   depth are applied, and every instrument method must exist. It cannot
+   check the physical bench setup.
 7. **Run Protocol.** Starts the run. Disabled while any editor has unsaved
    changes — runs use the saved files, not what is on screen.
 8. **Validation result.** A green **Protocol is valid.** banner, or a red
@@ -65,6 +67,25 @@ station.
 the form does not expose. See
 [Run a Protocol with YAML](../protocol-yaml.md) for the full command
 reference.
+
+## Choose Steps and Heights
+
+| Step | What it does |
+|---|---|
+| **Home** / **Move** | Establish the machine reference or move to a target. |
+| **Measure** / **Scan** | Measure one target or every well of a plate with an instrument. |
+| Pipette steps | Pick up/drop a tip, transfer liquid, mix, or perform supported liquid-handling tasks. |
+| **Pause** | Wait for the configured time. |
+
+The available commands and instrument methods appear in the form.
+See [Protocol commands](../protocol-yaml.md#protocol-command-reference) for details.
+
+**Measurement height** is measured from the labware's calibrated surface:
+`0` is at the surface, `+2` is 2 mm above it, and `−2` is 2 mm below it.
+**Interwell scan height** is the clearance above that surface between wells;
+it must be at least the measurement height. Both must fit the machine's
+travel limits. Named XYZ positions and **Travel Z** use deck coordinates
+instead. Use your lab's tested heights when approaching a sample.
 
 ## Track Liquid State Across Runs
 
@@ -76,14 +97,16 @@ which tips have been used, and which vials are capped. Pick a mode under
 
 1. **New fluid state.** Start a fresh record for this run.
 2. **Label.** An optional name for the new state so you can find it later.
-3. **Starting volumes.** Seed each container that is not empty: its
+3. **Starting volumes.** Enter the actual starting liquid in each nonempty container: its
    Component ID and volume in µL, optionally broken down by component.
-   Containers you leave out start at 0 µL. Transfers that would overdraw a
-   source or overflow a destination are rejected before any motion.
+   Containers you leave out start at 0 µL. CubOS checks starting amounts and blocks invalid transfers;
+   verify the real liquid levels before running.
 4. **Resume existing state.** Continue from a state saved by an earlier
    run, so volumes and consumed tips carry over.
 
-**No state tracking** runs without recording any of this. See
+**No state tracking** keeps no durable liquid or tip record. Used tips may
+be selected again on the next run; replace or refresh the physical rack
+before reusing a protocol in this mode. See
 [Fluid State Tracking](../fluid-state.md) for how the record is stored and
 resumed.
 
@@ -94,21 +117,18 @@ available for the rest of the session so you can come back to it.
 
 ![The Run view during a protocol run, annotated](../images/operator-ui/run-in-progress.webp)
 
-1. **Run tab.** Appears in the view switcher once a run exists.
-2. **Run header.** The run state (**Queued**, **Running**, then
-   **Succeeded**, **Failed**, or **Cancelled**), the run ID, a step counter,
-   and **Cancel run**.
-3. **Step list.** Every step in the plan, with its status: a filled dot for
-   done, a half dot for the step in progress, an empty ring for pending.
-   Finished steps show how long they took; a failed step shows its error
-   inline.
-4. **Protocol running banner.** Shown in the header on every view while the
-   run is active, with its own **Cancel** button. Manual gantry controls are
-   locked until the run ends.
+1. **Run tab.** Return here to watch the run.
+2. **Run header.** Status, run ID, step count, and **Cancel run**.
+3. **Step list.** Completed, active, and pending steps. Finished steps show
+   duration; failed steps show their error.
+4. **Protocol running banner.** Visible in every view, with **Cancel**.
+   Manual movement is locked during the run.
 
-Cancelling sends a feed hold to the controller, so motion stops at once and
-the run ends as **Cancelled**. A pipette holding liquid keeps it rather than
-dispensing on abort.
+**Cancel run** requests a motion hold and cancellation. Wait for the final
+status; an instrument action may still need to finish or report an error.
+Use the machine's emergency stop if immediate intervention is needed.
+A pipette holding liquid does not dispense it automatically on abort.
+Check the real tip, liquid, and cap state before resuming a tracked state.
 
 ![The Run view after a successful run, annotated](../images/operator-ui/run-complete.webp)
 
