@@ -244,7 +244,7 @@ describe("DeckEditor", () => {
     let x = 100;
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ work_x: x, work_y: 50, work_z: 20, connected: true, status: "Idle" }), { status: 200 })));
     expect(screen.getByRole("button", { name: "New Labware" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Calibrate labware" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Calibrate labware" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "New Labware" }));
     const dialog = within(screen.getByRole("dialog"));
     for (const [label, value] of [["Labware name", "First plate"], ["Rows", "4"], ["Columns", "5"], ["Well spacing X (mm)", "12.5"], ["Well spacing Y (mm)", "14"]]) {
@@ -401,7 +401,7 @@ describe("DeckEditor", () => {
     await user.click(screen.getByRole("button", { name: "Record Drop position" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
-    await user.click(screen.getByRole("button", { name: "Save labware calibration" }));
+    await user.click(screen.getByRole("button", { name: "Add to deck" }));
 
     await waitFor(() => expect(props.onLocalChange).toHaveBeenCalled());
     expect(props.onSave).not.toHaveBeenCalled();
