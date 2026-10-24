@@ -997,6 +997,11 @@ class Mill:
         for cmd in commands:
             self.execute_command(cmd)
 
+    def move_linear_to(self, x: float, y: float, z: float) -> None:
+        """Send one checked straight segment; never expand it into axis moves."""
+        self._validate_target_coordinates(Coordinates(x=x, y=y, z=z))
+        self.execute_command(f"G01 X{x} Y{y} Z{z} F{self.default_feed_rate}")
+
     def _is_already_at_target(
         self, goto: Coordinates, current_coordinates: Coordinates
     ):

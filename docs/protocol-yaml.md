@@ -127,6 +127,7 @@ Commands available in YAML:
 - `breakpoint`
 - `pick_up_tip`
 - `aspirate`
+- `dispense`
 - `blowout`
 - `mix`
 - `transfer`
@@ -268,6 +269,22 @@ Move to a position and aspirate.
 - `volume_ul` *(float, required)* — volume to aspirate (µL).
 - `speed` *(float, default `50.0`)* — aspirate speed.
 - `height` *(float, default `0.0`)* — engage offset.
+
+#### `dispense`
+
+Move to a position and dispense a specified volume from the attached tip.
+
+- `position` *(str, required)* — destination deck target.
+- `volume_ul` *(float, required)* — volume to dispense (µL).
+- `speed` *(float, default `50.0`)* — dispense speed.
+- `height` *(float, default `0.0`)* — labware-relative Z offset in mm.
+
+Standalone `aspirate`, `dispense`, and `blowout` support collision-aware routing,
+including attached-tip geometry and the configured `height`. Timed `pause`
+keeps the current pose and does not add motion. All routes are checked before
+any step executes. These standalone liquid commands do not update durable
+fluid inventory and are rejected in routed runs when durable fluid tracking is active; use
+`transfer` for tracked liquid handling; it blows out after the final dispense.
 
 #### `blowout`
 
