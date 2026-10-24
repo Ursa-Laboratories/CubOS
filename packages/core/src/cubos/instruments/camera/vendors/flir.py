@@ -1,7 +1,7 @@
 """FLIR camera driver, saving frames through OpenCV.
 
-FLIR/Point Grey hardware is one vendor; PySpin and GenTL are two different
-SDK bindings for talking to it, selected via ``backend``, not two different
+FLIR/Point Grey hardware is one vendor; PySpin, GenTL, and Aravis are different
+SDK bindings for talking to it, selected via ``backend``, not different
 vendors:
 
 - ``backend="pyspin"`` (default): Spinnaker SDK's proprietary Python
@@ -15,8 +15,11 @@ vendors:
   library with no Python ABI coupling, so this works from any CPython
   version the SDK's own Spinnaker package is installed for — the one to
   use when PySpin's wheel doesn't match the running interpreter.
+- ``backend="aravis"``: the open-source Linux GenICam/USB3 Vision stack,
+  accessed through the system ``gir1.2-aravis-0.8`` Python bindings. This
+  avoids a proprietary SDK and Python ABI dependency on Linux systems.
 
-Both backends are imported lazily, so offline use needs neither.
+All backends are imported lazily, so offline use needs none of them.
 """
 
 from __future__ import annotations
@@ -36,11 +39,12 @@ from cubos.instruments.camera.placeholder import write_placeholder_png
 
 _PYSPIN_GRAB_TIMEOUT_MS = 1000
 _GENTL_GRAB_TIMEOUT_S = 3.0
-_BACKENDS = ("pyspin", "gentl")
+_ARAVIS_GRAB_TIMEOUT_US = 3_000_000
+_BACKENDS = ("pyspin", "gentl", "aravis")
 
 
 class FlirCamera(CameraInstrument):
-    """FLIR/Point Grey camera, via PySpin or GenTL (see module docstring)."""
+    """FLIR/Point Grey camera via PySpin, GenTL, or Aravis."""
 
     def __init__(
         self,
@@ -75,6 +79,9 @@ class FlirCamera(CameraInstrument):
         # gentl state
         self._harvester = None
         self._acquirer = None
+        # aravis state
+        self._aravis_camera = None
+        self._aravis_pixel_format = None
         self._connected = False
 
     @staticmethod
@@ -84,6 +91,11 @@ class FlirCamera(CameraInstrument):
                 import PySpin  # noqa: F401
             elif backend == "gentl":
                 import harvesters.core  # noqa: F401
+            elif backend == "aravis":
+                import gi
+
+                gi.require_version("Aravis", "0.8")
+                from gi.repository import Aravis  # noqa: F401
             else:
                 return False
         except ImportError:
@@ -99,8 +111,10 @@ class FlirCamera(CameraInstrument):
             return
         if self.backend == "pyspin":
             self._connect_pyspin()
-        else:
+        elif self.backend == "gentl":
             self._connect_gentl()
+        else:
+            self._connect_aravis()
         self._connected = True
         self.logger.info(
             "Connected to FLIR camera ID %d via %s", self.camera_id, self.backend
@@ -113,8 +127,10 @@ class FlirCamera(CameraInstrument):
             return
         if self.backend == "pyspin":
             self._release_pyspin_handles()
-        else:
+        elif self.backend == "gentl":
             self._release_gentl_handles()
+        else:
+            self._release_aravis_handles()
         self.logger.info("Disconnected from FLIR camera")
 
     def health_check(self) -> bool:
@@ -122,7 +138,9 @@ class FlirCamera(CameraInstrument):
             return True
         if self.backend == "pyspin":
             return self._connected and self._camera is not None
-        return self._connected and self._acquirer is not None
+        if self.backend == "gentl":
+            return self._connected and self._acquirer is not None
+        return self._connected and self._aravis_camera is not None
 
     # ── CameraInstrument interface ────────────────────────────────────────
 
@@ -137,8 +155,10 @@ class FlirCamera(CameraInstrument):
 
         if self.backend == "pyspin":
             image_rgb = self._capture_pyspin()
-        else:
+        elif self.backend == "gentl":
             image_rgb = self._capture_gentl()
+        else:
+            image_rgb = self._capture_aravis()
 
         import cv2
 
@@ -333,3 +353,108 @@ class FlirCamera(CameraInstrument):
                 self.logger.warning("Error resetting GenTL harvester: %s", exc)
             finally:
                 self._harvester = None
+
+    # ── Aravis backend ───────────────────────────────────────────────────
+
+    @staticmethod
+    def _import_aravis():
+        import gi
+
+        gi.require_version("Aravis", "0.8")
+        from gi.repository import Aravis
+
+        return Aravis
+
+    def _connect_aravis(self) -> None:
+        if self._aravis_camera is not None:
+            return
+        Aravis = self._import_aravis()
+        try:
+            Aravis.update_device_list()
+            count = Aravis.get_n_devices()
+            if count == 0:
+                raise CameraConnectionError("No FLIR cameras found.")
+            index = self.camera_id
+            if index >= count:
+                self.logger.warning(
+                    "Camera ID %d out of range (%d found); using first camera",
+                    self.camera_id, count,
+                )
+                index = 0
+            camera = Aravis.Camera.new(Aravis.get_device_id(index))
+            formats = camera.dup_available_pixel_formats_as_strings()
+            supported_formats = (
+                "RGB8",
+                "BGR8",
+                "BayerRG8",
+                "BayerBG8",
+                "BayerGR8",
+                "BayerGB8",
+                "Mono8",
+            )
+            preferred = next(
+                (value for value in supported_formats if value in formats),
+                None,
+            )
+            if preferred is None:
+                raise CameraConnectionError(
+                    "FLIR camera has no supported 8-bit pixel format; found "
+                    f"{', '.join(formats) or 'none'}."
+                )
+            camera.set_pixel_format_from_string(preferred)
+        except CameraConnectionError:
+            raise
+        except Exception as exc:
+            raise CameraConnectionError(
+                f"Error connecting to FLIR camera via Aravis: {exc}"
+            ) from exc
+        self._aravis_camera = camera
+        self._aravis_pixel_format = preferred
+
+    def _capture_aravis(self):
+        if self._aravis_camera is None:
+            raise CameraCaptureError("Cannot capture image: camera not connected.")
+        Aravis = self._import_aravis()
+        try:
+            buffer = self._aravis_camera.acquisition(_ARAVIS_GRAB_TIMEOUT_US)
+            if buffer is None:
+                raise CameraCaptureError("Timed out waiting for a camera frame.")
+            if buffer.get_status() != Aravis.BufferStatus.SUCCESS:
+                raise CameraCaptureError(
+                    f"Image incomplete with status {buffer.get_status()}"
+                )
+            width = buffer.get_image_width()
+            height = buffer.get_image_height()
+            data = buffer.get_data()
+
+            import cv2
+            import numpy as np
+
+            pixels = np.frombuffer(data, dtype=np.uint8)
+            pixel_format = self._aravis_pixel_format
+            if pixel_format in ("RGB8", "BGR8"):
+                image = pixels.reshape(height, width, 3)
+                if pixel_format == "BGR8":
+                    image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                return image.copy()
+
+            image = pixels.reshape(height, width)
+            conversion = {
+                "BayerRG8": cv2.COLOR_BayerRG2RGB,
+                "BayerBG8": cv2.COLOR_BayerBG2RGB,
+                "BayerGR8": cv2.COLOR_BayerGR2RGB,
+                "BayerGB8": cv2.COLOR_BayerGB2RGB,
+                "Mono8": cv2.COLOR_GRAY2RGB,
+            }[pixel_format]
+            return cv2.cvtColor(image, conversion)
+        except CameraCaptureError:
+            raise
+        except Exception as exc:
+            raise CameraCaptureError(
+                f"Error capturing image from FLIR camera via Aravis: {exc}"
+            ) from exc
+
+    def _release_aravis_handles(self) -> None:
+        self._aravis_camera = None
+        self._aravis_pixel_format = None
+        gc.collect()

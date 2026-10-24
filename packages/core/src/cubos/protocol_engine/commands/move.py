@@ -5,6 +5,7 @@ from typing import Any, TYPE_CHECKING
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
 from . import _summaries
+from ._movement import _assert_finite_number
 
 if TYPE_CHECKING:
     from ..runtime import ProtocolContext
@@ -16,6 +17,8 @@ def move(
     instrument: str,
     position: Any,
     travel_z: float | None = None,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
     """Move *instrument* to *position*.
 
@@ -39,8 +42,21 @@ def move(
                     at ``position``. When omitted and the move changes XY,
                     the gantry lifts to the working-volume ceiling first.
     """
+    try:
+        _assert_finite_number(x_offset_mm, field_name="x_offset_mm", source="move")
+        _assert_finite_number(y_offset_mm, field_name="y_offset_mm", source="move")
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
+
+    def shifted(raw: Any) -> tuple[float, float, float]:
+        return (
+            float(raw[0]) + float(x_offset_mm),
+            float(raw[1]) + float(y_offset_mm),
+            float(raw[2]),
+        )
+
     if isinstance(position, (list, tuple)):
-        target = tuple(position)
+        target = shifted(position)
         context.logger.info(
             "move: %s -> %s (raw, travel_z=%s)", instrument, target, travel_z,
         )
@@ -50,7 +66,7 @@ def move(
             context.gantry.move(instrument, target, travel_z=travel_z)
         return
     if isinstance(position, str) and position in context.positions:
-        target = tuple(context.positions[position])
+        target = shifted(context.positions[position])
         context.logger.info(
             "move: %s -> %s (named: %s, travel_z=%s)",
             instrument,
@@ -87,5 +103,17 @@ def move(
             "not deck targets. Deck targets already use move_to_labware() "
             "with instrument safe-approach behavior."
         )
-    context.logger.info("move: %s -> %s (labware: safe approach)", instrument, position)
-    context.gantry.move_to_labware(instrument, coord)
+    target = (
+        coord
+        if float(x_offset_mm) == 0.0 and float(y_offset_mm) == 0.0
+        else (
+            coord.x + float(x_offset_mm),
+            coord.y + float(y_offset_mm),
+            coord.z,
+        )
+    )
+    context.logger.info(
+        "move: %s -> %s (labware: safe approach, offset=(%s, %s) mm)",
+        instrument, position, x_offset_mm, y_offset_mm,
+    )
+    context.gantry.move_to_labware(instrument, target)

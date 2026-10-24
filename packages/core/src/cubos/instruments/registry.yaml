@@ -66,6 +66,9 @@ instruments:
       pawduino:
         module: cubos.instruments.capper.vendors.pawduino
         class_name: PawduinoCapper
+      nano_text:
+        module: cubos.instruments.capper.vendors.nano_text
+        class_name: NanoTextCapper
 
   camera:
     interface: cubos.instruments.camera.interface.CameraInstrument
@@ -91,6 +94,9 @@ instruments:
       pawduino:
         module: cubos.instruments.lighting.vendors.pawduino
         class_name: PawduinoLighting
+      nano_text:
+        module: cubos.instruments.lighting.vendors.nano_text
+        class_name: NanoTextLighting
 
   mounted_tool:
     interface: cubos.instruments.mounted_tool.interface.MountedToolInstrument

@@ -120,7 +120,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         baud_rate: int = _BAUD_RATE,
         command_timeout: float = 30.0,
         blowout_delay_ms: int = 3000,
-        blowout_go_home: bool = True,
+        blowout_go_home: bool = False,
         min_battery_percent: float = 20.0,
         verify_model: bool = True,
         whole_microlitres_only: bool = False,
@@ -377,7 +377,12 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         return self._result(commanded)
 
     def blowout(self, speed: float = 50.0) -> None:
-        """Expel residual liquid using the instrument's own blow-out stroke."""
+        """Expel residual liquid without a return stroke unless configured.
+
+        Keeping the piston at blow-out prevents the return-to-home stroke
+        from aspirating liquid while the tip is still immersed. Protocols
+        can call ``pipette_home`` after moving the tip clear of the liquid.
+        """
         if self._offline:
             self._loaded_volume_ul = 0.0
             return

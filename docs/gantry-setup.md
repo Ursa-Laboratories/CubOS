@@ -233,8 +233,11 @@ instruments:
 **`camera` / `flir`** (or `opencv`) — an acquiring camera for the `capture`
 and `image_well` protocol commands (see [Protocol YAML: Lighting and imaging
 commands](protocol-yaml.md#lighting-and-imaging-commands)). `flir` drives a
-FLIR camera through the proprietary Spinnaker/PySpin SDK (manual install
-from https://www.flir.com/products/spinnaker-sdk/); `opencv` drives a
+FLIR camera. Select `backend: pyspin` for the proprietary Spinnaker/PySpin
+SDK, `backend: gentl` for Spinnaker's GenTL producer, or `backend: aravis`
+for the Linux Aravis 0.8 USB3 Vision stack. On Debian, Aravis requires the
+`gir1.2-aravis-0.8`, `python3-opencv`, and `python3-numpy` system packages.
+`opencv` drives a
 plain USB webcam (`camera_id: -1` auto-detects the first responsive index).
 Offline, both write placeholder PNGs so dry runs exercise the full
 capture/persistence path:
@@ -245,6 +248,7 @@ instruments:
     type: camera
     vendor: flir
     camera_id: 0
+    backend: aravis
     offline: true
     offset_x: 0.0
     offset_y: 0.0
@@ -291,6 +295,7 @@ instruments:
     engage_depth_mm: -15.0
     capture_retries: 2
     capture_settle_s: 1.0
+    cap_release_shimmy_y_mm: 0.0
 ```
 
 `park_position` is retired: `decap`/`cap` leave the tool at `safe_z` above
@@ -301,7 +306,12 @@ carries the key loads with a warning and the key is ignored; delete it.
 required, not driver defaults — every capper's decap/cap motion sequence
 comes entirely from this config, never hardcoded. `vendor: mock` is an
 offline-only in-memory simulation useful for dry runs without any Arduino
-attached.
+attached. `cap_release_shimmy_y_mm` is optional and defaults to `0`; a
+nonzero value enables failed-capping recovery. The first capping attempt
+releases, retracts, and checks normally. If the sensor still sees the cap, the
+retry engages and moves from centre to `+value` in Y, then `-value`, then back
+to centre before retracting and checking again. The shimmy is never performed
+during decapping or after a successful first capping attempt.
 
 **`mounted_tool` / `mount_only`** — any other passive mounted tool tracked
 for offsets only (no actuation, no sensor):

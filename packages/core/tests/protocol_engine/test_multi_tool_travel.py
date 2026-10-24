@@ -26,6 +26,7 @@ from cubos.protocol_engine.runtime import ProtocolContext
 
 SAFE_Z = 55.0
 Z_MAX = 250.0
+SAFE_TRAVEL_Z = Z_MAX - 0.5
 VIAL_RIM_Z = 40.0
 CAPPER_DEPTH = 45.0
 PIPETTE_DEPTH = 40.0
@@ -84,9 +85,14 @@ class GCodeController:
         else:
             cmds = Mill._build_transit_move(self._mill, self.cur, target, travel_z)
         for cmd in cmds:
-            word = cmd.split()[1]
-            setattr(self.cur, word[0].lower(), float(word[1:]))
-            self.gcode.append((word[0], self.cur.x, self.cur.y, self.cur.z))
+            coordinate_words = [
+                word for word in cmd.split()[1:]
+                if word[0] in ("X", "Y", "Z")
+            ]
+            for word in coordinate_words:
+                setattr(self.cur, word[0].lower(), float(word[1:]))
+            axis = "".join(word[0] for word in coordinate_words)
+            self.gcode.append((axis, self.cur.x, self.cur.y, self.cur.z))
 
 
 @pytest.fixture
@@ -117,12 +123,12 @@ def _run_sequence(ctx):
     cap(ctx, "capper", "reagent")
 
 
-def test_every_xy_gcode_is_issued_at_the_ceiling(rig):
+def test_every_xy_gcode_is_issued_at_the_safe_ceiling_clearance(rig):
     ctx, controller, _, _ = rig
     _run_sequence(ctx)
-    lateral = [g for g in controller.gcode if g[0] in ("X", "Y")]
+    lateral = [g for g in controller.gcode if "X" in g[0] or "Y" in g[0]]
     assert lateral, "sequence must include XY travel"
-    low = [g for g in lateral if g[3] < Z_MAX]
+    low = [g for g in lateral if g[3] < SAFE_TRAVEL_Z]
     assert low == []
 
 
@@ -130,7 +136,9 @@ def test_pipette_tip_never_below_rim_while_moving_xy(rig):
     ctx, controller, pipette, _ = rig
     _run_sequence(ctx)
     lowest_tip = min(
-        z - pipette.effective_depth for axis, _, _, z in controller.gcode if axis in ("X", "Y")
+        z - pipette.effective_depth
+        for axis, _, _, z in controller.gcode
+        if "X" in axis or "Y" in axis
     )
     assert lowest_tip > VIAL_RIM_Z
 
@@ -150,6 +158,6 @@ def test_engage_and_retract_stay_z_only(rig):
     pick_up_tip(ctx, "tip_rack.A1")
     controller.gcode.clear()
     decap(ctx, "capper", "reagent")
-    # lift, X, Y, descend to safe_z, engage, retract: exactly one XY leg.
+    # lift, straight XY, descend to safe_z, engage, retract: one lateral leg.
     axes = [g[0] for g in controller.gcode]
-    assert axes == ["Z", "X", "Y", "Z", "Z", "Z"]
+    assert axes == ["Z", "XY", "Z", "Z", "Z"]

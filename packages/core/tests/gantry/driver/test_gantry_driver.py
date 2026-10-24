@@ -551,10 +551,10 @@ class TestCNCDriverLogic(unittest.TestCase):
     def test_build_transit_move_lifts_traverses_descends(
         self, mock_cmd_logger, mock_mill_logger, mock_serial,
     ):
-        """Transit: lift → X → Y → (descend skipped when target_z == travel_z).
+        """Transit: lift → straight XY → (no descent at target travel_z).
 
-        Models an inter-well scan hop. X and Y always ship as separate
-        G-code lines so no diagonal motion is ever commanded.
+        Models an inter-well scan hop. X and Y share one G-code line so the
+        safe-height lateral leg follows the shortest straight path.
         """
         mill = Mill()
 
@@ -564,8 +564,7 @@ class TestCNCDriverLogic(unittest.TestCase):
 
         self.assertEqual(commands, [
             "G01 Z-85.0 F3000",    # lift
-            "G01 X-110.0 F3000",   # X alone
-            "G01 Y-60.0 F3000",    # Y alone
+            "G01 X-110.0 Y-60.0 F3000",  # diagonal XY
             # target.z == travel_z, final descent skipped.
         ])
 
@@ -608,10 +607,10 @@ class TestCNCDriverLogic(unittest.TestCase):
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
     @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
-    def test_build_transit_move_emits_all_four_steps(
+    def test_build_transit_move_emits_lift_xy_and_descent(
         self, mock_cmd_logger, mock_mill_logger, mock_serial,
     ):
-        """Lift → X → Y → descend, all four fire when every axis changes
+        """Lift → straight XY → descend when every axis changes
         and travel_z differs from both current.z and target.z."""
         mill = Mill()
 
@@ -621,8 +620,7 @@ class TestCNCDriverLogic(unittest.TestCase):
 
         self.assertEqual(commands, [
             "G01 Z-85.0 F3000",    # lift
-            "G01 X-110.0 F3000",   # X alone
-            "G01 Y-60.0 F3000",    # Y alone
+            "G01 X-110.0 Y-60.0 F3000",  # diagonal XY
             "G01 Z-90.0 F3000",    # descend
         ])
 
@@ -649,8 +647,7 @@ class TestCNCDriverLogic(unittest.TestCase):
         commands = [c[0][0] for c in mill.execute_command.call_args_list]
         self.assertEqual(commands, [
             "G01 Z-5.0 F3000",     # lift first, unconditionally
-            "G01 X-110.0 F3000",
-            "G01 Y-60.0 F3000",
+            "G01 X-110.0 Y-60.0 F3000",
             "G01 Z-90.0 F3000",
         ])
 
@@ -684,7 +681,7 @@ class TestCNCDriverLogic(unittest.TestCase):
         self, mock_cmd_logger, mock_mill_logger, mock_serial,
     ):
         """End-to-end: move_to(..., travel_z=...) routes
-        through _build_transit_move and emits lift → X → Y →
+        through _build_transit_move and emits lift → straight XY →
         descend in order. The emitted travel_z matches the input."""
         mill = Mill()
         mill.ser_mill = MagicMock()
@@ -702,8 +699,7 @@ class TestCNCDriverLogic(unittest.TestCase):
 
         self.assertEqual(sent, [
             "G01 Z-85.0 F3000",
-            "G01 X-110.0 F3000",
-            "G01 Y-60.0 F3000",
+            "G01 X-110.0 Y-60.0 F3000",
             "G01 Z-90.0 F3000",
         ])
 

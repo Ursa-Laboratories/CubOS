@@ -244,7 +244,7 @@ describe("DeckEditor", () => {
     let x = 100;
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ work_x: x, work_y: 50, work_z: 20, connected: true, status: "Idle" }), { status: 200 })));
     expect(screen.getByRole("button", { name: "New Labware" })).toBeEnabled();
-    expect(screen.getByRole("button", { name: "Calibrate labware" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Calibrate labware" })).toBeEnabled();
     await user.click(screen.getByRole("button", { name: "New Labware" }));
     const dialog = within(screen.getByRole("dialog"));
     for (const [label, value] of [["Labware name", "First plate"], ["Rows", "4"], ["Columns", "5"], ["Well spacing X (mm)", "12.5"], ["Well spacing Y (mm)", "14"]]) {
@@ -359,6 +359,60 @@ describe("DeckEditor", () => {
     // The type dropdown is built from the deck's labware types.
     expect(screen.getByLabelText("Labware type")).toHaveTextContent("Well plate");
     expect(screen.getByLabelText("Labware type")).toHaveTextContent("Vial");
+  });
+
+  it("keeps calibrated labware local until a new deck receives a filename", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      x: 10,
+      y: 20,
+      z: 30,
+      work_x: 10,
+      work_y: 20,
+      work_z: 30,
+      status: "Idle",
+      connected: true,
+      calibration_active: false,
+    }), { status: 200, headers: { "Content-Type": "application/json" } })));
+    const props = renderDeck({
+      configs: [],
+      selectedFile: null,
+      deck: { filename: "unsaved", labware: [] },
+      baseline: null,
+      gantry: gantryFixture(),
+      position: {
+        x: 10,
+        y: 20,
+        z: 30,
+        work_x: 10,
+        work_y: 20,
+        work_z: 30,
+        status: "Idle",
+        connected: true,
+        calibration_active: false,
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Calibrate labware" }));
+    await user.selectOptions(screen.getByLabelText("Labware type"), "tip_disposal");
+    await user.selectOptions(screen.getByLabelText("Labware"), "new:generic_tip_disposal");
+    await user.type(screen.getByLabelText("Name"), "Tip Trash");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Record Drop position" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Add to deck" }));
+
+    await waitFor(() => expect(props.onLocalChange).toHaveBeenCalled());
+    expect(props.onSave).not.toHaveBeenCalled();
+    const saved = vi.mocked(props.onLocalChange).mock.calls.at(-1)![0];
+    expect(saved.filename).toBe("unsaved");
+    expect(saved.labware[0].config).toMatchObject({
+      type: "tip_disposal",
+      name: "Tip Trash",
+      location: { x: 10, y: 20, z: 30 },
+    });
+    vi.unstubAllGlobals();
   });
 
   it("calibrates the editor's unsaved labware edits, not the last-saved deck", async () => {

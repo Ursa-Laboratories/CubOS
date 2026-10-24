@@ -12,6 +12,7 @@ import type {
   LabwareConfig,
 } from "../../types";
 import JogPanel, { MIN_JOG_STEP } from "../gantry/JogPanel";
+import CameraPreview from "../gantry/CameraPreview";
 import { createJogPacer, jogPaceMs } from "../gantry/jogPacing";
 
 interface Props {
@@ -54,7 +55,7 @@ const TYPE_LABELS: Record<string, string> = {
   tip_rack: "Tip rack",
   well_plate: "Well plate",
   vial: "Vial",
-  vial_grid: "Vial grid",
+  vial_grid: "Vial rack / grid",
   vial_holder: "Vial holder",
   well_plate_holder: "Well plate holder",
   tip_disposal: "Tip disposal",
@@ -117,6 +118,55 @@ const LABWARE_TEMPLATES: Record<string, LabwareTemplate[]> = {
       id: "scint_20ml",
       label: "20 mL scintillation vial",
       config: { type: "vial", model_name: "scint_vial_20ml", height: 57, diameter: 28, capacity_ul: 20000, working_volume_ul: 18000 },
+    },
+  ],
+  vial_grid: [
+    {
+      id: "ursa_9x20ml",
+      label: "Ursa 9-position 20 mL vial rack",
+      config: {
+        type: "vial_grid",
+        model_name: "9VialHolder20mL_TightFit",
+        rows: 1,
+        columns: 9,
+        x_offset: 33,
+        y_offset: 33,
+        vial_model_name: "20ml_vial",
+        vial_height: 57,
+        vial_diameter: 28,
+        capacity_ul: 20000,
+        working_volume_ul: 20000,
+      },
+    },
+    {
+      id: "ursa_12x4ml",
+      label: "Ursa 12-position 4 mL vial rack",
+      config: {
+        type: "vial_grid",
+        model_name: "12VialHolder4mL",
+        rows: 2,
+        columns: 6,
+        x_offset: 18,
+        y_offset: 18,
+        vial_model_name: "4ml_vial",
+        vial_height: 45,
+        vial_diameter: 14.5,
+        capacity_ul: 4000,
+        working_volume_ul: 4000,
+      },
+    },
+  ],
+  tip_disposal: [
+    {
+      id: "generic_tip_disposal",
+      label: "Tip disposal / trash",
+      config: {
+        type: "tip_disposal",
+        model_name: "tip_disposal",
+        length: 198,
+        width: 62,
+        height: 30,
+      },
     },
   ],
 };
@@ -835,6 +885,9 @@ export default function LabwareCalibrationModal({
                         </div>
                       )}
                     </div>
+                    {selectedInstrument?.type === "camera" && selectedInstrumentName && (
+                      <CameraPreview instrument={selectedInstrumentName} />
+                    )}
                     <JogPanel
                       xyStep={xyStep}
                       zStep={zStep}
