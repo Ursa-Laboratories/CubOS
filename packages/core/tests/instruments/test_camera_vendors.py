@@ -615,6 +615,69 @@ class TestFlirAravisHardwarePath:
         with pytest.raises(CameraConnectionError, match="no supported 8-bit"):
             camera.connect()
 
+    def test_connect_twice_and_out_of_range_id(self, monkeypatch):
+        aravis_camera = FakeAravisCamera()
+        _install_fake_aravis(monkeypatch, [aravis_camera])
+        camera = FlirCamera(camera_id=8, backend="aravis", offline=False)
+        camera.connect()
+        camera.connect()
+        assert camera.health_check() is True
+
+    def test_connect_wraps_aravis_error(self, monkeypatch):
+        aravis = _install_fake_aravis(monkeypatch, [FakeAravisCamera()])
+        aravis.update_device_list = lambda: (_ for _ in ()).throw(RuntimeError("usb gone"))
+        with pytest.raises(CameraConnectionError, match="usb gone"):
+            FlirCamera(backend="aravis", offline=False).connect()
+
+    def test_capture_requires_connected_camera(self):
+        camera = FlirCamera(backend="aravis", offline=False)
+        with pytest.raises(CameraCaptureError, match="not connected"):
+            camera._capture_aravis()
+
+    def test_capture_times_out(self, monkeypatch):
+        aravis_camera = FakeAravisCamera()
+        aravis_camera.buffer = None
+        _install_fake_aravis(monkeypatch, [aravis_camera])
+        camera = FlirCamera(backend="aravis", offline=False)
+        camera.connect()
+        with pytest.raises(CameraCaptureError, match="Timed out"):
+            camera._capture_aravis()
+
+    @pytest.mark.parametrize(
+        ("pixel_format", "conversion"),
+        [("BGR8", "bgr"), ("Mono8", "gray")],
+    )
+    def test_capture_converts_non_rgb_formats(
+        self, monkeypatch, pixel_format, conversion
+    ):
+        aravis_camera = FakeAravisCamera(formats=[pixel_format])
+        _install_fake_aravis(monkeypatch, [aravis_camera])
+        cv2 = SimpleNamespace(
+            COLOR_BGR2RGB="bgr",
+            COLOR_BayerRG2RGB="rg",
+            COLOR_BayerBG2RGB="bg",
+            COLOR_BayerGR2RGB="gr",
+            COLOR_BayerGB2RGB="gb",
+            COLOR_GRAY2RGB="gray",
+            cvtColor=lambda image, code: FakeNumpyArray((image, code)),
+        )
+        monkeypatch.setitem(sys.modules, "cv2", cv2)
+        camera = FlirCamera(backend="aravis", offline=False)
+        camera.connect()
+        image = camera._capture_aravis()
+        assert image.data[1] == conversion
+
+    def test_capture_wraps_aravis_error(self, monkeypatch):
+        aravis_camera = FakeAravisCamera()
+        aravis_camera.acquisition = lambda _timeout: (_ for _ in ()).throw(
+            RuntimeError("grab failed")
+        )
+        _install_fake_aravis(monkeypatch, [aravis_camera])
+        camera = FlirCamera(backend="aravis", offline=False)
+        camera.connect()
+        with pytest.raises(CameraCaptureError, match="grab failed"):
+            camera._capture_aravis()
+
     def test_capture_rejects_incomplete_buffer(self, monkeypatch, tmp_path):
         aravis_camera = FakeAravisCamera(
             buffer=FakeAravisBuffer(status="MISSING_PACKETS")

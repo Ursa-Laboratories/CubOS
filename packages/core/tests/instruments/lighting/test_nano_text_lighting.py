@@ -5,6 +5,11 @@ import pytest
 from cubos.instruments.lighting.exceptions import (
     LightingCommandError,
     LightingConnectionError,
+    LightingTimeoutError,
+)
+from cubos.instruments.controllers.nano_text import (
+    NanoTextCommandError,
+    NanoTextTimeoutError,
 )
 from cubos.instruments.lighting.vendors.nano_text import NanoTextLighting
 from cubos.instruments.registry import get_instrument_class
@@ -80,3 +85,74 @@ def test_hardware_command_requires_connection():
     lights = NanoTextLighting(port="/dev/ttyUSB1")
     with pytest.raises(LightingCommandError, match="Not connected"):
         lights.set_channel("white", 25)
+
+
+def test_offline_lifecycle_and_channels():
+    lights = NanoTextLighting(offline=True)
+    lights.connect()
+    assert set(lights.channels) == {"red", "green", "blue", "white"}
+    assert lights.health_check() is True
+    lights.set_channel("white", 100)
+    lights.all_off()
+    lights.disconnect()
+    assert all(level == 0 for level in lights.status().channels.values())
+
+
+def test_connect_requires_port():
+    with pytest.raises(LightingConnectionError, match="non-empty"):
+        NanoTextLighting().connect()
+
+
+@pytest.mark.parametrize("error", [NanoTextCommandError("bad"), NanoTextTimeoutError("late")])
+@patch("cubos.instruments.lighting.vendors.nano_text.NanoTextLink")
+def test_connect_wraps_safe_off_failure(link_cls, error):
+    link_cls.return_value.send.side_effect = error
+    with pytest.raises(LightingConnectionError, match="initialize safely"):
+        NanoTextLighting(port="/dev/ttyUSB1").connect()
+    link_cls.return_value.disconnect.assert_called_once()
+
+
+def test_disconnect_attempts_off_and_releases_link():
+    lights = NanoTextLighting(port="/dev/ttyUSB1")
+    lights._link = MagicMock(is_open=True)
+    lights._link.send.side_effect = NanoTextCommandError("gone")
+    link = lights._link
+    lights.disconnect()
+    link.disconnect.assert_called_once()
+    assert lights._link is None
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (NanoTextTimeoutError("late"), LightingTimeoutError),
+        (NanoTextCommandError("bad"), LightingCommandError),
+    ],
+)
+def test_set_channel_maps_transport_errors(error, expected):
+    lights = NanoTextLighting(port="/dev/ttyUSB1")
+    lights._link = MagicMock()
+    lights._link.send.side_effect = error
+    with pytest.raises(expected):
+        lights.set_channel("white", 25)
+
+
+def test_all_off_requires_connection_and_maps_errors():
+    lights = NanoTextLighting(port="/dev/ttyUSB1")
+    with pytest.raises(LightingCommandError, match="Not connected"):
+        lights.all_off()
+    lights._link = MagicMock()
+    lights._link.send.side_effect = NanoTextTimeoutError("late")
+    with pytest.raises(LightingTimeoutError):
+        lights.all_off()
+    lights._link.send.side_effect = NanoTextCommandError("bad")
+    with pytest.raises(LightingCommandError):
+        lights.all_off()
+
+
+def test_unexpected_success_response_is_rejected():
+    lights = NanoTextLighting(port="/dev/ttyUSB1")
+    lights._link = MagicMock()
+    lights._link.send.return_value = "OK RED"
+    with pytest.raises(LightingCommandError, match="Unexpected response"):
+        lights.set_channel("red", 10)
