@@ -104,6 +104,26 @@ network, and services. They were rerun outside the macOS sandbox because its
 
 ## Operator checks required before merge
 
+### Review refresh — 2026-10-27
+
+Integrated main `3865235b` (including the fixed deck visualizer) without
+conflicts. Reviewed the changed movement guards, finite-value validation,
+event recovery, reconciliation ownership, UI state/cancellation, desktop
+lifecycle, and shared migration guidance; no new blocking defect was found.
+No production code was changed during this refresh.
+
+Fresh local results: 2,708 core tests passed (20 skipped, 14 subtests), 100%
+changed-core coverage (29/29 lines), 358 API/SDK tests passed (2 skipped),
+418 web tests passed, and 11 desktop tests passed. Lint, production build,
+strict docs, and offline ASMI setup validation (195 targets) passed. The five
+updater tests first failed on sandbox-blocked `/dev/fd` shell pipes and then
+all passed outside the sandbox using their local fake repositories and stub
+installs/services/network. The existing frontend bundle-size advisory remains.
+
+The operator confirmed that the physical checks below have not yet been run.
+This refresh does not establish physical safety or satisfy that validation
+gate. No live station, hardware, service, or calibration was changed.
+
 Hardware potentially affected: gantries using manual jogging/Move To, calibration
 jog controls, and any mounted instrument whose offsets are loaded. No physical
 validation has been performed; keep the PR in draft until that is completed.
