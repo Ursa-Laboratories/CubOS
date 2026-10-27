@@ -1,0 +1,8 @@
+protocol:
+  - pause:
+      seconds: 1.0
+      reason: Allow the client to observe this mock execution
+  - measure:
+      instrument: filmetrics
+      position: sample
+      measurement_height: 10.0
