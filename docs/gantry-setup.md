@@ -30,6 +30,9 @@ If no seed has your instrument, copy any seed for your machine and swap the
 CUB config on a CUB XL (or vice versa) has the wrong travel limits and can
 crash the gantry into the frame.
 
+All six `working_volume` bounds must be finite numbers, with each minimum below
+its maximum. NaN and infinity are rejected before connecting hardware.
+
 ## Define Instruments
 
 Instruments live under `instruments:` in the gantry YAML. The map key is the
@@ -59,7 +62,7 @@ Every instrument entry accepts these shared fields:
 - `type` *(str, required)* — a type from `packages/core/src/cubos/instruments/registry.yaml`.
 - `vendor` *(str, required)* — a vendor registered for that type. The
   `type`/`vendor` pair tells CubOS which Python driver class to load.
-- `offset_x`, `offset_y`, `depth` *(float, default `0.0`)* — physical mounting
+- `offset_x`, `offset_y`, `depth` *(finite float, default `0.0`)* — physical mounting
   offsets from the gantry's reference point. Calibration writes these for normal
   operator flows.
 

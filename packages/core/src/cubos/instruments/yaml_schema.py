@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, FiniteFloat, model_validator
 
 
 _RELOCATED_HEIGHT_FIELDS = {
@@ -24,32 +24,17 @@ _RELOCATED_HEIGHT_FIELDS = {
 class InstrumentYamlEntry(BaseModel):
     """Schema for one gantry-mounted instrument.
 
-    Common fields are declared explicitly. Driver-specific fields
-    (e.g. serial_number, dll_path) pass through via extra="allow".
-
-    Z semantics
-    -----------
-    Instruments declare only their physical mounting (``offset_x``,
-    ``offset_y``, ``depth``). Labware-relative motion heights live on the
-    protocol commands that engage with labware:
-
-    * ``measurement_height`` — first-class arg to ``measure`` and ``scan``.
-    * ``interwell_scan_height`` — first-class arg to ``scan``.
-
-    Inter-labware travel uses the gantry-level ``safe_z`` (absolute).
-
-    Stale ``measurement_height``/``interwell_scan_height`` keys are
-    rejected explicitly — the ``extra="allow"`` policy would otherwise
-    silently swallow them for drivers that accept ``**kwargs``.
+    Driver-specific fields pass through via ``extra="allow"``. Explicitly
+    reject protocol height fields so drivers cannot silently ignore them.
     """
 
     model_config = ConfigDict(extra="allow")
 
     type: str
     vendor: str
-    offset_x: float = 0.0
-    offset_y: float = 0.0
-    depth: float = 0.0
+    offset_x: FiniteFloat = 0.0
+    offset_y: FiniteFloat = 0.0
+    depth: FiniteFloat = 0.0
 
     @model_validator(mode="before")
     @classmethod

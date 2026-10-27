@@ -33,6 +33,8 @@ def _load_user_settings() -> dict[str, Any]:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
+    if not isinstance(data, dict):
+        return {}
     config_dir = data.get("config_dir")
     if not isinstance(config_dir, str) or not config_dir:
         return {}

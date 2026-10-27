@@ -330,7 +330,20 @@ def resolve_reconciliation(
     detail = f"[{body.operator.strip()}] {body.reason.strip()}"
     store = _open_store()
     try:
+        get_snapshot = {
+            "fluid": store.get_fluid_snapshot,
+            "tip": store.get_tip_snapshot,
+            "cap": store.get_cap_snapshot,
+        }[body.domain]
         try:
+            snapshot = get_snapshot(fluid_state_id)
+            if not any(
+                op["operation_key"] == body.operation_key
+                for op in snapshot["operations"]
+            ):
+                raise HTTPException(
+                    404, f"operation {body.operation_key!r} was not found in state {fluid_state_id}"
+                )
             if body.domain == "fluid":
                 store.resolve_fluid_operation(
                     body.operation_key,
@@ -341,7 +354,6 @@ def resolve_reconciliation(
                     destination_volume_ul=body.destination_volume_ul,
                     destination_composition=body.destination_composition,
                 )
-                snapshot = store.get_fluid_snapshot(fluid_state_id)
             elif body.domain == "tip":
                 store.resolve_tip_operation(
                     body.operation_key,
@@ -349,7 +361,6 @@ def resolve_reconciliation(
                     detail=detail,
                     final_slot_status=body.final_slot_status,
                 )
-                snapshot = store.get_tip_snapshot(fluid_state_id)
             else:
                 store.resolve_cap_operation(
                     body.operation_key,
@@ -357,7 +368,7 @@ def resolve_reconciliation(
                     detail=detail,
                     final_status=body.final_status,
                 )
-                snapshot = store.get_cap_snapshot(fluid_state_id)
+            snapshot = get_snapshot(fluid_state_id)
         except _STATE_EXCEPTIONS as exc:
             raise map_state_exception(exc) from exc
 

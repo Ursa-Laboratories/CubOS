@@ -118,47 +118,73 @@ function startBackend(paths, port, { spawnProcess = spawn, env = process.env } =
   });
   child.stdout.pipe(log, { end: false });
   child.stderr.pipe(log, { end: false });
+  let startupError = null;
+  child.once("error", (error) => {
+    startupError = error;
+    log.write(`${new Date().toISOString()} Backend process error: ${error.message}\n`);
+  });
+  let closed = false;
+  const closedPromise = new Promise((resolve) => child.once("close", () => {
+    closed = true;
+    log.end();
+    resolve();
+  }));
   child.once("exit", (code, signal) => {
     log.write(
       `${new Date().toISOString()} Backend exited with code ${String(code)} signal ${String(signal)}\n`,
     );
   });
 
-  let stopped = false;
+  let stopping = null;
   return {
     child,
     logPath,
+    get startupError() { return startupError; },
     writeLog(message) {
       log.write(`${new Date().toISOString()} ${message}\n`);
     },
-    async stop(timeoutMs = 5000) {
-      if (stopped) return;
-      stopped = true;
-      if (child.exitCode === null && child.stdin.writable) child.stdin.end();
-      if (child.exitCode === null) {
-        await Promise.race([
-          new Promise((resolve) => child.once("exit", resolve)),
-          new Promise((resolve) => setTimeout(resolve, timeoutMs)),
-        ]);
+    stop(timeoutMs = 5000) {
+      if (!stopping) {
+        stopping = (async () => {
+          if (closed) return;
+          if (child.stdin.writable) child.stdin.end();
+          let timer;
+          await Promise.race([
+            closedPromise,
+            new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs); }),
+          ]);
+          clearTimeout(timer);
+          if (!closed) child.kill();
+        })();
       }
-      if (child.exitCode === null) child.kill();
-      log.end();
+      return stopping;
     },
   };
 }
 
-async function waitForBackend(baseUrl, child, { timeoutMs = 45000, fetchImpl = fetch } = {}) {
+function isBackendUrl(url, baseUrl) {
+  try {
+    return new URL(url).origin === new URL(baseUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+async function waitForBackend(baseUrl, backend, { timeoutMs = 45000, fetchImpl = fetch } = {}) {
+  const { child } = backend;
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) {
-      throw new Error(`CubOS backend exited during startup with code ${child.exitCode}`);
+    if (backend.startupError) throw backend.startupError;
+    if (child.exitCode !== null || child.signalCode != null) {
+      throw new Error(`CubOS backend exited during startup with code ${child.exitCode}${child.signalCode ? ` (${child.signalCode})` : ""}`);
     }
     try {
       const response = await fetchImpl(`${baseUrl}/api/v1/health`, {
         signal: AbortSignal.timeout(1500),
       });
-      if (response.status >= 200 && response.status < 600) return response;
+      if ((response.status >= 200 && response.status < 300) || response.status === 503) return response;
+      lastError = new Error(`Health endpoint returned HTTP ${response.status}`);
     } catch (error) {
       lastError = error;
     }
@@ -174,6 +200,7 @@ module.exports = {
   buildBackendEnvironment,
   getRuntimePaths,
   hasYamlFiles,
+  isBackendUrl,
   seedConfigs,
   startBackend,
   waitForBackend,

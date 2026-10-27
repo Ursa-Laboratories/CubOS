@@ -13,35 +13,10 @@ from pydantic import ValidationError
 # Side-effect import: triggers all @protocol_command decorators so that
 # the CommandRegistry is populated before Python-authored protocols compile.
 from . import commands as _commands  # noqa: F401
+from .errors import LEGACY_COMMAND_HINTS
 from .protocol import Protocol, ProtocolSetup
 from .registry import CommandRegistry
 from .runtime import ProtocolStep
-
-_LEGACY_TOP_LEVEL_HINTS: dict[str, str] = {
-    "safe_approach_height": (
-        "`safe_approach_height` was renamed to `interwell_scan_height` "
-        "(labware-relative offset above the well surface for between-wells "
-        "XY travel)."
-    ),
-    "indentation_limit": (
-        "`indentation_limit` was renamed to `indentation_limit_height` and "
-        "its meaning changed: it is now a *signed* labware-relative offset "
-        "(mm above the well surface; negative = below), not a sign-agnostic "
-        "descent magnitude. Convert e.g. `indentation_limit: 5.0` to "
-        "`indentation_limit_height: -5.0`."
-    ),
-    "z_limit": (
-        "`z_limit` is no longer supported. Use `indentation_limit_height` "
-        "(signed labware-relative offset, mm above the well surface)."
-    ),
-    "entry_travel_height": (
-        "`entry_travel_height` is no longer supported. Inter-labware/entry "
-        "travel uses the gantry's `safe_z` (absolute deck-frame Z)."
-    ),
-    "interwell_travel_height": (
-        "`interwell_travel_height` was renamed to `interwell_scan_height`."
-    ),
-}
 
 
 @dataclass
@@ -98,9 +73,9 @@ def _schema_error_message(index: int, command: str, error: Exception) -> str:
             guidance = "Add the missing required argument shown in the error location."
         elif (
             ("extra_forbidden" in error_type or "Extra inputs are not permitted" in detail)
-            and offending_field in _LEGACY_TOP_LEVEL_HINTS
+            and offending_field in LEGACY_COMMAND_HINTS
         ):
-            guidance = _LEGACY_TOP_LEVEL_HINTS[offending_field]
+            guidance = LEGACY_COMMAND_HINTS[offending_field]
         elif "extra_forbidden" in error_type or "Extra inputs are not permitted" in detail:
             guidance = "Remove unknown arguments; only registered parameters are allowed."
 

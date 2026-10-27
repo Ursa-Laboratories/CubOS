@@ -117,6 +117,10 @@ jobs:
         working-directory: apps/operator-web
         run: npm run test -- --run
 
+      - name: Test desktop runtime
+        working-directory: apps/operator-desktop
+        run: npm test
+
       - name: Build frontend
         working-directory: apps/operator-web
         run: npm run build

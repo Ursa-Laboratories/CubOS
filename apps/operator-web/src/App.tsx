@@ -58,15 +58,9 @@ function errorMessage(error: unknown): string {
 
 const RUN_TERMINAL_STATES = new Set(["succeeded", "failed", "cancelled"]);
 
-// Feature 07: translate the operator's create-new/resume-existing choice
-// into the run submission's `state` selection. "none" (never made a
-// choice) returns undefined, keeping submission on the legacy stateless
-// path — see handleRunProtocol.
 function buildStateSelection(choice: FluidStateChoice): RunStateSelection | undefined {
   if (choice.mode === "new") {
     const label = choice.newLabel.trim();
-    // Seed per-container starting volumes from the operator's rows. No rows
-    // → `{}`, keeping the original empty-state behavior byte-identical.
     return { initial_state: { label: label || undefined, fluids: buildSeedFluids(choice.seeds) } };
   }
   if (choice.mode === "resume" && choice.resumeId !== null) {
@@ -129,11 +123,6 @@ export default function App() {
     deck: null,
     protocol: null,
   });
-  // Feature 07: explicit create-new-state vs resume-existing-state choice.
-  // "none" (the default) is a stateless run through the unchanged legacy
-  // /protocol/run flow; "new"/"resume" route submission through the
-  // versioned /api/v1/runs resource instead, so activeRunId tracks which
-  // resource owns the in-flight run for cancellation.
   const [fluidStateChoice, setFluidStateChoice] = useState<FluidStateChoice>({
     mode: "none",
     newLabel: "",
@@ -277,10 +266,12 @@ export default function App() {
       setPreviewWells({});
       return;
     }
+    let cancelled = false;
     clearTimeout(previewTimerRef.current);
     previewTimerRef.current = setTimeout(async () => {
       const result: Record<string, Record<string, WellPosition>> = {};
       for (const item of localDeck.labware) {
+        if (cancelled) return;
         if (item.config.type === "well_plate" || item.config.type === "tip_rack") {
 	          try {
 	            result[item.key] = await deckApi.previewWells(item.config);
@@ -293,9 +284,12 @@ export default function App() {
           }
         }
       }
-      setPreviewWells(result);
+      if (!cancelled) setPreviewWells(result);
     }, 300);
-    return () => clearTimeout(previewTimerRef.current);
+    return () => {
+      cancelled = true;
+      clearTimeout(previewTimerRef.current);
+    };
   }, [localDeck]);
 
   // Clear each local working copy when the user selects a different

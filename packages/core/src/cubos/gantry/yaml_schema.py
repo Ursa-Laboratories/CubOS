@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 
 from cubos.instruments.yaml_schema import InstrumentYamlEntry
 
@@ -16,12 +16,12 @@ class WorkingVolumeYaml(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    x_min: float
-    x_max: float
-    y_min: float
-    y_max: float
-    z_min: float
-    z_max: float
+    x_min: FiniteFloat
+    x_max: FiniteFloat
+    y_min: FiniteFloat
+    y_max: FiniteFloat
+    z_min: FiniteFloat
+    z_max: FiniteFloat
 
     @model_validator(mode="after")
     def _validate_min_less_than_max(self) -> "WorkingVolumeYaml":

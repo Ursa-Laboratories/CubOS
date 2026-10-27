@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from cubos.data import DataStore
 
 from tests.api_client import api_request
@@ -324,3 +326,68 @@ def test_resolve_reconciliation_invalid_resolution_is_400(monkeypatch, tmp_path:
         },
     )
     assert response.status_code == 400
+
+
+@pytest.mark.parametrize("domain", ["fluid", "tip", "cap"])
+@pytest.mark.parametrize("requested_state", ["other", "missing"])
+def test_reconciliation_rejects_foreign_operation_without_mutation(
+    monkeypatch, tmp_path, domain, requested_state
+):
+    path = _write_deck_config(monkeypatch, tmp_path)
+    deck_yaml = DECK_YAML
+    if domain == "cap":
+        deck_yaml = deck_yaml.replace("    role: stock", "    capped: true\n    role: stock")
+    if domain == "tip":
+        deck_yaml += """
+  tips:
+    load_name: ursa_tip_rack
+    name: tips
+    tip_length: 59.3
+    pickup_z: 64.7
+    drop_z: 34.0
+    calibration:
+      a1: {x: 210.0, y: 230.0}
+      a2: {x: 218.5, y: 230.0}
+"""
+    path.write_text(deck_yaml, encoding="utf-8")
+    app = create_app()
+    state_ids = [
+        api_request(app, "POST", "/api/v1/fluid-states", json={
+            "deck_file": "state-deck.yaml", "fluids": {"source": {"volume_ul": 100.0}},
+        }).json()["id"]
+        for _ in range(2)
+    ]
+    owner_id, other_id = state_ids
+    with _store() as store:
+        campaign_id = store.create_campaign("reconciliation owner", fluid_state_id=owner_id)
+        if domain == "fluid":
+            store.begin_fluid_transfer(owner_id, "foreign", "source", "waste", 10.0, campaign_id=campaign_id)
+            store.mark_fluid_reconciliation_required("foreign", "interrupted")
+        elif domain == "tip":
+            store.begin_pick_up_tip(owner_id, "foreign", "tips", "A1", 59.3, campaign_id=campaign_id)
+            store.mark_tip_reconciliation_required("foreign", "interrupted")
+        else:
+            store.begin_cap_operation(owner_id, "foreign", "decap", "source", "", campaign_id=campaign_id)
+            store.mark_cap_reconciliation_required("foreign", "interrupted")
+        snapshot = getattr(store, f"get_{domain}_snapshot")
+        before = {state_id: snapshot(state_id) for state_id in state_ids}
+
+    body = {
+        "domain": domain, "operation_key": "foreign", "resolution": "applied",
+        "operator": "operator", "reason": "confirmed action completed",
+    }
+    requested_id = other_id if requested_state == "other" else other_id + 1000
+    response = api_request(
+        app, "POST", f"/api/v1/fluid-states/{requested_id}/reconciliation/resolve", json=body,
+    )
+
+    assert response.status_code == 404
+    with _store() as store:
+        snapshot = getattr(store, f"get_{domain}_snapshot")
+        assert {state_id: snapshot(state_id) for state_id in state_ids} == before
+
+    response = api_request(
+        app, "POST", f"/api/v1/fluid-states/{owner_id}/reconciliation/resolve", json=body,
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "applied"

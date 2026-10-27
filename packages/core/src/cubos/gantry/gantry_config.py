@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+import math
 from typing import Any, Dict, Optional
 
 
@@ -54,6 +55,8 @@ class WorkingVolume:
         for axis in ("x", "y", "z"):
             lo = getattr(self, f"{axis}_min")
             hi = getattr(self, f"{axis}_max")
+            if not math.isfinite(lo) or not math.isfinite(hi):
+                raise ValueError(f"{axis}_min and {axis}_max must be finite.")
             if lo >= hi:
                 raise ValueError(
                     f"{axis}_min ({lo}) must be < {axis}_max ({hi})"
