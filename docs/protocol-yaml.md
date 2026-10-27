@@ -3,6 +3,14 @@
 YAML is the standard operator-facing protocol format and the path used by the
 stock validation and run scripts.
 
+For complete workflow configurations and experiment recipes, use the
+[CubOS Protocol Library](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library).
+The [Polar Bear files](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library/tree/main/cubxl_plus/polar_bear)
+are maintained there with their provenance and validation status. See
+[YAML File Overview](configuration.md) for the directory layout and Operator
+configuration. The bundled paths used in the examples below remain available
+for learning and offline checks.
+
 ## Before You Validate and Run
 
 Check these before every run, not just the first one of the day:
@@ -123,9 +131,9 @@ Two conventions apply throughout:
   `destination_x_offset_mm`/`destination_y_offset_mm`.
 
 These command fields belong to the shared CubOS protocol engine. They are
-available to every station and vendor using the corresponding generic command;
-the Polar Bear gantry file only supplies that station's calibrated values and
-its chosen cap-release shimmy distance.
+available to every station and vendor using the corresponding generic command.
+Station-specific values, mounting calibrations, and workflow recipes belong
+in the [protocol library](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library).
 
 Commands available in YAML:
 

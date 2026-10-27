@@ -9,6 +9,12 @@ The **Protocol** tab unlocks once a saved gantry and deck are loaded.
 Running also needs the gantry connected. Start with a protocol supplied
 by your lab, or use **New** to build one.
 
+Shared workflow gantry/deck files and protocol recipes live in the
+[CubOS Protocol Library](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library).
+Select the workflow's `configs/` directory in Operator settings, then load its
+gantry, deck, and protocol files. Read the workflow README for calibration and
+validation status. See [YAML File Overview](../configuration.md) for details.
+
 ## The Protocol Tab
 
 ![The Protocol tab with a protocol loaded and validated, annotated](../images/operator-ui/protocol-tab.webp)
