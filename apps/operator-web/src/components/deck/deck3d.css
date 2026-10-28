@@ -1,0 +1,36 @@
+.deck-view { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
+.deck-view-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex: 0 0 auto; }
+.deck-view-heading h3 { font-size: 16px; line-height: 1.4; margin: 0; font-weight: 600; color: var(--z-ink); }
+.deck-view-heading p { margin: 3px 0 0; color: var(--z-text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.deck-view-toggle { display: flex; border: 1px solid var(--z-border-strong); border-radius: 8px; padding: 3px; flex-shrink: 0; }
+.deck-view-toggle button { padding: 6px 16px; border: 0; background: transparent; color: var(--z-text-secondary); border-radius: 5px; font: inherit; font-size: 12px; cursor: pointer; }
+.deck-view-toggle button[aria-pressed="true"] { background: #233c78; color: #fff; }
+.deck-view-flat { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.deck-overview > svg { height: 100% !important; width: 100%; }
+.deck3d { flex: 1; min-height: 320px; display: flex; flex-direction: column; gap: 9px; }
+.deck3d-viewport { flex: 1; min-height: 260px; position: relative; overflow: hidden; border: 1px solid var(--z-border-strong); border-radius: 8px; background: #29323e; }
+.deck3d-canvas { position: absolute; inset: 0; }
+.deck3d-canvas canvas { display: block; width: 100%; height: 100%; touch-action: none; outline-offset: -3px; }
+.deck3d-toolbar { position: absolute; top: 12px; left: 12px; z-index: 2; display: flex; gap: 3px; background: var(--z-surface); padding: 3px; border: 1px solid var(--z-border-strong); border-radius: 7px; }
+.deck3d button, .deck3d select { font: inherit; font-size: 12px; }
+.deck3d-toolbar button, .deck3d-focus { border: 1px solid transparent; background: transparent; color: var(--z-text); border-radius: 5px; padding: 6px 10px; cursor: pointer; }
+.deck3d-toolbar button:hover, .deck3d-focus:hover { background: var(--z-surface-muted); border-color: var(--z-border-strong); }
+.deck3d-toolbar button:disabled, .deck3d-focus:disabled { cursor: default; opacity: .45; }
+.deck3d-options { position: absolute; bottom: 34px; right: 12px; z-index: 2; display: flex; flex-wrap: wrap; gap: 12px; padding: 7px 10px; border-radius: 6px; background: var(--z-surface); border: 1px solid var(--z-border-strong); font-size: 12px; }
+.deck3d-options label { display: flex; align-items: center; gap: 5px; cursor: pointer; }
+.deck3d-options input { accent-color: #3873d9; margin: 0; }
+.deck3d-hint { position: absolute; bottom: 10px; right: 12px; color: #dae2ec; font-size: 10px; pointer-events: none; }
+.deck3d-labels { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+.deck3d-label { position: absolute; transform: translate(-50%, -100%); border: 1px solid #b8c8da; border-radius: 4px; padding: 3px 7px; background: #f9fbff; color: #22314f; font: 500 11px/1.4 Inter, system-ui, sans-serif; max-width: 150px; white-space: nowrap; text-overflow: ellipsis; overflow: hidden; pointer-events: auto; cursor: pointer; }
+.deck3d-label[data-selected="true"] { background: #245ed4; border-color: #245ed4; color: #fff; z-index: 1; }
+.deck3d-axis { position: absolute; bottom: 13px; left: 13px; width: 76px; height: 76px; pointer-events: none; }
+.deck3d-axis text { font: 600 11px Inter, system-ui, sans-serif; }
+.deck3d-selection { display: flex; align-items: center; gap: 10px; min-height: 40px; flex-wrap: wrap; }
+.deck3d-selection select { flex: 1; min-width: 100px; max-width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--z-border-strong); background: var(--z-surface); color: var(--z-ink); }
+.deck3d-focus { border-color: var(--z-border-strong); white-space: nowrap; }
+.deck3d-caption { margin: 0; font-size: 11px; line-height: 1.5; color: var(--z-text-muted); }
+.deck3d-message { flex: 1; display: grid; place-content: center; gap: 8px; padding: 24px; text-align: center; color: var(--z-text-muted); font-size: 13px; }
+.deck3d-empty { position: absolute; inset: 60px 20px; display: grid; place-content: center; text-align: center; color: #dae2ec; pointer-events: none; font-size: 13px; }
+:root[data-theme="light"] .deck3d-viewport { background: #bfc9d3; }
+:root[data-theme="light"] .deck3d-hint, :root[data-theme="light"] .deck3d-empty { color: #34465b; }
+@media (max-width: 1100px) { .deck3d-toolbar { top: 8px; left: 8px; } .deck3d-toolbar button { padding: 5px 7px; } .deck3d-options { bottom: 42px; right: 8px; } .deck3d-hint { max-width: 180px; text-align: right; } }

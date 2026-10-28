@@ -2,6 +2,7 @@ import React, { useRef, useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import AppLayout from "./components/layout/AppLayout";
 import DeckVisualization from "./components/deck/DeckVisualization";
+import DeckView from "./components/deck/DeckView";
 import GantryPositionWidget from "./components/gantry/GantryPositionWidget";
 import EditorTabs from "./components/editor/EditorTabs";
 import DeckEditor from "./components/editor/DeckEditor";
@@ -776,7 +777,7 @@ export default function App() {
   const left = (
     <div
       style={
-        activeView === "Run"
+        (activeView === "Run" || activeView === "Visualize")
           ? { height: "100%", display: "flex", flexDirection: "column" }
           : undefined
       }
@@ -982,19 +983,15 @@ export default function App() {
         </div>
       )}
       {activeView === "Visualize" && (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-          <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Deck Visualization</h3>
-          <div style={{ flex: "1 1 auto", minHeight: 0 }}>
-            <DeckVisualization
-              deck={displayDeck}
-              instruments={displayGantry?.config.instruments ?? null}
-              gantryPosition={gantryPosition.data ?? null}
-              machineXRange={machineXRange}
-              machineYRange={machineYRange}
-              yAxisMotion={yAxisMotion}
-            />
-          </div>
-        </div>
+        <DeckView
+          deck={displayDeck}
+          instruments={displayGantry?.config.instruments ?? null}
+          gantryPosition={gantryPosition.data ?? null}
+          machineXRange={machineXRange}
+          machineYRange={machineYRange}
+          machineZRange={workingVolume ? [workingVolume.z_min, workingVolume.z_max] : [0, 150]}
+          yAxisMotion={yAxisMotion}
+        />
       )}
       {activeView === "State" && <StatePanel />}
       {activeView === "Results" && (
@@ -1010,8 +1007,8 @@ export default function App() {
 
   const topRight = (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Deck Visualization</h3>
-      <div style={deckVisualizationFrameStyle}>
+      <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>{activeView === "Visualize" ? "Deck overview" : "Deck Visualization"}</h3>
+      <div className={activeView === "Visualize" ? "deck-overview" : undefined} style={activeView === "Visualize" ? { flex: "1 1 0", minHeight: 0 } : deckVisualizationFrameStyle}>
         <DeckVisualization
           deck={displayDeck}
           instruments={displayGantry?.config.instruments ?? null}
