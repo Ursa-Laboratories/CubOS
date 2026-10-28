@@ -1,0 +1,4 @@
+protocol:
+  - move:
+      instrument: pipette
+      position: [410, 150, 40]

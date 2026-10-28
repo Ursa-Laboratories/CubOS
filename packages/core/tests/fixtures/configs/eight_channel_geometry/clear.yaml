@@ -1,0 +1,8 @@
+protocol:
+  - move:
+      instrument: pipette
+      position: [400, 150, 100]
+  - move:
+      instrument: pipette
+      position: [560, 150, 100]
+      travel_z: 100

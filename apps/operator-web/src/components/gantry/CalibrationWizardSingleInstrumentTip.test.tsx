@@ -43,7 +43,12 @@ function position(): GantryPosition {
 describe("CalibrationWizard single-instrument tip compensation", () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it("keeps raw carriage contact for a 56 mm machine and saves its 70 mm tip as nozzle depth", async () => {
+  it.each([null, "x", "y"] as const)("keeps carriage contact and saves tip compensation with channel axis %s", async (axis) => {
+    const config = singlePipetteConfig();
+    if (axis) {
+      config.instruments.pipette.pipette_model = "p300_multi_gen2";
+      config.instruments.pipette.channel_geometry = { axis, length_mm: 80, width_mm: 30, height_mm: 120 };
+    }
     const user = userEvent.setup();
     const finalizeCalls: Array<Record<string, unknown>> = [];
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -89,7 +94,7 @@ describe("CalibrationWizard single-instrument tip compensation", () => {
       <CalibrationWizard
         open
         onClose={() => undefined}
-        gantry={{ filename: "cubos.yaml", config: singlePipetteConfig() }}
+        gantry={{ filename: "cubos.yaml", config }}
         position={position()}
         onSaveCalibrated={onSaveCalibrated}
       />,
@@ -107,6 +112,7 @@ describe("CalibrationWizard single-instrument tip compensation", () => {
     await user.click(tipCheckbox);
     expect(setOriginButton).toBeDisabled();
 
+    if (axis) expect(screen.getByText(new RegExp(`Use the ${axis === "x" ? "leftmost" : "frontmost"} tip`))).toBeInTheDocument();
     const tipLength = screen.getByLabelText("Tip length (mm)");
     await user.type(tipLength, "70");
     expect(setOriginButton).toBeEnabled();
@@ -121,5 +127,8 @@ describe("CalibrationWizard single-instrument tip compensation", () => {
     expect(finalizeCalls[0].factory_z_travel).toBe(56);
     expect(onSaveCalibrated.mock.calls[0][1].instruments.pipette.depth).toBe(-70);
     expect(onSaveCalibrated.mock.calls[0][1].cnc.factory_z_travel_mm).toBe(56);
+    expect(onSaveCalibrated.mock.calls[0][1].instruments.pipette.channel_geometry).toEqual(config.instruments.pipette.channel_geometry);
+    expect(onSaveCalibrated.mock.calls[0][1].instruments.pipette.offset_x).toBe(0);
+    expect(onSaveCalibrated.mock.calls[0][1].instruments.pipette.offset_y).toBe(0);
   });
 });

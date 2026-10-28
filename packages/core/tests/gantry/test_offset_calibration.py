@@ -30,7 +30,13 @@ def captures():
     }
 
 
-def test_tip_reference_preserves_frame_and_controller_and_lighting(config, captures):
+@pytest.mark.parametrize("axis", [None, "x", "y"])
+def test_tip_reference_preserves_frame_and_controller_and_lighting(config, captures, axis):
+    if axis is not None:
+        config["instruments"]["pipette"]["pipette_model"] = "picus2_8ch_300"
+        config["instruments"]["pipette"]["channel_geometry"] = dict(
+            axis=axis, length_mm=80, width_mm=30, height_mm=120,
+        )
     original = deepcopy(config)
     result = calibrate_instrument_offsets(config, "pipette", captures)
     assert config == original

@@ -16,7 +16,7 @@ The protocol model:
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from cubos.gantry.instrument_mount import InstrumentedGantry
@@ -40,6 +40,8 @@ from cubos.protocol_engine.scan_args import (
     surface_detection_enabled,
 )
 from cubos.instruments.potentiostat.interface import PotentiostatInstrument
+from cubos.instruments.pipette.geometry import EightChannelGeometry
+from cubos.instruments.pipette.interface import PipetteInstrument
 
 from .errors import ProtocolSemanticViolation
 
@@ -193,14 +195,16 @@ def _validate_machine_structure_point(
     x: float,
     y: float,
     z: float,
+    tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
     violations: list[ProtocolSemanticViolation] = []
     for box in fixed_structures_for_gantry(gantry):
-        if box.contains(x, y, z):
+        envelope = _structure_for_instrument(box, gantry, instrument, tip_extension)
+        if envelope.contains(x, y, z):
             violations.append(_violation(
                 step_index,
                 command_name,
-                f"{label} instrument point ({x}, {y}, {z}) will hit the "
+                f"{label} instrument envelope at ({x}, {y}, {z}) will hit the "
                 f"{box.name} ({_format_box(box)}) for instrument {instrument!r}.",
             ))
     return violations
@@ -215,10 +219,12 @@ def _validate_machine_structure_segment(
     instrument: str,
     start: Point3D,
     end: Point3D,
+    tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
     violations: list[ProtocolSemanticViolation] = []
     for box in fixed_structures_for_gantry(gantry):
-        if _segment_intersects_box(start, end, box):
+        envelope = _structure_for_instrument(box, gantry, instrument, tip_extension)
+        if _segment_intersects_box(start, end, envelope):
             violations.append(_violation(
                 step_index,
                 command_name,
@@ -227,6 +233,27 @@ def _validate_machine_structure_segment(
                 f"instrument {instrument!r}.",
             ))
     return violations
+
+
+def _structure_for_instrument(
+    box: FixedStructureBox,
+    gantry: GantryConfig,
+    instrument: str,
+    tip_extension: float,
+) -> FixedStructureBox:
+    entry = gantry.instruments.get(instrument, {})
+    geometry = entry.get("channel_geometry") if entry.get("type") == "pipette" else None
+    if geometry is None:
+        return box
+    geometry = EightChannelGeometry.model_validate(geometry)
+    x_min, x_max, y_min, y_max = geometry.xy_bounds
+    # Minkowski expansion checks the full swept head from the reference tip.
+    return FixedStructureBox(
+        name=box.name,
+        x_min=box.x_min - x_max, x_max=box.x_max - x_min,
+        y_min=box.y_min - y_max, y_max=box.y_max - y_min,
+        z_min=box.z_min - geometry.height_mm - tip_extension, z_max=box.z_max,
+    )
 
 
 def _transit_segments(
@@ -258,6 +285,7 @@ def _validate_known_transit(
     current: Point3D | None,
     target: Point3D,
     travel_z: float,
+    tip_extension: float = 0.0,
 ) -> list[ProtocolSemanticViolation]:
     if current is None:
         return []
@@ -272,6 +300,7 @@ def _validate_known_transit(
             instrument=instrument,
             start=start,
             end=end,
+            tip_extension=tip_extension,
         ))
     return violations
 
@@ -314,6 +343,7 @@ def _validate_home_waypoints(
             x=pose[0],
             y=pose[1],
             z=pose[2],
+            tip_extension=instrument_tip_extensions.get(instrument_name, 0.0),
         ))
         current_poses[instrument_name] = pose
     return violations
@@ -362,6 +392,7 @@ def _validate_gantry_waypoint(
         x=x,
         y=y,
         z=z,
+        tip_extension=tip_extension,
     ))
     return violations
 
@@ -455,6 +486,7 @@ def _validate_pipette_engage(
             current=current_poses.get("pipette"),
             target=safe_pose,
             travel_z=safe_z,
+            tip_extension=tip_extension,
         ))
         violations.extend(_validate_machine_structure_segment(
             step_index=step_index,
@@ -464,6 +496,7 @@ def _validate_pipette_engage(
             instrument="pipette",
             start=safe_pose,
             end=action,
+            tip_extension=tip_extension,
         ))
 
     violations.extend(_validate_gantry_waypoint(
@@ -555,6 +588,7 @@ def _validate_scan_segments(
     action_abs: float,
     approach_abs: float,
     safe_z: float | None,
+    tip_extension: float = 0.0,
 ) -> tuple[list[ProtocolSemanticViolation], Point3D | None]:
     violations: list[ProtocolSemanticViolation] = []
     pose = current
@@ -574,6 +608,7 @@ def _validate_scan_segments(
                 current=pose,
                 target=entry,
                 travel_z=safe_z,
+                tip_extension=tip_extension,
             ))
             violations.extend(_validate_machine_structure_segment(
                 step_index=step_index,
@@ -583,6 +618,7 @@ def _validate_scan_segments(
                 instrument=instrument,
                 start=entry,
                 end=approach,
+                tip_extension=tip_extension,
             ))
         elif well_index > 0:
             violations.extend(_validate_known_transit(
@@ -594,6 +630,7 @@ def _validate_scan_segments(
                 current=pose,
                 target=approach,
                 travel_z=approach_abs,
+                tip_extension=tip_extension,
             ))
 
         violations.extend(_validate_machine_structure_segment(
@@ -604,6 +641,7 @@ def _validate_scan_segments(
             instrument=instrument,
             start=approach,
             end=action,
+            tip_extension=tip_extension,
         ))
         pose = action
 
@@ -618,6 +656,7 @@ def _validate_scan_segments(
             instrument=instrument,
             start=pose,
             end=final_approach,
+            tip_extension=tip_extension,
         ))
         pose = final_approach
 
@@ -766,6 +805,7 @@ def _validate_scan_command(
         action_abs=action_abs,
         approach_abs=approach_abs,
         safe_z=safe_z,
+        tip_extension=tip_ext,
     )
     violations.extend(segment_violations)
     if final_pose is not None:
@@ -910,6 +950,7 @@ def _validate_measure_command(
             current=current_poses.get(instrument),
             target=safe_pose,
             travel_z=safe_z,
+            tip_extension=tip_ext,
         ))
         violations.extend(_validate_machine_structure_segment(
             step_index=step_index,
@@ -919,6 +960,7 @@ def _validate_measure_command(
             instrument=instrument,
             start=safe_pose,
             end=action,
+            tip_extension=tip_ext,
         ))
 
     violations.extend(_validate_gantry_waypoint(
@@ -1187,6 +1229,7 @@ def _validate_move_waypoints(
             current=current_poses.get(instrument),
             target=target,
             travel_z=transit_z,
+            tip_extension=tip_ext,
         ))
     current_poses[instrument] = target
     return violations
@@ -2002,6 +2045,13 @@ def validate_protocol_semantics(
     gantry: GantryConfig,
 ) -> list[ProtocolSemanticViolation]:
     """Return protocol semantic violations that static bounds checks miss."""
+    geometries = {
+        name: {"type": "pipette", "channel_geometry": instrument.channel_geometry.model_dump()}
+        for name, instrument in instrumented_gantry.instruments.items()
+        if isinstance(instrument, PipetteInstrument) and instrument.channel_geometry is not None
+    }
+    if geometries:
+        gantry = replace(gantry, instruments={**gantry.instruments, **geometries})
     violations: list[ProtocolSemanticViolation] = []
     current_poses: dict[str, Point3D] = {}
     pipette_tip_state = PipetteTipState()

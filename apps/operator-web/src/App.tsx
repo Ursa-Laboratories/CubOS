@@ -1218,9 +1218,7 @@ const viewToggleButtonStyle: React.CSSProperties = {
 };
 
 const deckVisualizationFrameStyle: React.CSSProperties = {
-  flex: "0 1 auto",
-  minHeight: 240,
-  maxHeight: "100%",
-  aspectRatio: "600 / 420",
+  flex: "1 1 0",
+  minHeight: 0,
   width: "100%",
 };

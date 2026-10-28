@@ -567,3 +567,14 @@ describe("custom labware creation", () => {
     expect(props.onSaveDeck).not.toHaveBeenCalled();
   });
 });
+
+it.each(["x", "y"] as const)("identifies the end tip for %s-aligned labware calibration", axis => {
+  const gantry = gantryResponse(false);
+  gantry.config.instruments = { pipette: {
+    type: "pipette", vendor: "opentrons", pipette_model: "p300_multi_gen2", offset_x: 0, offset_y: 0,
+    channel_geometry: { axis, length_mm: 80, width_mm: 30, height_mm: 120 },
+  } };
+  render(<LabwareCalibrationModal open onClose={() => undefined} deck={deckResponse()} gantry={gantry}
+    position={null} onSaveDeck={async () => undefined} />);
+  expect(screen.getByText(new RegExp(`Use the ${axis === "x" ? "leftmost" : "frontmost"} tip`))).toBeInTheDocument();
+});

@@ -13,6 +13,7 @@ import type {
 } from "../../types";
 import JogPanel, { MIN_JOG_STEP } from "../gantry/JogPanel";
 import { createJogPacer, jogPaceMs } from "../gantry/jogPacing";
+import { channelCalibrationHint } from "../../utils/pipetteGeometry";
 
 interface Props {
   open: boolean;
@@ -598,6 +599,7 @@ export default function LabwareCalibrationModal({
           <section style={contentStyle}>
             {error && <div style={errorStyle}>{error}</div>}
             {statusNote && <div style={noteStyle}>{statusNote}</div>}
+            {channelCalibrationHint(selectedInstrument ?? undefined) && <p style={instructionStyle}>{channelCalibrationHint(selectedInstrument ?? undefined)}</p>}
 
             {step === 0 && (
               <div>

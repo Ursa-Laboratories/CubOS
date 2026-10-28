@@ -10,6 +10,7 @@ from cubos.instruments.pipette.liquid_class import (
     LiquidClassCorrection,
 )
 from cubos.instruments.pipette.models import AspirateResult, MixResult, PipetteStatus
+from cubos.instruments.pipette.geometry import EightChannelGeometry
 
 
 class PipetteInstrument(BaseInstrument):
@@ -29,6 +30,8 @@ class PipetteInstrument(BaseInstrument):
     already in use, so that is a deliberate follow-up rather than part of
     this contract's introduction.
     """
+
+    channel_geometry: EightChannelGeometry | None = None
 
     @property
     def liquid_classes(self) -> dict[str, LiquidClassCorrection]:

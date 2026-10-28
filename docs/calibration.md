@@ -23,6 +23,50 @@ travel settings. Keep the E-stop reachable and clear the deck before starting.
 
 ![Calibration block aligned to a board placement marker](images/calibration-block-marker.webp){ width="420" }
 
+## Eight-channel pipettes
+
+Configure and measure the [eight-channel head geometry](gantry-setup.md#eight-channel-pipette-geometry)
+before calibration. Use the **leftmost tip/nozzle** for `axis: x` and the
+**frontmost tip/nozzle** for `axis: y` throughout gantry origin calibration,
+instrument-offset captures, and labware calibration. The remaining seven
+channels extend along +X or +Y respectively. Never calibrate to the row midpoint.
+
+For the reference instrument, WPos X/Y locates that end nozzle. Other mounted
+instruments use the usual `WPos + offset_x/offset_y`; the offset belongs to the
+end nozzle, with no half-row correction. Depth remains referenced to the bare
+nozzle plane. When capturing with a disposable tip attached, enter its actual
+protrusion below the nozzle so the existing Z compensation applies. Both the
+operator wizard and CLI identify the correct end tip.
+
+Physical acceptance procedure (required before using a newly configured head):
+
+1. Clear the deck, check homing clearance for the entire head/mount, and measure
+   the head envelope and channel spacing. Save those values and the actual
+   orientation in the gantry config. Keep the E-stop accessible.
+2. In **Gantry → Calibrate**, select full calibration for a new reference tool,
+   or instrument-offset calibration against an already calibrated contact tool.
+   Jog in small increments and capture the fixed mark with the selected end
+   nozzle/tip. Keep the other seven tips clear of the block. Record tip protrusion
+   when using a disposable tip. Save to a new file, select it, and reconnect.
+3. Return to the same fixed mark at a verified safe clearance. Check the
+   reference tip's X/Y and Z, then repeat the capture to verify repeatability.
+   Verify the neighboring seven channels are spaced correctly along +X/+Y and
+   that the visualizer's envelope covers the measured body.
+4. Validate the intended protocol offline with
+   `python -m cubos.tools.validate_setup <gantry.yaml> <deck.yaml> <protocol.yaml>`.
+   A low rail approach where any part of the wide head intersects the Cub XL
+   right rail must fail even when the reference tip is clear. Do not execute
+   that collision test on hardware. Verify an alternative route above the rail
+   with enough carriage and head clearance.
+5. Check bare-nozzle and attached-tip clearance at low speed on the accepted
+   route without liquid. Verify pickup/drop alignment separately before liquid
+   handling. Repeat steps 1–5 after rotating/remounting the head, and recalibrate
+   affected labware references. Never reuse the previous orientation's offsets.
+
+CLI alternative for step 2:
+`python -m cubos.tools.calibrate_gantry <input.yaml> --output-gantry <calibrated.yaml>`.
+This command moves hardware; only run it during the supervised physical test.
+
 ## Calibration Reference Options
 
 Calibration needs two things from a physical reference:

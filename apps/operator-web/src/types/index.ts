@@ -195,6 +195,14 @@ export interface DeckConfig {
   labware: Record<string, LabwareConfig>;
 }
 
+export interface EightChannelGeometry {
+  axis: "x" | "y";
+  spacing_mm?: number;
+  length_mm: number;
+  width_mm: number;
+  height_mm: number;
+}
+
 export interface InstrumentConfig {
   type: string;
   vendor: string;
@@ -202,6 +210,7 @@ export interface InstrumentConfig {
   offset_y: number;
   depth?: number;
   offline?: boolean;
+  channel_geometry?: EightChannelGeometry;
   [key: string]: unknown;
 }
 

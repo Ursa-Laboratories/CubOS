@@ -13,6 +13,7 @@ import {
   type ZCalibrationResult,
 } from "./calibrationMath";
 import { createJogPacer, jogPaceMs } from "./jogPacing";
+import { channelCalibrationHint } from "../../utils/pipetteGeometry";
 
 interface Props {
   open: boolean;
@@ -929,6 +930,9 @@ export default function CalibrationWizard({
                     lowest instrument separately to define Z; they may be the same tool.
                   </p>
                 )}
+                {instruments.map(name => channelCalibrationHint(config?.instruments[name]) && (
+                  <p key={name} style={instructionStyle}>{name}: {channelCalibrationHint(config?.instruments[name])}</p>
+                ))}
                 {instruments.length === 0 && (
                   <div style={noInstrumentsStyle}>
                     Add and save at least one mounted instrument in the Gantry configuration before calibrating.
@@ -1017,6 +1021,7 @@ export default function CalibrationWizard({
             {!isMulti && step === 3 && (
               <div>
                 <h3 style={sectionTitleStyle}>Set Origin</h3>
+                {channelCalibrationHint(config?.instruments[soleInstrument]) && <p style={instructionStyle}>{channelCalibrationHint(config?.instruments[soleInstrument])}</p>}
                 <p style={instructionStyle}>
                   Put the calibration block at the front-left corner of the deck. Jog the tool until it just touches the top of the block, then continue.
                   {originPolicy === "home_origin" && " The homed back-right-top corner becomes zero only when you finish and save calibration."}
@@ -1096,6 +1101,7 @@ export default function CalibrationWizard({
             {isMulti && step === 2 && (
               <div>
                 <h3 style={sectionTitleStyle}>Set XY Origin</h3>
+                {channelCalibrationHint(config?.instruments[selectedReference]) && <p style={instructionStyle}>{channelCalibrationHint(config?.instruments[selectedReference])}</p>}
                 <p style={instructionStyle}>
                   Put the calibration block at the front-left corner of the deck. Jog the selected leftmost instrument until it is directly over the mark on the block, then continue.
                   {originPolicy === "home_origin" && " The homed back-right-top corner becomes zero only when you finish and save calibration."}
@@ -1157,6 +1163,7 @@ export default function CalibrationWizard({
             {isMulti && step === 4 && (
               <div>
                 <h3 style={sectionTitleStyle}>Set Z Reference</h3>
+                {channelCalibrationHint(config?.instruments[selectedLowest]) && <p style={instructionStyle}>{channelCalibrationHint(config?.instruments[selectedLowest])}</p>}
                 <p style={instructionStyle}>
                   Keep the block where it is. Jog {selectedLowest || "the lowest instrument"} until it just touches the top of the block, then continue.
                 </p>
@@ -1262,6 +1269,7 @@ export default function CalibrationWizard({
                     <div style={{ marginBottom: 10 }}>
                       <span style={labelStyle}>Active instrument</span>
                       <h4 style={{ margin: "2px 0 0", fontSize: 15, color: theme.color.ink }}>{nextInstrumentToRecord}</h4>
+                      {channelCalibrationHint(config?.instruments[nextInstrumentToRecord]) && <p style={instructionStyle}>{channelCalibrationHint(config?.instruments[nextInstrumentToRecord])}</p>}
                       {nextInstrumentIsCamera && (
                         <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
                           Center the camera over the calibration block mark, then enter the distance from the camera to the top of the block.

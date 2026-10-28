@@ -8,6 +8,7 @@ import type {
   LabwareResponse,
 } from "../../types";
 import { getSvgViewport, machineToSvg } from "../../utils/coordinates";
+import { channelGeometryBounds } from "../../utils/pipetteGeometry";
 import { color as themeColor, font as themeFont, viz as themeViz } from "../../theme";
 import GantryMarker from "./GantryMarker";
 import HolderRenderer from "./HolderRenderer";
@@ -113,7 +114,7 @@ export default function DeckVisualization({
       width={SVG_W}
       height={SVG_H}
       data-testid="deck-visualization"
-      style={{ background: themeViz.canvas, borderRadius: 8, border: `1px solid ${themeColor.border}`, display: "block", width: "100%", height: "auto", maxHeight: "100%" }}
+      style={{ background: themeViz.canvas, borderRadius: 8, border: `1px solid ${themeColor.border}`, display: "block", width: "100%", height: "100%", maxHeight: "100%" }}
       viewBox={`0 0 ${SVG_W} ${SVG_H}`}
       preserveAspectRatio="xMidYMid meet"
     >
@@ -367,12 +368,13 @@ function expandForInstrumentOffset(
   const offsetX = instrument.offset_x ?? 0;
   const offsetY = instrument.offset_y ?? 0;
   const pad = 12;
+  const head = channelGeometryBounds(instrument);
   expandRect(
     bounds,
-    machineXRange[0] + Math.min(0, offsetX) - pad,
-    machineYRange[0] + Math.min(0, offsetY) - pad,
-    machineXRange[1] + Math.max(0, offsetX) + pad,
-    machineYRange[1] + Math.max(0, offsetY) + pad,
+    machineXRange[0] + Math.min(0, offsetX + (head?.minX ?? 0)) - pad,
+    machineYRange[0] + Math.min(0, offsetY + (head?.minY ?? 0)) - pad,
+    machineXRange[1] + Math.max(0, offsetX + (head?.maxX ?? 0)) + pad,
+    machineYRange[1] + Math.max(0, offsetY + (head?.maxY ?? 0)) + pad,
   );
 }
 

@@ -16,6 +16,8 @@ import ConfigFilePicker from "./ConfigFilePicker";
 import { EMPTY_GANTRY } from "./gantryDefaults";
 import { useConfirm } from "../common/useConfirm";
 import * as theme from "../../theme";
+import PipetteGeometryFields from "./PipetteGeometryFields";
+import { channelGeometryBounds } from "../../utils/pipetteGeometry";
 
 interface Props {
   configs: string[];
@@ -513,6 +515,7 @@ export default function GantryEditor({
                         />
                       </div>
 
+                      {inst.type === "pipette" && <PipetteGeometryFields instrument={inst} onChange={next => updateInstrument(key, next)} />}
                       {fields.length > 0 && (
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 8 }}>
                           {fields.map((field) => {
@@ -703,6 +706,7 @@ function isValidGantry(config: GantryConfig | null | undefined): boolean {
   for (const inst of Object.values(instruments)) {
     if (!inst || typeof inst.type !== "string" || !inst.type.trim()) return false;
     if (typeof inst.vendor !== "string" || !inst.vendor.trim()) return false;
+    if (inst.channel_geometry && !channelGeometryBounds(inst)) return false;
   }
   return true;
 }

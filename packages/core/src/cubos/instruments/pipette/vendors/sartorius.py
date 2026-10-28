@@ -32,6 +32,7 @@ from typing import Any, Optional
 import serial
 
 from cubos.instruments.pipette.interface import PipetteInstrument
+from cubos.instruments.pipette.geometry import resolve_channel_geometry
 from cubos.instruments.pipette.exceptions import (
     PipetteBatteryError,
     PipetteCommandError,
@@ -130,6 +131,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         depth: float = 0.0,
         offline: bool = False,
         liquid_classes: Optional[dict] = None,
+        channel_geometry: Optional[dict] = None,
         **kwargs,
     ):
         super().__init__(
@@ -142,6 +144,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
                 f"Available: {', '.join(sorted(PICUS2_MODELS.keys()))}"
             )
         self._config: PipetteConfig = PICUS2_MODELS[pipette_model]
+        self.channel_geometry = resolve_channel_geometry(self._config.channels, channel_geometry)
         self._liquid_classes = build_liquid_classes(liquid_classes)
         self._port = port
         self._baud_rate = baud_rate
