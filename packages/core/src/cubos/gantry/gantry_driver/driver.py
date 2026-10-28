@@ -39,6 +39,7 @@ from .logger import set_up_command_logger, set_up_mill_logger
 DEFAULT_FEED_RATE = 3000
 HOMING_TIMEOUT = 90
 ERROR_22_MAX_RETRIES = 2
+STATUS_POLL_INTERVAL = 0.2
 
 def looks_like_connection_loss(value: Exception | str) -> bool:
     """Return true when an error looks like the serial link itself died.
@@ -117,6 +118,7 @@ class Mill:
         self.command_logger = set_up_command_logger(self.logger_location)
         self._wco: Optional[Coordinates] = None
         self.last_status: str = ""
+        self._last_status_query_at: float | None = None
 
     def _locate_over_serial(self, port: Optional[str] = None) -> Tuple[serial.Serial, str]:
         """
@@ -657,7 +659,7 @@ class Mill:
         """Wait for the mill to complete the previous command."""
         status = incoming_status
         start_time = time.time()
-        while "idle" not in status.lower():
+        while not re.match(r"^<idle(?:\||>)", status, re.IGNORECASE):
             lowered = status.lower()
             if "<run" in lowered:
                 start_time = time.time()
@@ -678,31 +680,28 @@ class Mill:
         return status
 
     def current_status(self) -> str:
-        """Get the current status of the mill."""
+        """Request a controller report, spacing repeated queries at 5 Hz."""
         self._require_open_serial()
-        attempt_limit = 5
-        status = self._read_serial()
-
-        while status.strip().lower() in ["", "ok"] and attempt_limit > 0:
+        for _ in range(5):
+            if self._last_status_query_at is not None:
+                delay = STATUS_POLL_INTERVAL - (time.monotonic() - self._last_status_query_at)
+                if delay > 0:
+                    time.sleep(delay)
             self._write_serial(b"?")
-            time.sleep(0.05)
-            status = self._read_serial()
-            attempt_limit -= 1
-
-        if not status:
-            raw_lines = self.ser_mill.readlines()
-            lines = [item.decode(errors="replace").rstrip() for item in raw_lines]
-            if not lines:
-                self.logger.error("Failed to get status from the mill")
-                raise StatusReturnError("Failed to get status from the mill")
-            # Find the first status line (<...>) or join all lines
-            status = next((l for l in lines if l.startswith("<")), "; ".join(lines))
-            self.last_status = status
-            if any(re.search(r"\b(error|alarm)\b", item.lower()) for item in lines):
-                self.logger.error("Error in status: %s", status)
-                raise StatusReturnError(f"Error in status: {status}")
-        self.last_status = status
-        return status
+            self._last_status_query_at = time.monotonic()
+            for _ in range(10):
+                status = self._read_serial().strip()
+                if not status:
+                    break
+                if status.lower().startswith(("error:", "alarm:")):
+                    self.last_status = status
+                    raise StatusReturnError(f"Error in status: {status}")
+                if status.startswith("<") and status.endswith(">"):
+                    self.last_status = status
+                    return status
+                # Acknowledgments and informational messages are not motion completion.
+        self.logger.error("Failed to get status from the mill")
+        raise StatusReturnError("Failed to get status from the mill")
 
     def _read_serial(self):
         self._require_open_serial()
