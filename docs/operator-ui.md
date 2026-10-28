@@ -56,6 +56,33 @@ Example filenames and instruments will differ from your lab's setup.
 
 The deck map and movement controls stay on the right as you switch views.
 
+## View the Deck in 3D
+
+Open your gantry and deck files in **Workflow**, choose **Visualize**, then
+select **3D**. The right-hand map stays in 2D for reference.
+
+- Drag to orbit, scroll to zoom, or right-drag to pan. **Orbit**, **Top**, and
+  **Fit** restore useful camera views; **+** and **−** zoom without a mouse wheel.
+- Click labware or choose it from the object list. **Focus selection** brings
+  that object into view. **Labels** and **Frame** show or hide visual guides.
+- While the canvas has focus, arrow keys rotate the view and +/− zoom.
+  These view controls do not move the gantry or edit your settings.
+- Select **2D** at any time, including if your browser cannot display 3D.
+
+The view uses CubOS-resolved labware positions in deck coordinates: X to the
+right, Y toward the back, and Z upward. It keeps this deck reference even for
+a moving-bed gantry. Instrument markers require a connected gantry with a
+complete work position; otherwise the object list says **Position unavailable**.
+
+The orthographic view uses CAD meshes for recognized models whose dimensions
+and mounting layout match the source asset. Other plates, racks, and vials use illustrative shapes
+with open wells and hollow shells. Colors, material finishes, instrument
+silhouettes, and the optional frame are illustrative. If a mesh cannot load
+or its dimensions do not match, the view keeps the fallback shape.
+
+This view does not establish collision clearance, show measured liquid levels,
+or replace calibration. The render does not change any well or tool coordinates.
+
 ## Save Before You Run
 
 Protocol runs always use the **saved** gantry, deck, and protocol files, not
