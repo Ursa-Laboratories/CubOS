@@ -940,6 +940,8 @@ class Mill:
 
         When ``travel_z`` is None, the mill issues a direct axis-by-axis
         move (X, then Y, then Z) — no Z detour, no diagonal interpolation.
+        With ``travel_z``, the XY leg is a single linear interpolation at
+        the caller-selected safe plane, giving the shortest lateral path.
 
         Args:
             x_coordinate (float): X coordinate.
@@ -1061,16 +1063,17 @@ class Mill:
         target_coordinates: Coordinates,
         travel_z: float,
     ):
-        """Transit via ``travel_z``, axis-by-axis: lift → X → Y → descend.
+        """Transit via ``travel_z``: lift → linear XY → descend.
 
         Each step is emitted only when it would produce actual motion,
-        so a move already at ``travel_z`` skips the lift, a same-X
-        (or same-Y) move skips that axis, and a final Z matching
-        ``travel_z`` skips the descent. X and Y always move in
-        separate G-codes — no diagonal.
+        so a move already at ``travel_z`` skips the lift, unchanged lateral
+        axes are omitted from the XY command, and a final Z matching
+        ``travel_z`` skips the descent. When both X and Y change they share
+        one G-code command, so GRBL follows the shortest straight path at
+        the safe travel plane.
 
         ``current_coordinates`` may be ``None`` (position read failed);
-        the full lift → X → Y → descend sequence is then emitted
+        the full lift → XY → descend sequence is then emitted
         unconditionally — safe because the commands are absolute and the
         lift happens first.
         """
@@ -1080,10 +1083,13 @@ class Mill:
         commands = []
         if current_coordinates is None or current_coordinates.z != travel_z:
             commands.append(f"G01 Z{travel_z}{f}")
+        xy_words = []
         if current_coordinates is None or target_coordinates.x != current_coordinates.x:
-            commands.append(f"G01 X{target_coordinates.x}{f}")
+            xy_words.append(f"X{target_coordinates.x}")
         if current_coordinates is None or target_coordinates.y != current_coordinates.y:
-            commands.append(f"G01 Y{target_coordinates.y}{f}")
+            xy_words.append(f"Y{target_coordinates.y}")
+        if xy_words:
+            commands.append(f"G01 {' '.join(xy_words)}{f}")
         if target_coordinates.z != travel_z:
             commands.append(f"G01 Z{target_coordinates.z}{f}")
         return commands

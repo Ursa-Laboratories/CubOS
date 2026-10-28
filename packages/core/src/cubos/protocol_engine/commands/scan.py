@@ -44,6 +44,8 @@ def scan(
     indentation_limit_height: float | None = None,
     delay_s: float = 0.0,
     method_kwargs: Dict[str, Any] | None = None,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Dict[str, Any]:
     """Scan every well on *plate* using *instrument*'s *method*.
 
@@ -118,6 +120,12 @@ def scan(
             interwell_scan_height, field_name="interwell_scan_height",
             source="scan",
         )
+        _assert_finite_number(
+            x_offset_mm, field_name="x_offset_mm", source="scan",
+        )
+        _assert_finite_number(
+            y_offset_mm, field_name="y_offset_mm", source="scan",
+        )
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
 
@@ -178,14 +186,17 @@ def scan(
             time.sleep(delay_s)
 
         well = plate_obj.get_well_center(well_id)
+        action_x = well.x + float(x_offset_mm)
+        action_y = well.y + float(y_offset_mm)
+        target = (action_x, action_y, well.z)
         if i == 0:
-            context.gantry.move_to_labware(instrument, well)
-            context.gantry.move(instrument, (well.x, well.y, approach_z))
+            context.gantry.move_to_labware(instrument, target)
+            context.gantry.move(instrument, (action_x, action_y, approach_z))
         else:
             context.gantry.move(
-                instrument, (well.x, well.y, approach_z), travel_z=approach_z,
+                instrument, (action_x, action_y, approach_z), travel_z=approach_z,
             )
-        context.gantry.move(instrument, (well.x, well.y, action_z))
+        context.gantry.move(instrument, (action_x, action_y, action_z))
 
         # Use the shared dispatch helper so closed-loop methods get the
         # same gantry-injection + None-gantry guard + finite-number guard
@@ -246,7 +257,12 @@ def scan(
     if sorted_wells:
         last_well = plate_obj.get_well_center(sorted_wells[-1])
         context.gantry.move(
-            instrument, (last_well.x, last_well.y, approach_z),
+            instrument,
+            (
+                last_well.x + float(x_offset_mm),
+                last_well.y + float(y_offset_mm),
+                approach_z,
+            ),
             travel_z=approach_z,
         )
 

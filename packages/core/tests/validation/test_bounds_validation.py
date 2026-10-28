@@ -150,6 +150,28 @@ def _make_protocol(command_name: str, **args) -> Protocol:
     ])
 
 
+def test_image_well_x_sweep_collects_both_endpoint_targets():
+    gantry = _make_gantry(safe_z=80.0)
+    deck = _make_deck(plate=_make_plate(rows=1, columns=1, a1_x=10.0))
+    protocol = _make_protocol(
+        "image_well",
+        camera="camera",
+        well="plate.A1",
+        image_height=20.0,
+        x_sweep_start_mm=-4.0,
+        x_sweep_stop_mm=4.0,
+        x_sweep_step_mm=1.0,
+    )
+
+    targets = collect_protocol_motion_targets(gantry, protocol, deck)
+
+    assert [(target.position_id, target.x) for target in targets] == [
+        ("A1.safe_z", 6.0),
+        ("A1.sweep_0_action_z", 6.0),
+        ("A1.sweep_1_action_z", 14.0),
+    ]
+
+
 # ── Deck position validation ────────────────────────────────────────────
 
 

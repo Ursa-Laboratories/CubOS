@@ -68,7 +68,7 @@ class GantryYamlSchema(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     serial_port: str
-    gantry_type: Literal["cub", "cub_xl"]
+    gantry_type: Literal["cub", "cub_xl", "genmitsu_4040_pro_max"]
     cnc: CncYaml
     working_volume: WorkingVolumeYaml
     origin_policy: Literal["deck_origin", "home_origin"] = "deck_origin"

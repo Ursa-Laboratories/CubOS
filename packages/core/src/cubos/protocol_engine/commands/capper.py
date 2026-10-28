@@ -47,7 +47,7 @@ from cubos.instruments.capper.interface import CapperInstrument
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
 from . import _summaries
-from ._movement import unpack_xyz
+from ._movement import offset_xy
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,12 @@ def _actuate_retract_confirm(
     last_reading: Any = None
     last_error: BaseException | None = None
     for _attempt in range(attempts):
-        context.gantry.move(instrument, (x, y, engage_z))  # (re-)engage
+        action_z = (
+            engage_z
+            if capturing
+            else engage_z - capper.release_overtravel_mm
+        )
+        context.gantry.move(instrument, (x, y, action_z))  # (re-)engage
         try:
             if capturing:
                 capper.capture_cap()
@@ -155,6 +160,20 @@ def _actuate_retract_confirm(
                 capper.release_cap()
             if capper.capture_settle_s > 0:
                 time.sleep(capper.capture_settle_s)
+            # A capping retry means the previous release was still sensed at
+            # the tool after retracting.  Sweep to both sides only on that
+            # failed-cap recovery attempt, then return to the vial centre
+            # before retracting and checking again.
+            if (
+                not capturing
+                and _attempt > 0
+                and capper.cap_release_shimmy_y_mm
+            ):
+                shimmy = capper.cap_release_shimmy_y_mm
+                for shimmy_y in (y + shimmy, y - shimmy, y):
+                    context.gantry.move(
+                        instrument, (x, shimmy_y, action_z), travel_z=action_z,
+                    )
         except CapperError as exc:
             last_reading = None
             last_error = exc
@@ -189,6 +208,8 @@ def _run_capper_sequence(
     *,
     capturing: bool,
     command_label: str,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
     capper = _get_capper(context, instrument)
     try:
@@ -197,7 +218,15 @@ def _run_capper_sequence(
         raise ProtocolExecutionError(
             f"{command_label}: cannot resolve vial {vial!r} on the deck: {exc}"
         ) from exc
-    x, y, vial_z = unpack_xyz(coord)
+    try:
+        x, y, vial_z = offset_xy(
+            coord,
+            x_offset_mm=x_offset_mm,
+            y_offset_mm=y_offset_mm,
+            source=command_label,
+        )
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
 
     tracked = _tracked_fluid_state(context)
     operation_key = None
@@ -227,7 +256,12 @@ def _run_capper_sequence(
     # Steps 1-4: approach, engage, actuate, retract; sensor-confirm after
     # the retract (re-engaging per retry) -- see _actuate_retract_confirm.
     try:
-        context.gantry.move_to_labware(instrument, coord)  # approach
+        approach_coord = (
+            coord
+            if float(x_offset_mm) == 0.0 and float(y_offset_mm) == 0.0
+            else (x, y, vial_z)
+        )
+        context.gantry.move_to_labware(instrument, approach_coord)  # approach
         engage_z = vial_z + capper.engage_depth_mm
         _actuate_retract_confirm(
             context, capper, instrument,
@@ -273,7 +307,13 @@ def _safe_retract(context: "ProtocolContext", instrument: str, x: float, y: floa
 
 
 @protocol_command("decap", summary=_summaries.decap)
-def decap(context: "ProtocolContext", instrument: str, vial: str) -> None:
+def decap(
+    context: "ProtocolContext",
+    instrument: str,
+    vial: str,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
+) -> None:
     """Remove the cap from *vial* using a capper instrument.
 
     Approaches at ``safe_z``, engages at the instrument's configured
@@ -285,15 +325,27 @@ def decap(context: "ProtocolContext", instrument: str, vial: str) -> None:
     ``reconciliation_required`` (blocking further liquid handling on this
     vial) if the physical outcome is uncertain.
     """
-    _run_capper_sequence(context, instrument, vial, capturing=True, command_label="decap")
+    _run_capper_sequence(
+        context, instrument, vial, capturing=True, command_label="decap",
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )
 
 
 @protocol_command("cap", summary=_summaries.cap)
-def cap(context: "ProtocolContext", instrument: str, vial: str) -> None:
+def cap(
+    context: "ProtocolContext",
+    instrument: str,
+    vial: str,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
+) -> None:
     """Replace the cap on *vial* using a capper instrument.
 
     Mirrors ``decap``: approach, engage, release (sensor-confirmed cap no
     longer held), retract. When durable fluid/cap tracking is active,
     the vial must currently be tracked ``uncapped``.
     """
-    _run_capper_sequence(context, instrument, vial, capturing=False, command_label="cap")
+    _run_capper_sequence(
+        context, instrument, vial, capturing=False, command_label="cap",
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )

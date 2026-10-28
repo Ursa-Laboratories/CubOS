@@ -9,22 +9,65 @@ The **Protocol** tab unlocks once a saved gantry and deck are loaded.
 Running also needs the gantry connected. Start with a protocol supplied
 by your lab, or use **New** to build one.
 
+Shared workflow gantry/deck files and protocol recipes live in the
+[CubOS Protocol Library](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library).
+Select the workflow's `configs/` directory in Operator settings, then load its
+gantry, deck, and protocol files. Read the workflow README for calibration and
+validation status. See [YAML File Overview](../configuration.md) for details.
+
 ## The Protocol Tab
 
 ![The Protocol tab with a protocol loaded and validated, annotated](../images/operator-ui/protocol-tab.webp)
 
-1. **Protocol config.** Open a file or click **New**.
-2. **Named Positions.** Optional XYZ targets, such as a park position.
-3. **Step cards.** Steps in run order. Fill required fields marked `*`;
-   arrows reorder steps and **×** removes one.
-4. **Add step.** Choose a command and click **Add**. Use deck IDs for
-   targets (`plate.A1`) or a supported named position.
-5. **Fluid state tracking.** Choose how to record liquid, tips, and caps below.
-6. **Validate.** Checks the saved files without motion: targets, travel
-   limits, instrument methods, and command settings. It cannot check the bench.
-7. **Run Protocol.** Save all three files, validate, fix errors, then run.
-   Unsaved changes prevent starting.
-8. **Validation result.** Green means valid; red explains what to fix.
+1. **Protocol config.** Pick a protocol file, or click **New** to start an
+   empty one.
+2. **Named Positions.** Protocol-level XYZ targets such as a park position.
+   Steps refer to them by name. **Add Position** adds a row.
+3. **Step cards.** One card per step, in run order. Each shows the command
+   and its parameters — here a `measure` step naming the instrument, the
+   deck position (`e1`, a vial's Component ID), the measurement height
+   relative to the labware surface, and the instrument method with its own
+   parameters. Fields marked `*` are required by that command or method.
+   The arrows on the right reorder steps; **×** removes one.
+4. **Add step.** Choose a command and click **Add** to append a card.
+   Positions are addressed by the Component IDs from your deck file
+   (`plate.A1`) or by named positions.
+   **Repeat Steps Across Wells** can then copy any consecutive block of steps
+   from a template well to the checked wells. The expanded steps remain visible
+   and editable before saving; image labels receive the target well suffix.
+
+### Repeat blocks and tip use
+
+The repeat builder expands steps in place; it does not save a hidden loop. This
+makes the exact run order visible before validation.
+
+- For a **fresh tip at every well**, include `pick_up_tip` and `drop_tip` in
+  the selected From/Through range. Set the pickup position to the rack key
+  alone (for example, `tip_rack_green`) so CubOS auto-selects the next unused
+  tip for every copy; an explicit `tip_rack_green.A1` would target A1 again.
+  The whole block is copied for each well.
+- To **reuse one tip**, put `pick_up_tip` before the selected range and
+  `drop_tip` after it. Only the actions between them are copied.
+- Do not put `pick_up_tip` inside the block while leaving `drop_tip` outside:
+  the second copy would try to pick up another tip while one is attached.
+- You can create **several repeat blocks**. Expand the first one, inspect the
+  resulting step numbers, then select and expand the next template block.
+  Each expansion produces ordinary steps that can be edited independently.
+
+The builder is part of the shared CubOS Protocol editor and works with any
+loaded deck that exposes addressable wells; it is not tied to a particular
+station.
+5. **Fluid state tracking.** Whether this run records liquid volumes, tips,
+   and caps. See [below](#track-liquid-state-across-runs).
+6. **Validate.** Checks the saved protocol against the saved gantry and deck
+   files without moving anything: every target must resolve, every move
+   must stay inside the working volume once the instrument's offset and
+   depth are applied, and every instrument method must exist. It cannot
+   check the physical bench setup.
+7. **Run Protocol.** Starts the run. Disabled while any editor has unsaved
+   changes — runs use the saved files, not what is on screen.
+8. **Validation result.** A green **Protocol is valid.** banner, or a red
+   list of what failed and why.
 
 **Edit raw YAML** above the save row opens the file as text, for anything
 the form does not expose. See

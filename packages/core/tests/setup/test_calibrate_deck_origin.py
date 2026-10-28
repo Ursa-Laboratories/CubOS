@@ -1123,11 +1123,10 @@ def test_dry_run_prints_bottom_reference_step(tmp_path):
     assert "  G10 L20 P1 Z0" in messages
 
 
-def test_rejects_legacy_negative_space_config(tmp_path):
-    path = _write_gantry(tmp_path / "legacy.yaml", x_min=-400.0)
+def test_accepts_negative_x_margin_beyond_deck_origin(tmp_path):
+    path = _write_gantry(tmp_path / "left-margin.yaml", x_min=-20.0)
 
-    with pytest.raises(ValueError, match="Deck-origin calibration requires"):
-        run_calibration(path, dry_run=True)
+    run_calibration(path, dry_run=True)
 
 
 # --- _factory_z_travel_mm unit tests ---

@@ -249,7 +249,7 @@ export type OriginPolicy = "deck_origin" | "home_origin";
 
 export interface GantryConfig {
   serial_port: string;
-  gantry_type: "cub" | "cub_xl";
+  gantry_type: "cub" | "cub_xl" | "genmitsu_4040_pro_max";
   cnc: CncConfig;
   working_volume: WorkingVolume;
   grbl_settings?: GrblSettingsConfig | null;

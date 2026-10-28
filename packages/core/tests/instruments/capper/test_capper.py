@@ -35,10 +35,12 @@ class TestCapperInterfaceConfig:
     def test_stores_config(self):
         capper = _mock_capper(
             engage_depth_mm=-12.5, capture_retries=5, capture_settle_s=0.25,
+            release_overtravel_mm=0.5,
         )
         assert capper.engage_depth_mm == -12.5
         assert capper.capture_retries == 5
         assert capper.capture_settle_s == 0.25
+        assert capper.release_overtravel_mm == 0.5
 
     def test_rejects_non_finite_engage_depth(self):
         with pytest.raises(CapperConfigError):
@@ -51,6 +53,10 @@ class TestCapperInterfaceConfig:
     def test_rejects_negative_capture_settle(self):
         with pytest.raises(CapperConfigError):
             _mock_capper(capture_settle_s=-0.1)
+
+    def test_rejects_negative_release_overtravel(self):
+        with pytest.raises(CapperConfigError):
+            _mock_capper(release_overtravel_mm=-0.1)
 
     def test_rejects_bool_engage_depth(self):
         with pytest.raises(CapperConfigError):
