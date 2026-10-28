@@ -5,7 +5,7 @@ export interface SceneBounds { x: [number, number]; y: [number, number]; z: [num
 export interface ScenePoint { id: string; label: string; position: Coordinate3D; present?: boolean; parentId?: string }
 /** `size` always uses deck-space X, Y, Z dimensions, including cylinders. */
 export interface SceneBody { shape: SceneShape; center: Coordinate3D; size: Coordinate3D; rotationZ: number; schematic: true }
-export interface SceneObject { id: string; parentId?: string; parentLabel?: string; kind: string; label: string; body: SceneBody; points: ScenePoint[]; info: string }
+export interface SceneObject { id: string; parentId?: string; parentLabel?: string; kind: string; modelName?: string; hasChildren?: boolean; label: string; body: SceneBody; points: ScenePoint[]; info: string }
 export interface SceneInstrument {
   id: string; label: string; type: string; configuredOffset: { x: number; y: number; depth: number };
   position: Coordinate3D | null; positionUnavailable: boolean; body: SceneBody | null; info: string;
@@ -98,11 +98,11 @@ function holderEnvelopePoints(item: LabwareResponse): ScenePoint[] {
   if (config.type === "vial_holder") return entries.filter(([id]) => Object.prototype.hasOwnProperty.call(config.vials ?? {}, id)).map(([id, p]) => ({ id: `${item.key}.${id}`, label: id, position: p }));
   return [];
 }
-function makeChildVial(id: string, pointId: string, label: string, p: Coordinate3D, diameter: unknown, height: unknown, parentId?: string, parentLabel?: string): SceneObject {
+function makeChildVial(id: string, pointId: string, label: string, p: Coordinate3D, diameter: unknown, height: unknown, parentId?: string, parentLabel?: string, modelName?: string): SceneObject {
   const d = dim(diameter, DEFAULT.vial.d), h = dim(height, DEFAULT.vial.h);
   const displayLabel = parentLabel ? `${parentLabel} · ${label}` : label;
   const pt: ScenePoint = { id: pointId, label, position: p, ...(parentId ? { parentId } : {}) };
-  return { id, ...(parentId ? { parentId } : {}), ...(parentLabel ? { parentLabel } : {}), kind: "vial", label: displayLabel, body: cylinder(coord(p.x, p.y, p.z - h / 2), d, h), points: [pt], info: `${displayLabel} · vial · schematic body` };
+  return { id, ...(parentId ? { parentId } : {}), ...(parentLabel ? { parentLabel } : {}), kind: "vial", modelName, label: displayLabel, body: cylinder(coord(p.x, p.y, p.z - h / 2), d, h), points: [pt], info: `${displayLabel} · vial · schematic body` };
 }
 function objectBounds(body: SceneBody) {
   const c = Math.abs(Math.cos(body.rotationZ)), s = Math.abs(Math.sin(body.rotationZ));
@@ -121,7 +121,7 @@ export function buildSceneModel(input: BuildSceneModelInput): SceneModel {
     if (body) {
       const label = item.config.name || item.key;
       const renderedPoints = ["well_plate_holder", "vial_holder"].includes(item.config.type) ? [] : pts;
-      objects.push({ id: objectId(item.key), kind: item.config.type, label, body, points: renderedPoints, info: `${label} · ${humanize(item.config.type)} · schematic body` });
+      objects.push({ id: objectId(item.key), kind: item.config.type, modelName: item.config.model_name, hasChildren: item.config.type === "well_plate_holder" && !!item.config.well_plate, label, body, points: renderedPoints, info: `${label} · ${humanize(item.config.type)} · schematic body` });
       points.push(...renderedPoints);
     }
     if (item.config.type === "well_plate_holder" && item.config.well_plate) {
@@ -135,7 +135,7 @@ export function buildSceneModel(input: BuildSceneModelInput): SceneModel {
         const angle = angleFor(childPoints);
         const center = coord((e.minX + e.maxX) / 2, (e.minY + e.maxY) / 2, a1.z - h / 2);
         const childBody = box(center, coord(dim(nested.length, DEFAULT.plate.x), dim(nested.width, DEFAULT.plate.y), h), angle);
-        objects.push({ id: objectId(item.key, "plate"), parentId: objectId(item.key), kind: "well_plate", label: nested.name ?? "Well plate", body: childBody, points: childPoints, info: `${nested.name ?? "Well plate"} · nested well plate · schematic body` });
+        objects.push({ id: objectId(item.key, "plate"), parentId: objectId(item.key), kind: "well_plate", modelName: nested.model_name, label: nested.name ?? "Well plate", body: childBody, points: childPoints, info: `${nested.name ?? "Well plate"} · nested well plate · schematic body` });
         points.push(...childPoints);
       }
     }
@@ -143,7 +143,7 @@ export function buildSceneModel(input: BuildSceneModelInput): SceneModel {
       for (const [vialId, config] of Object.entries(item.config.vials ?? {})) {
         const p = item.positions?.[vialId];
         if (isPoint(p)) {
-          const child = makeChildVial(objectId(item.key, vialId), `${item.key}.${vialId}`, vialId, p, config.diameter, config.height, objectId(item.key), item.config.name || item.key);
+          const child = makeChildVial(objectId(item.key, vialId), `${item.key}.${vialId}`, vialId, p, config.diameter, config.height, objectId(item.key), item.config.name || item.key, config.model_name);
           objects.push(child); points.push(...child.points);
         }
       }
@@ -151,7 +151,7 @@ export function buildSceneModel(input: BuildSceneModelInput): SceneModel {
     if (item.config.type === "vial_grid") {
       for (const [vialId, p] of validPositions(item.positions).filter(([id]) => id !== "location")) {
         const d = item.config.vial_diameter, h = item.config.vial_height;
-        const child = makeChildVial(objectId(item.key, vialId), `${item.key}.${vialId}`, vialId, p, d, h, objectId(item.key), item.config.name || item.key);
+        const child = makeChildVial(objectId(item.key, vialId), `${item.key}.${vialId}`, vialId, p, d, h, objectId(item.key), item.config.name || item.key, item.config.vial_model_name);
         objects.push(child); points.push(...child.points);
       }
     }

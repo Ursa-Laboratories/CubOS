@@ -20,6 +20,7 @@ describe("buildSceneModel", () => {
     }] };
     const model = buildSceneModel({ ...base, deck });
     expect(model.objects[0].body.size).toEqual({ x: 100, y: 60, z: 12 });
+    expect(model.objects[0].modelName).toBe("p");
     expect(model.points.map(p => p.position.x)).toEqual([-40, -31]);
     expect(model.bounds.x[0]).toBeLessThan(0);
     expect(model.configuredBounds).toEqual({ x: [-100, 300], y: [-80, 200], z: [-20, 100] });
@@ -53,11 +54,13 @@ describe("buildSceneModel", () => {
 
   it("represents nested holder contents once as child objects and unique leaf points", () => {
     const deck: DeckResponse = { filename: "nested.yaml", labware: [{
-      key: "holder", config: { type: "well_plate_holder", name: "Holder", location: { x: 10, y: 20, z: 0 }, labware_seat_height_from_bottom: 3, well_plate: { name: "Plate", model_name: "p", rows: 1, columns: 2, calibration: { a1: null, a2: { x: 9, y: 0, z: 0 } }, x_offset: 9, y_offset: 9, length: 100, width: 60, height: 10 } },
+      key: "holder", config: { type: "well_plate_holder", name: "Holder", model_name: "tall_wellplate_holder", location: { x: 10, y: 20, z: 0 }, labware_seat_height_from_bottom: 3, well_plate: { name: "Plate", model_name: "p", rows: 1, columns: 2, calibration: { a1: null, a2: { x: 9, y: 0, z: 0 } }, x_offset: 9, y_offset: 9, length: 100, width: 60, height: 10 } },
       wells: null, location: { x: 10, y: 20, z: 0 }, geometry: { length: 120, width: 90, height: 18 }, positions: { location: { x: 10, y: 20, z: 0 }, plate: { x: 15, y: 25, z: 18 }, "plate.A1": { x: 15, y: 25, z: 18 }, "plate.A2": { x: 24, y: 25, z: 18 } },
     }] };
     const model = buildSceneModel({ ...base, deck });
     expect(model.objects.map(o => o.id)).toEqual([labwareId("holder"), labwareId("holder", "plate")]);
+    expect(model.objects.map(o => o.modelName)).toEqual(["tall_wellplate_holder", "p"]);
+    expect(model.objects[0].hasChildren).toBe(true);
     expect(model.objects[1].parentId).toBe(labwareId("holder"));
     expect(model.objects[0].body.center).toEqual({ x: 19.5, y: 25, z: 9 });
     expect(model.objects[0].points).toEqual([]);

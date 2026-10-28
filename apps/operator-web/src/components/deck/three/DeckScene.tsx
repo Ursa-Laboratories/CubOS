@@ -96,7 +96,7 @@ export default function DeckScene(props: DeckViewProps) {
         <button className="deck3d-focus" type="button" disabled={!canFocus || !!error} onClick={() => scene.current?.view("focus")}>Focus selection</button>
       </div>
       <p className="deck3d-caption">
-        Schematic shapes · Deck coordinates{yAxisMotion === "bed" ? " · Moving-bed gantry" : ""}
+        CAD where matched · Illustrative geometry · Deck coordinates{yAxisMotion === "bed" ? " · Moving-bed gantry" : ""}
         {unavailableCount > 0 ? " · " + unavailableCount + " instrument position" + (unavailableCount === 1 ? "" : "s") + " unavailable" : ""}
         {selected && <><br />{selected.info}</>}
       </p>

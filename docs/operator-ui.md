@@ -74,9 +74,14 @@ right, Y toward the back, and Z upward. It keeps this deck reference even for
 a moving-bed gantry. Instrument markers require a connected gantry with a
 complete work position; otherwise the object list says **Position unavailable**.
 
-Bodies, instrument silhouettes, and the optional frame are schematic.
-Missing dimensions use simple display shapes. This view does not establish
-collision clearance, show measured liquid levels, or replace calibration.
+The orthographic view uses CAD meshes for recognized models whose dimensions
+and mounting layout match the source asset. Other plates, racks, and vials use illustrative shapes
+with open wells and hollow shells. Colors, material finishes, instrument
+silhouettes, and the optional frame are illustrative. If a mesh cannot load
+or its dimensions do not match, the view keeps the fallback shape.
+
+This view does not establish collision clearance, show measured liquid levels,
+or replace calibration. The render does not change any well or tool coordinates.
 
 ## Save Before You Run
 

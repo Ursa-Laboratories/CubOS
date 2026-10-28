@@ -9,9 +9,12 @@ import "../src/index.css";
 let scenario = previewScenarios[0];
 let connected = false, empty = false, hardwareRequests = 0;
 const requests: { method: string; path: string }[] = [];
+const nativeFetch = window.fetch.bind(window);
 window.fetch = async (input, init) => {
   const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-  const path = new URL(raw, location.origin).pathname.replace(/^\/api\/v1/, "");
+  const pathname = new URL(raw, location.origin).pathname;
+  if (!pathname.startsWith("/api/v1/")) return nativeFetch(input, init);
+  const path = pathname.replace(/^\/api\/v1/, "");
   const method = init?.method ?? "GET";
   requests.push({ method, path });
   const json = (data: unknown, status = 200) => new Response(JSON.stringify(data), { status, headers: { "Content-Type": "application/json" } });
@@ -73,4 +76,4 @@ export default function Preview() {
 }
 const root = createRoot(document.getElementById("root")!);
 root.render(<StrictMode><QueryClientProvider client={queryClient}><Preview /></QueryClientProvider></StrictMode>);
-if (import.meta.hot) import.meta.hot.dispose(() => root.unmount());
+if (import.meta.hot) import.meta.hot.dispose(() => { root.unmount(); window.fetch = nativeFetch; });

@@ -68,6 +68,28 @@ function raisedPlate(key: string, x: number, y: number): LabwareResponse {
   };
 }
 
+function cadHolder(x: number, y: number): LabwareResponse {
+  const item = raisedPlate("cad_holder", x, y);
+  if (item.config.type !== "well_plate_holder") return item;
+  item.config.model_name = "tall_wellplate_holder";
+  item.config.name = "Cubware plate holder";
+  item.config.labware_seat_height_from_bottom = 21;
+  // Show the real holder empty until its CAD seat registration is mapped.
+  // The source seat is offset/rotated relative to the mesh bounding box.
+  item.config.well_plate = null;
+  item.positions = {};
+  item.geometry = { length: 127.5, width: 176.4, height: 25 };
+  return item;
+}
+
+function cadTipHolder(x: number, y: number): LabwareResponse {
+  const positions = grid(x, y, 66, 2, 15, 8.5);
+  return {
+    key: "cad_tips", config: { type: "tip_rack", name: "Cubware 30-tip holder", model_name: "cubware_tip_holder_visual", rows: 2, columns: 15, pickup_z: 66, tip_length: 50, x_offset: 8.5, y_offset: 8.5, calibration: { a1: positions.A1, a2: positions.A2 }, tip_present: Object.fromEntries(Object.keys(positions).map(id => [id, false])) },
+    wells: null, positions, geometry: { length: 138, width: 21, height: 66 },
+  };
+}
+
 function waste(x: number, y: number, height = 45): LabwareResponse {
   const location = { x, y, z: height };
   return { key: "waste", config: { type: "tip_disposal", name: "Tip disposal", location }, wells: null, location, geometry: { length: 100, width: 72, height } };
@@ -90,6 +112,13 @@ function setup(id: string, label: string, description: string, width: number, de
 }
 
 export const previewScenarios: PreviewScenario[] = [
+  setup("cad", "CAD labware · 600 × 400 mm", "Imported Cubware meshes, open wells, hollow vials and studio shading", 600, 400, [
+    cadHolder(145, 205), cadTipHolder(430, 245),
+    plate("six_well", "6-well plate", 145, 60, 6, 17),
+    plate("plate", "96-well plate", 430, 90),
+    vialHolder("vials", 145, 345),
+    vialGrid("glass_vials", "Glass vials", 430, 345, 2, 5, 70, 20),
+  ], true),
   setup("compact", "Compact · 300 × 230 mm", "Original compact setup", 300, 230, [
     plate("plate", "96-well plate", 75, 64), tips("tips", 224, 174), vialHolder("vials", 71, 176), waste(224, 64, 35),
   ]),

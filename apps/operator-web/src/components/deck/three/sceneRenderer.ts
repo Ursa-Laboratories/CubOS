@@ -2,8 +2,10 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Coordinate3D } from "../../../types";
-import type { SceneBody, SceneModel, SceneObject } from "./sceneModel";
-import { getPointGeometryRadii } from "./pointGeometry";
+import type { SceneModel } from "./sceneModel";
+import { RoomEnvironment } from "three/addons/environments/RoomEnvironment.js";
+import { loadCadAsset } from "./cadAssets";
+import { createLabwareMesh, createCadTipOverlay, styleCadMesh } from "./labwareMeshes";
 
 export interface SceneRenderer {
   update(model: SceneModel): void;
@@ -18,10 +20,6 @@ export interface SceneRenderer {
 
 type Label = { element: HTMLButtonElement; anchor: THREE.Vector3; id: string };
 const vector = (p: Coordinate3D) => new THREE.Vector3(p.x, p.y, p.z);
-const colors: Record<string, number> = {
-  well_plate: 0xe9eff6, tip_rack: 0x67c6b0, vial: 0xd7e6ec,
-  vial_holder: 0x374454, well_plate_holder: 0xe3e8ee, tip_disposal: 0xcbd7e2,
-};
 
 function disposeGroup(group: THREE.Object3D) {
   const geometries = new Set<THREE.BufferGeometry>();
@@ -39,11 +37,11 @@ function disposeGroup(group: THREE.Object3D) {
 }
 
 function material(color: number, opacity = 1) {
-  return new THREE.MeshStandardMaterial({ color, roughness: 0.6, metalness: 0.12, transparent: opacity < 1, opacity });
+  return new THREE.MeshPhysicalMaterial({ color, roughness: 0.4, metalness: 0.05, clearcoat: 0.2, transparent: opacity < 1, opacity });
 }
 
 function box(size: Coordinate3D, center: Coordinate3D, mat: THREE.Material) {
-  const mesh = new THREE.Mesh(new THREE.BoxGeometry(size.x, size.y, size.z), mat);
+  const mesh = new THREE.Mesh(new RoundedBoxGeometry(size.x, size.y, size.z, 2, Math.min(1.5, size.x / 8, size.y / 8, size.z / 8)), mat);
   mesh.position.copy(vector(center));
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -58,50 +56,6 @@ function cylinder(radiusTop: number, radiusBottom: number, height: number, z: nu
   return mesh;
 }
 
-function makeBody(body: SceneBody, color: number) {
-  if (body.shape === "box") {
-    const { x, y, z } = body.size;
-    const mesh = new THREE.Mesh(new RoundedBoxGeometry(x, y, z, 2, Math.min(1.5, x / 8, y / 8, z / 8)), material(color));
-    mesh.position.copy(vector(body.center));
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    mesh.rotation.z = body.rotationZ;
-    return mesh;
-  }
-  const mesh = cylinder(body.size.x / 2, body.size.x / 2, body.size.z, 0, material(color, 0.88));
-  mesh.position.copy(vector(body.center));
-  return mesh;
-}
-
-function addPointMeshes(group: THREE.Group, object: SceneObject) {
-  if (!object.points.length || object.kind === "vial") return;
-  const isRack = object.kind === "tip_rack";
-  const points = object.points;
-  const { outerRadius, fillRadius, tubeRadius, tipRadius, tipBaseRadius } = getPointGeometryRadii(points);
-  // Repeated wells/tips share geometry and draw calls even on 384-position plates.
-  const rings = new THREE.InstancedMesh(new THREE.TorusGeometry(outerRadius - tubeRadius, tubeRadius, 6, 16), material(isRack ? 0xb9f4db : 0xf9fcff), points.length);
-  const wells = new THREE.InstancedMesh(new THREE.CircleGeometry(fillRadius, 16), material(isRack ? 0x24896d : 0x536c8d), points.length);
-  const matrix = new THREE.Matrix4();
-  points.forEach((point, i) => {
-    matrix.makeTranslation(point.position.x, point.position.y, point.position.z + 0.3);
-    rings.setMatrixAt(i, matrix);
-    matrix.makeTranslation(point.position.x, point.position.y, point.position.z + 0.2);
-    wells.setMatrixAt(i, matrix);
-    if (point.present === false) wells.setColorAt(i, new THREE.Color(0x203b35));
-  });
-  group.add(rings, wells);
-  if (isRack) {
-    const present = points.filter(point => point.present !== false);
-    const tips = new THREE.InstancedMesh(new THREE.CylinderGeometry(tipRadius, tipBaseRadius, 8, 10), material(0xc5f2df, 0.85), present.length);
-    const rotation = new THREE.Matrix4().makeRotationX(Math.PI / 2);
-    present.forEach((point, i) => {
-      matrix.makeTranslation(point.position.x, point.position.y, point.position.z + 4.3).multiply(rotation);
-      tips.setMatrixAt(i, matrix);
-    });
-    group.add(tips);
-  }
-}
-
 /** Rendering uses CubOS XYZ directly; camera Z is up, floor is XY. */
 export function createSceneRenderer(
   host: HTMLDivElement,
@@ -113,35 +67,47 @@ export function createSceneRenderer(
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.shadowMap.type = THREE.VSMShadowMap;
   renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
   renderer.domElement.tabIndex = 0;
   renderer.domElement.setAttribute("aria-label", "3D deck. Drag to orbit, scroll to zoom. Arrow keys rotate the view.");
   renderer.domElement.setAttribute("role", "img");
   host.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(38, 1, 0.1, 20000);
+  const camera = new THREE.OrthographicCamera(-300, 300, 300, -300, 0.1, 20000);
   camera.up.set(0, 0, 1);
   camera.position.set(400, -500, 500);
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = false; // Render on demand, including on low-powered appliances.
   controls.maxPolarAngle = Math.PI * 0.49;
-  controls.minDistance = 10;
-  controls.maxDistance = 10000;
-  const ambient = new THREE.HemisphereLight(0xffffff, 0x75889d, 2.4);
+  controls.minZoom = 0.1;
+  controls.maxZoom = 30;
+  const environmentRoom = new RoomEnvironment();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const environment = pmrem.fromScene(environmentRoom, 0.04);
+  scene.environment = environment.texture;
+  scene.environmentIntensity = 0.7;
+  scene.environmentRotation.set(Math.PI / 2, 0, 0);
+  environmentRoom.dispose(); pmrem.dispose();
+  const ambient = new THREE.HemisphereLight(0xffffff, 0x75889d, 0.7);
   ambient.position.set(0, 0, 1000);
   const light = new THREE.DirectionalLight(0xffffff, 2.3);
   light.position.set(-200, -300, 600);
   light.castShadow = true;
-  light.shadow.mapSize.set(1024, 1024);
+  light.shadow.mapSize.set(2048, 2048);
+  light.shadow.radius = 4;
+  light.shadow.blurSamples = 8;
+  light.shadow.normalBias = 0.12;
   light.shadow.camera.left = -650;
   light.shadow.camera.right = 650;
   light.shadow.camera.top = 650;
   light.shadow.camera.bottom = -650;
   light.shadow.camera.far = 2000;
-  light.shadow.bias = -0.001;
-  scene.add(ambient, light);
+  light.shadow.bias = -0.0001;
+  scene.add(ambient, light, light.target);
 
   const stage = new THREE.Group(), labware = new THREE.Group(), instruments = new THREE.Group(), frame = new THREE.Group();
   scene.add(stage, labware, instruments, frame);
@@ -153,16 +119,19 @@ export function createSceneRenderer(
   let selected = "", labelsVisible = true, frameVisible = false, disposed = false;
   let model: SceneModel | null = null;
   let signature = "", instrumentSignature = "", stageSignature = "";
+  let instrumentVisibilitySignature = "";
   let pending = 0;
   let size = { width: 1, height: 1 };
   let bounds = new THREE.Box3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(300, 200, 150));
   let firstFit = true;
+  let objectRevision = 0;
+  let fitTargetId: string | null = null;
 
   function render() {
     pending = 0;
     if (disposed) return;
     const lightTheme = document.documentElement.dataset.theme === "light";
-    scene.background = new THREE.Color(lightTheme ? 0xbfc9d3 : 0x29323e);
+    scene.background = new THREE.Color(lightTheme ? 0xeff1f3 : 0x1b2330);
     renderer.render(scene, camera);
     const occupied: { x: number; y: number; width: number }[] = [];
     [...labels].sort((a, b) => Number(b.id === selected) - Number(a.id === selected)).forEach(label => {
@@ -216,40 +185,40 @@ export function createSceneRenderer(
       selection.box.setFromObject(group).expandByScalar(0.8);
     }
     for (const [id, group] of selectable) {
-      const body = group.children[0];
-      if (body instanceof THREE.Mesh && body.material instanceof THREE.MeshStandardMaterial) {
-        body.material.emissive.set(id === selected ? 0x1c478c : 0x000000);
-        body.material.emissiveIntensity = id === selected ? 0.25 : 0;
-      }
+      group.traverse(object => {
+        if (!(object instanceof THREE.Mesh)) return;
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+        materials.forEach(mat => {
+          if (!(mat instanceof THREE.MeshStandardMaterial)) return;
+          mat.emissive.set(id === selected ? 0x1c478c : 0x000000);
+          mat.emissiveIntensity = id === selected ? 0.15 : 0;
+        });
+      });
     }
     requestRender();
   }
   function fit(targetBounds: THREE.Box3, direction?: THREE.Vector3, parts = [targetBounds]) {
     const center = targetBounds.getCenter(new THREE.Vector3());
-    const vertical = THREE.MathUtils.degToRad(camera.fov);
-    const horizontal = 2 * Math.atan(Math.tan(vertical / 2) * camera.aspect);
     const offset = direction ?? camera.position.clone().sub(controls.target).normalize();
     const right = new THREE.Vector3().crossVectors(camera.up, offset).normalize();
     const up = new THREE.Vector3().crossVectors(offset, right).normalize();
-    let distance = 20;
+    let halfWidth = 10, halfHeight = 10;
     for (const part of parts) {
-      for (const x of [part.min.x, part.max.x]) {
-        for (const y of [part.min.y, part.max.y]) {
-          for (const z of [part.min.z, part.max.z]) {
-          const corner = new THREE.Vector3(x, y, z).sub(center);
-          distance = Math.max(distance, corner.dot(offset) + Math.max(Math.abs(corner.dot(right)) / Math.tan(horizontal / 2), Math.abs(corner.dot(up)) / Math.tan(vertical / 2)));
-          }
-        }
+      for (const x of [part.min.x, part.max.x]) for (const y of [part.min.y, part.max.y]) for (const z of [part.min.z, part.max.z]) {
+        const corner = new THREE.Vector3(x, y, z).sub(center);
+        halfWidth = Math.max(halfWidth, Math.abs(corner.dot(right)));
+        halfHeight = Math.max(halfHeight, Math.abs(corner.dot(up)));
       }
     }
-    distance *= 1.16;
+    const aspect = size.width / size.height;
+    const extent = Math.max(halfHeight, halfWidth / aspect) * 1.15;
+    camera.left = -extent * aspect; camera.right = extent * aspect;
+    camera.top = extent; camera.bottom = -extent; camera.zoom = 1;
+    const distance = Math.max(100, targetBounds.getSize(new THREE.Vector3()).length() * 2);
     controls.target.copy(center);
     camera.position.copy(center).addScaledVector(offset, distance);
-    camera.near = Math.max(0.1, distance / 1000);
-    camera.far = Math.max(10000, distance * 10);
-    camera.updateProjectionMatrix();
-    controls.update();
-    requestRender();
+    camera.near = 0.1; camera.far = Math.max(10000, distance * 4);
+    camera.updateProjectionMatrix(); controls.update(); requestRender();
   }
   function visibleBounds() {
     // Fit what is drawn, not the empty height of the configured working volume.
@@ -260,6 +229,7 @@ export function createSceneRenderer(
     return result.isEmpty() ? bounds : result;
   }
   function fitScene(direction?: THREE.Vector3) {
+    fitTargetId = null;
     const parts = [...stage.children.slice(0, 2), ...labware.children, ...instruments.children, ...(frameVisible ? frame.children : [])]
       .map(object => new THREE.Box3().setFromObject(object));
     fit(visibleBounds(), direction, parts);
@@ -267,9 +237,15 @@ export function createSceneRenderer(
   const resize = new ResizeObserver(() => {
     size = { width: Math.max(1, host.clientWidth), height: Math.max(1, host.clientHeight) };
     renderer.setSize(size.width, size.height, false);
-    camera.aspect = size.width / size.height;
+    camera.left = -camera.top * size.width / size.height;
+    camera.right = camera.top * size.width / size.height;
     camera.updateProjectionMatrix();
     if (firstFit && model) { fitScene(new THREE.Vector3(0.45, -1, 0.95).normalize()); firstFit = false; }
+    else if (model) {
+      const focused = fitTargetId ? selectable.get(fitTargetId) : null;
+      if (focused) fit(new THREE.Box3().setFromObject(focused));
+      else fitScene();
+    }
     requestRender();
   });
   resize.observe(host);
@@ -279,16 +255,24 @@ export function createSceneRenderer(
     const { x, y, z } = current.configuredBounds;
     const cx = (x[0] + x[1]) / 2, cy = (y[0] + y[1]) / 2;
     const width = Math.max(20, x[1] - x[0]), depth = Math.max(20, y[1] - y[0]);
-    const floorZ = z[0] - 3;
-    stage.add(box({ x: width + 16, y: depth + 16, z: 5 }, { x: cx, y: cy, z: floorZ - 3 }, material(0x899daf)));
-    stage.add(box({ x: width + 20, y: 7, z: 12 }, { x: cx, y: y[0] - 8, z: floorZ - 5 }, material(0x317d95)));
+    const floorZ = z[0];
+    stage.add(box({ x: width + 16, y: depth + 16, z: 6 }, { x: cx, y: cy, z: floorZ - 3 }, material(0x697b90)));
+    stage.add(box({ x: width + 20, y: 5, z: 9 }, { x: cx, y: y[0] - 8, z: floorZ - 4 }, material(0x233c78)));
     const gridSize = Math.ceil(Math.max(width, depth) / 50) * 50 + 100;
     const grid = new THREE.GridHelper(gridSize, Math.min(100, Math.round(gridSize / 10)), 0x7f94a8, 0x9faebd);
     grid.rotation.x = Math.PI / 2;
-    grid.position.set(cx, cy, floorZ);
+    grid.position.set(cx, cy, floorZ + 0.05);
     (grid.material as THREE.Material).transparent = true;
-    (grid.material as THREE.Material).opacity = 0.5;
+    (grid.material as THREE.Material).opacity = 0.18;
     stage.add(grid);
+    const span = Math.max(width, depth);
+    light.position.set(cx - span * 0.55, cy - span * 0.7, floorZ + span * 1.3);
+    light.target.position.set(cx, cy, floorZ);
+    light.target.updateMatrixWorld();
+    light.shadow.camera.left = -span * 0.85; light.shadow.camera.right = span * 0.85;
+    light.shadow.camera.top = span * 0.85; light.shadow.camera.bottom = -span * 0.85;
+    light.shadow.camera.far = span * 4;
+    light.shadow.camera.updateProjectionMatrix();
     const frameHeight = floorZ + Math.max(90, z[1] - z[0]) + 20;
     const ghost = material(0xa8c0d6, 0.15);
     ghost.depthWrite = false;
@@ -301,29 +285,28 @@ export function createSceneRenderer(
     frame.visible = frameVisible;
   }
   function buildObjects(current: SceneModel) {
+    const revision = ++objectRevision;
     disposeGroup(labware);
     for (const [id, group] of selectable) if (group.parent !== instruments) selectable.delete(id);
     current.objects.forEach(object => {
       const group = new THREE.Group();
       group.userData.selectId = object.id;
-      if (object.kind === "tip_disposal") {
-        const { center: c, size: s } = object.body;
-        const mat = material(colors.tip_disposal);
-        group.add(box({ x: s.x, y: s.y, z: 2 }, { ...c, z: c.z - s.z / 2 + 1 }, mat));
-        for (const sign of [-1, 1]) {
-          group.add(box({ x: s.x, y: 2, z: s.z }, { ...c, y: c.y + sign * (s.y / 2 - 1) }, mat));
-          group.add(box({ x: 2, y: s.y, z: s.z }, { ...c, x: c.x + sign * (s.x / 2 - 1) }, mat));
-        }
-      } else group.add(makeBody(object.body, colors[object.kind] ?? 0xb9c8d6));
-      addPointMeshes(group, object);
-      if (object.kind === "vial") {
-        const ring = new THREE.Mesh(new THREE.TorusGeometry(object.body.size.x * 0.44, 0.6, 6, 20), material(0xf5fbff));
-        ring.position.set(object.body.center.x, object.body.center.y, object.body.center.z + object.body.size.z / 2);
-        group.add(ring);
-      }
-      labware.add(group);
-      selectable.set(object.id, group);
+      group.add(createLabwareMesh(object));
+      labware.add(group); selectable.set(object.id, group);
+      void loadCadAsset(object).then(cad => {
+        if (!cad) return;
+        if (disposed || revision !== objectRevision || group.parent !== labware) { disposeGroup(cad); return; }
+        styleCadMesh(cad, object.kind);
+        cad.position.copy(vector(object.body.center));
+        cad.rotation.z = object.body.rotationZ;
+        disposeGroup(group);
+        group.add(cad);
+        group.add(createCadTipOverlay(object));
+        host.dataset.cadModels = String(labware.children.filter(child => child.children[0]?.userData.geometrySource === "cad").length);
+        updateSelection();
+      });
     });
+    host.dataset.cadModels = "0";
   }
   function buildInstruments(current: SceneModel) {
     for (const [id, group] of selectable) if (group.parent === instruments) selectable.delete(id);
@@ -397,10 +380,16 @@ export function createSceneRenderer(
       if (nextStage !== stageSignature) { buildStage(current); stageSignature = nextStage; }
       const nextInstruments = JSON.stringify(current.instruments);
       if (nextInstruments !== instrumentSignature) { buildInstruments(current); instrumentSignature = nextInstruments; }
+      const nextVisibility = JSON.stringify(current.instruments.filter(item => item.position).map(item => item.id));
+      if (nextVisibility !== instrumentVisibilitySignature) {
+        firstFit = true;
+        instrumentVisibilitySignature = nextVisibility;
+      }
       refreshLabels(current);
       if (firstFit && host.clientWidth > 0 && host.clientHeight > 0) {
         size = { width: host.clientWidth, height: host.clientHeight };
-        camera.aspect = size.width / size.height;
+        camera.left = -camera.top * size.width / size.height;
+    camera.right = camera.top * size.width / size.height;
         renderer.setSize(size.width, size.height, false);
         fitScene(new THREE.Vector3(0.45, -1, 0.95).normalize());
         firstFit = false;
@@ -413,14 +402,12 @@ export function createSceneRenderer(
     view(view) {
       if (view === "focus") {
         const object = selectable.get(selected);
-        if (object) fit(new THREE.Box3().setFromObject(object));
+        if (object) { fitTargetId = selected; fit(new THREE.Box3().setFromObject(object)); }
       } else fitScene(view === "top" ? new THREE.Vector3(0, -0.0001, 1).normalize() : view === "orbit" ? new THREE.Vector3(0.45, -1, 0.95).normalize() : undefined);
     },
     zoom(factor) {
-      const offset = camera.position.clone().sub(controls.target);
-      offset.setLength(THREE.MathUtils.clamp(offset.length() * factor, controls.minDistance, controls.maxDistance));
-      camera.position.copy(controls.target).add(offset);
-      controls.update(); requestRender();
+      camera.zoom = THREE.MathUtils.clamp(camera.zoom / factor, controls.minZoom, controls.maxZoom);
+      camera.updateProjectionMatrix(); controls.update(); requestRender();
     },
     rotate(horizontal, vertical) {
       const offset = camera.position.clone().sub(controls.target);
@@ -444,6 +431,7 @@ export function createSceneRenderer(
       selection.geometry.dispose();
       (selection.material as THREE.Material).dispose();
       light.shadow.map?.dispose();
+      environment.dispose();
       renderer.dispose();
       renderer.forceContextLoss();
       renderer.domElement.remove();
