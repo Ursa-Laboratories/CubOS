@@ -3,6 +3,7 @@ import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { RoundedBoxGeometry } from "three/addons/geometries/RoundedBoxGeometry.js";
 import type { Coordinate3D } from "../../../types";
 import type { SceneBody, SceneModel, SceneObject } from "./sceneModel";
+import { getPointGeometryRadii } from "./pointGeometry";
 
 export interface SceneRenderer {
   update(model: SceneModel): void;
@@ -76,9 +77,10 @@ function addPointMeshes(group: THREE.Group, object: SceneObject) {
   if (!object.points.length || object.kind === "vial") return;
   const isRack = object.kind === "tip_rack";
   const points = object.points;
+  const { outerRadius, fillRadius, tubeRadius, tipRadius, tipBaseRadius } = getPointGeometryRadii(points);
   // Repeated wells/tips share geometry and draw calls even on 384-position plates.
-  const rings = new THREE.InstancedMesh(new THREE.TorusGeometry(isRack ? 2.6 : 3, 0.45, 6, 16), material(isRack ? 0xb9f4db : 0xf9fcff), points.length);
-  const wells = new THREE.InstancedMesh(new THREE.CircleGeometry(isRack ? 2.2 : 2.6, 16), material(isRack ? 0x24896d : 0x536c8d), points.length);
+  const rings = new THREE.InstancedMesh(new THREE.TorusGeometry(outerRadius - tubeRadius, tubeRadius, 6, 16), material(isRack ? 0xb9f4db : 0xf9fcff), points.length);
+  const wells = new THREE.InstancedMesh(new THREE.CircleGeometry(fillRadius, 16), material(isRack ? 0x24896d : 0x536c8d), points.length);
   const matrix = new THREE.Matrix4();
   points.forEach((point, i) => {
     matrix.makeTranslation(point.position.x, point.position.y, point.position.z + 0.3);
@@ -90,7 +92,7 @@ function addPointMeshes(group: THREE.Group, object: SceneObject) {
   group.add(rings, wells);
   if (isRack) {
     const present = points.filter(point => point.present !== false);
-    const tips = new THREE.InstancedMesh(new THREE.CylinderGeometry(1.8, 0.5, 8, 10), material(0xc5f2df, 0.85), present.length);
+    const tips = new THREE.InstancedMesh(new THREE.CylinderGeometry(tipRadius, tipBaseRadius, 8, 10), material(0xc5f2df, 0.85), present.length);
     const rotation = new THREE.Matrix4().makeRotationX(Math.PI / 2);
     present.forEach((point, i) => {
       matrix.makeTranslation(point.position.x, point.position.y, point.position.z + 4.3).multiply(rotation);
@@ -348,12 +350,18 @@ export function createSceneRenderer(
   }
   function refreshLabels(current: SceneModel) {
     clearLabels();
+    const labelledParents = new Set(current.objects.map(object => object.id));
     current.objects.forEach(object => {
-      // A holder label covers its vial children until an individual vial is selected.
-      if (object.parentId && object.kind === "vial" && object.id !== selected) return;
+      let text = object.label;
+      // Use one label per vial grid/holder; individual vials remain selectable.
+      if (object.parentId && object.kind === "vial" && object.id !== selected) {
+        if (labelledParents.has(object.parentId)) return;
+        labelledParents.add(object.parentId);
+        text = object.parentLabel ?? object.label;
+      }
       const p = vector(object.body.center);
       p.z += object.body.size.z / 2 + (object.kind === "tip_rack" ? 14 : 5);
-      addLabel(object.id, object.label, p);
+      addLabel(object.id, text, p);
     });
     current.instruments.forEach(instrument => {
       if (instrument.position) addLabel(instrument.id, instrument.label, vector(instrument.position).add(new THREE.Vector3(0, 0, 88)));

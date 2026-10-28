@@ -72,9 +72,23 @@ describe("buildSceneModel", () => {
     }] };
     const model = buildSceneModel({ ...base, deck });
     expect(model.objects.map(o => o.id)).toEqual([labwareId("grid", "A1"), labwareId("grid", "A2")]);
+    expect(model.objects.map(o => o.label)).toEqual(["Grid · A1", "Grid · A2"]);
+    expect(model.objects[0].parentId).toBe(labwareId("grid"));
+    expect(model.objects[0].parentLabel).toBe("Grid");
     expect(model.objects[0].body.size).toEqual({ x: 12, y: 12, z: 40 });
     expect(model.objects[0].body.center.z).toBe(30); // resolved Z is vial rim; body extends down.
     expect(model.points).toHaveLength(2);
+  });
+
+  it("keeps matching vial IDs distinguishable across grids", () => {
+    const deck: DeckResponse = { filename: "two-grids.yaml", labware: [
+      { key: "grid_a", config: { type: "vial_grid", name: "Reagent grid", model_name: "g", rows: 1, columns: 1, calibration: { a1: null, a2: { x: 9, y: 0, z: 0 } }, x_offset: 9, y_offset: 9, vial_height: 40, vial_diameter: 12, capacity_ul: 500, working_volume_ul: 400 }, wells: null, positions: { A1: { x: 10, y: 10, z: 50 } } },
+      { key: "grid_b", config: { type: "vial_grid", name: "Waste grid", model_name: "g", rows: 1, columns: 1, calibration: { a1: null, a2: { x: 9, y: 0, z: 0 } }, x_offset: 9, y_offset: 9, vial_height: 40, vial_diameter: 12, capacity_ul: 500, working_volume_ul: 400 }, wells: null, positions: { A1: { x: 100, y: 10, z: 50 } } },
+    ] };
+    const model = buildSceneModel({ ...base, deck });
+    expect(model.objects.map(o => o.label)).toEqual(["Reagent grid · A1", "Waste grid · A1"]);
+    expect(model.objects.map(o => o.parentId)).toEqual([labwareId("grid_a"), labwareId("grid_b")]);
+    expect(model.objects.map(o => o.parentLabel)).toEqual(["Reagent grid", "Waste grid"]);
   });
 
   it("does not fabricate an instrument position without complete connected WPos", () => {
