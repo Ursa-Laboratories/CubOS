@@ -1,0 +1,25 @@
+# Offline-only fixture: synthetic head dimensions, not a hardware seed.
+serial_port: /dev/null
+gantry_type: cub_xl
+cnc:
+  factory_z_travel_mm: 160
+  safe_z: 100
+working_volume:
+  x_min: 0
+  x_max: 600
+  y_min: 0
+  y_max: 300
+  z_min: 0
+  z_max: 160
+instruments:
+  pipette:
+    type: pipette
+    vendor: opentrons
+    pipette_model: p300_multi_gen2
+    offline: true
+    channel_geometry:
+      axis: x
+      spacing_mm: 9
+      length_mm: 80
+      width_mm: 30
+      height_mm: 120

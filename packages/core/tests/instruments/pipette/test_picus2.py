@@ -214,7 +214,8 @@ class TestSpeedMapping:
 class TestVolumeQuantization:
 
     def test_8ch_300_bounds_and_increment(self):
-        pip = SartoriusPicus2Pipette(pipette_model="picus2_8ch_300", offline=True)
+        pip = SartoriusPicus2Pipette(pipette_model="picus2_8ch_300", offline=True,
+            channel_geometry=dict(axis="y", length_mm=80, width_mm=30, height_mm=120))
         assert pip._quantize(10.0) == 10.0
         assert pip._quantize(300.0) == 300.0
         assert pip._quantize(100.09) == 100.0
@@ -227,6 +228,7 @@ class TestVolumeQuantization:
         pip, fake = connected(
             script={"GET_NOMINAL_VOLUME": (["300"], "OK")},
             pipette_model="picus2_8ch_300",
+            channel_geometry=dict(axis="y", length_mm=80, width_mm=30, height_mm=120),
         )
         assert pip.aspirate(300.0).loaded_volume_ul == 300.0
         with pytest.raises(PipetteCommandError, match="already loaded"):

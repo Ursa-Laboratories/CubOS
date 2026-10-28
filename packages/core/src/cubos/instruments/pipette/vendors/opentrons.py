@@ -8,6 +8,7 @@ from cubos.instruments.controllers.pawduino import (
     PawduinoLinkTimeoutError,
 )
 from cubos.instruments.pipette.interface import PipetteInstrument
+from cubos.instruments.pipette.geometry import resolve_channel_geometry
 from cubos.instruments.pipette.exceptions import (
     PipetteCommandError,
     PipetteConfigError,
@@ -64,6 +65,7 @@ class OpentronsPipette(PipetteInstrument):
         depth: float = 0.0,
         offline: bool = False,
         liquid_classes: Optional[dict] = None,
+        channel_geometry: Optional[dict] = None,
         **kwargs,
     ):
         super().__init__(
@@ -77,6 +79,7 @@ class OpentronsPipette(PipetteInstrument):
                 f"Available: {', '.join(sorted(PIPETTE_MODELS.keys()))}"
             )
         self._config: PlungerPipetteConfig = PIPETTE_MODELS[pipette_model]
+        self.channel_geometry = resolve_channel_geometry(self._config.channels, channel_geometry)
         # Per-liquid-class stroke-volume correction (multiplier + offset_ul),
         # keyed by an operator-chosen name; empty/disabled unless configured.
         # See cubos.instruments.pipette.liquid_class for the parametric form.

@@ -226,3 +226,73 @@ def test_scan_action_z_inside_machine_structure_fails():
     )
 
     assert any("action_z" in v.message for v in violations), violations
+
+
+def _eight_channel_board(axis="x", height=120):
+    from cubos.instruments.pipette.vendors.opentrons import OpentronsPipette
+    return InstrumentedGantry(controller=MagicMock(), instruments={
+        "pipette": OpentronsPipette(
+            pipette_model="p300_multi_gen2", offline=True,
+            channel_geometry=dict(axis=axis, length_mm=80, width_mm=30, height_mm=height),
+        ),
+    })
+
+
+def test_eight_channel_far_end_hits_rail_while_reference_tip_is_clear():
+    protocol = _protocol(_move_step(0, position=(410, 150, 40), instrument="pipette"))
+    assert any("right X-max rail" in v.message for v in validate_protocol_semantics(
+        protocol, _eight_channel_board("x"), _deck(), _gantry(),
+    ))
+    assert validate_protocol_semantics(protocol, _eight_channel_board("y"), _deck(), _gantry()) == []
+
+
+def test_eight_channel_transverse_width_hits_rail():
+    protocol = _protocol(_move_step(0, position=(470, 150, 40), instrument="pipette"))
+    assert any("right X-max rail" in v.message for v in validate_protocol_semantics(
+        protocol, _eight_channel_board("y"), _deck(), _gantry(),
+    ))
+
+
+def test_eight_channel_sweep_hits_between_clear_endpoints():
+    protocol = _protocol(
+        _move_step(0, position=(400, 150, 90), instrument="pipette"),
+        _move_step(1, position=(560, 150, 90), instrument="pipette", travel_z=40),
+    )
+    violations = validate_protocol_semantics(protocol, _eight_channel_board(), _deck(), _gantry())
+    assert any("travel segment" in v.message and "right X-max rail" in v.message for v in violations)
+    high = _protocol(
+        _move_step(0, position=(400, 150, 90), instrument="pipette"),
+        _move_step(1, position=(560, 150, 90), instrument="pipette", travel_z=90),
+    )
+    assert validate_protocol_semantics(high, _eight_channel_board(), _deck(), _gantry()) == []
+
+
+def test_eight_channel_swept_geometry_translates_with_home_origin():
+    from dataclasses import replace
+    from cubos.gantry.gantry_config import OriginPolicy
+    gantry = replace(_gantry(), origin_policy=OriginPolicy.HOME_ORIGIN,
+        working_volume=WorkingVolume(-540, 0, -300, 0, -160, 0))
+    protocol = _protocol(_move_step(0, position=(-130, -150, -60), instrument="pipette"))
+    assert any("right X-max rail" in v.message for v in validate_protocol_semantics(
+        protocol, _eight_channel_board(), _deck(), gantry,
+    ))
+
+
+def test_eight_channel_home_checks_full_head():
+    from dataclasses import replace
+    gantry = replace(_gantry(x_max=410), working_volume=WorkingVolume(0, 410, 0, 200, 0, 70))
+    assert any("home pose" in v.message and "right X-max rail" in v.message
+        for v in validate_protocol_semantics(_protocol(_home_step(0)), _eight_channel_board(), _deck(), gantry))
+
+
+def test_eight_channel_body_height_includes_attached_tip_extension():
+    from pathlib import Path
+    from cubos.deck.loader import load_deck_from_yaml
+    deck = load_deck_from_yaml(Path(__file__).parents[1] / "fixtures/configs/pipette_tip_transfer/deck.yaml")
+    board = _eight_channel_board(height=20)
+    protocol = _protocol(
+        ProtocolStep(index=0, command_name="pick_up_tip", handler=lambda **kw: None, args={"position": "tip_rack.A1"}),
+        _move_step(1, position=(410, 150, -50), instrument="pipette", travel_z=90),
+    )
+    violations = validate_protocol_semantics(protocol, board, deck, _gantry(safe_z=90))
+    assert any(v.step_index == 1 and "instrument envelope" in v.message and "right X-max rail" in v.message for v in violations)

@@ -1,6 +1,8 @@
 import type { GantryPosition, InstrumentConfig } from "../../types";
 import { categorical as themeCategorical, viz as themeViz } from "../../theme";
 import { machineToSvg } from "../../utils/coordinates";
+import { channelGeometryBounds } from "../../utils/pipetteGeometry";
+import EightChannelRenderer from "./EightChannelRenderer";
 
 interface Props {
   label: string;
@@ -33,6 +35,9 @@ export default function InstrumentRenderer({
   machineYRange,
 }: Props) {
   const color = INSTRUMENT_COLORS[instrument.type] ?? INSTRUMENT_FALLBACK_COLOR;
+  if (channelGeometryBounds(instrument)) {
+    return <EightChannelRenderer {...{ label, instrument, gantryPosition, svgWidth, svgHeight, machineXRange, machineYRange, color }} />;
+  }
 
   // When gantry is connected and WPos is available, show instrument at WPos + offset
   if (gantryPosition?.connected && gantryPosition.work_x != null && gantryPosition.work_y != null) {

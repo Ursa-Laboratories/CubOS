@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
+from cubos.instruments.pipette.geometry import EightChannelGeometry, resolve_channel_geometry
+from cubos.instruments.pipette.models import PIPETTE_MODELS, PICUS2_MODELS
+
 
 _RELOCATED_HEIGHT_FIELDS = {
     "measurement_height": (
@@ -53,9 +56,23 @@ class InstrumentYamlEntry(BaseModel):
 
     @model_validator(mode="before")
     @classmethod
-    def _reject_relocated_height_fields(cls, data):
+    def _validate_config_fields(cls, data):
         if isinstance(data, dict):
             for key, hint in _RELOCATED_HEIGHT_FIELDS.items():
                 if key in data:
                     raise ValueError(hint)
+            if data.get("type") == "pipette":
+                model_name = data.get("pipette_model")
+                if model_name is not None and not isinstance(model_name, str):
+                    raise ValueError("pipette_model must be a string.")
+                if data.get("channel_geometry") is not None:
+                    geometry = EightChannelGeometry.model_validate(data["channel_geometry"])
+                    data = {**data, "channel_geometry": geometry.model_dump()}
+                    if not data.get("pipette_model"):
+                        raise ValueError("Select an explicit 8-channel pipette_model for channel_geometry.")
+                model = (PIPETTE_MODELS | PICUS2_MODELS).get(model_name)
+                if model is not None:
+                    geometry = resolve_channel_geometry(model.channels, data.get("channel_geometry"))
+                    if geometry is not None:
+                        data = {**data, "channel_geometry": geometry.model_dump()}
         return data

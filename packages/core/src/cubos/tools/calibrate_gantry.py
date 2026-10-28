@@ -22,6 +22,9 @@ from typing import Any, Callable
 
 import yaml
 
+from cubos.instruments.yaml_schema import InstrumentYamlEntry
+from cubos.instruments.pipette.geometry import EightChannelGeometry
+
 project_root = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
@@ -228,6 +231,18 @@ def run_auto_calibration(
     raw_config = _load_gantry_config(gantry_path)
     instruments = _instrument_info(raw_config)
     _validate_gantry_config(raw_config, output_path=resolved_output_path)
+    for name, entry in raw_config["instruments"].items():
+        if entry.get("type") != "pipette":
+            continue
+        validated = InstrumentYamlEntry.model_validate(entry).model_dump()
+        if validated.get("channel_geometry") is not None:
+            geometry = EightChannelGeometry.model_validate(validated["channel_geometry"])
+            output(
+                f"{name}: use the {geometry.reference_tip} tip/nozzle for every calibration capture. "
+                f"The other seven channels extend along +{geometry.axis.upper()}. "
+                "WPos plus the instrument offset locates this reference, not the head center. "
+                "Keep the full head clear of the block, deck edges, and rails."
+            )
 
     flow_name = (
         "single-instrument deck-origin calibration"

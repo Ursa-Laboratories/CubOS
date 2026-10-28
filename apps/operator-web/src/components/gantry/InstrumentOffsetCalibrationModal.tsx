@@ -4,6 +4,7 @@ import type { GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import * as theme from "../../theme";
 import JogPanel, { MIN_JOG_STEP } from "./JogPanel";
 import CameraPreview from "./CameraPreview";
+import { channelCalibrationHint } from "../../utils/pipetteGeometry";
 
 type Capture = { x: number; y: number; z: number; tip_length_mm: number; stand_off_mm?: number };
 interface Props {
@@ -143,6 +144,7 @@ function OffsetCalibration({ gantry, position, isRunning = false, onClose, onSav
         void gantryApi.jogCancel().catch(err => setError(err instanceof Error ? err.message : String(err)));
       }}>Stop jog</button>
       <p style={{ ...theme.mono, fontSize: 12 }}>WPos: X {position?.work_x ?? "—"}, Y {position?.work_y ?? "—"}, Z {position?.work_z ?? "—"} mm. Each jog is one step.</p>
+      {channelCalibrationHint(config.instruments[active]) && <p style={instructions}>{channelCalibrationHint(config.instruments[active])}</p>}
       {pipette && <><label style={{ display: "flex", gap: 8 }}><input type="checkbox" checked={tipAttached} disabled={busy} onChange={event => setTipAttached(event.target.checked)} />Tip attached for this capture</label>
         {tipAttached && <label style={field}>Tip protrusion below bare nozzle (mm)<input style={theme.input} value={tipLength} disabled={busy} onChange={event => setTipLength(event.target.value)} inputMode="decimal" /></label>}</>}
       {camera && <><label style={field}>Camera stand-off from fixed mark (mm)<input style={theme.input} value={standOff} disabled={busy} onChange={event => setStandOff(event.target.value)} inputMode="decimal" /></label><CameraPreview instrument={active} /></>}

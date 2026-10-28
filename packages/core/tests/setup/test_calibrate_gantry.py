@@ -295,3 +295,31 @@ def test_declined_overwrite_exits_zero(monkeypatch, tmp_path, capsys):
     assert exc_info.value.code == 0
     assert len(calls) == 1
     assert "ERROR:" not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("axis,reference", [("x", "leftmost"), ("y", "frontmost")])
+def test_eight_channel_preflight_identifies_reference_tip(monkeypatch, tmp_path, axis, reference):
+    path = _write_gantry(tmp_path / "eight.yaml", f"""  pipette:
+    type: pipette
+    vendor: opentrons
+    pipette_model: p300_multi_gen2
+    channel_geometry:
+      axis: {axis}
+      length_mm: 80
+      width_mm: 30
+      height_mm: 120
+""")
+    messages = []
+    monkeypatch.setattr(calibrate_gantry, "run_calibration", lambda *a, **k: "done")
+    calibrate_gantry.run_auto_calibration(path, output_gantry_path=tmp_path / "out.yaml",
+        output=messages.append, input_reader=_enter_only)
+    assert any(f"use the {reference} tip/nozzle" in message and f"+{axis.upper()}" in message for message in messages)
+
+
+def test_eight_channel_missing_geometry_stops_before_hardware(monkeypatch, tmp_path):
+    path = _write_gantry(tmp_path / "eight.yaml", "  pipette:\n    type: pipette\n    vendor: opentrons\n    pipette_model: p300_multi_gen2\n")
+    calls = []
+    monkeypatch.setattr(calibrate_gantry, "run_calibration", lambda *a, **k: calls.append(True))
+    with pytest.raises(ValueError, match="require channel_geometry"):
+        calibrate_gantry.run_auto_calibration(path, output_gantry_path=tmp_path / "out.yaml")
+    assert calls == []

@@ -1266,3 +1266,27 @@ def test_delete_gantry_refused_for_connected_config(monkeypatch, tmp_path):
     assert response.status_code == 409
     assert "disconnect" in response.json()["detail"]
     assert (gantry_dir / "live.yaml").exists()
+
+
+@pytest.mark.parametrize("axis", ["x", "y"])
+def test_eight_channel_geometry_round_trips_through_api(monkeypatch, tmp_path, axis):
+    config_dir = tmp_path / "configs"
+    (config_dir / "gantry").mkdir(parents=True)
+    monkeypatch.setattr(get_settings(), "config_dir", config_dir)
+    monkeypatch.setattr(gantry_router, "_session", None)
+    geometry = dict(axis=axis, spacing_mm=9, length_mm=80, width_mm=30, height_mm=120)
+    config = {**VALID_GANTRY, "instruments": {"pipette": dict(
+        type="pipette", vendor="opentrons", pipette_model="p300_multi_gen2",
+        offset_x=12, offset_y=-4, depth=20, channel_geometry=geometry,
+    )}}
+    response = api_request(create_app(), "PUT", "/api/v1/gantry/eight.yaml", json=config)
+    assert response.status_code == 200
+    saved = response.json()["config"]["instruments"]["pipette"]
+    assert saved["channel_geometry"] == geometry
+    assert (saved["offset_x"], saved["offset_y"], saved["depth"]) == (12, -4, 20)
+    assert read_yaml(config_dir / "gantry/eight.yaml")["instruments"]["pipette"] == saved
+    config["instruments"]["pipette"].pop("channel_geometry")
+    invalid = api_request(create_app(), "PUT", "/api/v1/gantry/eight.yaml", json=config)
+    assert invalid.status_code == 400
+    assert "require channel_geometry" in invalid.text
+    assert read_yaml(config_dir / "gantry/eight.yaml")["instruments"]["pipette"] == saved

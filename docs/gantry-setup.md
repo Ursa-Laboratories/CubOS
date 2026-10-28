@@ -54,6 +54,52 @@ instruments:
 Supported types: `asmi`, `capper`, `filmetrics`, `lighting`, `pipette`,
 `potentiostat`, `uv_curing`, `uvvis_ccs`, `camera`, `mounted_tool`.
 
+### Eight-channel pipette geometry
+
+For an 8-channel pipette, select its `pipette_model` and configure
+`channel_geometry` in the instrument entry. In the operator Gantry editor,
+enable **8-channel head geometry**, choose the orientation, and enter measured
+dimensions. Existing 8-channel YAML files must gain this section before they
+can be loaded or calibrated; single-channel files remain unchanged. If an old
+file cannot open in the editor, add the section in a text editor first.
+
+```yaml
+instruments:
+  pipette:
+    type: pipette
+    vendor: opentrons
+    pipette_model: p300_multi_gen2
+    channel_geometry:
+      axis: x
+      spacing_mm: 9.0
+      # Illustrative dimensions only; replace all three with measurements.
+      length_mm: 80.0
+      width_mm: 30.0
+      height_mm: 120.0
+```
+
+`axis: x` means the row extends right from its **leftmost tip**; `axis: y`
+means it extends back from its **frontmost tip**. These directions are the
+same with either origin policy. `spacing_mm` defaults to 9 mm; measure it for
+your head. Other angles and 96-channel geometry are not supported by this section.
+
+`length_mm` is the full envelope along the row, `width_mm` is across the row,
+and `height_mm` is from the bare nozzle plane upward to the highest part of
+the swept head/mount. Include protrusions and mounting hardware. All dimensions
+must be positive and finite; length must exceed `7 * spacing_mm`. The envelope
+is centered on the row midpoint (31.5 mm from the first tip at 9 mm spacing).
+For an asymmetric head, use `7 * spacing_mm + 2 * largest_end_overhang` for
+length and `2 * largest_side_overhang_from_nozzle_line` for width.
+
+The visualizer draws this envelope to scale with all eight tip centers and
+marks the reference tip. Offline protocol validation uses the full swept
+envelope against the built-in fixed machine structures, including the Cub XL
+right rail. With tips attached, the conservative collision envelope extends
+from the reference tip up through the head. This does not add live jog collision
+interlocks, arbitrary labware obstacle detection, or eight-well fluid/tip
+inventory accounting. See [eight-channel calibration](calibration.md#eight-channel-pipettes)
+before running hardware.
+
 Every instrument entry accepts these shared fields:
 
 - `type` *(str, required)* — a type from `packages/core/src/cubos/instruments/registry.yaml`.
