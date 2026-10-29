@@ -12,7 +12,10 @@ import type {
   LabwareConfig,
 } from "../../types";
 import JogPanel, { MIN_JOG_STEP } from "../gantry/JogPanel";
+import LimitRecoveryControls from "../gantry/LimitRecoveryControls";
 import { createJogPacer, jogPaceMs } from "../gantry/jogPacing";
+import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "../gantry/gantryAlarm";
+import { useCalibrationAutoRecovery } from "../../hooks/useCalibrationAutoRecovery";
 
 interface Props {
   open: boolean;
@@ -135,6 +138,7 @@ export default function LabwareCalibrationModal({
   initialMode = "calibrate",
   saveToFile = true,
 }: Props) {
+  const autoRecovery = useCalibrationAutoRecovery(open, position?.connected ?? false);
   const [mode, setMode] = useState<"new" | "calibrate">(initialMode);
   const [step, setStep] = useState(0);
   const [labwareType, setLabwareType] = useState("");
@@ -153,6 +157,9 @@ export default function LabwareCalibrationModal({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [alarmMessage, setAlarmMessage] = useState<string | null>(null);
+  const alarmLatched = useRef(false);
+  const [recoveringLimit, setRecoveringLimit] = useState(false);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previousOpen = useRef(false);
@@ -232,6 +239,10 @@ export default function LabwareCalibrationModal({
   }, [activeConfig, labwareEntries]);
 
   const connected = position?.connected ?? false;
+  const homing = isGantryHoming(position?.status);
+  const controllerFault = hasGantryAlarm(position?.status) ? position?.status ?? null : null;
+  const alarmed = !!alarmMessage || !!controllerFault;
+  const homeRequired = /home required/i.test(`${alarmMessage ?? ""} ${controllerFault ?? ""}`);
   const targets = useMemo(
     () => (activeConfig ? targetsForLabware(activeConfig) : []),
     [activeConfig],
@@ -290,6 +301,9 @@ export default function LabwareCalibrationModal({
     setBusy(false);
     setError(null);
     setStatusNote(null);
+    setAlarmMessage(null);
+    alarmLatched.current = false;
+    setRecoveringLimit(false);
   }, [initialMode, open]);
 
   useEffect(() => {
@@ -314,7 +328,7 @@ export default function LabwareCalibrationModal({
   const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
       event.preventDefault();
-      if (!busy) onClose();
+      if (!busy) close();
       return;
     }
     if (event.key !== "Tab") return;
@@ -402,17 +416,26 @@ export default function LabwareCalibrationModal({
   const jogRequestCount = useRef(0);
   const jogPacer = useRef(createJogPacer()).current;
 
-  const jog = useCallback(async (x: number, y: number, z: number): Promise<boolean> => {
-    if (!connected || busy) return false;
+  const jog = useCallback(async (x: number, y: number, z: number, generation = autoRecovery.generation): Promise<boolean> => {
+    if (!open || !connected || busy || homing || alarmed || alarmLatched.current) return false;
+    const id = autoRecovery.issueJogId(generation);
+    if (!id) return false;
     jogRequestCount.current += 1;
     try {
-      await gantryApi.jog(x, y, z);
-      return true;
+      await gantryApi.jog(x, y, z, id);
+      return autoRecovery.active && autoRecovery.generation === generation;
     } catch (err) {
-      setError(errorMessage(err));
+      if (!autoRecovery.active || autoRecovery.generation !== generation) return false;
+      const message = errorMessage(err);
+      setCaptured({});
+      if (hasGantryAlarm(message)) {
+        alarmLatched.current = true;
+        setAlarmMessage(message);
+      } else autoRecovery.cancel();
+      setError(message);
       return false;
     }
-  }, [busy, connected]);
+  }, [alarmed, autoRecovery, busy, connected, homing, open]);
 
   // The pump reads jog through a ref so an in-flight hold always uses the
   // latest guards (connected/busy) instead of a stale closure.
@@ -421,17 +444,63 @@ export default function LabwareCalibrationModal({
     jogRef.current = jog;
   }, [jog]);
 
-  const stopJog = useCallback(() => {
-    if (jogHeld.current === null) return;
+  const haltJogLocally = useCallback(() => {
     jogHeld.current = null;
-    if (jogRequestCount.current > 1) {
-      gantryApi.jogCancel().catch(() => undefined);
-    }
     jogRequestCount.current = 0;
     jogPacer.wake();
   }, [jogPacer]);
 
+  const stopJog = useCallback(() => {
+    if (jogHeld.current === null) return;
+    jogHeld.current = null;
+    if (jogRequestCount.current > 1) {
+      autoRecovery.cancel();
+      gantryApi.jogCancel().catch(() => undefined);
+    }
+    jogRequestCount.current = 0;
+    jogPacer.wake();
+  }, [autoRecovery, jogPacer]);
+
+  useEffect(() => {
+    if (!open || !controllerFault) return;
+    alarmLatched.current = true;
+    setAlarmMessage(controllerFault);
+    setStatusNote(null);
+    setCaptured({});
+    haltJogLocally();
+  }, [controllerFault, haltJogLocally, open]);
+
+  const unlockAlarm = async () => {
+    if (!connected || busy) return;
+    stopJog();
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await gantryApi.unlock();
+      if (/home required/i.test(result.status)) {
+        setAlarmMessage(result.status);
+        setStatusNote(null);
+        return;
+      }
+      if (!isVerifiedIdle(result)) throw new Error(`Controller is still blocked: ${result.status}`);
+      alarmLatched.current = false;
+      setAlarmMessage(null);
+      setStatusNote("Alarm cleared.");
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const close = () => {
+    autoRecovery.end();
+    stopJog();
+    onClose();
+  };
+
   const startJog = useCallback((x: number, y: number, z: number) => {
+    const generation = autoRecovery.generation;
     const heldBefore = jogHeld.current !== null;
     jogHeld.current = { x, y, z };
     if (heldBefore && jogPumpActive.current) {
@@ -441,19 +510,19 @@ export default function LabwareCalibrationModal({
     if (!jogPumpActive.current) {
       jogRequestCount.current = 0;
     }
-    const first = jogRef.current(x, y, z);
+    const first = jogRef.current(x, y, z, generation);
     if (jogPumpActive.current) return;
     jogPumpActive.current = true;
     const pump = async () => {
       try {
         let sent = { x, y, z };
         let ok = await first;
-        while (ok && jogHeld.current) {
+        while (ok && jogHeld.current && autoRecovery.generation === generation) {
           await jogPacer.sleep(jogPaceMs(sent.x, sent.y, sent.z));
           const delta = jogHeld.current;
           if (!delta) break;
           sent = delta;
-          ok = await jogRef.current(delta.x, delta.y, delta.z);
+          ok = await jogRef.current(delta.x, delta.y, delta.z, generation);
         }
         if (!ok) {
           jogHeld.current = null;
@@ -463,15 +532,26 @@ export default function LabwareCalibrationModal({
       }
     };
     void pump();
-  }, [jogPacer]);
+  }, [autoRecovery, jogPacer]);
 
   useEffect(() => () => stopJog(), [stopJog]);
 
   const recordTarget = async (target: Target) => {
+    if (homing || alarmed || alarmLatched.current) return;
+    const generation = autoRecovery.generation;
+    const lifetime = autoRecovery.lifetime;
     setBusy(true);
     setError(null);
     try {
       const result = await gantryApi.getPosition();
+      if (!autoRecovery.active || autoRecovery.generation !== generation) return;
+      if (isGantryHoming(result.status)) throw new Error("Wait for homing to finish before recording a position.");
+      if (hasGantryAlarm(result.status)) {
+        setCaptured({});
+        alarmLatched.current = true;
+        setAlarmMessage(result.status);
+        throw new Error(`Cannot record a position while the controller is blocked: ${result.status}`);
+      }
       const raw = requireWorkPosition(result);
       // Snapshot the offset/instrument active right now — not read live
       // later — so a later Back + instrument/tip change can't retroactively
@@ -485,9 +565,9 @@ export default function LabwareCalibrationModal({
         `${selectedInstrumentName}${tipApplies ? " + tip" : ""}).`,
       );
     } catch (err) {
-      setError(errorMessage(err));
+      if (autoRecovery.active && autoRecovery.generation === generation) setError(errorMessage(err));
     } finally {
-      setBusy(false);
+      if (autoRecovery.active && autoRecovery.lifetime === lifetime) setBusy(false);
     }
   };
 
@@ -506,6 +586,7 @@ export default function LabwareCalibrationModal({
 
   const save = async () => {
     if (!deck || !activeConfig) return;
+    const lifetime = autoRecovery.lifetime;
     setBusy(true);
     setError(null);
     try {
@@ -535,11 +616,13 @@ export default function LabwareCalibrationModal({
         writable: true,
       });
       await onSaveDeck(deck.filename, { labware });
+      if (!autoRecovery.active || autoRecovery.lifetime !== lifetime) return;
+      autoRecovery.end();
       onClose();
     } catch (err) {
-      setError(errorMessage(err));
+      if (autoRecovery.active && autoRecovery.lifetime === lifetime) setError(errorMessage(err));
     } finally {
-      setBusy(false);
+      if (autoRecovery.active && autoRecovery.lifetime === lifetime) setBusy(false);
     }
   };
 
@@ -576,7 +659,7 @@ export default function LabwareCalibrationModal({
               {selectedLabel ? ` · ${selectedLabel}` : ""}
             </div>
           </div>
-          <button onClick={onClose} style={closeButtonStyle} aria-label="Close labware calibration">
+          <button onClick={close} style={closeButtonStyle} aria-label="Close labware calibration">
             ×
           </button>
         </div>
@@ -596,7 +679,29 @@ export default function LabwareCalibrationModal({
           </aside>
 
           <section style={contentStyle}>
-            {error && <div style={errorStyle}>{error}</div>}
+            {alarmed && (
+              <div role="alert" style={errorStyle}>
+                <strong>{homeRequired ? "HOME REQUIRED" : "GANTRY ALARM"}</strong>
+                {!homeRequired && <div>{alarmMessage ?? controllerFault}</div>}
+                <div>{homeRequired ? "Close calibration, clear the gantry path, then Home before recording positions." : "Inspect the limit switches before unlocking or homing."}</div>
+                {homeRequired && <button onClick={close} style={theme.btn.danger}>Close calibration</button>}
+                {(!homeRequired || recoveringLimit) && <LimitRecoveryControls
+                  connected={connected} disabled={busy || homing}
+                  onStart={haltJogLocally}
+                  autoRecovery={autoRecovery}
+                  onBusyChange={(value) => { setRecoveringLimit(value); setBusy(value); }}
+                  onRecovered={(result) => {
+                    setAlarmMessage("Home required");
+                    setStatusNote(result.mode === "manual" ? "Manual pull-off complete." : "Pull-off complete.");
+                  }}
+                  onError={setError}
+                />}
+                {!homeRequired && <button onClick={() => void unlockAlarm()} disabled={!connected || busy} style={theme.btn.danger}>
+                  {busy ? "Clearing alarm…" : "Unlock alarm"}
+                </button>}
+              </div>
+            )}
+            {error && error !== alarmMessage && <div style={errorStyle}>{error}</div>}
             {statusNote && <div style={noteStyle}>{statusNote}</div>}
 
             {step === 0 && (
@@ -793,7 +898,7 @@ export default function LabwareCalibrationModal({
                 <p style={instructionStyle}>
                   Manually adjust each position below with {selectedInstrumentName || "the instrument"}
                   {tipApplies ? " (tip attached)" : ""}, then record it. Positions you do not
-                  want to change can keep their saved value.
+                  want to change can keep their saved value. Eligible limit faults back off once automatically.
                 </p>
                 {!connected && (
                   <div style={warningStyle}>
@@ -840,8 +945,8 @@ export default function LabwareCalibrationModal({
                       zStep={zStep}
                       setXyStep={setXyStep}
                       setZStep={setZStep}
-                      disabled={!connected || busy}
-                      alarmed={false}
+                      disabled={!connected || busy || homing}
+                      alarmed={alarmed}
                       onStartJog={startJog}
                       onStopJog={stopJog}
                       xy={xy}
@@ -855,8 +960,8 @@ export default function LabwareCalibrationModal({
                     <div style={actionRowStyle}>
                       <button
                         onClick={() => void recordTarget(nextTarget)}
-                        disabled={busy || !connected}
-                        style={buttonStateStyle(primaryButtonStyle, busy || !connected)}
+                        disabled={busy || !connected || homing || alarmed}
+                        style={buttonStateStyle(primaryButtonStyle, busy || !connected || homing || alarmed)}
                       >
                         Record {nextTarget.label}
                       </button>
@@ -1143,7 +1248,7 @@ function hasRecorded(captured: Record<string, CapturedEntry>, id: string): boole
 
 function requireWorkPosition(position: GantryPosition): Coordinate3D {
   if (!position.connected) throw new Error("Gantry is not connected.");
-  if (position.work_x == null || position.work_y == null || position.work_z == null) {
+  if (![position.work_x, position.work_y, position.work_z].every((value) => typeof value === "number" && Number.isFinite(value))) {
     throw new Error("Work coordinate position is not available. Home the gantry before recording positions.");
   }
   return {

@@ -48,6 +48,9 @@ class ScriptedSerial:
     def flush(self):
         pass
 
+    def reset_input_buffer(self):
+        self.lines.clear()
+
     def read_all(self):
         return b""
 
@@ -276,7 +279,8 @@ class TestCNCDriverLogic(unittest.TestCase):
         mill.ser_mill = FakeGrblSerial(jog_response="error:8")
 
         mill.jog()
-        mill.jog(x=1.0, z=-2.0)
+        with self.assertRaisesRegex(CommandExecutionError, "error:8"):
+            mill.jog(x=1.0, z=-2.0)
         mill.jog_cancel()
         mill.unlock()
         mill.soft_reset()
@@ -332,30 +336,22 @@ class TestCNCDriverLogic(unittest.TestCase):
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
     @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
-    def test_soft_reset_and_unlock_reconnects_when_link_dies(
+    def test_soft_reset_and_unlock_does_not_reconnect_when_link_dies(
         self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_sleep,
     ):
         mill = Mill()
-        # Dead link: writes succeed into the void, reads never answer — the
-        # signature of a controller that dropped off the USB bus.
-        dead = FakeGrblSerial()
-        dead.write = MagicMock(return_value=1)
-        mill.ser_mill = dead
-        alive = FakeGrblSerial()
-        alive.queue_line("ok")
+        failure = MillConnectionError("USB disconnected")
+        mill.soft_reset = MagicMock()
+        mill.unlock = MagicMock(side_effect=failure)
+        mill.reconnect = MagicMock()
 
-        def fake_reconnect(attempts=4, delay_s=1.0):
-            mill.ser_mill = alive
+        with self.assertRaises(MillConnectionError) as caught:
+            mill.soft_reset_and_unlock()
 
-        with patch.object(Mill, "reconnect", side_effect=fake_reconnect) as mock_reconnect:
-            with patch(
-                'cubos.gantry.gantry_driver.driver.time.time',
-                side_effect=[0.0, 3.0, 10.0, 10.1, 10.2],
-            ):
-                mill.soft_reset_and_unlock()
-
-        mock_reconnect.assert_called_once()
-        self.assertIn(b"$X\n", alive.writes)
+        self.assertIs(caught.exception, failure)
+        mill.soft_reset.assert_called_once()
+        mill.unlock.assert_called_once()
+        mill.reconnect.assert_not_called()
 
     @patch('cubos.gantry.gantry_driver.driver.time.sleep')
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
@@ -839,49 +835,44 @@ class TestCNCDriverLogic(unittest.TestCase):
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
     @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
-    def test_home_retries_transient_status_failures(
+    def test_home_status_failure_propagates_without_retry(
         self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_time, mock_sleep,
     ):
         mill = Mill()
+        mill.homed = True
         mill.execute_command = MagicMock()
-        mill.current_status = MagicMock(
-            side_effect=[
-                StatusReturnError("Failed to get status from the mill"),
-                "<Idle|WPos:0,0,0|FS:0,0>",
-            ]
-        )
+        failure = StatusReturnError("Failed to get status from the mill")
+        mill.current_status = MagicMock(side_effect=failure)
 
-        mill.home(timeout=1)
+        with self.assertRaises(StatusReturnError) as caught:
+            mill.home(timeout=90)
 
-        self.assertTrue(mill.homed)
-        self.assertEqual(mill.current_status.call_count, 2)
+        self.assertIs(caught.exception, failure)
+        self.assertFalse(mill.homed)
+        mill.current_status.assert_called_once()
+        mill.execute_command.assert_called_once_with("$H")
 
     @patch('cubos.gantry.gantry_driver.driver.time.sleep')
-    @patch('cubos.gantry.gantry_driver.driver.time.time', side_effect=[0.0, 0.2, 0.4])
+    @patch('cubos.gantry.gantry_driver.driver.time.time', return_value=0.0)
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
     @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')
     @patch('cubos.gantry.gantry_driver.driver.set_up_command_logger')
-    def test_home_alarm_retry_drains_before_retrying(
+    def test_home_alarm_stops_without_clearing_buffers_or_retrying(
         self, mock_cmd_logger, mock_mill_logger, mock_serial, mock_time, mock_sleep,
     ):
         mill = Mill()
-        mill.ser_mill = ScriptedSerial()
+        mill.homed = True
         mill.execute_command = MagicMock()
-        mill.current_status = MagicMock(
-            side_effect=[
-                "<Alarm|WPos:0,0,0|FS:0,0>",
-                "<Idle|WPos:0,0,0|FS:0,0>",
-            ]
-        )
+        mill.current_status = MagicMock(return_value="<Alarm|WPos:0,0,0|FS:0,0>")
         mill.clear_buffers = MagicMock()
 
-        mill.home(timeout=1)
+        with self.assertRaisesRegex(StatusReturnError, "Homing failed"):
+            mill.home(timeout=90)
 
-        self.assertEqual(mill.execute_command.call_args_list, [
-            call("$H"),
-            call("$H"),
-        ])
-        mill.clear_buffers.assert_called_once()
+        self.assertFalse(mill.homed)
+        mill.current_status.assert_called_once()
+        mill.execute_command.assert_called_once_with("$H")
+        mill.clear_buffers.assert_not_called()
 
     @patch('cubos.gantry.gantry_driver.driver.serial.Serial')
     @patch('cubos.gantry.gantry_driver.driver.set_up_mill_logger')

@@ -1,4 +1,4 @@
-Read `AGENTS.md` first. It is the source of truth for retrieval, hardware-safety handoff order, progress notes, and validation gates.
+Read `AGENTS.md` first. It is the source of truth for retrieval, hardware-safety handoff order, PR content rules, and validation gates.
 
 In **TDD Mode** (planning sessions, new features, cross-repo interface changes): write tests alongside implementation and update docs as you go. In **Hardware Iteration Mode** (small changes under active hardware testing): defer tests and docs to close-out, mark deferred work with `# TODO(iter)`. See the "Development Modes" section of `AGENTS.md` for full mode definitions.
 

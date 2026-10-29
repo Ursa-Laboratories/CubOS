@@ -18,7 +18,7 @@ import re
 import threading
 import time
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 # third-party libraries
 import serial
@@ -26,9 +26,11 @@ import serial.tools.list_ports
 
 from .exceptions import (
     CommandExecutionError,
+    JogAcceptanceUnknownError,
     LocationNotFound,
     MillConnectionError,
     StatusReturnError,
+    StatusResponseTimeoutError,
 )
 from ..coordinates import Coordinates
 
@@ -119,6 +121,7 @@ class Mill:
         self._wco: Optional[Coordinates] = None
         self.last_status: str = ""
         self._last_status_query_at: float | None = None
+        self._guarded_reset_tail: tuple[str, list[str]] | None = None
 
     def _locate_over_serial(self, port: Optional[str] = None) -> Tuple[serial.Serial, str]:
         """
@@ -225,8 +228,22 @@ class Mill:
         ser_mill.write(b"$$\n")
         time.sleep(0.2)
 
-        statuses = ser_mill.readlines()
-        self.logger.info(f"Raw response: {statuses}")
+        statuses = []
+        original_timeout = ser_mill.timeout
+        deadline = time.monotonic() + 3.0
+        try:
+            ser_mill.timeout = 0.2
+            # Limit messages can stream indefinitely while a switch is pressed.
+            for _ in range(64):
+                if time.monotonic() >= deadline:
+                    break
+                line = ser_mill.readline()
+                if not line:
+                    break
+                statuses.append(line)
+        finally:
+            ser_mill.timeout = original_timeout
+        self.logger.debug("Connection response: %s", statuses)
 
         for line in statuses:
             decoded = line.decode(errors='ignore').rstrip()
@@ -235,6 +252,7 @@ class Mill:
                 or decoded == "ok"
                 or decoded.startswith("$")
                 or decoded.startswith("<")
+                or decoded == "[MSG:Check Limits]"
             ):
                 return True
         return False
@@ -293,7 +311,9 @@ class Mill:
             raise MillConnectionError(
                 "No initial GRBL status response; cannot enforce WPos mode"
             )
-        if initial_status and "alarm" in initial_status.lower():
+        if initial_status and (
+            "alarm" in initial_status.lower() or "check limits" in initial_status.lower()
+        ):
             self.logger.warning(
                 "Mill is in alarm state — skipping config/setup. "
                 "Unlock ($X) or home ($H) to clear. Status: %s",
@@ -356,20 +376,27 @@ class Mill:
         return mill_config
 
     def _collect_grbl_settings_response(self) -> dict:
-        """Drain serial until ``ok`` arrives, then parse the $$ block."""
+        """Read a nonempty settings block through its terminating acknowledgement."""
         deadline = time.time() + 5
         self._require_open_serial()
-        lines = [self.ser_mill.readline().decode(encoding="ascii", errors="replace").rstrip()]
-        while lines[-1] != "ok":
+        lines = []
+        for _ in range(256):
             if time.time() > deadline:
-                raise StatusReturnError("Timed out waiting for GRBL settings response")
-            if lines[-1].lower().startswith(("error", "alarm")):
-                raise StatusReturnError(
-                    f"Error in settings response: {lines[-1]}"
-                )
-            lines.append(self.ser_mill.readline().decode(encoding="ascii", errors="replace").rstrip())
-        self.logger.debug("Returned %s", lines[:-1])
-        return self._parse_grbl_settings_response(lines[:-1])
+                break
+            line = self.ser_mill.readline().decode(encoding="ascii", errors="replace").strip()
+            lowered = line.lower()
+            if lowered.startswith(("error", "alarm", "<alarm")) or "[msg:check limits]" in lowered:
+                raise StatusReturnError(f"Error in settings response: {line}")
+            if lowered == "ok":
+                if not lines:
+                    continue
+                self.logger.debug("Returned %s", lines)
+                return self._parse_grbl_settings_response(lines)
+            if re.match(r"^\$\d+\s*=\s*\S", line):
+                lines.append(line)
+        raise StatusReturnError(
+            "Timed out or incomplete GRBL settings response; no complete settings block verified."
+        )
 
     def _parse_grbl_settings_response(self, response_lines: list[str]) -> dict:
         """Parse a GRBL $$ response into a settings dictionary."""
@@ -421,7 +448,7 @@ class Mill:
                     )
                 self.logger.debug("Returned %s", mill_response)
 
-                if not re.search(r"(error|alarm)", mill_response):
+                if not re.search(r"(error|alarm|\[msg:check limits\])", mill_response):
                     break
 
                 if re.search(r"error:22", mill_response) and attempt < ERROR_22_MAX_RETRIES:
@@ -471,7 +498,8 @@ class Mill:
         self._write_serial(b"~")
 
     def jog(self, x: float = 0, y: float = 0, z: float = 0,
-            feed_rate: float = DEFAULT_FEED_RATE) -> None:
+            feed_rate: float = DEFAULT_FEED_RATE, *, recovery_axis: str | None = None,
+            check_cancelled: Callable[[], None] | None = None) -> None:
         """Send a GRBL jog command ($J=) for immediate, cancellable movement.
 
         Unlike G-code moves, jog commands are non-blocking and can be
@@ -493,21 +521,74 @@ class Mill:
             parts.append(f"Z{z:.3f}")
         if not parts:
             return
+        if recovery_axis is not None:
+            delta = {"x": x, "y": y, "z": z}
+            if (
+                recovery_axis not in delta
+                or [axis for axis, value in delta.items() if value] != [recovery_axis]
+                or abs(delta[recovery_axis]) not in (1.0, 5.0)
+                or feed_rate != 100.0
+            ):
+                raise ValueError("Guarded recovery jog requires one matching 1 or 5 mm axis at 100 mm/min.")
+            if check_cancelled is not None:
+                check_cancelled()
+            self._drain_recovery_jog_input(recovery_axis)
         cmd = f"$J=G91 {' '.join(parts)} F{feed_rate}"
         self.logger.debug("Jog command: %s", cmd)
+        if recovery_axis is not None and check_cancelled is not None:
+            check_cancelled()
         self._write_serial((cmd + "\n").encode("ascii"))
-        response = self._read_serial().lower()
-        if (
-            "error" in response
-            or "alarm" in response
-            or "check limits" in response
-        ):
-            # error:8 = "not idle" (planner buffer full) — safe to ignore
-            if "error:8" in response:
-                self.logger.debug("Jog buffer full, skipping")
+        deadline = time.monotonic() + 2.0 if recovery_axis is not None else None
+        for _ in range(32 if recovery_axis is not None else 1):
+            if recovery_axis is not None and check_cancelled is not None:
+                check_cancelled()
+            if deadline is not None and time.monotonic() >= deadline:
+                break
+            response = self._read_serial().strip().lower()
+            if recovery_axis is not None and response == "[msg:check limits]":
+                self.logger.info("Guarded recovery jog courtesy: %s", response)
+                continue
+            if "error" in response or "alarm" in response or "check limits" in response:
+                self.logger.error("Jog error: %s", response)
+                raise CommandExecutionError(f"Jog failed: {response}")
+            if response == "ok":
+                if recovery_axis is not None:
+                    self.logger.info("Guarded recovery jog acknowledged with ok")
                 return
-            self.logger.error("Jog error: %s", response)
-            raise CommandExecutionError(f"Jog failed: {response}")
+            raise JogAcceptanceUnknownError(
+                f"Jog acceptance is unknown; expected ok, received {response!r}."
+            )
+        raise JogAcceptanceUnknownError("Guarded recovery jog did not receive its own ok within the response limits.")
+
+    def _drain_recovery_jog_input(self, axis: str) -> None:
+        """Validate buffered notices before the recovery command acknowledgement boundary."""
+        try:
+            waiting = int(self.ser_mill.in_waiting)
+            if waiting < 0 or waiting > 4096:
+                raise CommandExecutionError("Recovery jog input exceeds the validation byte limit.")
+            consumed = 0
+            deadline = time.monotonic() + 2.0
+            for _ in range(128):
+                if consumed >= waiting:
+                    return
+                if time.monotonic() >= deadline:
+                    break
+                raw = self.ser_mill.readline()
+                consumed += len(raw)
+                if not raw.endswith(b"\n") or consumed > 4096:
+                    raise CommandExecutionError("Recovery jog input is incomplete or exceeds the byte limit.")
+                line = raw.decode("ascii", errors="replace").strip()
+                lowered = line.lower()
+                if not line or lowered in ("ok", "[msg:check limits]"):
+                    self.logger.info("Buffered recovery jog notice: %s", line)
+                    continue
+                pins = re.search(r"Pn:([^|>;\s]*)", line, re.IGNORECASE)
+                if re.match(r"^<idle(?:\||>)", line, re.IGNORECASE) and line.endswith(">") and pins and set(pins.group(1).lower()) == {axis}:
+                    continue
+                raise CommandExecutionError(f"Unexpected buffered recovery jog response: {line}")
+            raise CommandExecutionError("Recovery jog input could not be validated within the response limits.")
+        except (serial.SerialException, OSError) as exc:
+            raise MillConnectionError(f"Recovery jog input validation failed: {exc}") from exc
 
     def jog_cancel(self) -> None:
         """Cancel any in-progress jog motion immediately."""
@@ -515,12 +596,14 @@ class Mill:
         self._write_serial(b"\x85")
 
     def unlock(self):
-        """Unlock the mill by sending $X directly over serial."""
+        """Send one $X and await its acknowledgement; callers verify state."""
         self._require_open_serial()
         self.logger.info("Sending unlock ($X)")
         self._write_serial(b"$X\n")
         deadline = time.time() + 2
-        while time.time() < deadline:
+        for _ in range(32):
+            if time.time() >= deadline:
+                break
             line = self.ser_mill.readline().decode("ascii", errors="replace").strip()
             if not line:
                 time.sleep(0.05)
@@ -529,19 +612,42 @@ class Mill:
             lowered = line.lower()
             if lowered == "ok":
                 return
-            if lowered.startswith(("error", "alarm")):
+            if "[msg:check limits]" in lowered:
+                self.last_status = line
+                self.logger.warning("Unlock reports Check Limits; fresh state verification is required")
+                continue
+            if lowered.startswith(("error", "alarm", "<alarm", "<error")):
+                self.last_status = line
                 raise CommandExecutionError(f"Unlock ($X) failed: {line}")
         raise CommandExecutionError("Unlock ($X) timed out waiting for ok")
 
-    def soft_reset(self):
-        """Soft reset the mill (GRBL Ctrl-X / 0x18)."""
+    def soft_reset(self, *, recovery_axis: str | None = None) -> list[str] | None:
+        """Reset once; only guarded limit recovery tolerates expected startup chatter."""
+        if recovery_axis is not None and recovery_axis not in ("x", "y", "z"):
+            raise ValueError("Guarded reset requires an x, y, or z axis.")
         self._require_open_serial()
+        self._discard_preexisting_input()
         self.logger.info("Sending soft reset (0x18)")
         self._write_serial(b"\x18")
         time.sleep(1.0)
-        while self.ser_mill.in_waiting:
+        notices: list[str] = []
+        deadline = time.monotonic() + 2.0
+        for _ in range(32):
+            if not self.ser_mill.in_waiting:
+                if recovery_axis:
+                    self._guarded_reset_tail = (recovery_axis, notices)
+                    return notices
+                return None
+            if time.monotonic() >= deadline:
+                break
             line = self.ser_mill.readline().decode("ascii", errors="replace").strip()
             self.logger.debug("Soft reset response: %s", line)
+            if recovery_axis is not None:
+                self._record_guarded_reset_notice(line, recovery_axis, notices)
+        if recovery_axis is not None and notices:
+            self._guarded_reset_tail = (recovery_axis, notices)
+            return notices
+        raise CommandExecutionError("Soft reset response did not settle; inspect the controller before retrying.")
 
     def reconnect(self, attempts: int = 4, delay_s: float = 1.0) -> None:
         """Re-open the serial port after the controller dropped off the bus.
@@ -582,76 +688,52 @@ class Mill:
         ) from last_error
 
     def soft_reset_and_unlock(self):
-        """Soft reset followed by unlock — single serial sequence.
-
-        Some controller boards drop off the USB bus when a hard-limit trip
-        glitches their supply rail; the first symptom is the unlock read
-        timing out here. Reconnect once and retry the unlock — after a bus
-        drop the board has already rebooted, so the reset part is moot.
-        """
-        try:
-            self.soft_reset()
-            self.unlock()
-        except (
-            MillConnectionError,
-            CommandExecutionError,
-            OSError,
-            serial.SerialException,
-        ) as exc:
-            if not looks_like_connection_loss(exc):
-                raise
-            self.logger.warning(
-                "Controller stopped responding during reset/unlock (%s); "
-                "attempting serial reconnect.",
-                exc,
-            )
-            self.reconnect()
-            self.unlock()
+        """Perform one reset/unlock sequence; transport failures propagate."""
+        self.soft_reset()
+        self.unlock()
 
     def home(self, timeout=HOMING_TIMEOUT):
-        """Home the mill with a timeout."""
+        """Run one homing cycle and verify completion within its deadline."""
+        self.homed = False
         self.execute_command("$H")
         time.sleep(1)
         start_time = time.time()
-        last_status_error = None
 
         while True:
             if time.time() - start_time > timeout:
-                self.logger.warning("Homing timed out")
-                if last_status_error is not None:
-                    raise StatusReturnError(
-                        f"Homing timed out after {timeout} seconds; "
-                        f"last status error: {last_status_error}"
-                    ) from last_status_error
-                raise StatusReturnError(f"Homing timed out after {timeout} seconds")
+                raise StatusReturnError(
+                    f"Homing completion did not verify after {timeout} seconds. "
+                    "The controller may still be moving; use Stop and inspect before retrying."
+                )
 
             try:
                 status = self.current_status()
-            except StatusReturnError as exc:
-                last_status_error = exc
-                self.logger.warning("No valid status during homing; retrying: %s", exc)
+            except StatusResponseTimeoutError:
+                self.logger.warning("No status frame during homing; continuing status checks within the original deadline")
                 time.sleep(0.5)
                 continue
-
-            if "Idle" in status:
-                self.logger.info("Homing completed")
-                self.homed = True
-                break
-
-            if "hold" in status.lower():
+            lowered = status.lower()
+            if "alarm" in lowered or "error" in lowered:
+                raise StatusReturnError(
+                    f"Homing failed ({status}). Inspect the controller before retrying."
+                )
+            if "hold" in lowered:
                 raise StatusReturnError(
                     "Homing paused by feed hold "
                     f"({status}). Resume or reset/unlock before retrying."
                 )
-
-            if "alarm" in status.lower():
-                self.logger.warning("Homing failed, trying again...")
-                self.clear_buffers()
-                try:
-                    self.execute_command("$H")
-                except CommandExecutionError as exc:
-                    last_status_error = exc
-                    self.logger.warning("Homing retry command failed: %s", exc)
+            if re.match(r"^<idle(?:\||>)", status, re.IGNORECASE):
+                if time.time() - start_time > timeout:
+                    continue
+                pins = re.search(r"(?:\||^)Pn:([^|>]*)", status, re.IGNORECASE)
+                if pins and any(axis in pins.group(1).lower() for axis in "xyz"):
+                    raise StatusReturnError(
+                        f"Homing ended with a limit pin active ({status}). "
+                        "Inspect the switch before retrying."
+                    )
+                self.logger.info("Homing completed")
+                self.homed = True
+                return
 
             time.sleep(0.5)
 
@@ -667,7 +749,7 @@ class Mill:
                 if not suppress_errors:
                     self.logger.error("Error in status: %s", status)
                 raise StatusReturnError(f"Error in status: {status}")
-            if "alarm" in lowered:
+            if "alarm" in lowered or "[msg:check limits]" in lowered:
                 if not suppress_errors:
                     self.logger.error("Alarm in status: %s", status)
                 raise StatusReturnError(f"Alarm in status: {status}")
@@ -679,29 +761,115 @@ class Mill:
             status = self.current_status()
         return status
 
-    def current_status(self) -> str:
+    def current_status(self, *, recovery: bool = False) -> str:
         """Request a controller report, spacing repeated queries at 5 Hz."""
         self._require_open_serial()
+        guarded_reset_context = None
         for _ in range(5):
             if self._last_status_query_at is not None:
                 delay = STATUS_POLL_INTERVAL - (time.monotonic() - self._last_status_query_at)
                 if delay > 0:
                     time.sleep(delay)
+            if recovery:
+                guarded_reset_context = self._discard_preexisting_input(guarded_reset_context=guarded_reset_context)
+            startup_complete_at_query = bool(
+                guarded_reset_context and any(notice.lower() == "ok" for notice in guarded_reset_context[1])
+            )
             self._write_serial(b"?")
             self._last_status_query_at = time.monotonic()
             for _ in range(10):
                 status = self._read_serial().strip()
                 if not status:
                     break
-                if status.lower().startswith(("error:", "alarm:")):
+                if status.lower() == "[msg:check limits]" and recovery:
+                    self.last_status = status
+                    continue
+                if status.lower().startswith(("error:", "alarm:")) or "[msg:check limits]" in status.lower():
                     self.last_status = status
                     raise StatusReturnError(f"Error in status: {status}")
                 if status.startswith("<") and status.endswith(">"):
+                    if (
+                        guarded_reset_context is not None
+                        and not startup_complete_at_query
+                        and any(notice.lower() == "grbl for arm32" for notice in guarded_reset_context[1])
+                    ):
+                        self._record_guarded_reset_notice(status, *guarded_reset_context)
+                        break
                     self.last_status = status
                     return status
+                if guarded_reset_context is not None:
+                    self._record_guarded_reset_notice(status, *guarded_reset_context)
                 # Acknowledgments and informational messages are not motion completion.
         self.logger.error("Failed to get status from the mill")
-        raise StatusReturnError("Failed to get status from the mill")
+        raise StatusResponseTimeoutError("Failed to get status from the mill")
+
+    def _record_guarded_reset_notice(self, line: str, axis: str, notices: list[str]) -> None:
+        if not line:
+            return
+        lowered = line.lower()
+        arm32_identified = (
+            any(notice.lower() == "grbl for arm32" for notice in notices)
+            and any(notice.lower() == "version:arm32 v3.8" for notice in notices)
+        )
+        setting_pattern = r"\$\d{1,3}=[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:\s*\([^\r\n]*\))?"
+        allowed = (
+            lowered in ("[msg:check limits]", "[msg:'$h'|'$x' to unlock]", "grbl for arm32")
+            or (lowered == "ok" and arm32_identified and any(re.fullmatch(setting_pattern, notice) for notice in notices))
+            or (lowered == "version:arm32 v3.8" and any(notice.lower() == "grbl for arm32" for notice in notices))
+            or (
+                arm32_identified and re.fullmatch(setting_pattern, line) is not None
+            )
+            or re.match(r"^grbl\s+\d", lowered) is not None
+            or re.fullmatch(r"alarm:[123]", lowered) is not None
+        )
+        if line.startswith("<") and line.endswith(">"):
+            pins = re.search(r"Pn:([^|>;\s]*)", line, re.IGNORECASE)
+            allowed = bool(
+                re.match(r"^<(?:idle|alarm)(?:\||>)", line, re.IGNORECASE)
+                and pins and set(pins.group(1).lower()) == {axis}
+            )
+        if not allowed:
+            raise CommandExecutionError(f"Unexpected guarded reset response: {line}")
+        self.last_status = line
+        if line not in notices:
+            notices.append(line)
+            self.logger.info("Guarded reset notice: %s", line)
+
+    def _discard_preexisting_input(
+        self, *, guarded_reset_context: tuple[str, list[str]] | None = None,
+    ) -> tuple[str, list[str]] | None:
+        """Validate buffered reset output; otherwise discard old recovery RX."""
+        self._require_open_serial()
+        context = guarded_reset_context or self._guarded_reset_tail
+        self._guarded_reset_tail = None
+        try:
+            if context is None:
+                self.ser_mill.reset_input_buffer()
+                return None
+            waiting = int(self.ser_mill.in_waiting)
+            if waiting < 0 or waiting > 16384:
+                raise CommandExecutionError("Buffered reset output exceeds the validation byte limit.")
+            consumed = 0
+            deadline = time.monotonic() + 2.0
+            for _ in range(1024):
+                startup_incomplete = (
+                    any(notice.lower() == "grbl for arm32" for notice in context[1])
+                    and not any(notice.lower() == "ok" for notice in context[1])
+                )
+                if consumed >= waiting and not startup_incomplete:
+                    return context
+                if time.monotonic() >= deadline:
+                    break
+                raw = self.ser_mill.readline()
+                if not raw and startup_incomplete:
+                    raise CommandExecutionError("ARM32 startup completion was not verified before the recovery query.")
+                consumed += len(raw)
+                if not raw.endswith(b"\n") or consumed > 16384:
+                    raise CommandExecutionError("Buffered reset output is incomplete or exceeds the byte limit.")
+                self._record_guarded_reset_notice(raw.decode("ascii", errors="replace").strip(), *context)
+            raise CommandExecutionError("Buffered reset output could not be validated within the response limits.")
+        except (serial.SerialException, OSError) as exc:
+            raise MillConnectionError(f"Could not discard stale recovery input: {exc}") from exc
 
     def _read_serial(self):
         self._require_open_serial()
@@ -862,7 +1030,7 @@ class Mill:
             )
         return None
 
-    def current_coordinates(self) -> Coordinates:
+    def current_coordinates(self, *, recovery: bool = False) -> Coordinates:
         """
         Get the current coordinates of the mill.
 
@@ -878,6 +1046,8 @@ class Mill:
         max_attempts = 4
         status = ""
         for attempt in range(max_attempts):
+            if recovery:
+                self._discard_preexisting_input()
             self._write_serial(b"?")
             time.sleep(0.05)
             status = self._read_serial()
@@ -887,6 +1057,7 @@ class Mill:
             while (not status or status[0] != "<") and skims < 6:
                 if status and (
                     "alarm" in status.lower() or "error" in status.lower()
+                    or ("[msg:check limits]" in status.lower() and (not recovery or status.lower() != "[msg:check limits]"))
                 ):
                     self.logger.error("Error in status: %s", status)
                     self.last_status = status

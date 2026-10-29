@@ -1092,6 +1092,31 @@ def test_reset_session_clears_module_global(monkeypatch):
     assert gantry_router.current_session() is None
 
 
+def test_blocking_jog_passes_explicit_slow_feed_rate(monkeypatch):
+    session = FakeSession()
+    monkeypatch.setattr(gantry_router, "_session", session)
+    response = api_request(create_app(), "POST", "/api/v1/gantry/jog-blocking", json={"y": 0.25, "feed_rate": 100})
+    assert response.status_code == 200
+    assert ("jog_blocking", {"x": 0, "y": 0.25, "z": 0, "timeout_s": 10, "feed_rate": 100}) in session.calls
+
+
+@pytest.mark.parametrize("feed_rate", [0, -1, 2001])
+def test_blocking_jog_rejects_unsafe_feed_rates(monkeypatch, feed_rate):
+    session = FakeSession()
+    monkeypatch.setattr(gantry_router, "_session", session)
+    response = api_request(create_app(), "POST", "/api/v1/gantry/jog-blocking", json={"y": 0.25, "feed_rate": feed_rate})
+    assert response.status_code == 422
+    assert session.calls == []
+
+
+def test_blocking_jog_rejects_nan_feed_rate(monkeypatch):
+    session = FakeSession()
+    monkeypatch.setattr(gantry_router, "_session", session)
+    response = api_request(create_app(), "POST", "/api/v1/gantry/jog-blocking", content='{"y":0.25,"feed_rate":NaN}', headers={"Content-Type": "application/json"})
+    assert response.status_code == 422
+    assert session.calls == []
+
+
 def test_motion_and_calibration_endpoints_reject_while_run_active(monkeypatch):
     session = FakeSession()
     monkeypatch.setattr(gantry_router, "_session", session)

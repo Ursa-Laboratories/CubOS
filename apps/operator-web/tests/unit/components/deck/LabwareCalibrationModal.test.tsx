@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import LabwareCalibrationModal from "./LabwareCalibrationModal";
+import LabwareCalibrationModal from "../../../../src/components/deck/LabwareCalibrationModal";
 import type {
   DeckConfig,
   DeckResponse,
@@ -11,7 +11,7 @@ import type {
   TipRackConfig,
   VialConfig,
   WellPlateConfig,
-} from "../../types";
+} from "../../../../src/types";
 
 function wellPlate(): WellPlateConfig {
   return {
@@ -131,6 +131,112 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("labware calibration alarm recovery", () => {
+  function json(body: unknown, status = 200) {
+    return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  }
+
+  async function setup() {
+    const user = userEvent.setup();
+    const modal = (status: string) => <LabwareCalibrationModal open onClose={() => undefined}
+      deck={deckResponse()} gantry={gantryResponse()} position={position({ status })}
+      onSaveDeck={async () => undefined} />;
+    const { rerender } = render(modal("Idle"));
+    await user.selectOptions(screen.getByLabelText("Labware type"), "tip_rack");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    return { user, poll: (status: string) => rerender(modal(status)) };
+  }
+
+  it("blocks jogging and recording while another client is homing without latching an alarm", async () => {
+    const fetchMock = vi.fn(async () => json(position()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { poll } = await setup();
+    poll("Homing");
+    expect(screen.getByRole("button", { name: "Z-" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Record A1" })).toBeDisabled();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
+    poll("Idle");
+    expect(screen.getByRole("button", { name: "Z-" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Record A1" })).toBeEnabled();
+  });
+
+  it("keeps alarm controls stable across cached Idle polls and a failed unlock", async () => {
+    let unlocks = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith("/jog")) return json({ detail: "ALARM:3 [MSG:Check Limits]" }, 409);
+      if (String(input).endsWith("/unlock")) {
+        unlocks++;
+        return json(position({ status: unlocks === 1 ? "[MSG:Check Limits]" : "Idle" }));
+      }
+      return json(position());
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { user, poll } = await setup();
+    await user.click(screen.getByRole("button", { name: "Z-" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("GANTRY ALARM");
+    poll("[MSG:Check Limits]");
+    poll("Idle");
+    expect(screen.getByRole("button", { name: "Unlock alarm" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Z-" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Record A1" })).toBeDisabled();
+    expect(screen.queryByRole("button", { name: "Pull off limit" })).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Unlock alarm" }));
+    expect(await screen.findByText(/Controller is still blocked/)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Unlock alarm" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).not.toBeInTheDocument());
+    expect(screen.getByRole("button", { name: "Z-" })).toBeEnabled();
+  });
+
+  it("requires an explicit pull-off and cancels recovery without clearing the fault", async () => {
+    let finishRecovery!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finishRecovery = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/recover-limit") ? pending : json(String(input).endsWith("/recovery-context") ? {
+      raw_status: "ALARM:3; Pn:Z", active_limit_axes: ["z"], failed_jog_delta: { x: 0, y: 0, z: -0.1 },
+      eligible: true, blocked_reason: null, pull_off_delta: { x: 0, y: 0, z: 5 }, manual_available: true,
+    } : position()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { user, poll } = await setup();
+    await user.click(screen.getByRole("button", { name: "Z-" }));
+    poll("ALARM:3 <Alarm|Pn:Z>");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
+    await user.click(await screen.findByRole("button", { name: "Pull off Z+ 5 mm" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/gantry/calibration/recover-limit", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ x: 0, y: 0, z: -0.1 }),
+    }));
+    expect(screen.getByRole("button", { name: "Z+" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Stop recovery" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/gantry/jog-cancel", expect.objectContaining({ method: "POST" }));
+    finishRecovery(json({ status: "recovered", attempts: 1, pull_off: { x: 0, y: 0, z: 1 }, messages: [] }));
+    await screen.findByText(/Recovery stopped/);
+    poll("Idle");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Z+" })).toBeDisabled();
+  });
+
+  it("requires homing after explicit pull-off succeeds without automatically homing", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => json(String(input).endsWith("/recover-limit")
+      ? { status: "recovered", mode: "known_jog", attempts: 1, pull_off: { x: 0, y: 0, z: 5 }, commanded_delta: { x: 0, y: 0, z: 5 }, failed_delta: { x: 0, y: 0, z: -0.1 }, messages: [] }
+      : String(input).endsWith("/recovery-context") ? {
+        raw_status: "ALARM:3; Pn:Z", active_limit_axes: ["z"], failed_jog_delta: { x: 0, y: 0, z: -0.1 }, eligible: true,
+        blocked_reason: null, pull_off_delta: { x: 0, y: 0, z: 5 }, manual_available: true,
+      } : position()));
+    vi.stubGlobal("fetch", fetchMock);
+    const { user, poll } = await setup();
+    await user.click(screen.getByRole("button", { name: "Z-" }));
+    poll("<Alarm|Pn:Z>");
+    await user.click(await screen.findByRole("button", { name: "Pull off Z+ 5 mm" }));
+    await screen.findByText("Pull-off complete.");
+    poll("Idle");
+    expect(screen.getByRole("alert")).toHaveTextContent("HOME REQUIRED");
+    expect(screen.getByRole("button", { name: "Record A1" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Z+" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/home"))).toBe(false);
+  });
+});
+
 describe("LabwareCalibrationModal", () => {
   it("lists labware types from the deck and filters items by type", async () => {
     const user = userEvent.setup();
@@ -243,10 +349,10 @@ describe("LabwareCalibrationModal", () => {
     const [filename, config] = onSaveDeck.mock.calls[0];
     expect(filename).toBe("demo_deck.yaml");
     const plate = config.labware.plate as WellPlateConfig;
-    expect(plate.calibration.a1).toEqual({ x: 110, y: 55, z: -110 });
+    expect(plate.calibration?.a1).toEqual({ x: 110, y: 55, z: -110 });
     // A2's raw delta is dominated by +X, so it snaps to exactly one x_offset
     // pitch from A1 (the loader requires the step to equal the pitch).
-    expect(plate.calibration.a2).toEqual({ x: 125, y: 55 });
+    expect(plate.calibration?.a2).toEqual({ x: 125, y: 55 });
     // Untouched labware rides along unchanged.
     expect(config.labware.s1).toEqual(vial());
     expect(config.labware.tips).toEqual(tipRack());
@@ -354,9 +460,9 @@ describe("LabwareCalibrationModal", () => {
     expect(added.name).toBe("Plate 2");
     expect(added.rows).toBe(8);
     expect(added.columns).toBe(12);
-    expect(added.calibration.a1).toEqual({ x: 100, y: 50, z: -30 });
+    expect(added.calibration?.a1).toEqual({ x: 100, y: 50, z: -30 });
     // Snapped to one 9 mm SBS pitch along the dominant +X jog.
-    expect(added.calibration.a2).toEqual({ x: 109, y: 50 });
+    expect(added.calibration?.a2).toEqual({ x: 109, y: 50 });
     // Existing labware rides along untouched.
     expect(config.labware.plate).toEqual(wellPlate());
   });
