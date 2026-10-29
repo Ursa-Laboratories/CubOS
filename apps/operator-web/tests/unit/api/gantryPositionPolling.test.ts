@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { gantryApi } from "./client";
+import { gantryApi } from "../../../src/api/client";
 
 function json(status: string) {
   return new Response(JSON.stringify({ connected: true, status, work_x: 0, work_y: 0, work_z: 0 }), { status: 200, headers: { "Content-Type": "application/json" } });

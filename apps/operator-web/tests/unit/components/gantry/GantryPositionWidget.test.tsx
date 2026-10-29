@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import GantryPositionWidget from "./GantryPositionWidget";
-import type { GantryConfig, GantryPosition, WorkingVolume } from "../../types";
+import GantryPositionWidget from "../../../../src/components/gantry/GantryPositionWidget";
+import type { GantryConfig, GantryPosition, WorkingVolume } from "../../../../src/types";
 
 function position(overrides: Partial<GantryPosition> = {}): GantryPosition {
   return {

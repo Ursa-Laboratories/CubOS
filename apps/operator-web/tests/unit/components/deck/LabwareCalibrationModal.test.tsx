@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import LabwareCalibrationModal from "./LabwareCalibrationModal";
+import LabwareCalibrationModal from "../../../../src/components/deck/LabwareCalibrationModal";
 import type {
   DeckConfig,
   DeckResponse,
@@ -11,7 +11,7 @@ import type {
   TipRackConfig,
   VialConfig,
   WellPlateConfig,
-} from "../../types";
+} from "../../../../src/types";
 
 function wellPlate(): WellPlateConfig {
   return {

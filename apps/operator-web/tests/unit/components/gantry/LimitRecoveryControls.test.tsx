@@ -1,8 +1,8 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import LimitRecoveryControls from "./LimitRecoveryControls";
-import type { LimitRecoveryContext, LimitRecoveryResult } from "../../api/client";
+import LimitRecoveryControls from "../../../../src/components/gantry/LimitRecoveryControls";
+import type { LimitRecoveryContext, LimitRecoveryResult } from "../../../../src/api/client";
 
 function context(overrides: Partial<LimitRecoveryContext> = {}): LimitRecoveryContext {
   return { raw_status: "ALARM:3; Pn:Y", active_limit_axes: ["y"], failed_jog_delta: { x: 0, y: 0.5, z: 0 }, eligible: true, blocked_reason: null, pull_off_delta: { x: 0, y: -5, z: 0 }, manual_available: true, ...overrides };

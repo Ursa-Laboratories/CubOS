@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from "vitest";
-import { gantryApi } from "./client";
+import { gantryApi } from "../../../src/api/client";
 
 afterEach(() => vi.unstubAllGlobals());
 

@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import CalibrationWizard from "./CalibrationWizard";
-import type { GantryConfig, GantryPosition } from "../../types";
+import CalibrationWizard from "../../../../src/components/gantry/CalibrationWizard";
+import type { GantryConfig, GantryPosition } from "../../../../src/types";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });

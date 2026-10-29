@@ -1,6 +1,6 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { useCalibrationAutoRecovery } from "./useCalibrationAutoRecovery";
+import { useCalibrationAutoRecovery } from "../../../src/hooks/useCalibrationAutoRecovery";
 
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "./gantryAlarm";
+import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "../../../../src/components/gantry/gantryAlarm";
 
 describe("gantry fault detection", () => {
   it.each(["ALARM:3", "[MSG:Check Limits]", "error:9 Reset to continue", "<Idle|Pn:Z>", "Home required"])("detects %s", (status) => {

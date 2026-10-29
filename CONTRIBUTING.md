@@ -88,6 +88,10 @@ above.
 
 Install development dependencies with the commands in [README.md](README.md).
 
+Frontend unit tests belong in `apps/operator-web/tests/unit/`, mirroring `src/`.
+Place new tests there and move legacy colocated tests when touching them.
+Playwright tests stay in `apps/operator-web/tests/e2e/`.
+
 Use focused tests while iterating, for example:
 
 ```bash

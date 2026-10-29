@@ -1,10 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import CalibrationWizard from "./CalibrationWizard";
-import LabwareCalibrationModal from "../deck/LabwareCalibrationModal";
-import type { DeckResponse, GantryPosition, GantryResponse } from "../../types";
-import type { LimitRecoveryContext } from "../../api/client";
+import CalibrationWizard from "../../../../src/components/gantry/CalibrationWizard";
+import LabwareCalibrationModal from "../../../../src/components/deck/LabwareCalibrationModal";
+import type { DeckResponse, GantryPosition, GantryResponse } from "../../../../src/types";
+import type { LimitRecoveryContext } from "../../../../src/api/client";
 
 type Mode = "gantry" | "labware";
 const gantry: GantryResponse = {
