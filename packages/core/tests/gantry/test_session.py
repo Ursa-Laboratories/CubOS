@@ -112,6 +112,9 @@ class FakeGantry:
     def reset_and_unlock(self):
         self.calls.append(("reset_and_unlock", None))
 
+    def reset_and_unlock_for_limit_recovery(self, *, axis, check_cancelled=None):
+        self.reset_and_unlock()
+
     def resume(self):
         self.calls.append(("resume", None))
 
@@ -161,6 +164,12 @@ class FakeGantry:
             "z": self.coords["z"] + float(kwargs.get("z", 0.0)),
         }
 
+    def get_recovery_status(self):
+        return self.get_status()
+
+    def get_recovery_position_info(self):
+        return self.get_position_info()
+
     def get_status(self):
         self.calls.append(("get_status", None))
         return self.status
@@ -170,6 +179,11 @@ class FakeGantry:
 
     def feed_hold_realtime(self):
         self.calls.append(("feed_hold_realtime", None))
+
+    def jog_for_limit_recovery(self, *, check_cancelled=None, **kwargs):
+        if check_cancelled is not None:
+            check_cancelled()
+        return self.jog(**kwargs)
 
     def jog_cancel(self):
         self.calls.append(("jog_cancel", None))
@@ -1070,3 +1084,1326 @@ def test_locked_entry_failure_preserves_exception_and_releases_lock(monkeypatch,
     assert acquired, "An interrupted context entry must release the acquired lock."
     session.operation_lock.release()
     assert session.connect(_write_gantry(tmp_path), filename="gantry.yaml").connected
+
+
+@pytest.mark.parametrize("status", ["<Idle|WPos:0,0,0|Pn:Z>", "<idle|Pn:XY>"])
+def test_blocking_jog_rejects_idle_with_active_limit(tmp_path, status):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = status
+    fake.calls.clear()
+
+    with pytest.raises(GantryAlarmError):
+        session.jog_blocking(z=1)
+
+    assert not fake.calls
+
+
+def test_alarm_stays_latched_across_failed_queries_and_cached_idle_until_verified_unlock(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    original_position = fake.get_position_info
+
+    for failure in [RuntimeError("ALARM:3"), RuntimeError("No position: [MSG:Check Limits]"), RuntimeError("No parsable position")]:
+        fake.get_position_info = lambda error=failure: (_ for _ in ()).throw(error)
+        snapshot = session.position()
+        assert snapshot.status == "ALARM:3"
+        assert snapshot.work_x is snapshot.work_y is snapshot.work_z is None
+
+    fake.get_position_info = original_position
+    assert session.position().status == "ALARM:3"
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError):
+        session.jog(z=1)
+    with pytest.raises(GantryAlarmError):
+        session.move_to_blocking(x=1, y=1, z=1)
+    assert not fake.calls
+
+    fake.status = "[MSG:Check Limits]"
+    with pytest.raises(GantryAlarmError):
+        session.unlock()
+    assert session.position().status == "ALARM:3"
+
+    fake.status = "Idle"
+    snapshot = session.unlock()
+    assert snapshot.status == "Home required"
+    assert snapshot.work_z is None
+    with pytest.raises(CalibrationBlockedError, match="Home before"):
+        session.jog(z=1)
+    snapshot = session.home()
+    assert snapshot.status == "Idle"
+    assert snapshot.work_z == 30
+    assert session.position().status == "Idle"
+
+
+def test_failed_position_query_never_returns_cached_idle_coordinates(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.get_position_info = lambda: (_ for _ in ()).throw(RuntimeError("No parsable position"))
+
+    snapshot = session.position()
+
+    assert snapshot.status == "Query failed"
+    assert snapshot.work_x is snapshot.work_y is snapshot.work_z is None
+    assert snapshot.x == 10
+
+
+@pytest.mark.parametrize("status", ["<Idle|Pn:Z>", "<Hold:0>", "[MSG:Check Limits]"])
+def test_unlock_acknowledgement_does_not_clear_fault_without_verified_idle(tmp_path, status):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session._latch_alarm_locked("ALARM:3")
+    fake.status = status
+
+    with pytest.raises(GantrySessionError):
+        session.unlock()
+
+    assert session.position().status.startswith("ALARM:3")
+
+
+def test_position_latches_limit_from_raw_status_and_blocks_jog_before_actuation(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.get_position_info = lambda: {
+        "coords": fake.coords, "work_pos": fake.coords,
+        "status": "Idle", "raw_status": "<Idle|WPos:10,20,30|Pn:Z>",
+    }
+
+    snapshot = session.position()
+
+    assert "Pn:Z" in snapshot.status
+    assert snapshot.work_z is None
+    with pytest.raises(GantryAlarmError):
+        session.jog(z=1)
+
+
+def test_unlock_connection_failure_keeps_alarm_and_propagates(tmp_path):
+    from cubos.gantry.errors import MillConnectionError
+
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    failure = MillConnectionError("USB disconnected")
+    session._latch_alarm_locked("ALARM:3")
+    fake.get_status = lambda: (_ for _ in ()).throw(failure)
+
+    with pytest.raises(MillConnectionError) as caught:
+        session.unlock()
+
+    assert caught.value is failure
+    assert session.position().status == "ALARM:3"
+
+
+def test_guarded_z_recovery_preserves_original_direction_and_requires_home(tmp_path):
+    class RecoveringZ(FakeGantry):
+        def reset_and_unlock(self):
+            super().reset_and_unlock()
+            self.status = "<Idle|Pn:Z>"
+
+        def jog(self, **kwargs):
+            super().jog(**kwargs)
+            self.status = "Idle"
+
+    session = GantrySession(gantry_factory=RecoveringZ, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(z=-1)
+    fake.status = "<Alarm|Pn:Z>"
+    session.position()
+
+    with pytest.raises(GantryAlarmError):
+        session.jog(z=1)
+    with pytest.raises(GantryAlarmError, match="matching failed jog"):
+        session.recover_calibration_limit(z=1)
+    fake.calls.clear()
+
+    result, _ = session.recover_calibration_limit(z=-1)
+
+    assert result.pull_off_delta == {"x": 0, "y": 0, "z": 5}
+    assert [name for name, _ in fake.calls].count("reset_and_unlock") == 1
+    assert [value for name, value in fake.calls if name == "jog"] == [{"x": 0, "y": 0, "z": 5, "feed_rate": 100}]
+    assert not any(name in ("home", "set_hard_limits_enabled", "set_soft_limits_enabled") for name, _ in fake.calls)
+    assert session.position().status == "Home required"
+    assert session.position().work_z is None
+    with pytest.raises(CalibrationBlockedError):
+        session.set_work_coordinates(z=0)
+    assert session.home().status == "Idle"
+
+
+@pytest.mark.parametrize("status", ["ALARM:3", "[MSG:Check Limits]", "<Alarm|Pn:X>", "<Alarm|Pn:XZ>"])
+def test_recovery_without_confirmed_z_pin_never_actuates(tmp_path, status):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(z=-1)
+    fake.status = status
+    session.position()
+    fake.calls.clear()
+
+    with pytest.raises(GantryAlarmError):
+        session.recover_calibration_limit(z=-1)
+
+    assert fake.calls == [("get_status", None)]
+
+
+def test_recovery_cancel_during_reset_prevents_pull_off(tmp_path):
+    class CancelDuringReset(FakeGantry):
+        def reset_and_unlock(self):
+            super().reset_and_unlock()
+            session.jog_cancel_interrupt()
+
+    from cubos.gantry.errors import CommandExecutionError
+
+    session = GantrySession(gantry_factory=CancelDuringReset, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(z=-1)
+    fake.status = "<Alarm|Pn:Z>"
+    session.position()
+    fake.calls.clear()
+
+    with pytest.raises(CommandExecutionError, match="cancelled"):
+        session.recover_calibration_limit(z=-1)
+
+    assert not any(name == "jog" for name, _ in fake.calls)
+    assert session.position().work_z is None
+
+
+def test_recovery_rejects_unknown_jog_even_with_z_pin(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = "<Alarm|Pn:Z>"
+    session.position()
+    fake.calls.clear()
+
+    with pytest.raises(GantryAlarmError, match="matching failed jog"):
+        session.recover_calibration_limit(z=-1)
+
+    assert not fake.calls
+
+
+def test_home_clears_incident_warning_but_preserves_calibration_warning_and_failure(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    session._calibration_warning = "Saved calibration mismatch."
+    session._calibration_frame_unverified = True
+    session._latch_alarm_locked("ALARM:3")
+    assert "Home before" in session.calibration_warning
+
+    snapshot = session.home()
+
+    assert snapshot.status == "Idle"
+    assert snapshot.calibration_warning == "Saved calibration mismatch."
+    with pytest.raises(CalibrationBlockedError, match="Restart full calibration"):
+        session.jog(z=1)
+
+
+def test_failed_home_keeps_position_reference_untrusted(tmp_path):
+    from cubos.gantry.errors import StatusReturnError
+
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session._latch_alarm_locked("ALARM:3")
+    failure = StatusReturnError("Homing failed")
+    fake.home = lambda: (_ for _ in ()).throw(failure)
+
+    with pytest.raises(StatusReturnError) as caught:
+        session.home()
+
+    assert caught.value is failure
+    assert session.position().work_z is None
+    assert "Home before" in session.calibration_warning
+
+
+def test_failed_home_cannot_reuse_previous_jog_as_recovery_direction(tmp_path):
+    from cubos.gantry.errors import StatusReturnError
+
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(z=-1)
+    fake.home = lambda: (_ for _ in ()).throw(StatusReturnError("ALARM:8"))
+    with pytest.raises(StatusReturnError):
+        session.home()
+    fake.status = "<Alarm|Pn:Z>"
+    session.position()
+
+    with pytest.raises(GantryAlarmError, match="matching failed jog"):
+        session.recover_calibration_limit(z=-1)
+
+
+def test_query_failure_stays_unknown_while_operation_lock_is_held(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.get_position_info = lambda: (_ for _ in ()).throw(RuntimeError("No position"))
+    assert session.position().status == "Query failed"
+
+    with session.operation_lock:
+        snapshot = session.position()
+
+    assert snapshot.status == "Query failed"
+    assert snapshot.work_z is None
+
+
+def test_first_fault_invalidates_queued_move_even_after_operator_home(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    queued_generation = session._jog_cancel_generation
+    session._latch_alarm_locked("ALARM:3")
+    generation_after_alarm = session._jog_cancel_generation
+    session._latch_alarm_locked("[MSG:Check Limits]")
+    assert session._jog_cancel_generation == generation_after_alarm
+    assert generation_after_alarm > queued_generation
+    session.home()
+    fake.calls.clear()
+
+    session._move_worker(10, 20, 30, queued_generation)
+
+    assert not fake.calls
+
+
+def test_stale_idle_after_accepted_jog_cannot_create_unverified_recovery_direction(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(z=-1)
+    session.position()
+    fake.status = "<Alarm|Pn:Z>"
+    session.position()
+    fake.calls.clear()
+
+    with pytest.raises(GantryAlarmError, match="matching failed jog"):
+        session.recover_calibration_limit(z=-1)
+
+    assert not fake.calls
+
+
+def test_operator_recovery_cannot_request_longer_pull_off(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.calls.clear()
+
+    with pytest.raises(ValueError, match="5 mm"):
+        session.recover_calibration_limit(z=-1, pull_off_mm=100)
+
+    assert not fake.calls
+
+
+@pytest.mark.parametrize("raw_status,work_pos", [("<Idle|Pn:Z>", {"x": 0, "y": 0, "z": 0}), ("<Idle>", None), ("<Jog>", {"x": 0, "y": 0, "z": 0})])
+def test_unlock_needs_verified_fresh_coordinates_and_status_after_idle_probe(tmp_path, raw_status, work_pos):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session._latch_alarm_locked("ALARM:3")
+    fake.get_position_info = lambda: {"status": "Idle", "raw_status": raw_status, "work_pos": work_pos, "coords": fake.coords}
+
+    with pytest.raises(GantrySessionError):
+        session.unlock()
+
+    assert session.position().status.startswith("ALARM:3")
+    assert session.position().work_z is None
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+@pytest.mark.parametrize("response", ["error:8", "", "<Jog|WPos:10,20,30>"])
+def test_only_explicit_jog_ack_can_supply_recovery_direction(tmp_path, monkeypatch, blocking, response):
+    from unittest.mock import MagicMock
+
+    from cubos.gantry.errors import CommandExecutionError
+    from cubos.gantry.gantry_driver.driver import Mill
+    from tests.gantry.fake_serial import FakeGrblSerial
+
+    monkeypatch.setattr("cubos.gantry.gantry_driver.driver.set_up_mill_logger", lambda _: MagicMock())
+    monkeypatch.setattr("cubos.gantry.gantry_driver.driver.set_up_command_logger", lambda _: MagicMock())
+
+    class SerialJogGantry(FakeGantry):
+        def __init__(self, config=None):
+            super().__init__(config=config)
+            self.mill = Mill()
+            self.serial = FakeGrblSerial()
+            self.mill.ser_mill = self.serial
+
+        def jog(self, **kwargs):
+            self.mill.jog(**kwargs)
+            super().jog(**kwargs)
+
+    session = GantrySession(gantry_factory=SerialJogGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(z=-1)
+    fake.serial.jog_response = response
+
+    with pytest.raises(CommandExecutionError):
+        (session.jog_blocking if blocking else session.jog)(z=1)
+
+    fake.status = "<Alarm|Pn:Z>"
+    session.position()
+    expected_candidate = {"x": 0, "y": 0, "z": -1} if response == "error:8" else None
+    assert session._failed_jog_delta == expected_candidate
+    with pytest.raises(GantryAlarmError, match="matching failed jog"):
+        session.recover_calibration_limit(z=1)
+    assert fake.serial.writes == [b"$J=G91 Z-1.000 F2000\n", b"$J=G91 Z1.000 F2000\n"]
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+def test_jog_connection_loss_invalidates_old_direction_and_propagates(tmp_path, blocking):
+    from cubos.gantry.errors import MillConnectionError
+
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(z=-1)
+    failure = MillConnectionError("USB disconnected before jog acknowledgement")
+    fake.jog = lambda **_: (_ for _ in ()).throw(failure)
+
+    with pytest.raises(MillConnectionError) as caught:
+        (session.jog_blocking if blocking else session.jog)(z=1)
+
+    assert caught.value is failure
+    assert session._last_jog_delta is None
+    assert session.position().status == "Home required"
+    assert session.position().work_z is None
+
+
+@pytest.mark.parametrize("entrypoint", ["home", "prepare_calibration_origin", "calibration_home_and_center"])
+def test_normal_homing_poll_is_in_progress_not_a_home_required_fault(tmp_path, entrypoint):
+    observed = []
+
+    class PollDuringHome(FakeGantry):
+        def home(self):
+            super().home()
+            observed.append(session.position())
+
+        def get_coordinates(self):
+            return dict(self.coords)
+
+    session = GantrySession(gantry_factory=PollDuringHome, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    getattr(session, entrypoint)()
+
+    assert observed[0].status == "Homing"
+    assert observed[0].work_x is observed[0].work_y is observed[0].work_z is None
+    assert not observed[0].calibration_warning or "Home before moving" not in observed[0].calibration_warning
+    assert session.position().status == "Idle"
+    assert session.position().work_z is not None
+
+
+def test_existing_alarm_is_not_hidden_by_in_progress_homing(tmp_path):
+    observed = []
+
+    class PollDuringHome(FakeGantry):
+        def home(self):
+            super().home()
+            observed.append(session.position())
+
+    session = GantrySession(gantry_factory=PollDuringHome, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    session._latch_alarm_locked("ALARM:3")
+
+    assert session.home().status == "Idle"
+
+    assert observed[0].status == "ALARM:3"
+    assert observed[0].work_z is None
+
+
+@pytest.mark.parametrize("entrypoint", ["home", "prepare_calibration_origin", "calibration_home_and_center"])
+def test_homing_flag_covers_verification_and_clears_on_failure(tmp_path, entrypoint):
+    from cubos.gantry.errors import StatusReturnError
+
+    observed = []
+    failure = StatusReturnError("Status verification failed")
+
+    class FailVerification(FakeGantry):
+        def get_status(self):
+            observed.append(session.position())
+            raise failure
+
+        def get_coordinates(self):
+            return dict(self.coords)
+
+    session = GantrySession(gantry_factory=FailVerification, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    with pytest.raises(StatusReturnError) as caught:
+        getattr(session, entrypoint)()
+
+    assert caught.value is failure
+    assert observed[0].status == "Homing"
+    assert observed[0].work_z is None
+    assert session.position().status == "Home required"
+    assert session.position().work_z is None
+    assert not session._homing_active
+
+
+def test_fault_observed_while_homing_is_preserved_after_failure(tmp_path):
+    observed = []
+
+    class AlarmDuringHome(FakeGantry):
+        def home(self):
+            super().home()
+            self.status = "<Alarm|Pn:Y>"
+            observed.append(session.position())
+
+    session = GantrySession(gantry_factory=AlarmDuringHome, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+
+    with pytest.raises(GantryAlarmError):
+        session.home()
+
+    assert "Alarm" in observed[0].status
+    assert "Pn:Y" in observed[0].status
+    assert observed[0].work_z is None
+    assert "Pn:Y" in session.position().status
+    assert not session._homing_active
+
+
+@pytest.mark.parametrize("axis,direction", [("x", 1), ("x", -1), ("y", 1), ("y", -1), ("z", 1), ("z", -1)])
+def test_known_single_axis_recovery_uses_authoritative_candidate_and_fixed_speed(tmp_path, axis, direction):
+    class RecoveringAxis(FakeGantry):
+        def reset_and_unlock(self):
+            super().reset_and_unlock()
+            self.status = f"<Idle|Pn:{axis.upper()}>"
+
+        def jog(self, **kwargs):
+            super().jog(**kwargs)
+            self.status = "Idle"
+
+    session = GantrySession(gantry_factory=RecoveringAxis, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(**{axis: direction})
+    fake.status = f"<Alarm|Pn:{axis.upper()}>"
+    fake.calls.clear()
+
+    context = session.limit_recovery_context()
+
+    assert context.eligible and context.manual_available
+    assert context.active_limit_axes == [axis]
+    assert context.failed_jog_delta[axis] == direction
+    assert context.pull_off_delta[axis] == -5 * direction
+    assert fake.calls == [("get_status", None)]
+    fake.calls.clear()
+    result, _ = session.recover_calibration_limit(**{axis: direction})
+    assert result.mode == "known_jog"
+    assert result.failed_delta == context.failed_jog_delta
+    assert result.commanded_delta == context.pull_off_delta
+    assert result.attempts == 1
+    jog = [args for name, args in fake.calls if name == "jog"]
+    assert jog == [{"x": context.pull_off_delta["x"], "y": context.pull_off_delta["y"], "z": context.pull_off_delta["z"], "feed_rate": 100}]
+    assert sum(name == "reset_and_unlock" for name, _ in fake.calls) == 1
+    assert not any(name in ("home", "set_soft_limits_enabled", "set_hard_limits_enabled", "set_work_coordinates") for name, _ in fake.calls)
+    assert session.position().status == "Home required"
+    assert session.position().work_z is None
+
+
+@pytest.mark.parametrize("axis,away", [("x", 1), ("x", -1), ("y", 1), ("y", -1), ("z", 1), ("z", -1)])
+def test_manual_recovery_is_one_mm_and_does_not_invent_failed_history(tmp_path, axis, away):
+    class ManualGantry(FakeGantry):
+        def reset_and_unlock(self):
+            super().reset_and_unlock()
+            self.status = f"<Idle|Pn:{axis.upper()}>"
+
+        def jog(self, **kwargs):
+            super().jog(**kwargs)
+            self.status = "Idle"
+
+    session = GantrySession(gantry_factory=ManualGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = f"<Alarm|Pn:{axis.upper()}>"
+    fake.calls.clear()
+
+    result, _ = session.recover_calibration_limit_manual(axis=axis, away_direction=away, operator_confirmed=True)
+
+    assert result.mode == "manual"
+    assert result.failed_delta is None
+    assert result.commanded_delta == {key: float(away) if key == axis else 0 for key in ("x", "y", "z")}
+    assert result.pull_off_delta == result.commanded_delta
+    assert result.attempts == 1
+    jogs = [args for name, args in fake.calls if name == "jog"]
+    assert jogs == [{**result.commanded_delta, "feed_rate": 100}]
+    assert sum(name == "reset_and_unlock" for name, _ in fake.calls) == 1
+    assert not any(name in ("home", "set_soft_limits_enabled", "set_hard_limits_enabled", "set_work_coordinates") for name, _ in fake.calls)
+    assert session._failed_jog_delta is None
+    assert session.position().status == "Home required"
+    assert session.position().work_z is None
+
+
+@pytest.mark.parametrize("status", ["<Idle>", "<Alarm|Pn:XY>", "<Alarm|Pn:YP>", "<Alarm|Pn:P>", "<Jog|Pn:Y>", "<Hold:0|Pn:Y>"])
+def test_recovery_context_and_manual_guard_reject_unknown_multiple_or_unrelated_pins(tmp_path, status):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = status
+    fake.calls.clear()
+    context = session.limit_recovery_context()
+    assert not context.eligible
+    assert not context.manual_available
+    assert context.blocked_reason
+    assert context.pull_off_delta is None
+    with pytest.raises(GantryAlarmError):
+        session.recover_calibration_limit_manual(axis="y", away_direction=1, operator_confirmed=True)
+    assert all(name == "get_status" for name, _ in fake.calls)
+
+
+@pytest.mark.parametrize("kwargs", [{"axis": "Y"}, {"away_direction": 0}, {"away_direction": float("nan")}, {"away_direction": True}, {"operator_confirmed": False}, {"operator_confirmed": 1}, {"operator_confirmed": "true"}])
+def test_manual_recovery_requires_literal_confirmation_and_signed_direction(tmp_path, kwargs):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.calls.clear()
+    request = {"axis": "y", "away_direction": 1, "operator_confirmed": True, **kwargs}
+    with pytest.raises(ValueError):
+        session.recover_calibration_limit_manual(**request)
+    assert not fake.calls
+
+
+def test_manual_post_rechecks_pin_after_context_changes(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = "<Alarm|Pn:Y>"
+    assert session.limit_recovery_context().manual_available
+    fake.status = "<Alarm|Pn:X>"
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError):
+        session.recover_calibration_limit_manual(axis="y", away_direction=1, operator_confirmed=True)
+    assert fake.calls == [("get_status", None)]
+
+
+def test_manual_recovery_does_not_jog_when_pin_changes_after_reset(tmp_path):
+    class ChangedPin(FakeGantry):
+        def reset_and_unlock(self):
+            super().reset_and_unlock()
+            self.status = "<Idle|Pn:X>"
+
+    from cubos.gantry.errors import StatusReturnError
+    session = GantrySession(gantry_factory=ChangedPin, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = "<Alarm|Pn:Y>"
+    fake.calls.clear()
+    with pytest.raises(StatusReturnError, match="did not verify"):
+        session.recover_calibration_limit_manual(axis="y", away_direction=1, operator_confirmed=True)
+    assert not any(name == "jog" for name, _ in fake.calls)
+    assert sum(name == "reset_and_unlock" for name, _ in fake.calls) == 1
+
+
+def test_stop_during_initial_manual_context_check_prevents_actuation(tmp_path):
+    class StopWhileReading(FakeGantry):
+        def get_recovery_status(self):
+            session.jog_cancel_interrupt()
+            return self.status
+
+    from cubos.gantry.errors import CommandExecutionError
+    session = GantrySession(gantry_factory=StopWhileReading, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = "<Alarm|Pn:Y>"
+    fake.calls.clear()
+    with pytest.raises(CommandExecutionError, match="cancelled"):
+        session.recover_calibration_limit_manual(axis="y", away_direction=1, operator_confirmed=True)
+    assert not any(name in ("jog", "reset_and_unlock") for name, _ in fake.calls)
+
+
+@pytest.mark.parametrize("recovery_request", [{}, {"x": 1, "y": 1}, {"x": float("nan")}, {"y": float("inf")}, {"z": 1, "feed_rate": 2500}])
+def test_known_recovery_rejects_invalid_vector_or_speed_before_queries(tmp_path, recovery_request):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.calls.clear()
+    with pytest.raises(ValueError):
+        session.recover_calibration_limit(**recovery_request)
+    assert not fake.calls
+
+
+@pytest.mark.parametrize("candidate", [{"x": 1, "y": 1, "z": 0}, {"x": float("inf"), "y": 0, "z": 0}])
+def test_context_never_offers_known_recovery_from_invalid_candidate(tmp_path, candidate):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = "<Alarm|Pn:X>"
+    session._failed_jog_delta = candidate
+    fake.calls.clear()
+    context = session.limit_recovery_context()
+    assert not context.eligible
+    assert context.manual_available
+    assert context.pull_off_delta is None
+    assert fake.calls == [("get_status", None)]
+
+
+@pytest.mark.parametrize("phase", ["context", "reset", "jog", "post_status", "final_position"])
+def test_manual_recovery_connection_loss_is_terminal_and_preserved(tmp_path, phase):
+    from cubos.gantry.errors import MillConnectionError
+    failure = MillConnectionError(f"USB disconnected at {phase}")
+
+    class ConnectionFailure(FakeGantry):
+        reads = 0
+
+        def get_recovery_status(self):
+            self.reads += 1
+            if phase == "context" or (phase == "post_status" and self.reads == 3):
+                raise failure
+            return self.status
+
+        def reset_and_unlock(self):
+            super().reset_and_unlock()
+            if phase == "reset":
+                raise failure
+            self.status = "<Idle|Pn:Y>"
+
+        def jog(self, **kwargs):
+            if phase == "jog":
+                raise failure
+            super().jog(**kwargs)
+            self.status = "Idle"
+
+        def get_recovery_position_info(self):
+            if phase == "final_position":
+                raise failure
+            return self.get_position_info()
+
+    session = GantrySession(gantry_factory=ConnectionFailure, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = "<Alarm|Pn:Y>"
+    fake.calls.clear()
+    with pytest.raises(MillConnectionError) as caught:
+        session.recover_calibration_limit_manual(axis="y", away_direction=1, operator_confirmed=True)
+    assert caught.value is failure
+    assert sum(name == "reset_and_unlock" for name, _ in fake.calls) <= 1
+    assert sum(name == "jog" for name, _ in fake.calls) <= 1
+    assert not any(name in ("home", "connect", "set_soft_limits_enabled", "set_hard_limits_enabled") for name, _ in fake.calls)
+
+
+def test_stop_during_final_recovery_verification_does_not_report_success(tmp_path):
+    from cubos.gantry.errors import CommandExecutionError
+
+    class StopFinal(FakeGantry):
+        def reset_and_unlock(self):
+            super().reset_and_unlock()
+            self.status = "<Idle|Pn:Y>"
+
+        def jog(self, **kwargs):
+            super().jog(**kwargs)
+            self.status = "Idle"
+
+        def get_recovery_position_info(self):
+            session.jog_cancel_interrupt()
+            return self.get_position_info()
+
+    session = GantrySession(gantry_factory=StopFinal, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = "<Alarm|Pn:Y>"
+    fake.calls.clear()
+    with pytest.raises(CommandExecutionError, match="cancelled"):
+        session.recover_calibration_limit_manual(axis="y", away_direction=1, operator_confirmed=True)
+    assert sum(name == "jog" for name, _ in fake.calls) == 1
+    assert session.position().status == "Home required"
+    assert session.position().work_z is None
+
+
+def test_connect_on_pressed_y_publishes_only_a_faulted_recovery_session(tmp_path):
+    from cubos.gantry.errors import StatusReturnError
+
+    class PressedY(FakeGantry):
+        def get_position_info(self):
+            raise StatusReturnError("Error in status: [MSG:Check Limits]")
+
+        def get_recovery_status(self):
+            self.calls.append(("get_recovery_status", None))
+            return "<Alarm|Pn:Y>"
+
+    session = GantrySession(gantry_factory=PressedY, sleep=lambda _: None)
+    snapshot = session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+
+    assert snapshot.connected
+    assert snapshot.work_x is snapshot.work_y is snapshot.work_z is None
+    assert "Check Limits" in snapshot.status
+    assert "Pn:Y" in snapshot.status
+    assert "Home before" in snapshot.calibration_warning
+    context = session.limit_recovery_context()
+    assert context.manual_available
+    assert context.active_limit_axes == ["y"]
+    assert not context.eligible
+    assert context.failed_jog_delta is None
+    for action in [lambda: session.jog(y=1), lambda: session.move_to_blocking(x=1, y=1, z=1), lambda: session.set_work_coordinates(y=0)]:
+        with pytest.raises(GantryAlarmError):
+            action()
+    assert not any(name in ("jog", "home", "unlock", "reset_and_unlock", "set_work_coordinates", "set_soft_limits_enabled", "set_hard_limits_enabled") for name, _ in fake.calls)
+    assert fake.disconnect_calls == 0
+
+
+@pytest.mark.parametrize("frame", ["<Idle|WPos:1,2,3>", "<Alarm|Pn:Y>", "ALARM:1"])
+def test_recognized_connect_fault_never_publishes_a_trusted_pose(tmp_path, frame):
+    from cubos.gantry.errors import StatusReturnError
+
+    class FaultedConnect(FakeGantry):
+        def get_position_info(self):
+            raise StatusReturnError("ALARM:3")
+
+        def get_recovery_status(self):
+            if frame == "ALARM:1":
+                raise StatusReturnError("Error in status: ALARM:1")
+            return frame
+
+    session = GantrySession(gantry_factory=FaultedConnect, sleep=lambda _: None)
+    snapshot = session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    assert snapshot.connected
+    assert snapshot.status.startswith("ALARM:3")
+    assert snapshot.work_x is snapshot.work_y is snapshot.work_z is None
+    assert session._position_reference_untrusted
+
+
+@pytest.mark.parametrize("phase", ["normal_position", "recovery_status", "settings"])
+def test_connect_transport_failure_closes_without_recovery_or_motion(tmp_path, phase):
+    from cubos.gantry.errors import MillConnectionError, StatusReturnError
+    failure = MillConnectionError("USB disconnected")
+
+    class ConnectionFailure(FakeGantry):
+        def get_position_info(self):
+            if phase == "normal_position":
+                raise failure
+            raise StatusReturnError("[MSG:Check Limits]")
+
+        def get_recovery_status(self):
+            raise failure
+
+        def read_grbl_settings(self):
+            if phase == "settings":
+                raise failure
+            return super().read_grbl_settings()
+
+    session = GantrySession(gantry_factory=ConnectionFailure, sleep=lambda _: None)
+    with pytest.raises(MillConnectionError) as caught:
+        session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    assert caught.value is failure
+    assert not session.connected
+    fake = FakeGantry.instances[-1]
+    assert fake.disconnect_calls == 1
+    assert not any(name in ("home", "unlock", "jog", "reset_and_unlock") for name, _ in fake.calls)
+
+
+@pytest.mark.parametrize("frame", ["", "ok", "<Unknown|Pn:Y>", "[MSG:Check Limits]"])
+def test_connect_fault_without_verified_controller_status_still_closes(tmp_path, frame):
+    from cubos.gantry.errors import StatusReturnError
+
+    class UnknownResponse(FakeGantry):
+        def get_position_info(self):
+            raise StatusReturnError("[MSG:Check Limits]")
+
+        def get_recovery_status(self):
+            return frame
+
+    session = GantrySession(gantry_factory=UnknownResponse, sleep=lambda _: None)
+    with pytest.raises(GantrySessionError, match="could not be verified"):
+        session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    assert not session.connected
+    assert FakeGantry.instances[-1].disconnect_calls == 1
+
+
+def test_connect_without_current_work_coordinates_does_not_publish_defaults(tmp_path):
+    class MissingCoordinates(FakeGantry):
+        def get_position_info(self):
+            return {"coords": self.coords, "work_pos": None, "status": "Idle"}
+
+    session = GantrySession(gantry_factory=MissingCoordinates, sleep=lambda _: None)
+    with pytest.raises(GantrySessionError, match="did not verify current work coordinates"):
+        session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    assert not session.connected
+    assert FakeGantry.instances[-1].disconnect_calls == 1
+
+
+def test_restore_refreshes_stale_soft_limits_warning_after_verified_enable(tmp_path):
+    class LiveSettings(FakeGantry):
+        def set_soft_limits_enabled(self, enabled):
+            super().set_soft_limits_enabled(enabled)
+            self.grbl_settings["$20"] = "1" if enabled else "0"
+
+        def soft_limits_enabled(self):
+            self.calls.append(("soft_limits_enabled", None))
+            return self.grbl_settings["$20"] == "1"
+
+    session = GantrySession(gantry_factory=LiveSettings, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.grbl_settings["$20"] = "0"
+    session._calibration_restore_soft_limits = True
+    session._calibration_jog_bypass_working_volume = True
+    session._calibration_warning = session._calibration_mismatch_warning(fake, session.connected_gantry_config)
+    assert "$20: expected 1, got 0" in session.calibration_warning
+    fake.calls.clear()
+
+    snapshot = session.restore_calibration_soft_limits()
+
+    assert not session.calibration_active
+    assert fake.grbl_settings["$20"] == "1"
+    assert snapshot.calibration_warning is None
+    assert session.calibration_warning is None
+    assert fake.calls == [("set_soft_limits_enabled", True), ("soft_limits_enabled", None), ("read_grbl_settings", None)]
+
+
+def test_verified_home_refreshes_unknown_settings_warning_with_fresh_read(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session._calibration_warning = "Calibration status unknown: prior fault prevented reading settings."
+    session._latch_alarm_locked("ALARM:1")
+    fake.calls.clear()
+
+    snapshot = session.home()
+
+    assert snapshot.status == "Idle"
+    assert snapshot.calibration_warning is None
+    assert session.calibration_warning is None
+    assert [name for name, _ in fake.calls] == ["home", "get_status", "read_grbl_settings"]
+
+
+@pytest.mark.parametrize("action", ["home", "restore_calibration_soft_limits"])
+@pytest.mark.parametrize("live_state", ["mismatch", "read_failure"])
+def test_warning_refresh_preserves_actual_mismatch_or_unknown_settings(tmp_path, action, live_state):
+    from cubos.gantry.errors import StatusReturnError
+
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session._calibration_warning = "Old warning."
+    if live_state == "mismatch":
+        fake.grbl_settings["$20"] = "0"
+    else:
+        fake.read_grbl_settings = lambda: (_ for _ in ()).throw(StatusReturnError("settings dump unavailable"))
+    fake.calls.clear()
+
+    snapshot = getattr(session, action)()
+
+    assert ("$20: expected 1, got 0" if live_state == "mismatch" else "Calibration status unknown") in snapshot.calibration_warning
+    if live_state == "read_failure":
+        assert "settings dump unavailable" in snapshot.calibration_warning
+    assert not any(name in ("jog", "reset_and_unlock", "unlock", "set_soft_limits_enabled", "set_hard_limits_enabled", "set_work_coordinates") for name, _ in fake.calls)
+
+
+@pytest.mark.parametrize("action", ["home", "restore_calibration_soft_limits"])
+def test_warning_refresh_propagates_connection_loss_without_clearing_fault_guards(tmp_path, action):
+    from cubos.gantry.errors import MillConnectionError
+
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session._calibration_warning = "Existing warning."
+    session._latch_alarm_locked("ALARM:1")
+    failure = MillConnectionError("USB disconnected during settings read")
+    fake.read_grbl_settings = lambda: (_ for _ in ()).throw(failure)
+
+    with pytest.raises(MillConnectionError) as caught:
+        getattr(session, action)()
+
+    assert caught.value is failure
+    assert session._calibration_warning == "Existing warning."
+    assert session._alarm_status == "ALARM:1"
+    assert session._position_reference_untrusted
+
+
+@pytest.mark.parametrize("action", ["home", "restore_calibration_soft_limits"])
+def test_settings_refresh_does_not_clear_origin_failure_or_pending_config(tmp_path, action):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session._calibration_frame_unverified = True
+    session._calibration_warning = "Calibration origin did not verify. Restart full calibration."
+    session._calibration_pending_config = {"unsaved": True}
+    fake.calls.clear()
+
+    snapshot = getattr(session, action)()
+
+    assert snapshot.calibration_warning == "Calibration origin did not verify. Restart full calibration."
+    assert session._calibration_frame_unverified
+    assert session._calibration_pending_config == {"unsaved": True}
+    assert not any(name == "read_grbl_settings" for name, _ in fake.calls)
+
+
+def test_restore_refresh_does_not_clear_existing_alarm_or_untrusted_reference(tmp_path):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    session._latch_alarm_locked("ALARM:1")
+    session._calibration_warning = "Stale settings mismatch."
+
+    snapshot = session.restore_calibration_soft_limits()
+
+    assert snapshot.status == "ALARM:1"
+    assert snapshot.work_z is None
+    assert session._position_reference_untrusted
+    assert "Home before" in snapshot.calibration_warning
+
+
+class CorrelatedRecoveryGantry(FakeGantry):
+    trip_next = False
+
+    def jog(self, **kwargs):
+        super().jog(**kwargs)
+        self.status = "<Alarm|Pn:Y>" if self.trip_next else "Idle"
+        self.trip_next = False
+
+    def reset_and_unlock(self):
+        super().reset_and_unlock()
+        self.status = "<Idle|Pn:Y>"
+
+
+def _correlated_fault(tmp_path, *, blocking=False, jog_id="wizard-owned"):
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.trip_next = True
+    if blocking:
+        with pytest.raises(GantryAlarmError):
+            session.jog_blocking(y=0.25, jog_id=jog_id)
+    else:
+        session.jog(y=0.25, jog_id=jog_id)
+    session.position()
+    return session, fake
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+def test_accepted_jog_id_is_exposed_with_its_failed_vector_and_consumed_once(tmp_path, blocking):
+    session, fake = _correlated_fault(tmp_path, blocking=blocking)
+    context = session.limit_recovery_context()
+    assert context.failed_jog_id == "wizard-owned"
+    assert context.failed_jog_delta == {"x": 0, "y": 0.25, "z": 0}
+    assert context.eligible
+    fake.calls.clear()
+
+    result, _ = session.recover_calibration_limit(y=0.25, jog_id=context.failed_jog_id)
+
+    assert result.mode == "known_jog"
+    assert result.commanded_delta == {"x": 0, "y": -5, "z": 0}
+    assert session._last_jog_id is session._failed_jog_id is None
+    assert session.position().status == "Home required"
+    writes = list(fake.calls)
+    with pytest.raises(GantryAlarmError):
+        session.recover_calibration_limit(y=0.25, jog_id="wizard-owned")
+    assert fake.calls == writes
+    assert sum(name == "reset_and_unlock" for name, _ in writes) == 1
+
+
+@pytest.mark.parametrize("jog_id", ["foreign", "stale"])
+def test_foreign_jog_id_is_rejected_before_controller_queries(tmp_path, jog_id):
+    session, fake = _correlated_fault(tmp_path)
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError, match="jog_id"):
+        session.recover_calibration_limit(y=0.25, jog_id=jog_id)
+    assert not fake.calls
+
+
+def test_last_accepted_jog_replaces_old_id_and_legacy_acceptance_has_no_id(tmp_path):
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(y=0.25, jog_id="old-id")
+    fake.trip_next = True
+    session.jog(y=0.25)
+    session.position()
+    context = session.limit_recovery_context()
+    assert context.eligible
+    assert context.failed_jog_id is None
+    with pytest.raises(GantryAlarmError, match="jog_id"):
+        session.recover_calibration_limit(y=0.25, jog_id="old-id")
+    assert session.recover_calibration_limit(y=0.25)[0].mode == "known_jog"
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+@pytest.mark.parametrize("rejection", ["error:8", "error:9"])
+def test_rejected_jog_never_overwrites_accepted_id(tmp_path, blocking, rejection):
+    from cubos.gantry.errors import CommandExecutionError
+
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(y=0.25, jog_id="accepted")
+    fake.status = "<Jog|WPos:10,20,30>"
+    fake.jog = lambda **_: (_ for _ in ()).throw(CommandExecutionError(f"Jog failed: {rejection}"))
+    with pytest.raises((CommandExecutionError, GantryAlarmError)):
+        (session.jog_blocking if blocking else session.jog)(y=-0.25, jog_id="rejected")
+    fake.status = "<Alarm|Pn:Y>"
+    session.position()
+    context = session.limit_recovery_context()
+    assert context.failed_jog_id == "accepted"
+    assert context.failed_jog_delta["y"] == 0.25
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+@pytest.mark.parametrize("failure_type", ["unknown_ack", "connection"])
+def test_unknown_jog_acceptance_clears_all_correlation(tmp_path, blocking, failure_type):
+    from cubos.gantry.errors import JogAcceptanceUnknownError, MillConnectionError
+
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(y=0.25, jog_id="old-accepted")
+    failure = (JogAcceptanceUnknownError if failure_type == "unknown_ack" else MillConnectionError)("No verified jog acknowledgement")
+    fake.jog = lambda **_: (_ for _ in ()).throw(failure)
+    with pytest.raises(type(failure)) as caught:
+        (session.jog_blocking if blocking else session.jog)(y=0.25, jog_id="unknown")
+    assert caught.value is failure
+    fake.status = "<Alarm|Pn:Y>"
+    session.position()
+    context = session.limit_recovery_context()
+    assert context.failed_jog_id is None
+    assert context.failed_jog_delta is None
+    assert not context.eligible
+
+
+@pytest.mark.parametrize("action", ["jog", "jog_blocking", "recover_calibration_limit"])
+@pytest.mark.parametrize("jog_id", ["", "   ", "x" * 129, 42, True])
+def test_invalid_correlation_is_rejected_without_controller_calls(tmp_path, action, jog_id):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.calls.clear()
+    with pytest.raises(ValueError, match="jog_id"):
+        getattr(session, action)(y=0.25, jog_id=jog_id)
+    assert not fake.calls
+
+
+@pytest.mark.parametrize("cancel_method", ["jog_cancel", "jog_cancel_interrupt"])
+def test_post_stop_correlated_recovery_cannot_reuse_still_known_vector(tmp_path, cancel_method):
+    session, fake = _correlated_fault(tmp_path)
+    getattr(session, cancel_method)()
+    context = session.limit_recovery_context()
+    assert context.eligible
+    assert context.failed_jog_delta["y"] == 0.25
+    assert context.failed_jog_id is None
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError, match="jog_id"):
+        session.recover_calibration_limit(y=0.25, jog_id="wizard-owned")
+    assert not fake.calls
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+def test_ack_after_stop_does_not_resurrect_jog_ownership(tmp_path, blocking):
+    class CancelBeforeAck(CorrelatedRecoveryGantry):
+        def jog(self, **kwargs):
+            super().jog(**kwargs)
+            session.jog_cancel_interrupt()
+
+    session = GantrySession(gantry_factory=CancelBeforeAck, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.trip_next = True
+    if blocking:
+        with pytest.raises(GantryAlarmError):
+            session.jog_blocking(y=0.25, jog_id="cancelled-before-ack")
+    else:
+        session.jog(y=0.25, jog_id="cancelled-before-ack")
+    session.position()
+    assert session.limit_recovery_context().failed_jog_id is None
+
+
+def test_cancel_during_pin_refresh_revokes_id_before_reset(tmp_path):
+    session, fake = _correlated_fault(tmp_path)
+
+    def status():
+        session.jog_cancel_interrupt()
+        return "<Alarm|Pn:Y>"
+
+    fake.get_recovery_status = status
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError, match="jog_id"):
+        session.recover_calibration_limit(y=0.25, jog_id="wizard-owned")
+    assert fake.calls == [("jog_cancel", None)]
+
+
+def test_duplicate_correlated_requests_serialize_to_one_recovery(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class PausedRecovery(CorrelatedRecoveryGantry):
+        def reset_and_unlock(self):
+            entered.set()
+            assert release.wait(2)
+            super().reset_and_unlock()
+
+    session = GantrySession(gantry_factory=PausedRecovery, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.trip_next = True
+    session.jog(y=0.25, jog_id="once")
+    session.position()
+    fake.calls.clear()
+    outcomes = []
+
+    def recover():
+        try:
+            outcomes.append(session.recover_calibration_limit(y=0.25, jog_id="once"))
+        except GantryAlarmError as exc:
+            outcomes.append(exc)
+
+    first = threading.Thread(target=recover)
+    second = threading.Thread(target=recover)
+    first.start()
+    assert entered.wait(2)
+    second.start()
+    release.set()
+    first.join(2)
+    second.join(2)
+    assert not first.is_alive() and not second.is_alive()
+    assert sum(isinstance(item, GantryAlarmError) for item in outcomes) == 1
+    assert len(outcomes) == 2
+    assert sum(name == "reset_and_unlock" for name, _ in fake.calls) == 1
+    assert sum(name == "jog" for name, _ in fake.calls) == 1
+
+
+def test_failed_recovery_attempt_consumes_correlated_id_before_actuation(tmp_path):
+    from cubos.gantry.errors import CommandExecutionError
+
+    session, fake = _correlated_fault(tmp_path)
+    fake.reset_and_unlock = lambda: (_ for _ in ()).throw(CommandExecutionError("Controller rejected reset"))
+    with pytest.raises(CommandExecutionError):
+        session.recover_calibration_limit(y=0.25, jog_id="wizard-owned")
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError):
+        session.recover_calibration_limit(y=0.25, jog_id="wizard-owned")
+    assert not fake.calls
+
+
+@pytest.mark.parametrize("action", ["position", "home", "reset_and_unlock", "disconnect", "move_to_blocking", "move_worker"])
+def test_jog_id_is_invalidated_with_existing_history_boundaries(tmp_path, action):
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    session.jog(y=0.25, jog_id="old")
+    if action == "move_to_blocking":
+        session.move_to_blocking(x=10, y=20, z=30)
+    elif action == "move_worker":
+        session._move_worker(10, 20, 30)
+    else:
+        getattr(session, action)()
+    assert session._last_jog_id is session._failed_jog_id is None
+
+
+@pytest.mark.parametrize("blocking", [False, True])
+@pytest.mark.parametrize("response", ["ALARM:1", "[MSG:Check Limits]"])
+def test_alarm_before_ack_cannot_attribute_opposite_attempt_to_prior_accepted_jog(tmp_path, blocking, response):
+    from cubos.gantry.errors import CommandExecutionError
+
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(y=-0.25, jog_id="accepted-opposite-A")
+
+    def unacknowledged(**kwargs):
+        fake.status = "<Alarm|Pn:Y>"
+        raise CommandExecutionError(f"Jog failed: {response}")
+
+    fake.jog = unacknowledged
+    with pytest.raises(GantryAlarmError):
+        (session.jog_blocking if blocking else session.jog)(y=0.25, jog_id="unacknowledged-B")
+    context = session.limit_recovery_context()
+    assert context.failed_jog_id is None
+    assert context.failed_jog_delta is None
+    assert not context.eligible
+    assert context.manual_available
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError):
+        session.recover_calibration_limit(y=-0.25, jog_id="accepted-opposite-A")
+    assert not fake.calls
+
+
+def test_alarm_from_blocking_probe_after_ack_preserves_current_accepted_id(tmp_path):
+    from cubos.gantry.errors import StatusReturnError
+
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(y=-0.25, jog_id="prior-A")
+    original_status = fake.get_status
+    fake.get_status = lambda: (_ for _ in ()).throw(StatusReturnError("Error in status: ALARM:1"))
+    with pytest.raises(GantryAlarmError):
+        session.jog_blocking(y=0.25, jog_id="accepted-B")
+    fake.get_status = original_status
+    fake.status = "<Alarm|Pn:Y>"
+    context = session.limit_recovery_context()
+    assert context.failed_jog_id == "accepted-B"
+    assert context.failed_jog_delta == {"x": 0, "y": 0.25, "z": 0}
+    assert context.eligible
+
+
+@pytest.mark.parametrize("reader", ["position", "context", "preflight", "wait"])
+def test_fresh_healthy_idle_retires_auto_id_before_later_switch_activation(tmp_path, reader):
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(y=0.25, jog_id="completed-jog")
+    if reader == "position":
+        session.position()
+    elif reader == "context":
+        session.limit_recovery_context()
+    elif reader == "preflight":
+        with session.operation_lock:
+            session._current_work_position_locked()
+    else:
+        with session.operation_lock:
+            session._wait_until_idle_locked()
+    fake.status = "<Alarm|Pn:Y>"
+    session.position()
+    context = session.limit_recovery_context()
+    assert context.failed_jog_id is None
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError):
+        session.recover_calibration_limit(y=0.25, jog_id="completed-jog")
+    assert not fake.calls
+
+
+@pytest.mark.parametrize("reader", ["position", "context"])
+def test_fresh_idle_after_latched_alarm_revokes_auto_id_but_preserves_fault_and_vector(tmp_path, reader):
+    session, fake = _correlated_fault(tmp_path)
+    assert session.limit_recovery_context().failed_jog_id == "wizard-owned"
+    fake.status = "<Idle|WPos:10,20,30>"
+    (session.position if reader == "position" else session.limit_recovery_context)()
+    assert session._alarm_status is not None
+    assert session._position_reference_untrusted
+    assert session._failed_jog_delta == {"x": 0, "y": 0.25, "z": 0}
+    fake.status = "<Alarm|Pn:Y>"
+    context = session.limit_recovery_context()
+    assert context.failed_jog_id is None
+    assert context.manual_available
+    fake.calls.clear()
+    with pytest.raises(GantryAlarmError, match="jog_id"):
+        session.recover_calibration_limit(y=0.25, jog_id="wizard-owned")
+    assert not fake.calls
+
+
+def test_cached_idle_snapshot_cannot_retire_unresolved_accepted_jog_id(tmp_path):
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(y=0.25, jog_id="unresolved-jog")
+    with session.operation_lock:
+        assert session.position().status == "Idle"
+    assert session._last_jog_id == "unresolved-jog"
+    fake.status = "<Alarm|Pn:Y>"
+    session.position()
+    assert session.limit_recovery_context().failed_jog_id == "unresolved-jog"
+
+
+@pytest.mark.parametrize("status", ["<Alarm|Pn:Y>", "<Idle|Pn:Y>"])
+def test_active_limit_before_any_healthy_idle_keeps_accepted_auto_ownership(tmp_path, status):
+    session = GantrySession(gantry_factory=CorrelatedRecoveryGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(y=0.25, jog_id="active-step")
+    fake.status = status
+    session.position()
+    context = session.limit_recovery_context()
+    assert context.failed_jog_id == "active-step"
+    assert context.eligible

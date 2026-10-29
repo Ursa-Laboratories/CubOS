@@ -290,37 +290,19 @@ describe("GantryPositionWidget manual move safety", () => {
     );
   });
 
-  it("offers Pull off limit after a jog and posts limit recovery", async () => {
-    const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
+  it("offers the server's Y pull-off candidate without a local jog", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => jsonResponse(String(input).endsWith("/recovery-context") ? {
+      raw_status: "ALARM:3; Pn:Y", active_limit_axes: ["y"], failed_jog_delta: { x: 0, y: 0.5, z: 0 },
+      eligible: true, blocked_reason: null, pull_off_delta: { x: 0, y: -5, z: 0 }, manual_available: true,
+    } : { status: "recovered", mode: "known_jog", attempts: 1, pull_off: { x: 0, y: -5, z: 0 }, commanded_delta: { x: 0, y: -5, z: 0 }, failed_delta: { x: 0, y: 0.5, z: 0 }, messages: [] }));
     vi.stubGlobal("fetch", fetchMock);
-
-    const widget = (pos: GantryPosition) => (
-      <GantryPositionWidget
-        position={pos}
-        workingVolume={workingVolume}
-        gantryFile="cubos.yaml"
-        gantry={null}
-        onSaveCalibrated={async () => undefined}
-      />
-    );
-    const { rerender } = render(widget(position()));
-
-    fireEvent.mouseDown(screen.getByTitle("X+"));
-    fireEvent.mouseUp(screen.getByTitle("X+"));
-
-    rerender(widget(position({ status: "ALARM:1" })));
-
-    fireEvent.click(screen.getByRole("button", { name: "Pull off limit" }));
-
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith(
-        "/api/v1/gantry/calibration/recover-limit",
-        expect.objectContaining({
-          method: "POST",
-          body: JSON.stringify({ x: 0.5, y: 0, z: 0 }),
-        }),
-      );
-    });
+    render(<GantryPositionWidget position={position({ status: "ALARM:3; Pn:Y" })}
+      workingVolume={workingVolume} gantryFile="cubos.yaml" gantry={null} onSaveCalibrated={async () => undefined} />);
+    await user.click(await screen.findByRole("button", { name: "Pull off Y− 5 mm" }));
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/gantry/calibration/recover-limit", expect.objectContaining({
+      method: "POST", body: JSON.stringify({ x: 0, y: 0.5, z: 0 }),
+    }));
   });
 
   it("hides Pull off limit when no jog direction is known", () => {
@@ -339,6 +321,62 @@ describe("GantryPositionWidget manual move safety", () => {
 
     expect(screen.queryByRole("button", { name: "Pull off limit" })).toBeNull();
     expect(screen.getByRole("button", { name: "Unlock ($X)" })).toBeInTheDocument();
+  });
+
+  it.each(["[MSG:Check Limits]", "Home required"])("blocks normal motion for %s while retaining explicit recovery controls", (status) => {
+    const fetchMock = vi.fn(async () => jsonResponse(position()));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GantryPositionWidget position={position({ status })} workingVolume={workingVolume}
+      gantryFile="cubos.yaml" gantry={null} onSaveCalibrated={async () => undefined} />);
+    expect(screen.getByTitle("Z+")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Go" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Home" })).toBeEnabled();
+    if (status === "Home required") expect(screen.getByText("HOME REQUIRED")).toBeInTheDocument();
+    else expect(screen.getByRole("button", { name: "Unlock ($X)" })).toBeEnabled();
+    fireEvent.keyDown(window, { key: "x" });
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
+  });
+
+  it("blocks jog, Go, and duplicate Home while another client is homing without reporting an alarm", () => {
+    const fetchMock = vi.fn(async () => jsonResponse(position()));
+    vi.stubGlobal("fetch", fetchMock);
+    render(<GantryPositionWidget position={position({ status: "Homing", work_x: null, work_y: null, work_z: null })}
+      workingVolume={workingVolume} gantryFile="cubos.yaml" gantry={null} onSaveCalibrated={async () => undefined} />);
+    expect(screen.getByTitle("Z+")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Go" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Homing…" })).toBeDisabled();
+    expect(screen.queryByText("ALARM")).not.toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "x" });
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
+  });
+
+  it.each([
+    { status: "ALARM:3; Pn:Y" },
+    { status: "Home required" },
+    { status: "Idle", work_x: null, work_y: null, work_z: null },
+  ])("hides placeholder machine coordinates for an untrusted position %j", (state) => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({ eligible: false, active_limit_axes: [], manual_available: false, blocked_reason: "Position unverified." })));
+    render(<GantryPositionWidget position={position(state)} workingVolume={workingVolume}
+      gantryFile="cubos.yaml" gantry={null} onSaveCalibrated={async () => undefined} />);
+    expect(screen.getAllByText("—", { exact: true })).toHaveLength(3);
+    expect(screen.queryByText("0.000", { exact: true })).not.toBeInTheDocument();
+    expect(screen.getByTitle("Z+")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Go" })).toBeDisabled();
+  });
+
+  it("latches a jog fault before the next poll and retains it across cached Idle", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn(async () => jsonResponse({ detail: "ALARM:3 [MSG:Check Limits]" }, 409));
+    vi.stubGlobal("fetch", fetchMock);
+    const widget = () => <GantryPositionWidget position={position()} workingVolume={workingVolume}
+      gantryFile="cubos.yaml" gantry={null} onSaveCalibrated={async () => undefined} />;
+    const { rerender } = render(widget());
+    await user.click(screen.getByTitle("Z+"));
+    expect(await screen.findByText("ALARM")).toBeInTheDocument();
+    rerender(widget());
+    expect(screen.getByRole("button", { name: "Unlock ($X)" })).toBeEnabled();
+    expect(screen.getByTitle("Z+")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Go" })).toBeDisabled();
   });
 
   it("hides Pull off limit for non-limit alarms even with a known jog direction", () => {
@@ -661,7 +699,7 @@ describe("GantryPositionWidget manual move safety", () => {
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     expect(await screen.findByText(/Move target outside working volume/)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("validates manual move coordinates before sending", async () => {
@@ -695,7 +733,7 @@ describe("GantryPositionWidget manual move safety", () => {
     // is no standalone "must be 0 or greater" rule anymore (home_origin
     // configs have an entirely negative working volume).
     expect(await screen.findByText(/Move target outside working volume/)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("accepts a manual move to negative coordinates inside a home_origin (negative) working volume", async () => {
@@ -749,7 +787,7 @@ describe("GantryPositionWidget manual move safety", () => {
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     expect(await screen.findByText(/Move target outside working volume/)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("allows a jog that stays inside a negative (home_origin) working volume", () => {
@@ -793,7 +831,7 @@ describe("GantryPositionWidget manual move safety", () => {
     fireEvent.mouseDown(screen.getByTitle("X-"));
     fireEvent.mouseUp(screen.getByTitle("X-"));
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
     expect(screen.getByText("At working-volume limit")).toBeInTheDocument();
   });
 
@@ -852,7 +890,7 @@ describe("GantryPositionWidget manual move safety", () => {
     select.focus();
     fireEvent.keyDown(select, { key: "ArrowDown" });
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("maps keyboard jog keys to CubOS-relative deltas", () => {
@@ -924,7 +962,7 @@ describe("GantryPositionWidget manual move safety", () => {
     ]);
   });
 
-  it("falls back to backend guarding when current work position is not finite", () => {
+  it("blocks jogging when current work position is not finite", () => {
     const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
     vi.stubGlobal("fetch", fetchMock);
 
@@ -941,13 +979,8 @@ describe("GantryPositionWidget manual move safety", () => {
     fireEvent.mouseDown(screen.getByTitle("X+"));
     fireEvent.mouseUp(screen.getByTitle("X+"));
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/jog",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ x: 0.5, y: 0, z: 0 }),
-      }),
-    );
+    expect(screen.getByTitle("X+")).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("stops keyboard hold jogging on window blur and sends jog cancel only for a held jog", async () => {
@@ -1005,7 +1038,7 @@ describe("GantryPositionWidget manual move safety", () => {
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("does not keyboard-jog while the calibration wizard is open", async () => {
@@ -1029,7 +1062,7 @@ describe("GantryPositionWidget manual move safety", () => {
 
     fireEvent.keyDown(window, { key: "ArrowRight" });
 
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("opens the chooser without hardware calls and blocks background keyboard jogging", async () => {
@@ -1044,7 +1077,7 @@ describe("GantryPositionWidget manual move safety", () => {
     expect(screen.queryByRole("dialog", { name: "Gantry calibration" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Calibrate instrument offsets" })).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.getByRole("button", { name: "Calibrate" })).toHaveFocus();
   });
@@ -1064,12 +1097,12 @@ describe("GantryPositionWidget manual move safety", () => {
     expect(screen.getByRole("button", { name: "Full calibration" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Calibrate offsets only" })).toBeDisabled();
     expect(screen.getByText(reason)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
     if ("connected" in state && state.connected === false) {
       await user.click(screen.getByRole("button", { name: "Full calibration" }));
       expect(screen.getByRole("dialog", { name: "Gantry calibration" })).toBeInTheDocument();
       expect(screen.queryByRole("dialog", { name: "Choose calibration mode" })).not.toBeInTheDocument();
-      expect(fetchMock).not.toHaveBeenCalled();
+      expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
     }
   });
 
@@ -1085,7 +1118,7 @@ describe("GantryPositionWidget manual move safety", () => {
     expect(screen.queryByRole("dialog", { name: "Choose calibration mode" })).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "Instrument offset calibration" })).toBeInTheDocument();
     fireEvent.keyDown(window, { key: "ArrowRight" });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("renders jog command errors inline", async () => {
@@ -1163,7 +1196,7 @@ describe("GantryPositionWidget manual move safety", () => {
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("rejects a move when one axis is left blank instead of treating it as 0", async () => {
@@ -1186,7 +1219,7 @@ describe("GantryPositionWidget manual move safety", () => {
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
   it("still sends an explicit all-zero move", async () => {

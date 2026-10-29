@@ -187,6 +187,10 @@ class _LimitRecoveringFakeGantry(_FakeGantry):
             raise CommandExecutionError("Alarm in status: <Alarm|WPos:0,0,0|Pn:Y>")
         super().jog(x=x, y=y, z=z, feed_rate=feed_rate)
 
+    def get_status(self) -> str:
+        self.calls.append(("get_status",))
+        return "<Idle|WPos:0,0,0>"
+
     def get_coordinates(self) -> dict[str, float]:
         if self.fail_next_recovery_readback:
             self.fail_next_recovery_readback = False

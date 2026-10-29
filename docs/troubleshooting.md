@@ -6,18 +6,19 @@ GRBL enters an **alarm state** after a hard-limit trip, an unexpected
 disconnect/reset, or certain startup conditions. While in alarm, GRBL
 refuses motion commands until it's cleared.
 
-CubOS already recovers automatically in the two places most likely to hit
-this:
+CubOS handles these cases as follows:
 
-- **During calibration jogging**, a hard-limit trip triggers a soft reset,
-  `$X` unlock, and a small pull-off opposite the jog that caused it (see
-  [Calibration: Jog Controls](calibration.md#jog-controls)).
-- **In the Operator UI**, the alarm banner offers **Pull off limit**, which
-  runs that same soft-reset + unlock + pull-off sequence opposite the last
-  jog direction.
-- **At the start of a protocol run**, if the gantry is already in alarm,
-  CubOS unlocks it before proceeding and raises an error if it can't get a
-  clean status afterward.
+- CLI calibration can attempt one directed reset/unlock and pull-off after a
+  failed jog. It does not repeat the move or reset after a failure.
+- An open Operator calibration wizard attempts one automatic backoff for an
+  eligible fault tied to its own accepted single-axis jog. Fresh controller
+  state must confirm only that axis's switch. Foreign/unknown jogs, a reopened
+  wizard, Stop/close and failed attempts do not trigger automatic movement.
+  Outside calibration, **Pull off limit** remains explicit. **Manual pull-off**
+  requires an explicitly confirmed axis and away direction. Every recovery
+  leaves **Home required** until successful explicit homing.
+- At protocol startup, the CLI can clear an expected startup alarm and checks
+  the resulting controller state before continuing.
 
 If you're driving the controller directly (a serial terminal, not a CubOS
 script) — for example during [Gantry Bring-Up](admin/gantry-bring-up.md) —
@@ -43,23 +44,23 @@ into the hard limit, or the machine was powered off in that position — it
 can look bricked: GRBL boots in alarm, refuses to home (homing would drive
 further into the switch), and rejects jogs.
 
-First choice: in the Operator UI, click **Pull off limit** in the alarm
-banner. It soft-resets, unlocks, and backs the gantry off opposite the last
-jog direction, then you can re-home.
+An eligible wizard-owned calibration jog triggers one automatic guarded
+backoff. Otherwise, use **Pull off limit** explicitly when CubOS still knows the
+original accepted jog and verifies the matching active switch. This sends one
+reset/unlock and one 5 mm reverse jog at 100 mm/min. It does not automatically
+home, resume jogging, or retry a failed recovery.
 
-If the UI can't help (e.g. the controller was power-cycled, so CubOS no
-longer knows which direction caused it), recover manually over a serial
-terminal or the UI's **Advanced** panel:
+After a restart, that original jog may be unknown. **Manual pull-off** allows
+one 1 mm jog at 100 mm/min only after you explicitly select the active axis,
+choose the direction away from the switch, and confirm the path is clear. The
+software verifies the switch again before the move; it cannot infer which end
+of the axis is pressed. Do not guess the direction.
 
-1. **Unlock:** send `$X` to clear the boot alarm.
-2. **Jog off the switch** a few millimeters in the direction *away* from
-   it, using small steps (e.g. `$J=G91 X-5 F500` for a tripped X-max
-   switch).
-3. If the jog is rejected (`error:15`, jog target exceeds travel), the
-   controller's soft limits are checking against an unhomed position.
-   Temporarily disable them with `$20=0`, jog off the switch, then
-   **re-enable them with `$20=1`** — do not leave soft limits off.
-4. **Re-home** with `$H` once no switch is pressed.
+Use **Stop** to cancel. Neither mode disables limits, zeroes coordinates, or
+automatically repeats a rejected move. If the controller refuses the jog,
+multiple inputs are active, or the direction is uncertain, stop and inspect
+the machine. Clear the instrument head, fixtures, and cables before explicitly
+homing once the switch is released.
 
 Do not run protocols or continue calibration until homing succeeds — see
 the warning above about trusting position after an alarm.
@@ -71,14 +72,10 @@ halts the steppers — the board reboots and re-enumerates on the bus, and
 every command afterward times out on the stale connection ("Unlock ($X)
 timed out waiting for ok", position reads failing).
 
-CubOS limit recovery detects this and automatically re-opens the serial
-port (retrying for a few seconds while the device re-enumerates), then
-resumes the unlock and pull-off. If the reconnect fails — the board did
-not come back on its own — the UI reports **"Controller connection
-lost"**: power-cycle the controller, re-seat the USB cable at both ends,
-then **Disconnect** and **Connect** again. Consider strain-relieving the
-USB cable and checking the controller's power supply if this happens
-repeatedly.
+A connection loss stops recovery; CubOS does not reconnect and resume a
+pull-off automatically. Check controller power, the USB cable, and its strain
+relief. Reconnect only after inspecting the machine. The position reference
+remains unverified until you explicitly home successfully.
 
 ## After a Physical Crash
 

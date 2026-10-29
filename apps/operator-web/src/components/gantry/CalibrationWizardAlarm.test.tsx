@@ -11,14 +11,6 @@ function jsonResponse(body: unknown): Response {
   });
 }
 
-function deferredResponse() {
-  let resolve!: (value: Response) => void;
-  const promise = new Promise<Response>((innerResolve) => {
-    resolve = innerResolve;
-  });
-  return { promise, resolve };
-}
-
 function gantryConfig(): GantryConfig {
   return {
     serial_port: "/dev/ttyUSB0",
@@ -76,6 +68,40 @@ describe("CalibrationWizard alarm recovery", () => {
     vi.unstubAllGlobals();
   });
 
+  it("clears a prior Home required poll only after verified homing succeeds", async () => {
+    const user = userEvent.setup();
+    let finishHome!: (response: Response) => void;
+    const pending = new Promise<Response>((resolve) => { finishHome = resolve; });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/prepare-origin") ? pending : jsonResponse(position())));
+    const wizard = (status: string) => <CalibrationWizard open onClose={() => undefined}
+      gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position(status)}
+      onSaveCalibrated={async () => undefined} />;
+    const { rerender } = render(wizard("Idle"));
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Home gantry" }));
+    rerender(wizard("Home required"));
+    finishHome(jsonResponse(position()));
+    await screen.findByText("Homed.");
+    rerender(wizard("Idle"));
+    expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+    rerender(wizard("ALARM:3; Pn:Y"));
+    expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+
+  it.each(["Home required", "Homing", "ALARM:3"])("does not report Homed for an unverified %s response", async (status) => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(position(status))));
+    render(<CalibrationWizard open onClose={() => undefined}
+      gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position()}
+      onSaveCalibrated={async () => undefined} />);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Home gantry" }));
+    expect(screen.queryByText("Homed.")).not.toBeInTheDocument();
+    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Home");
+  });
+
   it("shows the power-cycle instruction when recovery reports connection loss", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -86,7 +112,7 @@ describe("CalibrationWizard alarm recovery", () => {
           headers: { "Content-Type": "application/json" },
         });
       }
-      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
+      if (url.pathname === "/api/v1/gantry/unlock" && init?.method === "POST") {
         return new Response(
           JSON.stringify({
             detail:
@@ -112,12 +138,8 @@ describe("CalibrationWizard alarm recovery", () => {
     const zDown = await advanceToOriginJog(user);
     await user.click(zDown);
 
-    // The recovery failure surfaces on both the primary "GANTRY ALARM" banner
-    // and the secondary generic error line, so a bare findByText on this
-    // substring matches two elements. Scope to the alarm banner, which is
-    // the actionable instruction this test is actually about.
-    const alarmBanner = (await screen.findByText("GANTRY ALARM")).closest("div");
-    expect(alarmBanner).toHaveTextContent(/Power-cycle the controller, re-seat the USB cable/);
+    await user.click(await screen.findByRole("button", { name: "Unlock alarm" }));
+    expect(await screen.findByText(/Power-cycle the controller, re-seat the USB cable/)).toBeInTheDocument();
   });
 
   it("closes even when restoring soft limits fails (dead controller link)", async () => {
@@ -197,422 +219,59 @@ describe("CalibrationWizard alarm recovery", () => {
     expect(screen.getByText(/Jog in small steps near the edges of travel/)).toBeInTheDocument();
   });
 
-  it("automatically recovers and locks controls when Z jog hits a limit", async () => {
+  it.each(["ALARM:1 hard limit", "ALARM:3", "error:9 Reset to continue", "[MSG:Check Limits]"])("locks controls without automatic recovery after %s", async (message) => {
     const user = userEvent.setup();
-    const recovery = deferredResponse();
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-        "http://localhost",
-      );
-      if (url.pathname === "/api/v1/gantry/calibration/prepare-origin" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        return new Response("ALARM:1 hard limit", { status: 409 });
-      }
-      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
-        return recovery.promise;
-      }
-      return jsonResponse(position());
-    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/jog")
+      ? new Response(message, { status: 409 }) : jsonResponse(position()));
     vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <CalibrationWizard
-        open
-        onClose={() => undefined}
-        gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
-        position={position()}
-        onSaveCalibrated={async () => undefined}
-      />,
-    );
-
-    const zDown = await advanceToOriginJog(user);
-
-    await user.click(zDown);
-
-    expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
-    expect(zDown).toBeDisabled();
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/calibration/recover-limit",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ x: 0, y: 0, z: -0.5 }),
-      }),
-    ));
-
-    recovery.resolve(jsonResponse({
-      status: "recovered",
-      attempts: 1,
-      pull_off: { x: 0, y: 0, z: 5 },
-      messages: ["recovered"],
-    }));
-
-    await waitFor(() => expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument());
-    expect(await screen.findByText(/Backed off the limit switch/)).toBeInTheDocument();
-    expect(zDown).not.toBeDisabled();
-  });
-
-  it("recovers when a hard limit is first reported by position polling after a jog", async () => {
-    const user = userEvent.setup();
-    const recovery = deferredResponse();
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-        "http://localhost",
-      );
-      if (url.pathname === "/api/v1/gantry/calibration/prepare-origin" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        return jsonResponse({ status: "ok" });
-      }
-      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
-        return recovery.promise;
-      }
-      return jsonResponse(position());
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const props = {
-      open: true,
-      onClose: () => undefined,
-      gantry: { filename: "cubos.yaml", config: gantryConfig() },
-      onSaveCalibrated: async () => undefined,
-    };
-    const { rerender } = render(
-      <CalibrationWizard
-        {...props}
-        position={position()}
-      />,
-    );
-
+    render(<CalibrationWizard open onClose={() => undefined}
+      gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position()}
+      onSaveCalibrated={async () => undefined} />);
     await user.click(await advanceToOriginJog(user));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/jog",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ x: 0, y: 0, z: -0.5 }),
-      }),
-    );
-
-    rerender(
-      <CalibrationWizard
-        {...props}
-        position={position("ALARM:1")}
-      />,
-    );
-
     expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Z-" })).toBeDisabled();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/calibration/recover-limit",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ x: 0, y: 0, z: -0.5 }),
-      }),
-    ));
-
-    recovery.resolve(jsonResponse({
-      status: "recovered",
-      attempts: 1,
-      pull_off: { x: 0, y: 0, z: 5 },
-      messages: ["recovered"],
-    }));
-
-    await waitFor(() => expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument());
-    expect(await screen.findByText(/Backed off the limit switch/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Z-" })).not.toBeDisabled();
+    expect(screen.getByRole("button", { name: "Set origin and continue" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
   });
 
-  it("does not auto-recover a poll alarm during a blocking action with a stale jog delta", async () => {
+  it("retains a polled fault across cached Idle without automatic pull-off", async () => {
     const user = userEvent.setup();
-    const restore = deferredResponse();
-    let recoverCallCount = 0;
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-        "http://localhost",
-      );
-      if (url.pathname === "/api/v1/gantry/calibration/prepare-origin" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        return jsonResponse({ status: "ok" });
-      }
-      if (url.pathname === "/api/v1/gantry/position") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/work-coordinates" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/calibration/restore-soft-limits" && init?.method === "POST") {
-        return restore.promise;
-      }
-      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
-        recoverCallCount++;
-        return jsonResponse({
-          status: "recovered",
-          attempts: 1,
-          pull_off: { x: 0, y: 0, z: 5 },
-          messages: ["recovered"],
-        });
-      }
-      return jsonResponse(position());
-    });
+    const fetchMock = vi.fn<(input: RequestInfo | URL) => Promise<Response>>(async () => jsonResponse(position()));
     vi.stubGlobal("fetch", fetchMock);
-
-    const props = {
-      open: true,
-      onClose: () => undefined,
-      gantry: { filename: "cubos.yaml", config: gantryConfig() },
-      onSaveCalibrated: async () => undefined,
-    };
-    const { rerender } = render(<CalibrationWizard {...props} position={position()} />);
-
-    const zDown = await advanceToOriginJog(user);
-    await user.click(zDown);
-    await user.click(screen.getByRole("button", { name: "Set origin and continue" }));
-
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/calibration/restore-soft-limits",
-      expect.objectContaining({ method: "POST" }),
-    ));
-
-    rerender(<CalibrationWizard {...props} position={position("ALARM:1")} />);
-    await new Promise((r) => setTimeout(r, 50));
-    expect(recoverCallCount).toBe(0);
-
-    restore.resolve(jsonResponse(position()));
-
-    expect(await screen.findByText(/cannot back off on its own/i)).toBeInTheDocument();
-    expect(recoverCallCount).toBe(0);
-  });
-
-  it("recovers when a reset-to-continue error fires during a jog", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-        "http://localhost",
-      );
-      if (url.pathname === "/api/v1/gantry/calibration/prepare-origin" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        return new Response("error:9 Reset to continue", { status: 409 });
-      }
-      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
-        return jsonResponse({
-          status: "recovered",
-          attempts: 2,
-          pull_off: { x: 0, y: 0, z: 5 },
-          messages: ["recovered"],
-        });
-      }
-      return jsonResponse(position());
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <CalibrationWizard
-        open
-        onClose={() => undefined}
-        gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
-        position={position()}
-        onSaveCalibrated={async () => undefined}
-      />,
-    );
-
-    const zDown = await advanceToOriginJog(user);
-
-    await user.click(zDown);
-
-    expect(await screen.findByText(/Backed off the limit switch/)).toBeInTheDocument();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/calibration/recover-limit",
-      expect.objectContaining({ method: "POST" }),
-    ));
-    expect(zDown).not.toBeDisabled();
-  });
-
-  it("keeps controls locked when automatic recovery cannot clear the alarm", async () => {
-    const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-        "http://localhost",
-      );
-      if (url.pathname === "/api/v1/gantry/calibration/prepare-origin" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        return new Response("ALARM:1 hard limit", { status: 409 });
-      }
-      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
-        return new Response("still on limit", { status: 409 });
-      }
-      return jsonResponse(position());
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <CalibrationWizard
-        open
-        onClose={() => undefined}
-        gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
-        position={position()}
-        onSaveCalibrated={async () => undefined}
-      />,
-    );
-
-    const zDown = await advanceToOriginJog(user);
-
-    await user.click(zDown);
-
-    expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
-    expect(await screen.findByText(/Could not back off the limit switch/)).toBeInTheDocument();
-    expect(await screen.findByText(/Limit recovery failed after jog error/)).toBeInTheDocument();
-    expect(zDown).toBeDisabled();
-  });
-
-  it("recovers when position polling reports a Pn: active limit pin status", async () => {
-    const user = userEvent.setup();
-    const recovery = deferredResponse();
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-        "http://localhost",
-      );
-      if (url.pathname === "/api/v1/gantry/calibration/prepare-origin" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        return jsonResponse({ status: "ok" });
-      }
-      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
-        return recovery.promise;
-      }
-      return jsonResponse(position());
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const props = {
-      open: true,
-      onClose: () => undefined,
-      gantry: { filename: "cubos.yaml", config: gantryConfig() },
-      onSaveCalibrated: async () => undefined,
-    };
-    const { rerender } = render(<CalibrationWizard {...props} position={position()} />);
-
+    const wizard = (status: string) => <CalibrationWizard open onClose={() => undefined}
+      gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position(status)}
+      onSaveCalibrated={async () => undefined} />;
+    const { rerender } = render(wizard("Idle"));
     await user.click(await advanceToOriginJog(user));
-
-    rerender(<CalibrationWizard {...props} position={position("<Idle|WPos:0.0,0.0,20.0|Pn:Z>")} />);
-
+    rerender(wizard("<Idle|WPos:0,0,20|Pn:Z>"));
     expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
+    rerender(wizard("Idle"));
     expect(screen.getByRole("button", { name: "Z-" })).toBeDisabled();
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/calibration/recover-limit",
-      expect.objectContaining({ method: "POST" }),
-    ));
-
-    recovery.resolve(jsonResponse({
-      status: "recovered",
-      attempts: 1,
-      pull_off: { x: 0, y: 0, z: 5 },
-      messages: ["recovered"],
-    }));
-
-    await waitFor(() => expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument());
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
   });
 
-  it("does not re-trigger recovery when re-rendered with the same alarm status and delta", async () => {
+  it("does not advance after a calibration lift faults", async () => {
     const user = userEvent.setup();
-    let recoverCallCount = 0;
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-        "http://localhost",
-      );
-      if (url.pathname === "/api/v1/gantry/calibration/prepare-origin" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        return jsonResponse({ status: "ok" });
-      }
-      if (url.pathname === "/api/v1/gantry/calibration/recover-limit" && init?.method === "POST") {
-        recoverCallCount++;
-        return jsonResponse({
-          status: "recovered",
-          attempts: 1,
-          pull_off: { x: 0, y: 0, z: 5 },
-          messages: ["recovered"],
-        });
-      }
+    const config = gantryConfig();
+    config.instruments.camera = { type: "camera", vendor: "usb", offset_x: 0, offset_y: 0, depth: 0 };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/home-and-center")) return jsonResponse({ xy_bounds: { x: 100, y: 100, z: 20 }, position: { x: 50, y: 50, z: 20 } });
+      if (path.endsWith("/position")) return jsonResponse({ ...position(), z: -50, work_z: -50 });
+      if (path.endsWith("/jog-blocking")) return new Response("ALARM:1 hard limit", { status: 409 });
       return jsonResponse(position());
     });
     vi.stubGlobal("fetch", fetchMock);
-
-    const props = {
-      open: true,
-      onClose: () => undefined,
-      gantry: { filename: "cubos.yaml", config: gantryConfig() },
-      onSaveCalibrated: async () => undefined,
-    };
-    const { rerender } = render(<CalibrationWizard {...props} position={position()} />);
-
-    await user.click(await advanceToOriginJog(user));
-
-    // First alarm appearance triggers recovery.
-    rerender(<CalibrationWizard {...props} position={position("ALARM:1")} />);
-    await waitFor(() => expect(recoverCallCount).toBe(1));
-
-    // Re-rendering with the same status and delta must not fire a second call.
-    rerender(<CalibrationWizard {...props} position={position("ALARM:1")} />);
-    await new Promise((r) => setTimeout(r, 100));
-    expect(recoverCallCount).toBe(1);
-  });
-
-  it("stops jog repeats and shows error when a non-alarm jog error fires", async () => {
-    const user = userEvent.setup({ delay: null });
-    let jogCallCount = 0;
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(
-        typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
-        "http://localhost",
-      );
-      if (url.pathname === "/api/v1/gantry/calibration/prepare-origin" && init?.method === "POST") {
-        return jsonResponse(position());
-      }
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        jogCallCount++;
-        return new Response("serial port timed out", { status: 500 });
-      }
-      return jsonResponse(position());
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <CalibrationWizard
-        open
-        onClose={() => undefined}
-        gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
-        position={position()}
-        onSaveCalibrated={async () => undefined}
-      />,
-    );
-
-    const zDown = await advanceToOriginJog(user);
-    await user.click(zDown);
-
-    await waitFor(() => expect(screen.queryByText(/serial port timed out/i)).toBeInTheDocument());
-    expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument();
-
-    const countAfterError = jogCallCount;
-    await new Promise((r) => setTimeout(r, 300));
-    expect(jogCallCount).toBe(countAfterError);
+    render(<CalibrationWizard open onClose={() => undefined}
+      gantry={{ filename: "cubos.yaml", config }} position={position()}
+      onSaveCalibrated={async () => undefined} />);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Home gantry" }));
+    await user.click(await screen.findByRole("button", { name: "Set XY origin and continue" }));
+    await user.click(await screen.findByRole("button", { name: "Continue" }));
+    await user.click(await screen.findByRole("button", { name: "Set Z reference with asmi and continue" }));
+    expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
+    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Z reference");
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
   });
 });
