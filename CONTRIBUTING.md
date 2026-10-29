@@ -23,6 +23,9 @@ For installation, local setup, and project orientation, start with
 - Do not include unrelated formatting, generated files, or cleanup in the same
   PR unless the PR is specifically for that work.
 
+Keep progress files, work logs, and interim status updates out of PRs. Include
+concise final validation results and material limitations in the description.
+
 All CI checks should pass before a PR is merged. You do not need to run the
 entire test suite locally for every small change, but run the smallest useful
 tests while developing and make sure the PR is not relying on untested behavior.

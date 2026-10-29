@@ -109,9 +109,9 @@ Do not treat the pull-off reserve as usable WPos.
 
 In both cases: make the minimal targeted change, mark deferred work `# TODO(iter): test` or `# TODO(iter): doc`, and sweep those tags at close-out. Temporary instrumentation is OK if tagged and removed before finalizing. Deferral is within a working session, not past the PR: sweep `# TODO(iter)` tags before the PR is ready for review.
 
-## Progress Notes
+## PR Content
 
-See `progress/README.md`. Default: no progress file. Create only for hardware-facing motion changes, refactors >5 files, or explicit handoffs. Delete on PR merge.
+Do not add progress files, work logs, or interim status updates to PRs. Keep working plans outside the PR. Include concise final validation results and material limitations in the PR description.
 
 ## Verification Gates
 
