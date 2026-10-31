@@ -6,11 +6,9 @@ import sys
 from pathlib import Path
 
 import pytest
-
 from cubos.data.data_store import DataStore
 from cubos.data.export_helpers import main
 from cubos.protocol_engine.measurements import InstrumentMeasurement, MeasurementType
-
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -34,6 +32,58 @@ def _seed_db(path: str) -> None:
 
 
 # ─── campaign-experiments subcommand ─────────────────────────────────────────
+
+
+def test_help_documents_runtime_database_defaults(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["export", "--help"])
+
+    with pytest.raises(SystemExit) as exc:
+        main()
+
+    assert exc.value.code == 0
+    output = capsys.readouterr().out
+    assert "CUBOS_DATA_DB_PATH" in output
+    assert "~/.cubos/panda_data.db" in output
+
+
+@pytest.mark.parametrize("use_override", [False, True])
+@pytest.mark.parametrize("command, expected", [
+    (["campaign-experiments", "1"], "experiment_id"),
+    (["experiment-all", "1"], "uvvis"),
+    (["experiment-instrument", "1", "uvvis"], "wavelengths"),
+])
+def test_uses_runtime_database_default(
+    tmp_path, monkeypatch, capsys, use_override, command, expected,
+):
+    pytest.importorskip("pandas")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    if use_override:
+        db = tmp_path / "custom" / "results.db"
+        monkeypatch.setenv("CUBOS_DATA_DB_PATH", str(db))
+    else:
+        monkeypatch.delenv("CUBOS_DATA_DB_PATH", raising=False)
+        db = tmp_path / ".cubos" / "panda_data.db"
+    _seed_db(str(db))
+    monkeypatch.setattr(sys, "argv", ["export", *command])
+
+    assert main() == 0
+    assert expected in capsys.readouterr().out
+    assert not (tmp_path / "data").exists()
+
+
+def test_explicit_database_overrides_environment(tmp_path, monkeypatch, capsys):
+    pytest.importorskip("pandas")
+    db = tmp_path / "explicit.db"
+    _seed_db(str(db))
+    monkeypatch.setenv("CUBOS_DATA_DB_PATH", str(tmp_path / "missing.db"))
+    monkeypatch.setattr(sys, "argv", [
+        "export", "--db-path", str(db), "campaign-experiments", "1",
+    ])
+
+    assert main() == 0
+    assert "experiment_id" in capsys.readouterr().out
+    assert not (tmp_path / "missing.db").exists()
 
 
 class TestCampaignExperimentsSubcommand:
