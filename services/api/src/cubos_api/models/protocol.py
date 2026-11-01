@@ -13,6 +13,7 @@ class CommandArg(BaseModel):
     type: str
     required: bool
     default: Any = None
+    description: str = ""
 
 
 class CommandInfo(BaseModel):
