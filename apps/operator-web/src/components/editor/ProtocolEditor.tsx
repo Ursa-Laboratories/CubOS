@@ -21,6 +21,8 @@ import { useSaveShortcut } from "./saveHelpers";
 import ConfigFilePicker from "./ConfigFilePicker";
 import { normalizeYamlFilename } from "./field-utils";
 import RawYamlPanel from "./RawYamlPanel";
+import MultiDispenseTable from "./MultiDispenseTable";
+import { multiDispenseErrors } from "../../utils/multiDispense";
 import { useConfirm } from "../common/useConfirm";
 import {
   createCompositionRow,
@@ -88,6 +90,7 @@ const COMMAND_COLORS: Record<string, string> = {
   move: theme.color.accent,
   aspirate: theme.color.success,
   dispense: theme.color.success,
+  multi_dispense: theme.color.success,
   blowout: theme.color.success,
   mix: theme.color.success,
   pick_up_tip: theme.color.success,
@@ -195,6 +198,7 @@ export default function ProtocolEditor({
   const choices = buildProtocolChoices(deck, gantry, positionRows, instrumentMethods, instrumentMethodParams);
   const positionErrors = validatePositionRows(positionRows);
   const hasPositionErrors = positionErrors.length > 0;
+  const hasDispenseErrors = steps.some(step => step.command === "multi_dispense" && multiDispenseErrors(step.args).length > 0);
 
   const commit = (next: ProtocolStep[]) => {
     setSteps(next);
@@ -313,6 +317,11 @@ export default function ProtocolEditor({
     const next = steps.map((step) => {
       const args = Object.fromEntries(
         Object.entries(step.args).map(([name, value]) => {
+          if (step.command === "multi_dispense" && name === "destinations" && Array.isArray(value)) {
+            const renamed = value.map(target => target === oldName ? newName : target);
+            if (renamed.some((target, i) => target !== value[i])) changed = true;
+            return [name, renamed];
+          }
           if (isPositionArg(name) && value === oldName) {
             changed = true;
             return [name, newName];
@@ -329,14 +338,16 @@ export default function ProtocolEditor({
     rowsToPositions(positionRows) ? { positions: rowsToPositions(positionRows), protocol: steps } : { protocol: steps }
   );
 
-  const handleValidate = () => onValidate(buildConfig());
+  const handleValidate = () => {
+    if (!hasDispenseErrors) onValidate(buildConfig());
+  };
 
   const saveAsFilename = normalizeYamlFilename(saveAs);
   const saveAsExists = !!saveAsFilename && configs.includes(saveAsFilename);
 
   const handleSave = async () => {
     const normalized = saveAsFilename || selectedFile || "";
-    if (!normalized || saving || hasPositionErrors) return;
+    if (!normalized || saving || hasPositionErrors || hasDispenseErrors) return;
     if (saveAsExists && normalized !== selectedFile) {
       const ok = await requestConfirm({
         title: "Overwrite file?",
@@ -380,7 +391,7 @@ export default function ProtocolEditor({
   // banner only points the user there rather than asking them to save
   // those configs from here.
   const otherDirty = unsavedConfigs.filter((name) => name !== "Protocol");
-  const canSave = hasSteps && (!!saveAs.trim() || !!selectedFile) && !saving && !hasPositionErrors;
+  const canSave = hasSteps && (!!saveAs.trim() || !!selectedFile) && !saving && !hasPositionErrors && !hasDispenseErrors;
   useSaveShortcut(handleSave, canSave);
   // "new"/"resume" both need an explicit, complete choice before Run is
   // enabled — resume specifically needs a picked state id. "none" (the
@@ -394,14 +405,16 @@ export default function ProtocolEditor({
     : [];
   const seedRowsInvalid = seedErrors.length > 0;
   const seedContainerOptions = volumeContainerKeys(deck);
-  const runDisabled = isRunning || !hasSteps || !canRun || hasUnsaved || stateChoiceIncomplete || seedRowsInvalid;
-  const runButtonTitle = hasUnsaved
-    ? "Save your changes before running"
-    : stateChoiceIncomplete
-      ? "Select a fluid state to resume before running"
-      : seedRowsInvalid
-        ? "Fix the fluid-state seed rows before running"
-        : runDisabledReason ?? undefined;
+  const runDisabled = isRunning || !hasSteps || !canRun || hasUnsaved || stateChoiceIncomplete || seedRowsInvalid || hasDispenseErrors;
+  const runButtonTitle = hasDispenseErrors
+    ? "Fix the destination and volume rows before running"
+    : hasUnsaved
+      ? "Save your changes before running"
+      : stateChoiceIncomplete
+        ? "Select a fluid state to resume before running"
+        : seedRowsInvalid
+          ? "Fix the fluid-state seed rows before running"
+          : runDisabledReason ?? undefined;
 
   // Seed-row mutations flow up through onFluidStateChoiceChange so the
   // parent (App) stays the single owner of the choice. Each helper rebuilds
@@ -544,6 +557,7 @@ export default function ProtocolEditor({
                 {cmd ? (
                   <div style={stepArgsGridStyle}>
                     {cmd.args.map((arg) => {
+                      if (step.command === "multi_dispense" && ["destinations", "volumes"].includes(arg.name)) return null;
                       if (isHiddenArgForStep(arg.name, step.args, choices)) {
                         return null;
                       }
@@ -630,6 +644,16 @@ export default function ProtocolEditor({
                   </div>
                 ) : (
                   <p style={{ color: theme.color.danger, fontSize: 12, margin: 0 }}>Unknown command: {step.command}</p>
+                )}
+
+                {step.command === "multi_dispense" && (
+                  <MultiDispenseTable
+                    stepIndex={i}
+                    args={step.args}
+                    positions={choices.positions}
+                    onChange={(destinations, volumes) => commit(steps.map((s, j) => j === i
+                      ? { ...s, args: { ...s.args, destinations, volumes } } : s))}
+                  />
                 )}
 
                 {validationErrors &&
@@ -902,7 +926,7 @@ export default function ProtocolEditor({
             style={filenameInputStyle}
           />
           <div style={protocolButtonGroupStyle}>
-            <button onClick={handleValidate} disabled={isValidating || hasPositionErrors} style={validateBtnStyle}>
+            <button onClick={handleValidate} disabled={isValidating || hasPositionErrors || hasDispenseErrors} style={validateBtnStyle}>
               {isValidating ? "..." : "Validate"}
             </button>
             <button onClick={handleSave} disabled={!canSave} style={saveBtnStyle}>
@@ -969,6 +993,7 @@ export default function ProtocolEditor({
 }
 
 function defaultArgValue(name: string, choices: ProtocolChoices, current: Record<string, unknown>, command?: string): unknown {
+  if (command === "multi_dispense" && ["destinations", "volumes"].includes(name)) return [];
   if (command === "rinse" && name === "instrument") return choices.instruments.find((instrument) => choices.instrumentTypes[instrument] === "potentiostat") ?? "";
   if (command === "rinse" && name === "vial") return choices.vials[0] ?? "";
   if (name === "instrument") return choices.instruments[0] ?? "";

@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import ProtocolEditor from "./ProtocolEditor";
-import type { CommandInfo, DeckResponse, GantryResponse, ProtocolResponse, ProtocolStep } from "../../types";
+import ProtocolEditor from "../../../../src/components/editor/ProtocolEditor";
+import type { CommandInfo, DeckResponse, GantryResponse, ProtocolResponse, ProtocolStep } from "../../../../src/types";
 
 const COMMANDS: CommandInfo[] = [
   {
@@ -876,3 +876,141 @@ function baseProps(): React.ComponentProps<typeof ProtocolEditor> {
     runError: null,
   };
 }
+
+const MULTI_DISPENSE: CommandInfo = {
+  name: "multi_dispense", description: "Aspirate once, dispense portions",
+  args: [
+    { name: "source", type: "str", required: true, default: null },
+    { name: "destinations", type: "list[str]", required: true, default: null },
+    { name: "volumes", type: "list[float]", required: true, default: null },
+    { name: "speed", type: "float", required: false, default: 50 },
+  ],
+};
+const MULTI_ARGS = { source: "plate_1.A1", destinations: ["plate_1.B1", "plate_1.B2"], volumes: [20, 30], speed: 50 };
+function renderMulti(args: Record<string, unknown> = MULTI_ARGS, overrides: Partial<React.ComponentProps<typeof ProtocolEditor>> = {}) {
+  return renderProtocol({ commands: [...COMMANDS, MULTI_DISPENSE], steps: [{ command: "multi_dispense", args }], ...overrides });
+}
+
+describe("multi-dispense destination rows", () => {
+  it("loads saved arrays and submits paired numeric arrays to Save and Validate", async () => {
+    const user = userEvent.setup();
+    const props = renderMulti();
+    expect(screen.getByRole("table", { name: "Step 1 dispense destinations" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Step 1 destination 2")).toHaveValue("plate_1.B2");
+    const volume = screen.getByLabelText("Step 1 volume 1 (µL)");
+    await user.clear(volume);
+    await user.type(volume, "20.05");
+    expect(volume).toHaveValue("20.05");
+    await user.click(screen.getByRole("button", { name: "Validate" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    const body = { protocol: [{ command: "multi_dispense", args: { ...MULTI_ARGS, volumes: [20.05, 30] } }] };
+    expect(props.onValidate).toHaveBeenLastCalledWith(body);
+    expect(props.onSave).toHaveBeenLastCalledWith("move.yaml", body);
+  });
+
+  it("adds and removes paired rows repeatedly, including removing all rows", async () => {
+    const user = userEvent.setup();
+    const props = renderMulti();
+    await user.click(screen.getByRole("button", { name: "Remove destination 1 from step 1" }));
+    expect(screen.getByLabelText("Step 1 destination 1")).toHaveValue("plate_1.B2");
+    expect(screen.getByLabelText("Step 1 volume 1 (µL)")).toHaveValue("30");
+    for (let i = 0; i < 2; i++) {
+      await user.click(screen.getByRole("button", { name: "Add destination" }));
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+      await user.type(screen.getByLabelText("Step 1 destination 2"), "plate_1.A2");
+      await user.type(screen.getByLabelText("Step 1 volume 2 (µL)"), "12.5");
+      expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+      await user.click(screen.getByRole("button", { name: "Remove destination 1 from step 1" }));
+      expect(screen.getByLabelText("Step 1 volume 1 (µL)")).toHaveValue("12.5");
+    }
+    await user.click(screen.getByRole("button", { name: "Remove destination 1 from step 1" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Add at least one destination and volume.");
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([{ command: "multi_dispense", args: { ...MULTI_ARGS, destinations: [], volumes: [] } }]);
+  });
+
+  it.each(["", "-1", "0", "Infinity", "1e309", "NaN", "12abc", "1e", "."])("blocks invalid volume %j without retaining the prior number", async (invalid) => {
+    const user = userEvent.setup();
+    const props = renderMulti();
+    fireEvent.change(screen.getByLabelText("Step 1 volume 1 (µL)"), { target: { value: invalid } });
+    expect(screen.getByLabelText("Step 1 volume 1 (µL)")).toHaveAttribute("aria-invalid", "true");
+    for (const name of ["Save", "Validate", "Run Protocol"]) expect(screen.getByRole("button", { name })).toBeDisabled();
+    await user.keyboard("{Control>}s{/Control}");
+    expect(props.onSave).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByLabelText("Step 1 volume 1 (µL)"), { target: { value: "2.5e1" } });
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([{ command: "multi_dispense", args: { ...MULTI_ARGS, volumes: [25, 30] } }]);
+  });
+
+  it("preserves unmatched values and allows completing a mismatched saved list", async () => {
+    const user = userEvent.setup();
+    const props = renderMulti({ ...MULTI_ARGS, destinations: ["plate_1.B1"], volumes: [20, 30] });
+    expect(screen.getByLabelText("Step 1 volume 2 (µL)")).toHaveValue("30");
+    expect(screen.getByRole("alert")).toHaveTextContent("matching volume");
+    await user.type(screen.getByLabelText("Step 1 destination 2"), "plate_1.B2");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onSave).toHaveBeenLastCalledWith("move.yaml", { protocol: [{ command: "multi_dispense", args: MULTI_ARGS }] });
+  });
+
+  it("keeps malformed list values visible in raw YAML until explicitly repaired", async () => {
+    const user = userEvent.setup();
+    const props = renderMulti({ ...MULTI_ARGS, destinations: "plate_1.B1,plate_1.B2" });
+    expect(screen.getByRole("alert")).toHaveTextContent("must be lists");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Edit raw YAML" }));
+    expect((screen.getByLabelText("Raw YAML") as HTMLTextAreaElement).value).toContain("plate_1.B1,plate_1.B2");
+    expect(props.onLocalChange).not.toHaveBeenCalled();
+  });
+
+  it("round trips table edits through raw YAML and reapplies new rows to the table", async () => {
+    const user = userEvent.setup();
+    const props = renderMulti();
+    fireEvent.change(screen.getByLabelText("Step 1 volume 2 (µL)"), { target: { value: "40.5" } });
+    await user.click(screen.getByRole("button", { name: "Edit raw YAML" }));
+    const yaml = screen.getByLabelText("Raw YAML") as HTMLTextAreaElement;
+    expect(yaml.value).toContain("40.5");
+    await user.click(screen.getByRole("button", { name: "Apply to form" }));
+    expect(screen.getByLabelText("Step 1 volume 2 (µL)")).toHaveValue("40.5");
+    fireEvent.change(yaml, { target: { value: "protocol:\n  - multi_dispense:\n      source: plate_1.A1\n      destinations: [plate_1.B2]\n      volumes: [12.5]\n" } });
+    await user.click(screen.getByRole("button", { name: "Apply to form" }));
+    expect(screen.queryByLabelText("Step 1 volume 2 (µL)")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Step 1 volume 1 (µL)")).toHaveValue("12.5");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onSave).toHaveBeenLastCalledWith("move.yaml", { protocol: [{ command: "multi_dispense", args: { source: "plate_1.A1", destinations: ["plate_1.B2"], volumes: [12.5] } }] });
+  });
+
+  it("starts a newly added command with empty editable lists", async () => {
+    const user = userEvent.setup();
+    renderMulti(MULTI_ARGS, { steps: [] });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Add step" }), "multi_dispense");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Add at least one destination");
+    await user.click(screen.getByRole("button", { name: "Add destination" }));
+    expect(screen.getByLabelText("Step 1 destination 1")).toHaveValue("");
+  });
+
+  it("renames named destinations without changing volumes or unrelated positions", async () => {
+    const user = userEvent.setup();
+    const props = renderMulti({ ...MULTI_ARGS, destinations: ["park", "plate_1.B2"] }, { positions: { park: [1, 2, 3] } });
+    await user.type(screen.getByLabelText("Position 1 name"), "2");
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([{ command: "multi_dispense", args: { ...MULTI_ARGS, destinations: ["park2", "plate_1.B2"] } }]);
+  });
+});
+
+describe("multi-dispense incomplete saved rows", () => {
+  it.each([
+    { ...MULTI_ARGS, destinations: ["", "plate_1.B2"] },
+    { ...MULTI_ARGS, destinations: ["   ", "plate_1.B2"] },
+    { ...MULTI_ARGS, volumes: [20] },
+    { ...MULTI_ARGS, volumes: [20, null] },
+    { ...MULTI_ARGS, volumes: [20, true] },
+    { ...MULTI_ARGS, volumes: [20, "30"] },
+  ])("blocks incomplete or nonnumeric rows without silently dropping them: %j", (args) => {
+    const props = renderMulti(args);
+    expect(screen.getByLabelText("Step 1 destination 2")).toHaveValue("plate_1.B2");
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled();
+    expect(props.onLocalChange).not.toHaveBeenCalled();
+  });
+});

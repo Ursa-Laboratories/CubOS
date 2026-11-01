@@ -392,6 +392,14 @@ Liquid-class correction and automatic source selection are not applied.
 ```
 
 The same arguments work with `ProtocolBuilder.add_command("multi_dispense", ...)`.
+In the Operator protocol editor, each destination and its volume share a table
+row. Use **Add destination** or the row's remove button to change the batch;
+volumes are in µL. Empty destinations and nonpositive, nonfinite, or incomplete
+volumes block Save, Validate, and Run until corrected. **Validate** still checks
+the selected pipette's capacity, resolution, tip state, and motion bounds.
+Saved YAML retains the parallel `destinations` and `volumes` lists, and
+**Edit raw YAML** remains available.
+
 The [offline example](https://github.com/Ursa-Laboratories/CubOS/blob/main/packages/core/tests/fixtures/configs/pipette_tip_transfer/multi_dispense.yaml)
 uses the adjacent simulated gantry/deck fixtures; their geometry is not a
 physical calibration.
