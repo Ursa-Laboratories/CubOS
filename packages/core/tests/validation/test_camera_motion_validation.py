@@ -77,15 +77,15 @@ def test_raised_camera_uses_real_clearance_in_bounds_and_runtime(monkeypatch, tm
     config, gantry, deck, protocol = r
     assert validate(r) == ([], [])
     targets = collect_protocol_motion_targets(config, protocol, deck, gantry)
-    assert [target.z for target in targets] == [159.5, 70.0, 159.5]
+    assert [target.z for target in targets] == [160.0, 70.0, 160.0]
     moves = []
-    gantry.controller.get_coordinates = lambda: {"x": 50, "y": 50, "z": 99.5}
+    gantry.controller.get_coordinates = lambda: {"x": 50, "y": 50, "z": 100.0}
     gantry.controller.move_to = lambda x, y, z, travel_z=None: moves.append((x, y, z, travel_z))
     gantry.instruments["camera"].capture = lambda save_path: save_path
     monkeypatch.setenv("CUBOS_IMAGES_DIR", str(tmp_path))
     monkeypatch.setattr("cubos.protocol_engine.commands.camera.time.sleep", lambda _: None)
     image_well(ProtocolContext(gantry=gantry, deck=deck), **protocol.steps[0].args)
-    assert moves == [(50, 50, 10.0, 99.5), (50, 50, 99.5, None)]
+    assert moves == [(50, 50, 10.0, 100.0), (50, 50, 100.0, None)]
 
 
 @pytest.mark.parametrize("args", [

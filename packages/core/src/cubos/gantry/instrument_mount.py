@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import logging
 import math
+from collections.abc import Mapping
 from typing import Any, TYPE_CHECKING
 
 from cubos.instruments.base_instrument import BaseInstrument
 from cubos.instruments.lighting.interface import LightingInstrument
 
-from .errors import LocationNotFound
+from .errors import LocationNotFound, MillConnectionError
 
 if TYPE_CHECKING:
     from cubos.gantry import Gantry
@@ -18,20 +19,18 @@ Position = Any
 
 # GRBL reports WPos to 3 decimals; anything under this is not lateral travel.
 _XY_SAME_TOL_MM = 0.01
-# Do not command the carriage exactly to the configured soft-limit ceiling.
-# GRBL evaluates machine coordinates at higher precision than the displayed
-# three-decimal WPos, so a displayed/configured boundary can still produce
-# ALARM:2 after coordinate transforms and floating-point rounding.
-_Z_CEILING_CLEARANCE_MM = 0.5
 
 
 def resolve_multi_tool_safe_travel_z(
     *, safe_z: float | None, carriage_ceiling: float | None, effective_depth: float,
 ) -> float | None:
     """Resolve instrument-tip clearance from the configured carriage ceiling."""
+    candidates = []
+    if safe_z is not None:
+        candidates.append(float(safe_z))
     if carriage_ceiling is not None:
-        return carriage_ceiling - _Z_CEILING_CLEARANCE_MM - effective_depth
-    return float(safe_z) if safe_z is not None else None
+        candidates.append(carriage_ceiling - effective_depth)
+    return max(candidates) if candidates else None
 
 
 class InstrumentedGantry:
@@ -49,6 +48,7 @@ class InstrumentedGantry:
         instruments: dict[str, BaseInstrument] | None = None,
         expected_grbl_settings: dict[str, float] | None = None,
         safe_z: float | None = None,
+        motion_envelopes: Mapping[str, Mapping[str, Any]] | None = None,
     ):
         self.controller = controller
         self.instruments: dict[str, BaseInstrument] = instruments or {}
@@ -56,8 +56,86 @@ class InstrumentedGantry:
             dict(expected_grbl_settings) if expected_grbl_settings else None
         )
         self.safe_z = safe_z
+        self.motion_envelopes = {
+            name: dict(envelope)
+            for name, envelope in (motion_envelopes or {}).items()
+        }
         self.last_commanded_pose: dict[str, Any] | None = None
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+
+    def move_carriage_exact(
+        self,
+        start: Position,
+        end: Position,
+        *,
+        instrument: str | BaseInstrument | None = None,
+    ) -> None:
+        """Execute one preplanned single-axis or coordinated-XY segment.
+
+        This deliberately bypasses instrument offset conversion, automatic
+        safe-Z selection, and the driver's ``travel_z`` expansion. The caller
+        must supply a segment already checked against scene geometry and
+        carriage working-volume bounds.
+        """
+        start_xyz = self._resolve_position(start)
+        end_xyz = self._resolve_position(end)
+        self._validate_finite_xyz(*start_xyz, "carriage")
+        self._validate_finite_xyz(*end_xyz, "carriage")
+        changed_axes = {
+            axis
+            for axis, before, after in zip("xyz", start_xyz, end_xyz)
+            if abs(before - after) > 1e-9
+        }
+        if len(changed_axes) > 1 and changed_axes != {"x", "y"}:
+            raise ValueError(
+                "move_carriage_exact requires one axis or coordinated XY motion; "
+                f"got {start_xyz} -> {end_xyz}."
+            )
+        if not changed_axes:
+            return
+        try:
+            coordinates = self.controller.get_coordinates()
+            actual = (
+                float(coordinates["x"]),
+                float(coordinates["y"]),
+                float(coordinates["z"]),
+            )
+        except MillConnectionError:
+            raise
+        except Exception as exc:
+            raise ValueError(
+                "move_carriage_exact cannot verify the current carriage pose; "
+                "no motion was sent."
+            ) from exc
+        if not all(math.isfinite(value) for value in actual):
+            raise ValueError(
+                f"move_carriage_exact observed a non-finite carriage pose {actual}; "
+                "no motion was sent."
+            )
+        if any(abs(observed - planned) > _XY_SAME_TOL_MM for observed, planned in zip(actual, start_xyz)):
+            raise ValueError(
+                "move_carriage_exact start pose does not match the controller: "
+                f"planned {start_xyz}, observed {actual}. No motion was sent."
+            )
+        resolved_instrument = (
+            self._resolve_instrument(instrument) if instrument is not None else None
+        )
+        instrument_position = None
+        instrument_name = None
+        if resolved_instrument is not None:
+            instrument_name = resolved_instrument.name
+            instrument_position = (
+                end_xyz[0] + resolved_instrument.offset_x,
+                end_xyz[1] + resolved_instrument.offset_y,
+                end_xyz[2] - self._effective_depth(resolved_instrument),
+            )
+        self.last_commanded_pose = {
+            "instrument": instrument_name,
+            "instrument_position": instrument_position,
+            "gantry_position": end_xyz,
+            "travel_z": None,
+        }
+        self.controller.move_linear_to(*end_xyz)
 
     def move(
         self,
@@ -141,11 +219,11 @@ class InstrumentedGantry:
     ) -> float | None:
         """Instrument-tip Z at which XY travel clears every mounted tool.
 
-        The carriage rides just below ``working_volume.z_max`` so a tool
-        hanging lower than *instrument* still clears the deck without
-        commanding the exact GRBL soft-limit boundary. ``safe_z`` remains
-        the hover and retract plane. Returns ``None`` only when neither
-        ``safe_z`` nor a working volume is configured.
+        The carriage rides ``working_volume.z_max`` (or ``safe_z`` if that
+        is higher for this instrument), so a tool hanging lower than
+        *instrument* still clears the deck. ``safe_z`` remains the hover
+        and retract plane. Returns ``None`` only when neither ``safe_z``
+        nor a working volume is configured.
         """
         instr = self._resolve_instrument(instrument)
         travel_z = resolve_multi_tool_safe_travel_z(

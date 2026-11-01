@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import GantryEditor from "./GantryEditor";
-import type { GantryResponse, InstrumentSchemas, InstrumentTypeInfo } from "../../types";
+import GantryEditor from "../../../../src/components/editor/GantryEditor";
+import type { GantryResponse, InstrumentSchemas, InstrumentTypeInfo } from "../../../../src/types";
 
 const INSTRUMENT_TYPES: InstrumentTypeInfo[] = [
   { type: "pipette", vendors: ["opentrons"], is_mock: false },

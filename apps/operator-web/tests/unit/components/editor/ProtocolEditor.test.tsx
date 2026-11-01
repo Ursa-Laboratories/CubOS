@@ -1,9 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import ProtocolEditor from "./ProtocolEditor";
-import { expandStepsAcrossWells } from "./protocolRepeat";
-import type { CommandInfo, DeckResponse, GantryResponse, ProtocolResponse, ProtocolStep } from "../../types";
+import ProtocolEditor from "../../../../src/components/editor/ProtocolEditor";
+import { expandStepsAcrossWells } from "../../../../src/components/editor/protocolRepeat";
+import type { CommandInfo, DeckResponse, GantryResponse, ProtocolResponse, ProtocolStep } from "../../../../src/types";
 
 const COMMANDS: CommandInfo[] = [
   {

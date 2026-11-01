@@ -118,10 +118,7 @@ def aspirate(args: Dict[str, Any]) -> str:
 
 
 def dispense(args: Dict[str, Any]) -> str:
-    return _join(
-        _volume(args["volume_ul"]),
-        f"to {args['position']}",
-    )
+    return _join(_volume(args["volume_ul"]), f"into {args['position']}")
 
 
 def blowout(args: Dict[str, Any]) -> str:
@@ -243,6 +240,7 @@ def clear_well(args: Dict[str, Any]) -> str:
 
 __all__ = [
     "aspirate",
+    "dispense",
     "blowout",
     "breakpoint_cmd",
     "cap",

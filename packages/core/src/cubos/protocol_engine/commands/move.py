@@ -55,6 +55,13 @@ def move(
             float(raw[2]),
         )
 
+    if getattr(context.deck, "planning_enabled", False) is True:
+        from ..routing import prepared_step
+
+        prepared = prepared_step(context, "move")
+        context.routing_session.execute(prepared.plans[0])
+        return
+
     if isinstance(position, (list, tuple)):
         target = shifted(position)
         context.logger.info(

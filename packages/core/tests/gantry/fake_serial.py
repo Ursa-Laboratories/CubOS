@@ -120,6 +120,9 @@ class FakeGrblSerial:
         self._rx.clear()
         return data
 
+    def reset_input_buffer(self) -> None:
+        self.flushInput()
+
     def flushInput(self) -> None:
         self._rx.clear()
 

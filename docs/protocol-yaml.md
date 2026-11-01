@@ -146,6 +146,7 @@ Commands available in YAML:
 - `breakpoint`
 - `pick_up_tip`
 - `aspirate`
+- `dispense`
 - `blowout`
 - `pipette_home`
 - `mix`
@@ -203,6 +204,12 @@ approach and ends **above** the target (no descent).
   to literal/named targets; supplying it with a deck target is an error.
 - `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
   adjustments applied to the resolved destination.
+
+With `motion_planning` enabled on the deck, the collision-aware router owns
+the exact segments, including coordinated XY motion when clear. Offsets are
+applied before planning for literal, named, and deck targets; `travel_z` is
+rejected. Deck targets end at the carriage ceiling. Legacy decks retain
+axis-by-axis travel and the clearance behavior above.
 
 ### `measure`
 
@@ -295,6 +302,22 @@ Move to a position and aspirate.
 - `speed` *(float, default `50.0`)* — aspirate speed.
 - `height` *(float, default `0.0`)* — engage offset.
 
+#### `dispense`
+
+Move to a position and dispense a specified volume from the attached tip.
+
+- `position` *(str, required)* — destination deck target.
+- `volume_ul` *(float, required)* — volume to dispense (µL).
+- `speed` *(float, default `50.0`)* — dispense speed.
+- `height` *(float, default `0.0`)* — labware-relative Z offset in mm.
+
+Standalone `aspirate`, `dispense`, and `blowout` support collision-aware routing,
+including attached-tip geometry, XY offsets, and the configured `height`. Timed `pause`
+keeps the current pose and does not add motion. All routes are checked before
+any step executes. These standalone liquid commands do not update durable
+fluid inventory and are rejected in routed runs when durable fluid tracking is active; use
+`transfer` for tracked liquid handling; it blows out after the final dispense.
+
 #### `blowout`
 
 Move to a position and blow out. By default, Sartorius Picus protocols then
@@ -305,6 +328,17 @@ the blowout height. A failed lift stops the command without homing; tracked
 transfer failures require reconciliation. Other pipette drivers retain their
 existing behavior. Setting `blowout_go_home: true` explicitly keeps the Picus
 return stroke at the blowout position, which can draw liquid into a submerged tip.
+
+For routed runs, the Picus withdrawal is checked during whole-protocol
+preflight and executed as an exact planned segment before piston homing.
+The following step starts from that withdrawn pose. Routed `transfer`, `mix`,
+and `drop_tip` also apply their XY offsets before collision checks. Routed
+`pick_up_tip` requires zero XY offsets to match the registered slot and its
+vertical access corridor.
+
+Routing v1 still rejects unsupported commands before any movement, including
+`image_well` sweeps and `pipette_home`. Those commands remain available on
+legacy decks; a planning-enabled deck never falls back to unplanned motion.
 
 - `position` *(str, required)* — deck target.
 - `speed` *(float, default `50.0`)* — blowout speed.

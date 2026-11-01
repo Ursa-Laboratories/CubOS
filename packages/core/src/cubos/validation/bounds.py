@@ -38,6 +38,7 @@ class ProtocolMotionTarget:
     y: float
     z: float
     tip_extension: float = 0.0
+    carriage_z: float | None = None
 
 
 def _check_point(
@@ -150,6 +151,7 @@ def _append_target(
     y: float,
     z: float,
     tip_extension: float = 0.0,
+    carriage_z: float | None = None,
 ) -> None:
     labware_key, position_id = _target_label(target, suffix)
     targets.append(ProtocolMotionTarget(
@@ -160,6 +162,7 @@ def _append_target(
         y=y,
         z=z,
         tip_extension=tip_extension,
+        carriage_z=carriage_z,
     ))
 
 
@@ -278,15 +281,19 @@ def _append_move_targets(
         coord = _resolve_deck_coord(deck, position)
         if coord is None:
             return
+        planned_carriage_z = (
+            gantry.working_volume.z_max if deck.planning_enabled else None
+        )
         _append_target(
             targets,
             target=position,
-            suffix="safe_z",
+            suffix=("carriage_ceiling" if deck.planning_enabled else "safe_z"),
             instrument=instrument,
             x=coord.x + x_offset,
             y=coord.y + y_offset,
             z=gantry.resolved_safe_z,
             tip_extension=tip_ext,
+            carriage_z=planned_carriage_z,
         )
         return
     else:
@@ -593,7 +600,7 @@ def _append_pipette_targets(
     gantry: GantryConfig,
     tip_extension: float,
 ) -> float:
-    if command_name in {"aspirate", "blowout", "dispense", "mix"}:
+    if command_name in {"aspirate", "dispense", "blowout", "mix"}:
         height = _height_arg(step_args, "height")
         x_offset = _height_arg(step_args, "x_offset_mm")
         y_offset = _height_arg(step_args, "y_offset_mm")
@@ -805,7 +812,11 @@ def validate_protocol_motion_bounds(
             continue
         gx = target.x - instrument.offset_x
         gy = target.y - instrument.offset_y
-        gz = target.z + instrument.depth + target.tip_extension
+        gz = (
+            target.carriage_z
+            if target.carriage_z is not None
+            else target.z + instrument.depth + target.tip_extension
+        )
         for axis, bound_name, bound_value in _check_point(volume, gx, gy, gz):
             violations.append(BoundsViolation(
                 labware_key=target.labware_key,
