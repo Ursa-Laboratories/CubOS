@@ -14,7 +14,8 @@ Read before changing motion, coordinates, bounds, homing, session ownership, or 
 
 Setup and calibration flows should route through public `Gantry` APIs. Long-lived UI/API runtimes such as CubOS should route through `GantrySession`. Do not import `Mill` or `gantry_driver` internals from user-facing scripts.
 
-Gantry YAML requires top-level `gantry_type` (`cub` or `cub_xl`).
+Gantry YAML requires top-level `gantry_type` (`cub`, `cub_xl`, or
+`genmitsu_4040_pro_max`).
 
 Setup bounds validation checks the concrete motion targets implied by the loaded protocol, not every physical geometry anchor or unused labware point on the deck.
 

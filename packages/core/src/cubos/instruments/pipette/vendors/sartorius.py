@@ -120,7 +120,7 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         baud_rate: int = _BAUD_RATE,
         command_timeout: float = 30.0,
         blowout_delay_ms: int = 3000,
-        blowout_go_home: bool = True,
+        blowout_go_home: bool = False,
         min_battery_percent: float = 20.0,
         verify_model: bool = True,
         whole_microlitres_only: bool = False,
@@ -180,6 +180,10 @@ class SartoriusPicus2Pipette(PipetteInstrument):
     def loaded_volume_ul(self) -> float:
         """Driver-tracked volume currently in the tip."""
         return self._loaded_volume_ul
+
+    @property
+    def requires_home_after_blowout(self) -> bool:
+        return not self._blowout_go_home
 
     @property
     def _holding_liquid(self) -> bool:
@@ -377,7 +381,13 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         return self._result(commanded)
 
     def blowout(self, speed: float = 50.0) -> None:
-        """Expel residual liquid using the instrument's own blow-out stroke."""
+        """Expel residual liquid without a return stroke unless configured.
+
+        Keeping the piston at blow-out prevents the return-to-home stroke
+        from aspirating liquid while the tip is still immersed. Protocol
+        commands retract to safe_z before homing; direct driver callers must
+        provide their own clearance and home sequence.
+        """
         if self._offline:
             self._loaded_volume_ul = 0.0
             return

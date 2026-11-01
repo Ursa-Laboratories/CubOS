@@ -898,3 +898,189 @@ def test_standalone_out_of_bounds_height_rejects_before_pickup(command):
         protocol.execute(context)
     assert controller.moves == []
     assert pipette.actions == []
+
+
+@pytest.mark.parametrize("position", [[90.0, 70.0, 80.0], "park", "destination"])
+def test_planned_move_applies_offsets_to_every_position_form(position):
+    context, controller, _ = _context()
+    context.positions["park"] = (90.0, 70.0, 80.0)
+    protocol = compile_protocol([CommandCall("move", {
+        "instrument": "pipette", "position": position,
+        "x_offset_mm": 2.0, "y_offset_mm": -3.0,
+    })])
+    protocol.positions["park"] = (90.0, 70.0, 80.0)
+    protocol.execute(context)
+    expected = (82.0, 57.0, 80.0) if position == "destination" else (92.0, 67.0, 60.0)
+    assert controller.moves[-1] == (*expected, None)
+
+
+@pytest.mark.parametrize("command", ["aspirate", "dispense", "blowout", "mix", "drop_tip", "transfer"])
+def test_routed_liquid_commands_preserve_offsets_and_execute_only_planned_segments(command, monkeypatch):
+    context, controller, pipette = _context()
+    poses = []
+    for action in ("aspirate", "dispense", "blowout", "drop_tip"):
+        original = getattr(pipette, action)
+        def record(*args, _action=action, _original=original):
+            poses.append((_action, controller.get_coordinates()))
+            return _original(*args)
+        monkeypatch.setattr(pipette, action, record)
+    monkeypatch.setattr(context.gantry, "move", Mock(side_effect=AssertionError("legacy move")))
+    if command == "transfer":
+        args = {
+            "source": "source", "destination": "destination", "volume_ul": 50,
+            "source_x_offset_mm": -2.0, "source_y_offset_mm": 1.0,
+            "destination_x_offset_mm": 2.0, "destination_y_offset_mm": -3.0,
+        }
+    else:
+        args = {"position": "destination", "x_offset_mm": 2.0, "y_offset_mm": -3.0}
+        if command in {"aspirate", "dispense", "mix"}:
+            args["volume_ul"] = 50.0
+        if command == "mix":
+            args["cycles"] = 1
+    compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall(command, args),
+    ]).execute(context)
+    if command == "transfer":
+        assert poses[0] == ("aspirate", {"x": 58.0, "y": 61.0, "z": 40.0})
+    assert any(pose == {"x": 82.0, "y": 57.0, "z": 40.0} for _, pose in poses)
+    assert controller.moves == [
+        (segment.end.x, segment.end.y, segment.end.z, None)
+        for plan in context.motion_plans for segment in plan.segments
+    ]
+
+
+@pytest.mark.parametrize("command", ["move", "aspirate", "transfer"])
+def test_offset_collision_fails_whole_protocol_before_pickup(command):
+    context, controller, pipette = _context()
+    if command == "move":
+        args = {"instrument": "pipette", "position": [80, 60, 40], "x_offset_mm": 100}
+    elif command == "transfer":
+        args = {"source": "source", "destination": "destination", "volume_ul": 50,
+                "destination_x_offset_mm": 100}
+    else:
+        args = {"position": "destination", "volume_ul": 50, "x_offset_mm": 100}
+    with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+        compile_protocol([
+            CommandCall("pick_up_tip", {"position": "tips.A1"}), CommandCall(command, args),
+        ]).execute(context)
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+@pytest.mark.parametrize("offset", [{"x_offset_mm": 1}, {"y_offset_mm": -1}])
+def test_planned_tip_pickup_rejects_shift_away_from_registered_slot(offset):
+    context, controller, pipette = _context()
+    with pytest.raises(ProtocolExecutionError, match="zero XY offsets"):
+        compile_protocol([
+            CommandCall("pick_up_tip", {"position": "tips.A1", **offset}),
+        ]).execute(context)
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+@pytest.mark.parametrize("command", ["blowout", "transfer"])
+@pytest.mark.parametrize("failure", [None, "withdrawal", "home"])
+def test_routed_picus_blowout_withdrawal_is_planned_and_precedes_home(command, failure, monkeypatch):
+    from cubos.gantry.errors import MillConnectionError
+
+    context, controller, pipette = _context()
+    pipette.requires_home_after_blowout = True
+    events = []
+    original_move = controller.move_linear_to
+    def move(x, y, z):
+        events.append(("move", x, y, z))
+        if failure == "withdrawal" and len(events) > 1 and events[-2] == ("blowout",):
+            raise MillConnectionError("withdrawal failed")
+        original_move(x, y, z)
+    monkeypatch.setattr(controller, "move_linear_to", move)
+    monkeypatch.setattr(context.gantry, "move", Mock(side_effect=AssertionError("legacy move")))
+    monkeypatch.setattr(pipette, "blowout", lambda speed: events.append(("blowout",)))
+    def home():
+        events.append(("home",))
+        if failure == "home":
+            raise RuntimeError("home failed")
+    pipette.home = home
+    args = {"destination_x_offset_mm": 2, "destination_y_offset_mm": -3,
+            "source": "source", "destination": "destination", "volume_ul": 50,
+            "destination_height": -5} if command == "transfer" else {
+                "position": "destination", "height": -5, "x_offset_mm": 2, "y_offset_mm": -3,
+            }
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall(command, args),
+        CommandCall("aspirate", {"position": "source", "volume_ul": 50}),
+    ])
+    if failure:
+        with pytest.raises((MillConnectionError, RuntimeError), match=f"{failure} failed"):
+            protocol.execute(context)
+    else:
+        protocol.execute(context)
+        assert controller.moves == [
+            (segment.end.x, segment.end.y, segment.end.z, None)
+            for plan in context.motion_plans for segment in plan.segments
+        ]
+    i = events.index(("blowout",))
+    assert events[i + 1] == ("move", 82.0, 57.0, 80.0)
+    if failure == "withdrawal":
+        assert ("home",) not in events
+    else:
+        assert events[i + 2] == ("home",)
+
+
+def test_routed_picus_invalid_withdrawal_fails_before_pickup():
+    context, controller, pipette = _context()
+    pipette.requires_home_after_blowout = True
+    context.gantry.safe_z = 100.0
+    with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+        compile_protocol([
+            CommandCall("pick_up_tip", {"position": "tips.A1"}),
+            CommandCall("blowout", {"position": "destination"}),
+        ]).execute(context)
+    assert controller.moves == []
+    assert pipette.actions == []
+
+
+@pytest.mark.parametrize("command, volume, strokes", [("blowout", 0, 0), ("transfer", 50, 1), ("transfer", 2500, 3)])
+def test_real_picus_routed_reset_preserves_next_step_start(command, volume, strokes, monkeypatch):
+    from cubos.instruments.pipette.vendors.sartorius import SartoriusPicus2Pipette
+
+    context, controller, _ = _context()
+    pipette = SartoriusPicus2Pipette(name="pipette", depth=-20.0)
+    pipette._initialized = True
+    context.gantry.instruments["pipette"] = pipette
+    events = []
+    monkeypatch.setattr(pipette, "_send", lambda cmd, **kwargs: events.append((cmd, controller.get_coordinates())))
+    args = {"position": "destination", "height": -5} if command == "blowout" else {
+        "source": "source", "destination": "destination", "volume_ul": volume,
+        "destination_height": -5,
+    }
+    compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall(command, args),
+        CommandCall("aspirate", {"position": "source", "volume_ul": 50}),
+    ]).execute(context)
+    blowout_index, = [i for i, (cmd, _) in enumerate(events) if cmd.startswith("BLOW_OUT")]
+    assert events[blowout_index][1] == {"x": 80.0, "y": 60.0, "z": 35.0}
+    assert events[blowout_index + 1] == ("HOME", {"x": 80.0, "y": 60.0, "z": 80.0})
+    assert events[blowout_index + 2][0].startswith("RUN_ASPIRATE")
+    assert events[blowout_index + 2][1] == {"x": 60.0, "y": 60.0, "z": 40.0}
+    assert sum(cmd.startswith("RUN_ASPIRATE") for cmd, _ in events) == strokes + 1
+    assert controller.moves == [
+        (segment.end.x, segment.end.y, segment.end.z, None)
+        for plan in context.motion_plans for segment in plan.segments
+    ]
+
+
+@pytest.mark.parametrize("command, args", [
+    ("image_well", {"camera": "camera", "well": "source", "image_height": 20}),
+    ("pipette_home", {}),
+])
+def test_new_unsupported_commands_remain_fail_closed_on_routed_decks(command, args):
+    context, controller, pipette = _context(with_camera=True)
+    with pytest.raises(ProtocolExecutionError, match="does not support"):
+        compile_protocol([
+            CommandCall("pick_up_tip", {"position": "tips.A1"}), CommandCall(command, args),
+        ]).execute(context)
+    assert controller.moves == []
+    assert pipette.actions == []

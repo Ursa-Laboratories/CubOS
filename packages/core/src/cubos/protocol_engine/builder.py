@@ -76,6 +76,9 @@ class ProtocolBuilder:
     def add_home(self) -> "ProtocolBuilder":
         return self.add_command("home")
 
+    def add_pipette_home(self) -> "ProtocolBuilder":
+        return self.add_command("pipette_home")
+
     def add_move(
         self,
         *,

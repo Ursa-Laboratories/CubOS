@@ -23,6 +23,8 @@ def cure(
     measurement_height: float,
     exposure_time: float,
     intensity: float | None = None,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Any:
     """Cure at a deck position using a UV-curing instrument.
 
@@ -66,4 +68,6 @@ def cure(
         measurement_height=measurement_height,
         method="cure",
         method_kwargs=method_kwargs,
+        x_offset_mm=x_offset_mm,
+        y_offset_mm=y_offset_mm,
     )

@@ -125,6 +125,10 @@ def blowout(args: Dict[str, Any]) -> str:
     return f"at {args['position']}"
 
 
+def pipette_home(args: Dict[str, Any]) -> str:
+    return "piston home"
+
+
 def mix(args: Dict[str, Any]) -> str:
     return _join(
         str(args["position"]),
@@ -208,9 +212,22 @@ def capture(args: Dict[str, Any]) -> str:
 
 
 def image_well(args: Dict[str, Any]) -> str:
+    sweep_start = args.get("x_sweep_start_mm")
+    sweep_stop = args.get("x_sweep_stop_mm")
+    if sweep_start is not None or sweep_stop is not None:
+        return _join(
+            f"{args['camera']} @ {_position(args['well'])}",
+            f"X sweep {sweep_start} to {sweep_stop} mm",
+        )
+    x_offset = float(args.get("x_offset_mm", 0.0))
+    y_offset = float(args.get("y_offset_mm", 0.0))
+    offset = ""
+    if x_offset or y_offset:
+        offset = f"offset ({x_offset:+g}, {y_offset:+g}) mm"
     return _join(
         f"{args['camera']} @ {_position(args['well'])}",
         str(args.get("mode", "standard")),
+        offset,
     )
 
 
@@ -238,6 +255,7 @@ __all__ = [
     "mix",
     "move",
     "pause",
+    "pipette_home",
     "pick_up_tip",
     "purge_pipette",
     "rinse_well",

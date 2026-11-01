@@ -429,11 +429,14 @@ class TestGetSupportedVendors:
     def test_camera_vendors(self):
         assert get_supported_vendors("camera") == ["flir", "mount_only", "opencv", "raspberry_pi"]
 
+    def test_capper_vendors(self):
+        assert get_supported_vendors("capper") == ["mock", "nano_text", "pawduino"]
+
     def test_filmetrics_vendors(self):
         assert get_supported_vendors("filmetrics") == ["kla"]
 
     def test_lighting_vendors(self):
-        assert get_supported_vendors("lighting") == ["pawduino"]
+        assert get_supported_vendors("lighting") == ["nano_text", "pawduino"]
 
     def test_mounted_tool_vendors(self):
         assert get_supported_vendors("mounted_tool") == ["mount_only"]
@@ -497,6 +500,15 @@ class TestConfigFields:
             choices=None,
         ) in fields
         assert "offset_x" not in {field.name for field in fields}
+
+    def test_cap_release_shimmy_is_available_to_every_capper_vendor(self):
+        for vendor in get_supported_vendors("capper"):
+            fields = {field.name: field for field in config_fields("capper", vendor)}
+            assert fields["cap_release_shimmy_y_mm"].default == 0.0
+
+    def test_picus_blowout_stays_out_by_default(self):
+        fields = {field.name: field for field in config_fields("pipette", "sartorius")}
+        assert fields["blowout_go_home"].default is False
 
     def test_config_fields_unknown_vendor_raises_clear_error(self):
         with pytest.raises(ValueError, match="asmi/missing_vendor"):

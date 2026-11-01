@@ -8,8 +8,8 @@ that pair to choose the concrete class.
 |-------------|-----------------|------------|-------|
 | `asmi/` | `vernier` | GoDirect Force Sensor | Force measurement via USB (GoDirect SDK) |
 | `camera/` | `mount_only`, `raspberry_pi`, `flir`, `opencv` | Mounted camera | `mount_only` is calibration-only (`capture()` intentionally not implemented); `flir` is the PANDA high-res camera via the proprietary Spinnaker/PySpin SDK (manual install; OpenCV saves the frames); `opencv` is a plain USB webcam with index auto-detect |
-| `capper/` | `mock`, `pawduino` | Vial capper/decapper | Electromagnet capture/release + line-break sensor confirm via Arduino serial (Pawduino firmware); `mock` is an offline in-memory simulation |
-| `lighting/` | `pawduino` | Imaging/deck lights | Two channels on the PANDA Arduino: `white` (5/10/15/25/50/100%) and `contact` red+blue (5/10/20/30/50%). Non-positional; driven by the `set_lights` / `image_well` protocol commands, forced off at run end |
+| `capper/` | `mock`, `pawduino`, `nano_text` | Vial capper/decapper | Electromagnet capture/release + line-break sensor confirm via Arduino serial; `nano_text` supports a dedicated `CAP_MODULE` Nano and `mock` is an offline simulation |
+| `lighting/` | `pawduino`, `nano_text` | Imaging/deck lights | `pawduino` supports PANDA white/contact channels; `nano_text` supports independent RGBW channels on a dedicated `LIGHT_MODULE` Nano. Non-positional; driven by `set_lights` / `image_well` and forced off at run end |
 | `filmetrics/` | `kla` | F-Series (via FilmetricsTool.exe) | Thin-film thickness measurement via spectral reflectance |
 | `mounted_tool/` | `mount_only` | Mounted non-instrumented tool | Calibration-only stand-in for physical tools without control code |
 | `pipette/` | `opentrons`, `sartorius` | OT-2 / Flex pipettes; Sartorius Picus 2 | `opentrons` drives a CubOS stepper on a bare pipette body via Arduino serial (Pawduino firmware) and commands plunger millimetres; `sartorius` commands microlitres to the pipette's own controller over USB serial |

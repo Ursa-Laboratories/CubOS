@@ -129,7 +129,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
   const valid = hasItems && isValid(labware);
   const canSave = valid && (!!saveAs.trim() || !!selectedFile) && !saving;
   const canCreateLabware = !!gantry && !isRunning;
-  const canCalibrateLabware = hasItems && canCreateLabware;
+  const canCalibrateLabware = canCreateLabware;
   // The modal calibrates what the editor currently shows (including unsaved
   // edits), so build its deck view from the local labware state.
   const calibrationDeck = buildDeckResponse(labware, selectedFile ?? "unsaved", deck);
@@ -236,9 +236,7 @@ export default function DeckEditor({ configs, selectedFile, onSelectFile, onImpo
             ? "Open labware calibration"
             : isRunning
               ? "Protocol running"
-              : !hasItems
-                ? "Add labware first"
-                : "Load a gantry config first"}
+              : "Load a gantry config first"}
         >
           Calibrate labware
         </button>

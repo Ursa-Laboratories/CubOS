@@ -2,8 +2,8 @@
 
 CubOS speaks a signed frame at the high-level gantry boundary, selected per
 gantry config by ``origin_policy``: ``deck_origin`` (default) uses a
-front-left-bottom origin with +X operator-right, +Y back, +Z up and a
-non-negative working volume; ``home_origin`` uses the homed back-right-top
+front-left-bottom origin with +X operator-right, +Y back, +Z up and may
+include negative X/Y travel beyond the deck corner; ``home_origin`` uses the homed back-right-top
 corner as WPos zero with the same axis directions and a non-positive
 working volume. Controller configuration is responsible for making raw
 GRBL/WPos reports match the configured frame, so outgoing values are
