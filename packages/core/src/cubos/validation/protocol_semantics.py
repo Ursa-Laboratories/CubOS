@@ -34,6 +34,11 @@ from cubos.gantry.gantry_config import GantryConfig
 from cubos.gantry.machine_geometry import FixedStructureBox, fixed_structures_for_gantry
 from cubos.protocol_engine.protocol import Protocol
 from cubos.protocol_engine.registry import CommandRegistry
+from cubos.protocol_engine.commands._liquid_transfer import (
+    LiquidTransferPreflightError,
+    pipette_capacity,
+    plan_multi_dispense,
+)
 from cubos.protocol_engine.scan_args import (
     NormalizedScanArguments,
     normalize_scan_arguments,
@@ -1272,6 +1277,7 @@ _PIPETTE_COMMANDS = frozenset({
     "drop_tip",
     "flush_pipette",
     "mix",
+    "multi_dispense",
     "pick_up_tip",
     "purge_pipette",
     "rinse_well",
@@ -1565,6 +1571,32 @@ def _validate_pipette_command(
                 instrumented_gantry=instrumented_gantry,
                 deck=deck,
                 gantry=gantry,
+                current_poses=current_poses,
+            )
+            violations.extend(engage_violations)
+        return violations, tip_state
+
+    if command_name == "multi_dispense":
+        violations.extend(_require_attached_tip(
+            step_index=step_index, command_name=command_name, tip_state=tip_state,
+        ))
+        try:
+            plan_multi_dispense(
+                args.get("destinations", []), args.get("volumes", []),
+                pipette_capacity(instrumented_gantry.instruments["pipette"]),
+            )
+        except LiquidTransferPreflightError as exc:
+            violations.append(_violation(step_index, command_name, str(exc)))
+        for position, height_key in [
+            (args.get("source"), "source_height"),
+            *((target, "destination_height") for target in args.get("destinations", [])),
+        ]:
+            engage_violations, _ = _validate_pipette_engage(
+                step_index=step_index, command_name=command_name,
+                label=f"multi_dispense {position!r}", position=position,
+                height=_height_value(args, height_key), height_field_name=height_key,
+                tip_extension=tip_state.tip_extension,
+                instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
                 current_poses=current_poses,
             )
             violations.extend(engage_violations)

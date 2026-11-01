@@ -131,6 +131,7 @@ Commands available in YAML:
 - `mix`
 - `transfer`
 - `serial_transfer`
+- `multi_dispense`
 - `drop_tip`
 - `rinse_well`
 - `flush_pipette`
@@ -356,6 +357,62 @@ volumes given explicitly or interpolated.
   destination.
 
 `volumes` and `volume_range` are **mutually exclusive** — provide exactly one.
+
+#### `multi_dispense`
+
+Aspirate the sum of the requested portions once, visit the destinations in
+list order, and dispense one portion at each. Blow out only after the last
+portion, at the last destination. `transfer` and `serial_transfer` retain their
+existing behavior; use this command to share a single aspiration.
+
+- `source` *(str, required)* — source deck target.
+- `destinations` *(list of str, required)* — nonempty ordered deck targets.
+- `volumes` *(list of float, required)* — one positive, finite volume in µL
+  per destination. Each must meet the pipette model's minimum and maximum and
+  be a multiple of its volume increment, where specified. Picus
+  `whole_microlitres_only` configurations require whole-µL portions.
+- `speed` *(float, default `50.0`)* — normalized 0–100 pipette speed.
+- `source_height` *(float, default `0.0`)* — source labware-relative offset.
+- `destination_height` *(float, default `0.0`)* — labware-relative offset at
+  every destination.
+
+The total must fit the pipette capacity. Oversized batches are rejected before
+motion; split them into separate commands explicitly. A known empty pipette
+and attached tip are required. Both built-in drivers report loaded volume;
+external drivers must expose `config` and `loaded_volume_ul` to use this command.
+Liquid-class correction and automatic source selection are not applied.
+
+```yaml
+- multi_dispense:
+    source: plate.A1
+    destinations: [plate.B1, plate.C1, plate.D1]
+    volumes: [20.0, 30.0, 50.0]
+    source_height: -2.0
+    destination_height: 4.0
+```
+
+The same arguments work with `ProtocolBuilder.add_command("multi_dispense", ...)`.
+The [offline example](https://github.com/Ursa-Laboratories/CubOS/blob/main/packages/core/tests/fixtures/configs/pipette_tip_transfer/multi_dispense.yaml)
+uses the adjacent simulated gantry/deck fixtures; their geometry is not a
+physical calibration.
+
+**Tracking and failure behavior:** durable fluid tracking is unsupported because
+the journal cannot represent liquid held between destinations. Seeded validation
+and execution with a fluid-state session reject this command; use `transfer` or
+`serial_transfer` for those runs. Ordinary campaign logging records each
+successfully acknowledged portion. Without durable tracking, source availability
+and destination headroom remain the operator's responsibility. Any motion,
+aspiration, dispense, or blowout failure stops the batch without retry or
+recovery blowout. Earlier dispenses may have completed and liquid may remain in
+the tip. Driver volume is an estimate from acknowledged commands, not a sensor
+reading; after an uncertain failure, reconcile the physical tip and containers
+before starting another run. Do not replay the batch as a resume operation.
+
+Before merging a hardware-facing change, validate a calibrated setup offline,
+then supervise a fresh-tip 100 µL aspiration followed by 20/30/50 µL dispenses.
+Check destination order, absence of intermediate aspiration/blowout, final
+blowout and tip disposal, delivered volumes, and supervised interruption
+recovery. Automated tests use simulated pipettes and mocked motion only.
 
 #### `drop_tip`
 

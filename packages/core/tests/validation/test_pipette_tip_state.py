@@ -421,3 +421,60 @@ def test_non_finite_pipette_height_names_offending_field():
     )
 
     assert any("destination_height must be a finite number" in v.message for v in violations)
+
+
+def _multi_dispense_protocol(**overrides):
+    args = {"source": "plate.A1", "destinations": ["plate.A2", "waste"], "volumes": [40, 60]}
+    args.update(overrides)
+    return _protocol(
+        _step(0, "pick_up_tip", position="tips.A1"),
+        _step(1, "multi_dispense", **args),
+        _step(2, "drop_tip", position="waste"),
+    )
+
+
+def _multi_dispense_board():
+    from cubos.instruments.pipette.models import PIPETTE_MODELS
+
+    board = _board()
+    board.instruments["pipette"].config = PIPETTE_MODELS["p300_single_gen2"]
+    return board
+
+
+def test_multi_dispense_validates_every_target_with_attached_tip():
+    protocol = _multi_dispense_protocol(source_height=-2, destination_height=3)
+    assert validate_protocol_semantics(protocol, _multi_dispense_board(), _deck(), _gantry()) == []
+    assert validate_protocol_motion_bounds(_gantry(), protocol, _deck(), _multi_dispense_board()) == []
+
+
+@pytest.mark.parametrize("args,match", [
+    ({"volumes": [150, 100]}, "exceeds pipette capacity"),
+    ({"volumes": [40]}, "one volume per destination"),
+    ({"destinations": ["plate.A2", "missing"]}, "missing"),
+    ({"destination_height": 100}, "safe_z"),
+    ({"source_height": float("nan")}, "finite"),
+])
+def test_multi_dispense_semantics_reject_invalid_batch(args, match):
+    errors = validate_protocol_semantics(
+        _multi_dispense_protocol(**args), _multi_dispense_board(), _deck(), _gantry(),
+    )
+    assert any(match in error.message for error in errors)
+
+
+def test_multi_dispense_requires_tip():
+    protocol = _protocol(_step(
+        0, "multi_dispense", source="plate.A1", destinations=["plate.A2"], volumes=[40],
+    ))
+    errors = validate_protocol_semantics(protocol, _multi_dispense_board(), _deck(), _gantry())
+    assert any("requires an attached pipette tip" in error.message for error in errors)
+
+
+def test_multi_dispense_bounds_include_last_destination_and_tip_extension():
+    from cubos.validation.bounds import collect_protocol_motion_targets
+
+    targets = collect_protocol_motion_targets(_gantry(), _multi_dispense_protocol(), _deck())
+    assert any(t.labware_key == "waste" and t.tip_extension == DEFAULT_TEST_TIP_LENGTH for t in targets)
+    errors = validate_protocol_motion_bounds(
+        _gantry(x_max=110), _multi_dispense_protocol(), _deck(), _multi_dispense_board(),
+    )
+    assert any(error.labware_key == "waste" and error.axis == "x" for error in errors)

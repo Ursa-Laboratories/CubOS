@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from collections.abc import Mapping
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any, Iterator, List, Optional
+
+from pydantic import StrictFloat
 
 from cubos.deck.labware.tip_rack import (
     TipRackResolutionError,
@@ -29,12 +32,13 @@ from ._liquid_transfer import (
     LiquidTransferPreflightError,
     derive_liquid_relative_height,
     pipette_capacity,
+    plan_multi_dispense,
     plan_strokes,
     validate_dead_volume,
     validate_destination_overflow,
     vial_for_target,
 )
-from ._movement import engage_at_labware
+from ._movement import _assert_finite_number, engage_at_labware
 
 logger = logging.getLogger(__name__)
 
@@ -885,6 +889,63 @@ def _wells_for_axis(plate: WellPlate, axis: str) -> list:
     else:
         wells = [w for w in plate.wells if w[1:] == axis]
     return sorted(wells, key=lambda w: (w[0], int(w[1:])))
+
+
+@protocol_command("multi_dispense", summary=_summaries.multi_dispense)
+def multi_dispense(
+    context: ProtocolContext,
+    source: str,
+    destinations: list[str],
+    volumes: list[StrictFloat],
+    speed: StrictFloat = 50.0,
+    source_height: StrictFloat = 0.0,
+    destination_height: StrictFloat = 0.0,
+) -> None:
+    """Aspirate the sum once, then dispense each portion in destination order."""
+    if _tracked_fluid_state(context):
+        raise ProtocolExecutionError(
+            "multi_dispense is disabled while durable fluid tracking is active: "
+            "the journal cannot track liquid held between destinations. "
+            "Use transfer or serial_transfer."
+        )
+    pipette = _get_pipette(context)
+    try:
+        total = plan_multi_dispense(destinations, volumes, pipette_capacity(pipette))
+        for name, value in (
+            ("speed", speed), ("source_height", source_height),
+            ("destination_height", destination_height),
+        ):
+            _assert_finite_number(value, field_name=name, source="multi_dispense")
+        if not 0 <= speed <= 100:
+            raise ValueError("multi_dispense speed must be between 0 and 100.")
+        for position in [source, *destinations]:
+            context.deck.resolve_coordinate(position)
+    except (KeyError, ValueError) as exc:
+        raise ProtocolExecutionError(f"multi_dispense preflight failed: {exc}") from exc
+    loaded = pipette.loaded_volume_ul
+    if (
+        isinstance(loaded, bool) or not isinstance(loaded, (int, float))
+        or not math.isfinite(loaded) or abs(loaded) > 1e-6
+    ):
+        raise ProtocolExecutionError(
+            "multi_dispense requires a known empty pipette. "
+            "Resolve any remaining or uncertain liquid before starting a batch."
+        )
+
+    _engage(context, source, command_label="multi_dispense.aspirate", height=source_height)
+    result = pipette.aspirate(total, speed)
+    if not result.success:
+        raise ProtocolExecutionError("multi_dispense aspiration did not succeed.")
+    for destination, volume in zip(destinations, volumes):
+        _engage(
+            context, destination, command_label="multi_dispense.dispense",
+            height=destination_height,
+        )
+        result = pipette.dispense(volume, speed)
+        if not result.success:
+            raise ProtocolExecutionError("multi_dispense dispense did not succeed.")
+        _record_transfer_to_store(context, source, destination, volume)
+    pipette.blowout(speed)
 
 
 @protocol_command("serial_transfer", summary=_summaries.serial_transfer)

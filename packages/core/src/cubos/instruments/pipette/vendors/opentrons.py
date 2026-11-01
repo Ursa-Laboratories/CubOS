@@ -88,12 +88,17 @@ class OpentronsPipette(PipetteInstrument):
         self._has_tip = False
         self._attached_tip_extension = 0.0
         self._position_mm = 0.0
+        self._loaded_volume_ul = 0.0
         self._is_homed = False
         self._is_primed = False
 
     @property
     def config(self) -> PlungerPipetteConfig:
         return self._config
+
+    @property
+    def loaded_volume_ul(self) -> float:
+        return self._loaded_volume_ul
 
     @property
     def attached_tip_extension(self) -> float:
@@ -185,6 +190,7 @@ class OpentronsPipette(PipetteInstrument):
 
     def home(self) -> None:
         if self._offline:
+            self._loaded_volume_ul = 0.0
             self._position_mm = self._config.zero_position
             self._is_homed = True
             return
@@ -196,11 +202,13 @@ class OpentronsPipette(PipetteInstrument):
             # second leg to reach the limit switch.
             self.logger.info("Homing fell short of the limit switch; retrying")
             self._send_command(_CMD_HOME, timeout=_MOTION_TIMEOUT)
+        self._loaded_volume_ul = 0.0
         self._position_mm = self._config.zero_position
         self._is_homed = True
 
     def prime(self, speed: float = 50.0) -> None:
         if self._offline:
+            self._loaded_volume_ul = 0.0
             self._position_mm = self._config.prime_position
             self._is_primed = True
             return
@@ -208,6 +216,7 @@ class OpentronsPipette(PipetteInstrument):
             _CMD_MOVE_TO, self._config.prime_position, _FIRMWARE_DEFAULT_SPEED,
             timeout=_MOTION_TIMEOUT,
         )
+        self._loaded_volume_ul = 0.0
         self._position_mm = self._config.prime_position
         self._is_primed = True
 
@@ -216,16 +225,17 @@ class OpentronsPipette(PipetteInstrument):
         mm_travel = volume_ul * self._config.mm_to_ul
         if self._offline:
             self._position_mm += mm_travel
-            return AspirateResult(
-                success=True, volume_ul=volume_ul, position_mm=self._position_mm
+            position = self._position_mm
+        else:
+            response = self._send_command(
+                _CMD_ASPIRATE, mm_travel, _FIRMWARE_DEFAULT_SPEED,
+                timeout=_MOTION_TIMEOUT,
             )
-        response = self._send_command(
-            _CMD_ASPIRATE, mm_travel, _FIRMWARE_DEFAULT_SPEED,
-            timeout=_MOTION_TIMEOUT
-        )
-        position = self._parse_position(response)
+            position = self._parse_position(response)
+        self._loaded_volume_ul += volume_ul
         return AspirateResult(
-            success=True, volume_ul=volume_ul, position_mm=position
+            success=True, volume_ul=volume_ul, position_mm=position,
+            loaded_volume_ul=self._loaded_volume_ul,
         )
 
     def dispense(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
@@ -233,26 +243,29 @@ class OpentronsPipette(PipetteInstrument):
         mm_travel = volume_ul * self._config.mm_to_ul
         if self._offline:
             self._position_mm -= mm_travel
-            return AspirateResult(
-                success=True, volume_ul=volume_ul, position_mm=self._position_mm
+            position = self._position_mm
+        else:
+            response = self._send_command(
+                _CMD_DISPENSE, mm_travel, _FIRMWARE_DEFAULT_SPEED,
+                timeout=_MOTION_TIMEOUT,
             )
-        response = self._send_command(
-            _CMD_DISPENSE, mm_travel, _FIRMWARE_DEFAULT_SPEED,
-            timeout=_MOTION_TIMEOUT
-        )
-        position = self._parse_position(response)
+            position = self._parse_position(response)
+        self._loaded_volume_ul = max(0.0, self._loaded_volume_ul - volume_ul)
         return AspirateResult(
-            success=True, volume_ul=volume_ul, position_mm=position
+            success=True, volume_ul=volume_ul, position_mm=position,
+            loaded_volume_ul=self._loaded_volume_ul,
         )
 
     def blowout(self, speed: float = 50.0) -> None:
         if self._offline:
+            self._loaded_volume_ul = 0.0
             self._position_mm = self._config.blowout_position
             return
         self._send_command(
             _CMD_MOVE_TO, self._config.blowout_position, _FIRMWARE_DEFAULT_SPEED,
             timeout=_MOTION_TIMEOUT,
         )
+        self._loaded_volume_ul = 0.0
 
     def pick_up_tip(self, speed: float = 50.0) -> None:
         if not self._offline:
@@ -260,12 +273,14 @@ class OpentronsPipette(PipetteInstrument):
                 _CMD_MOVE_TO, self._config.zero_position, _FIRMWARE_DEFAULT_SPEED,
                 timeout=_MOTION_TIMEOUT,
             )
+        self._loaded_volume_ul = 0.0
         self._has_tip = True
 
     def drop_tip(self, speed: float = 50.0) -> None:
         if self._offline:
             self._has_tip = False
             self.clear_attached_tip_extension()
+            self._loaded_volume_ul = 0.0
             self._position_mm = self._config.prime_position
             self._is_primed = True
             return
@@ -275,6 +290,7 @@ class OpentronsPipette(PipetteInstrument):
             _FIRMWARE_DEFAULT_SPEED,
             timeout=_MOTION_TIMEOUT,
         )
+        self._loaded_volume_ul = 0.0
         self._has_tip = False
         self.clear_attached_tip_extension()
         self._position_mm = self._config.drop_tip_position
@@ -294,6 +310,7 @@ class OpentronsPipette(PipetteInstrument):
                 "low, will re-home on next connect", exc,
             )
             return
+        self._loaded_volume_ul = 0.0
         self._position_mm = self._config.prime_position
         self._is_primed = True
 

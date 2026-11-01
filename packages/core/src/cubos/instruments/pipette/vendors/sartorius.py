@@ -27,6 +27,7 @@ import math
 import re
 import threading
 import time
+from dataclasses import replace
 from typing import Any, Optional
 
 import serial
@@ -166,6 +167,11 @@ class SartoriusPicus2Pipette(PipetteInstrument):
 
     @property
     def config(self) -> PipetteConfig:
+        if self._whole_microlitres_only:
+            return replace(
+                self._config,
+                volume_increment_ul=max(1.0, self._config.volume_increment_ul),
+            )
         return self._config
 
     @property

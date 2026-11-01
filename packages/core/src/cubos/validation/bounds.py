@@ -528,6 +528,18 @@ def _append_pipette_targets(
                 measurement_height=height,
                 tip_extension=tip_extension,
             )
+    elif command_name == "multi_dispense":
+        for position, height_key in [
+            (step_args.get("source"), "source_height"),
+            *((target, "destination_height") for target in step_args.get("destinations", [])),
+        ]:
+            height = _height_arg(step_args, height_key)
+            if height is not None:
+                _append_position_engage(
+                    targets, deck=deck, gantry=gantry, position=position,
+                    instrument="pipette", measurement_height=height,
+                    tip_extension=tip_extension,
+                )
     elif command_name == "serial_transfer":
         source_height = _height_arg(step_args, "source_height")
         if source_height is None:
