@@ -72,6 +72,19 @@ def test_get_single_command(client):
     assert "speed" in arg_names
 
 
+def test_transfer_command_exposes_travel_clearance_metadata(client):
+    response = api_request(client, "GET", "/api/v1/protocol/commands/transfer")
+    assert response.status_code == 200
+    clearance = next(
+        arg for arg in response.json()["args"] if arg["name"] == "travel_clearance"
+    )
+    assert clearance["default"] == 3.0
+    assert clearance["required"] is False
+    assert clearance["type"] == "float | None"
+    assert "registered plate top" in clearance["description"]
+    assert "null" in clearance["description"]
+
+
 def test_get_unknown_command(client):
     response = api_request(client, "GET", "/api/v1/protocol/commands/nonexistent")
     assert response.status_code == 404

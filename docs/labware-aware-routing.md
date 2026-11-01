@@ -93,3 +93,14 @@ The final core verification passed 2,634 tests with 17 skips and 14 subtests; ch
 ## Physical validation
 
 No real hardware is used during branch development. Before enabling this on a machine, measure and register every fixture/tool envelope, verify the plotted corridors against the physical deck, and have an operator run a slow clear-space route followed by a dry pickup and supervised water transfer. Keep the E-stop accessible. A successful simulation is not proof of unmodeled mechanical clearance.
+
+Pipette commands accept `travel_clearance` (default `3.0` mm): a requested,
+finite non-negative clearance above the registered plate top for consecutive
+operations on that plate. Transitions between wells can use this local travel
+height; direct same-well transitions between action depths can move directly
+without first retracting to the local travel height. The planner may raise the
+requested height for scene or tool clearance, or use the full travel ceiling
+when needed. Set it to `null` to request full ceiling retraction. Decks without
+routing retain their existing routes. This setting does not change engage depths
+or the tip reuse policy. YAML can override it with `travel_clearance: 5` or
+request a full retract with `travel_clearance: null`.
