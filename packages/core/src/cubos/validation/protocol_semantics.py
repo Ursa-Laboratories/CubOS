@@ -1128,18 +1128,26 @@ def _validate_move_waypoints(
                 f"not deck target {position!r}.",
             ))
             return violations
-        safe_z = _resolved_safe_z(gantry)
-        if safe_z is None:
-            violations.append(_violation(
-                step_index,
-                "move",
-                f"deck-target move to {position!r} requires gantry `safe_z` "
-                "to be configured.",
-            ))
-            return violations
-        target = (coord.x, coord.y, safe_z)
-        target_label = f"move safe_z for {position!r}"
-        transit_z = safe_z
+        if deck.planning_enabled:
+            carriage_ceiling = gantry.working_volume.z_max
+            instrument_config = instrumented_gantry.instruments[instrument]
+            target_z = carriage_ceiling - instrument_config.depth - tip_ext
+            target = (coord.x, coord.y, target_z)
+            target_label = f"move carriage ceiling for {position!r}"
+            transit_z = target_z
+        else:
+            safe_z = _resolved_safe_z(gantry)
+            if safe_z is None:
+                violations.append(_violation(
+                    step_index,
+                    "move",
+                    f"deck-target move to {position!r} requires gantry `safe_z` "
+                    "to be configured.",
+                ))
+                return violations
+            target = (coord.x, coord.y, safe_z)
+            target_label = f"move safe_z for {position!r}"
+            transit_z = safe_z
 
     if target is None:
         return violations
@@ -1267,6 +1275,7 @@ def _require_attached_tip(
 
 _PIPETTE_COMMANDS = frozenset({
     "aspirate",
+    "dispense",
     "blowout",
     "clear_well",
     "drop_tip",
@@ -1522,7 +1531,7 @@ def _validate_pipette_command(
             )
         return violations, tip_state
 
-    if command_name in {"aspirate", "blowout", "mix"}:
+    if command_name in {"aspirate", "dispense", "blowout", "mix"}:
         violations.extend(_require_attached_tip(
             step_index=step_index,
             command_name=command_name,

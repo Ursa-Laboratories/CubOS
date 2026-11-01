@@ -615,7 +615,12 @@ export default function LabwareCalibrationModal({
         configurable: true,
         writable: true,
       });
-      await onSaveDeck(deck.filename, { labware });
+      await onSaveDeck(deck.filename, {
+        labware,
+        ...(deck.motion_planning != null
+          ? { motion_planning: structuredClone(deck.motion_planning) }
+          : {}),
+      });
       if (!autoRecovery.active || autoRecovery.lifetime !== lifetime) return;
       autoRecovery.end();
       onClose();

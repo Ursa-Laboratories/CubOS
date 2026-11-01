@@ -421,3 +421,23 @@ def test_non_finite_pipette_height_names_offending_field():
     )
 
     assert any("destination_height must be a finite number" in v.message for v in violations)
+
+
+def test_standalone_dispense_requires_tip():
+    protocol = _protocol(_step(0, "dispense", position="plate.A1", volume_ul=25.0))
+    violations = validate_protocol_semantics(protocol, _board(), _deck(), _gantry())
+    assert any("requires an attached pipette tip" in v.message for v in violations)
+
+
+def test_standalone_dispense_validates_attached_tip_height():
+    protocol = _protocol(
+        _step(0, "pick_up_tip", position="tips.A1"),
+        _step(1, "dispense", position="plate.A2", height=20.0, volume_ul=25.0),
+    )
+    violations = validate_protocol_motion_bounds(
+        _gantry(z_max=60.0, safe_z=40.0), protocol, _deck(), _board(depth=5.0),
+    )
+    assert any(
+        v.position_id == "A2.action_z" and v.axis == "z" and v.bound_name == "z_max"
+        for v in violations
+    )
