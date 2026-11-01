@@ -1466,3 +1466,30 @@ class TestSerialTransferCommand:
                 ctx, source="vial_1", plate="plate_1", axis="A",
                 volumes=[10.0],
             )
+
+
+def test_standalone_blowout_rejects_durable_fluid_tracking_before_motion():
+    from cubos.protocol_engine.commands.pipette import blowout
+
+    ctx = _mock_context()
+    ctx.deck.planning_enabled = True
+    ctx.data_store = MagicMock()
+    ctx.fluid_state_id = 3
+    ctx.campaign_id = 4
+    with pytest.raises(ProtocolExecutionError, match="Standalone blowout"):
+        blowout(ctx, position="plate_1.A1")
+    ctx.gantry.move_to_labware.assert_not_called()
+    ctx.gantry.move.assert_not_called()
+    _get_pipette(ctx).blowout.assert_not_called()
+
+
+def test_dispense_registry_summary_and_required_volume():
+    from pydantic import ValidationError
+    from cubos.protocol_engine.registry import CommandRegistry
+
+    command = CommandRegistry.instance().get("dispense")
+    assert command.describe({"position": "plate.A1", "volume_ul": 100}) == "100 µL   into plate.A1"
+    with pytest.raises(ValidationError):
+        command.schema.model_validate({"position": "plate.A1"})
+    with pytest.raises(ValidationError):
+        command.schema.model_validate({"position": "plate.A1", "volume_ul": 100, "unknown": True})

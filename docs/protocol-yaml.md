@@ -127,6 +127,7 @@ Commands available in YAML:
 - `breakpoint`
 - `pick_up_tip`
 - `aspirate`
+- `dispense`
 - `blowout`
 - `mix`
 - `transfer`
@@ -270,6 +271,22 @@ Move to a position and aspirate.
 - `speed` *(float, default `50.0`)* — aspirate speed.
 - `height` *(float, default `0.0`)* — engage offset.
 
+#### `dispense`
+
+Move to a position and dispense a specified volume from the attached tip.
+
+- `position` *(str, required)* — destination deck target.
+- `volume_ul` *(float, required)* — volume to dispense (µL).
+- `speed` *(float, default `50.0`)* — dispense speed.
+- `height` *(float, default `0.0`)* — labware-relative Z offset in mm.
+
+Standalone `aspirate`, `dispense`, and `blowout` support collision-aware routing,
+including attached-tip geometry and the configured `height`. Timed `pause`
+keeps the current pose and does not add motion. All routes are checked before
+any step executes. These standalone liquid commands do not update durable
+fluid inventory and are rejected in routed runs when durable fluid tracking is active; use
+`transfer` for tracked liquid handling; it blows out after the final dispense.
+
 #### `blowout`
 
 Move to a position and blow out.
@@ -399,6 +416,11 @@ volumes block Save, Validate, and Run until corrected. **Validate** still checks
 the selected pipette's capacity, resolution, tip state, and motion bounds.
 Saved YAML retains the parallel `destinations` and `volumes` lists, and
 **Edit raw YAML** remains available.
+
+`multi_dispense` currently requires a deck without `motion_planning`. On routed
+decks, whole-protocol preflight rejects it before any step moves; direct command
+calls also reject it before motion or aspiration. Use routed `transfer` commands
+until multi-dispense has an immutable collision-aware plan implementation.
 
 The [offline example](https://github.com/Ursa-Laboratories/CubOS/blob/main/packages/core/tests/fixtures/configs/pipette_tip_transfer/multi_dispense.yaml)
 uses the adjacent simulated gantry/deck fixtures; their geometry is not a

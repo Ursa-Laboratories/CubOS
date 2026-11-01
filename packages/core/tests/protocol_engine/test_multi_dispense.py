@@ -142,6 +142,18 @@ def test_tracking_rejected_before_motion(ctx):
     assert not ctx.data_store.mock_calls
 
 
+def test_direct_call_cannot_bypass_collision_planning(ctx, monkeypatch):
+    ctx.deck = Deck({}, motion_planning={})
+    pipette = ctx.gantry.instruments["pipette"]
+    aspirate = MagicMock(wraps=pipette.aspirate)
+    monkeypatch.setattr(pipette, "aspirate", aspirate)
+    with pytest.raises(ProtocolExecutionError, match="not supported with motion planning"):
+        run(ctx)
+    assert not ctx.gantry.mock_calls
+    aspirate.assert_not_called()
+    assert pipette.loaded_volume_ul == 0
+
+
 def test_successful_portions_logged_individually(ctx):
     ctx.data_store = MagicMock()
     ctx.campaign_id = 12
