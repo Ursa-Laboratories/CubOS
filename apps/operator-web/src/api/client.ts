@@ -1,5 +1,27 @@
 const BASE = "/api/v1";
 
+export type RecoveryAxis = "x" | "y" | "z";
+export type RecoveryDelta = { x: number; y: number; z: number };
+export type LimitRecoveryContext = {
+  raw_status: string;
+  active_limit_axes: RecoveryAxis[];
+  failed_jog_delta: RecoveryDelta | null;
+  failed_jog_id?: string | null;
+  eligible: boolean;
+  blocked_reason: string | null;
+  pull_off_delta: RecoveryDelta | null;
+  manual_available: boolean;
+};
+export type LimitRecoveryResult = {
+  status: string;
+  attempts: number;
+  pull_off: RecoveryDelta;
+  messages: string[];
+  mode: "known_jog" | "manual";
+  commanded_delta: RecoveryDelta;
+  failed_delta: RecoveryDelta | null;
+};
+
 export type SettingsResponse = {
   config_dir: string;
 };
@@ -53,6 +75,26 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json();
 }
 
+let homingEpoch = 0;
+
+async function homingRequest<T>(path: string): Promise<T> {
+  homingEpoch += 1;
+  try {
+    return await request<T>(path, { method: "POST" });
+  } finally {
+    homingEpoch += 1;
+  }
+}
+
+async function readGantryPosition(): Promise<import("../types").GantryPosition> {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const epoch = homingEpoch;
+    const result = await request<import("../types").GantryPosition>("/gantry/position");
+    if (epoch === homingEpoch) return result;
+  }
+  throw new Error("Position changed during homing. Wait for a fresh position update.");
+}
+
 async function download(path: string): Promise<Blob> {
   const res = await fetch(`${BASE}${path}`);
   if (!res.ok) {
@@ -103,8 +145,7 @@ export const gantryApi = {
     }),
   delete: (filename: string) =>
     request<{ status: string; filename: string }>(`/gantry/${filename}`, { method: "DELETE" }),
-  getPosition: () =>
-    request<import("../types").GantryPosition>("/gantry/position"),
+  getPosition: readGantryPosition,
   connect: (filename: string) =>
     request<import("../types").GantryPosition>("/gantry/connect", {
       method: "POST",
@@ -114,15 +155,13 @@ export const gantryApi = {
     request<import("../types").GantryPosition>("/gantry/disconnect", {
       method: "POST",
     }),
-  jog: (x = 0, y = 0, z = 0) =>
+  jog: (x = 0, y = 0, z = 0, jog_id?: string) =>
     request<{ status: string }>("/gantry/jog", {
       method: "POST",
-      body: JSON.stringify({ x, y, z }),
+      body: JSON.stringify({ x, y, z, jog_id }),
     }),
   home: () =>
-    request<import("../types").GantryPosition>("/gantry/home", {
-      method: "POST",
-    }),
+    homingRequest<import("../types").GantryPosition>("/gantry/home"),
   moveTo: (x: number, y: number, z: number) =>
     request<{ status: string }>("/gantry/move-to", {
       method: "POST",
@@ -133,10 +172,10 @@ export const gantryApi = {
       method: "POST",
       body: JSON.stringify({ x, y, z }),
     }),
-  jogBlocking: (x = 0, y = 0, z = 0, timeout_s = 10) =>
+  jogBlocking: (x = 0, y = 0, z = 0, timeout_s = 10, jog_id?: string) =>
     request<import("../types").GantryPosition>("/gantry/jog-blocking", {
       method: "POST",
-      body: JSON.stringify({ x, y, z, timeout_s }),
+      body: JSON.stringify({ x, y, z, timeout_s, jog_id }),
     }),
   setWorkCoordinates: (body: { x?: number; y?: number; z?: number }) =>
     request<import("../types").GantryPosition>("/gantry/work-coordinates", {
@@ -152,16 +191,12 @@ export const gantryApi = {
     body: JSON.stringify(body),
   }),
   prepareCalibrationOrigin: () =>
-    request<import("../types").GantryPosition>("/gantry/calibration/prepare-origin", {
-      method: "POST",
-    }),
+    homingRequest<import("../types").GantryPosition>("/gantry/calibration/prepare-origin"),
   homeAndCenterForCalibration: () =>
-    request<{
+    homingRequest<{
       xy_bounds: { x: number; y: number; z: number };
       position: { x: number; y: number; z: number };
-    }>("/gantry/calibration/home-and-center", {
-      method: "POST",
-    }),
+    }>("/gantry/calibration/home-and-center"),
   restoreCalibrationSoftLimits: () =>
     request<import("../types").GantryPosition>("/gantry/calibration/restore-soft-limits", {
       method: "POST",
@@ -178,21 +213,22 @@ export const gantryApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
+  getLimitRecoveryContext: () => request<LimitRecoveryContext>("/gantry/calibration/recovery-context"),
   recoverCalibrationLimit: (body: {
     x: number;
     y: number;
     z: number;
     pull_off_mm?: number;
     feed_rate?: number;
+    jog_id?: string;
   }) =>
-    request<{
-      status: string;
-      attempts: number;
-      pull_off: { x: number; y: number; z: number };
-      messages: string[];
-    }>("/gantry/calibration/recover-limit", {
+    request<LimitRecoveryResult>("/gantry/calibration/recover-limit", {
       method: "POST",
       body: JSON.stringify(body),
+    }),
+  recoverCalibrationLimitManual: (body: { axis: RecoveryAxis; away_direction: -1 | 1; operator_confirmed: true }) =>
+    request<LimitRecoveryResult>("/gantry/calibration/recover-limit/manual", {
+      method: "POST", body: JSON.stringify(body),
     }),
   configureSoftLimits: (body: {
     max_travel_x: number;

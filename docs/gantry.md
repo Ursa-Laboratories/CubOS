@@ -236,6 +236,27 @@ Legacy names `entry_travel_z`, `entry_travel_height`,
 `interwell_travel_height`, `safe_approach_height`, `indentation_limit`,
 and ASMI `z_limit` are rejected before motion.
 
+## Motion completion and status polling
+
+CubOS asks GRBL for a status report before waiting for the reply. The first
+regular status query is immediate; subsequent regular queries on the same
+connection are spaced at least 200 ms apart (5 Hz). This avoids waiting for
+the serial read timeout before asking whether a short move has finished.
+The controller's feed rate, acceleration, calibration and movement path are
+unchanged.
+
+An `ok` acknowledges a command; it does not confirm that motion has finished.
+CubOS waits for a controller `Idle` report. Informational messages containing
+the word "idle" do not complete a move, and Hold or alarm states are not
+successful completion. Real-time feed hold is sent immediately, without
+waiting for the regular polling interval.
+
+Status-query retries and reply processing are bounded. A silent or disconnected
+controller can still take time to report an error because the serial timeout
+is preserved. This is not a guaranteed stop-response time or a hardware timing
+benchmark. The query cadence follows the
+[GRBL interface guidance](https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md#status-reporting).
+
 ## Controller Bring-Up
 
 Axis and homing normalization is controller administration, not routine

@@ -9,9 +9,11 @@ internal implementation detail behind the ``Gantry`` boundary.
 from .gantry_driver.exceptions import (
     CNCMillException,
     CommandExecutionError,
+    JogAcceptanceUnknownError,
     LocationNotFound,
     MillConnectionError,
     StatusReturnError,
+    StatusResponseTimeoutError,
 )
 
 
@@ -22,8 +24,10 @@ class GantryLoaderError(Exception):
 __all__ = [
     "CNCMillException",
     "CommandExecutionError",
+    "JogAcceptanceUnknownError",
     "GantryLoaderError",
     "LocationNotFound",
     "MillConnectionError",
     "StatusReturnError",
+    "StatusResponseTimeoutError",
 ]

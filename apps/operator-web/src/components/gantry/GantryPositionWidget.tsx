@@ -6,7 +6,9 @@ import CalibrationWizard from "./CalibrationWizard";
 import CalibrationModeChooser from "./CalibrationModeChooser";
 import InstrumentOffsetCalibrationModal from "./InstrumentOffsetCalibrationModal";
 import { createJogPacer, jogPaceMs } from "./jogPacing";
+import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "./gantryAlarm";
 import { useConfirm } from "../common/useConfirm";
+import LimitRecoveryControls from "./LimitRecoveryControls";
 
 interface Props {
   position: GantryPosition | null;
@@ -65,15 +67,19 @@ export default function GantryPositionWidget({
   const jogHeld = useRef<AxisPosition | null>(null);
   const jogPumpActive = useRef(false);
   const jogRequestCount = useRef(0);
-  const lastJogDelta = useRef<AxisPosition | null>(null);
   const predictedJogPosition = useRef<AxisPosition | null>(null);
   const limitHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const configSelected = !!gantryFile;
   const connected = configSelected && (position?.connected ?? false);
-  const status = position?.status ?? "Not connected";
-  const isAlarm = status.toLowerCase().includes("alarm");
-  const isLimitAlarm = isAlarm && looksLikeLimitAlarm(status);
+  const controllerStatus = position?.status ?? "Not connected";
+  const homing = isGantryHoming(controllerStatus);
+  const status = hasGantryAlarm(controllerStatus)
+    ? controllerStatus
+    : hasGantryAlarm(lastCommandError) ? lastCommandError! : controllerStatus;
+  const isAlarm = hasGantryAlarm(status);
+  const visiblePosition = connected && !isAlarm && !homing ? currentWorkPosition(position) : null;
+  const homeRequired = /home required/i.test(status);
   const isHold = status.toLowerCase().startsWith("hold");
   const isMoving = status === "Run" || status === "Jog";
   const calibrationInterrupted = connected && !anyCalibrationOpen && (position?.calibration_active ?? false);
@@ -104,7 +110,7 @@ export default function GantryPositionWidget({
   }, []);
 
   const jog = useCallback(async (x: number, y: number, z: number): Promise<boolean> => {
-    if (!connected || isRunning || jogBusy || homeBusy) return false;
+    if (!connected || isRunning || jogBusy || homeBusy || homing || pullOffBusy || isAlarm || !currentWorkPosition(position)) return false;
     if (workingVolume) {
       const base = predictedJogPosition.current ?? currentWorkPosition(position);
       if (base) {
@@ -117,7 +123,6 @@ export default function GantryPositionWidget({
       }
     }
     jogRequestCount.current += 1;
-    lastJogDelta.current = { x, y, z };
     try {
       await gantryApi.jog(x, y, z);
       setLastCommandError(null);
@@ -126,7 +131,7 @@ export default function GantryPositionWidget({
       setLastCommandError(errorMessage(e));
       return false;
     }
-  }, [connected, homeBusy, isRunning, jogBusy, position, showLimitHint, workingVolume]);
+  }, [connected, homeBusy, homing, isAlarm, isRunning, jogBusy, position, pullOffBusy, showLimitHint, workingVolume]);
 
   // The held-jog pump reads jog through a ref so an in-flight hold always
   // uses the latest guards (connected/busy state) instead of a stale closure.
@@ -199,10 +204,10 @@ export default function GantryPositionWidget({
   useEffect(() => () => stopJog(), [stopJog]);
 
   useEffect(() => {
-    if (anyCalibrationOpen || isRunning) {
+    if (anyCalibrationOpen || isRunning || isAlarm) {
       stopJog();
     }
-  }, [anyCalibrationOpen, isRunning, stopJog]);
+  }, [anyCalibrationOpen, isAlarm, isRunning, stopJog]);
 
   useEffect(() => {
     if (!connected) {
@@ -221,7 +226,7 @@ export default function GantryPositionWidget({
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!connected || anyCalibrationOpen || isRunning || jogBusy || homeBusy) return;
+      if (!connected || anyCalibrationOpen || isRunning || jogBusy || homeBusy || homing || pullOffBusy || isAlarm) return;
       if (isEditableTarget(e.target)) return;
       const key = e.key;
       if (held.has(key)) return; // already held
@@ -267,7 +272,7 @@ export default function GantryPositionWidget({
       window.removeEventListener("blur", releaseHeldJog);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [anyCalibrationOpen, connected, homeBusy, isRunning, jogBusy, stepXY, stepZ, startJog, stopJog]);
+  }, [anyCalibrationOpen, connected, homeBusy, homing, isAlarm, isRunning, jogBusy, pullOffBusy, stepXY, stepZ, startJog, stopJog]);
 
   const handleConnect = async () => {
     if (!gantryFile) return;
@@ -312,27 +317,13 @@ export default function GantryPositionWidget({
     if (!connected || isRunning) return;
     setJogBusy(true);
     try {
-      await gantryApi.unlock();
+      const result = await gantryApi.unlock();
+      if (!isVerifiedIdle(result) && !/home required/i.test(result.status)) throw new Error(`Controller is still blocked: ${result.status}`);
       setLastCommandError(null);
     } catch (e) {
       setLastCommandError(errorMessage(e));
     } finally {
       setJogBusy(false);
-    }
-  };
-
-  const handlePullOff = async () => {
-    const delta = lastJogDelta.current;
-    if (!connected || !delta || !isLimitAlarm || pullOffBusy || isRunning) return;
-    stopJog();
-    setPullOffBusy(true);
-    try {
-      await gantryApi.recoverCalibrationLimit({ x: delta.x, y: delta.y, z: delta.z });
-      setLastCommandError(null);
-    } catch (e) {
-      setLastCommandError(errorMessage(e));
-    } finally {
-      setPullOffBusy(false);
     }
   };
 
@@ -408,7 +399,7 @@ export default function GantryPositionWidget({
   };
 
   const handleHome = async () => {
-    if (!connected || isRunning) return;
+    if (!connected || isRunning || homeBusy || homing || pullOffBusy) return;
     const confirmed = await requestConfirm({
       title: "Home gantry",
       message: "Confirm you want to go to home?",
@@ -419,7 +410,7 @@ export default function GantryPositionWidget({
   };
 
   const handleMoveTo = () => {
-    if (!connected || isRunning) return;
+    if (!connected || isRunning || homing || isAlarm || pullOffBusy || !currentWorkPosition(position)) return;
     setMoveError(null);
     // Blank fields must not silently mean 0 — Number("") is 0, and a
     // half-filled form would command an unintended move on the blank axes.
@@ -464,9 +455,9 @@ export default function GantryPositionWidget({
   const xyBelowMin = parsedXYStep != null && parsedXYStep < MIN_STEP;
   const zBelowMin = parsedZStep != null && parsedZStep < MIN_STEP;
   const stepInvalid = parsedXYStep == null || parsedZStep == null;
-  const homeDisabled = !connected || isHold || jogBusy || homeBusy || isRunning;
-  const jogDisabled = homeDisabled || stepInvalid;
-  const moveDisabled = !connected || isHold || isMoving || isRunning;
+  const homeDisabled = !connected || isHold || jogBusy || homeBusy || homing || pullOffBusy || isRunning;
+  const jogDisabled = homeDisabled || stepInvalid || isAlarm || !visiblePosition;
+  const moveDisabled = !connected || isHold || isMoving || homing || isRunning || isAlarm || pullOffBusy || !visiblePosition;
   const advancedDisabled = !connected || advancedBusy || isRunning;
   const canCalibrate = !!gantry;
   const canOpenCalibration = canCalibrate && !isRunning;
@@ -529,36 +520,29 @@ export default function GantryPositionWidget({
           alignItems: "center",
           gap: 8,
         }}>
-          <span style={{ color: theme.color.danger, fontWeight: 700, fontSize: 13 }}>ALARM</span>
+          <span style={{ color: theme.color.danger, fontWeight: 700, fontSize: 13 }}>{homeRequired ? "HOME REQUIRED" : "ALARM"}</span>
           <span style={{ color: theme.color.dangerText, fontSize: 11 }}>
-            {status} — {isLimitAlarm && lastJogDelta.current
-              ? "Pull off backs away from the limit switch automatically, or Unlock to clear and jog back manually."
-              : "Unlock to clear, then jog back to safety."}
+            {status}{homeRequired && " — Clear the gantry path, then Home before moving or recording positions."}
           </span>
-          {isLimitAlarm && lastJogDelta.current && (
-            <button
-              onClick={handlePullOff}
-              disabled={pullOffBusy || jogBusy || isRunning}
-              style={{
-                ...theme.btn.danger,
-                ...theme.btnSmall,
-                marginLeft: "auto",
-              }}
-            >
-              {pullOffBusy ? "Pulling off..." : "Pull off limit"}
-            </button>
-          )}
-          <button
+          {(!homeRequired || pullOffBusy) && <LimitRecoveryControls
+            connected={connected}
+            disabled={jogBusy || pullOffBusy || isRunning || homeBusy || homing}
+            onStart={stopJog}
+            onBusyChange={setPullOffBusy}
+            onRecovered={() => setLastCommandError(null)}
+            onError={setLastCommandError}
+          />}
+          {!homeRequired && <button
             onClick={handleUnlock}
             disabled={jogBusy || pullOffBusy || isRunning}
             style={{
               ...theme.btn.danger,
               ...theme.btnSmall,
-              marginLeft: isLimitAlarm && lastJogDelta.current ? undefined : "auto",
+              marginLeft: "auto",
             }}
           >
             Unlock ($X)
-          </button>
+          </button>}
         </div>
       )}
 
@@ -711,17 +695,16 @@ export default function GantryPositionWidget({
           padding: "10px 16px",
         }}>
           {(["X", "Y", "Z"] as const).map((axis) => {
-            const rawMpos = connected ? position![axis.toLowerCase() as "x" | "y" | "z"] : null;
-            const mpos = rawMpos;
-            const wKey = `work_${axis.toLowerCase()}` as "work_x" | "work_y" | "work_z";
-            const rawWpos = connected ? position![wKey] : null;
-            const wpos = rawWpos;
-            const hasPosition = wpos != null || mpos != null;
+            const key = axis.toLowerCase() as "x" | "y" | "z";
+            const wpos = visiblePosition?.[key] ?? null;
+            const rawMpos = wpos != null ? position![key] : null;
+            const mpos = rawMpos != null && Number.isFinite(rawMpos) ? rawMpos : null;
+            const hasPosition = wpos != null;
             return (
               <div key={axis} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span style={{ ...theme.sectionLabel, width: 14 }}>{axis}</span>
                 <span style={hasPosition ? liveCoordStyle : coordPlaceholderStyle}>
-                  {wpos != null ? wpos.toFixed(3) : mpos != null ? mpos.toFixed(3) : "\u2014"}
+                  {wpos != null ? wpos.toFixed(3) : "\u2014"}
                 </span>
                 {wpos != null && mpos != null && (
                   <span style={{ ...theme.mono, color: theme.color.textFaint, fontSize: 10 }}>M{mpos.toFixed(1)}</span>
@@ -743,7 +726,7 @@ export default function GantryPositionWidget({
       {/* Home and calibration */}
       <div style={{ marginBottom: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button onClick={handleHome} disabled={homeDisabled} style={buttonStateStyle(homeBtnStyle, homeDisabled)}>
-          {homeBusy ? "Homing…" : "Home"}
+          {homeBusy || homing ? "Homing…" : "Home"}
         </button>
         <button
           onClick={() => setCalibrationModeOpen(true)}
@@ -930,16 +913,10 @@ export default function GantryPositionWidget({
 }
 
 function currentWorkPosition(position: GantryPosition | null): AxisPosition | null {
-  if (!position?.connected) return null;
-  const coords = {
-    x: position.work_x ?? position.x,
-    y: position.work_y ?? position.y,
-    z: position.work_z ?? position.z,
-  };
-  if (!Number.isFinite(coords.x) || !Number.isFinite(coords.y) || !Number.isFinite(coords.z)) {
-    return null;
-  }
-  return coords;
+  if (!position?.connected || hasGantryAlarm(position.status) || isGantryHoming(position.status)) return null;
+  const { work_x: x, work_y: y, work_z: z } = position;
+  if (typeof x !== "number" || typeof y !== "number" || typeof z !== "number" || !Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
+  return { x, y, z };
 }
 
 function isInsideWorkingVolume(position: AxisPosition, volume: WorkingVolume): boolean {
@@ -963,17 +940,6 @@ function parseAxisTarget(value: string): number | null {
   if (trimmed === "") return null;
   const parsed = Number(trimmed);
   return Number.isFinite(parsed) ? parsed : null;
-}
-
-// Only GRBL limit trips warrant an automatic pull-off move: ALARM:1 (hard
-// limit) and ALARM:2 (soft limit), or a status carrying "limit" / an active
-// limit pin report ("Pn:"). Other alarms — abort during cycle (E-stop /
-// reset, ALARM:3), probe failures, homing failures — do not mean the gantry
-// is sitting on a switch, and blindly jogging 5 mm in response to them is
-// the wrong reflex.
-function looksLikeLimitAlarm(status: string): boolean {
-  const lower = status.toLowerCase();
-  return /alarm:\s*[12]\b/.test(lower) || lower.includes("limit") || lower.includes("pn:");
 }
 
 function errorMessage(error: unknown): string {
