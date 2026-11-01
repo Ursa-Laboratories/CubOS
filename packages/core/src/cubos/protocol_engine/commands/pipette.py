@@ -34,7 +34,7 @@ from ._liquid_transfer import (
     validate_destination_overflow,
     vial_for_target,
 )
-from ._movement import engage_at_labware
+from ._movement import _assert_finite_number, engage_at_labware
 
 logger = logging.getLogger(__name__)
 
@@ -174,6 +174,7 @@ def _begin_tracked_mix(
     cycles: int,
     speed: float,
     height: float,
+    blowout_height: float,
 ) -> tuple[str, bool]:
     target = _resolve_fluid_target(context, position)
     try:
@@ -187,6 +188,7 @@ def _begin_tracked_mix(
             speed,
             height,
             campaign_id=context.campaign_id,
+            blowout_height=blowout_height,
         )
     except Exception as exc:
         raise ProtocolExecutionError(
@@ -371,9 +373,16 @@ def mix(
     cycles: int = 3,
     speed: float = 50.0,
     height: float = 0.0,
+    blowout_height: float = 0.0,
 ) -> Any:
     """Move pipette to *position* at *height*, then mix ``cycles`` times
-    between that height and 1 mm above it."""
+    between that height and 1 mm above it, finishing with a blowout."""
+    try:
+        _assert_finite_number(
+            blowout_height, field_name="blowout_height", source="command 'mix'",
+        )
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     tracked = _tracked_fluid_state(context)
     pipette = _get_pipette(context)
     operation_key = None
@@ -385,6 +394,7 @@ def mix(
             cycles=cycles,
             speed=speed,
             height=height,
+            blowout_height=blowout_height,
         )
         if not should_execute:
             context.logger.info(
@@ -408,6 +418,7 @@ def mix(
                 context.routing_session.execute(planned.plans[motion_index])
                 motion_index += 1
                 pipette.dispense(volume_ul, speed)
+            context.routing_session.execute(planned.plans[motion_index])
             from cubos.instruments.pipette.models import MixResult
 
             result = MixResult(success=True, volume_ul=volume_ul, cycles=cycles)
@@ -416,6 +427,10 @@ def mix(
             result = pipette.mix(
                 volume_ul, cycles, speed, gantry=context.gantry, position=tip,
             )
+            context.gantry.move(
+                "pipette", (tip[0], tip[1], tip[2] - height + blowout_height),
+            )
+        pipette.blowout(speed)
     except BaseException as exc:
         if operation_key is not None:
             _mark_transfer_uncertain(context, operation_key, exc)

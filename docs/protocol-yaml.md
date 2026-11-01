@@ -298,13 +298,24 @@ Move to a position and blow out.
 
 Move to a position and mix between two heights. Each cycle aspirates at
 `height`, rises 1 mm to dispense and aspirate again, then returns to `height`
-to dispense.
+to dispense. After the final cycle, the tip moves vertically to `blowout_height`
+over the same well and blows out once before the command completes.
 
 - `position` *(str, required)* — deck target.
 - `volume_ul` *(float, required)* — mix volume (µL).
 - `cycles` *(int, default `3`)* — number of mix cycles.
 - `speed` *(float, default `50.0`)* — mix speed.
 - `height` *(float, default `0.0`)* — engage offset.
+- `blowout_height` *(float, default `0.0`)* — finishing blowout offset from the
+  labware reference. Choose a height above the actual liquid surface; `0`
+  places the tip at the calibrated rim/reference, not at the submerged mixing
+  depth. The finish is included in bounds and collision checks.
+
+With fluid tracking, the mix is applied only after the finishing move and
+blowout succeed. A failure leaves the operation requiring reconciliation.
+The finishing height is part of the operation identity: an older applied mix
+without that parameter cannot be replayed as if it had performed the new
+finish. Review existing operation records before resuming across this change.
 
 #### `transfer`
 

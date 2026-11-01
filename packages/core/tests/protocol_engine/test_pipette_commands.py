@@ -346,6 +346,8 @@ class TestMixCommand:
             lambda *args, **kwargs: events.append("move")
         )
         _get_pipette(ctx).mix.side_effect = lambda *args, **kwargs: events.append("mix")
+        ctx.gantry.move.side_effect = lambda *args, **kwargs: events.append("position")
+        _get_pipette(ctx).blowout.side_effect = lambda *args: events.append("blowout")
 
         mix(
             ctx,
@@ -355,14 +357,75 @@ class TestMixCommand:
             speed=20.0,
         )
 
-        assert events == ["begin", "move", "mix", "complete"]
+        assert events == ["begin", "move", "position", "mix", "position", "blowout", "complete"]
         store.begin_fluid_mix.assert_called_once()
         args = store.begin_fluid_mix.call_args.args
         assert args[0] == 11
         assert args[1].endswith(":mix")
         assert (args[2].labware_key, args[2].location_id) == ("plate", "A1")
         assert args[3:] == (25.0, 4, 20.0, 0.0)
-        assert store.begin_fluid_mix.call_args.kwargs == {"campaign_id": 7}
+        assert store.begin_fluid_mix.call_args.kwargs == {
+            "campaign_id": 7, "blowout_height": 0.0,
+        }
+
+    @pytest.mark.parametrize("blowout_height", [0.0, 3.0])
+    def test_legacy_finish_lifts_in_same_well_before_one_blowout(self, blowout_height):
+        from cubos.protocol_engine.commands.pipette import mix
+
+        ctx = _mock_context()
+        events = []
+        ctx.gantry.move.side_effect = lambda instrument, target: events.append(target)
+        _get_pipette(ctx).mix.side_effect = lambda *args, **kwargs: events.append("mix")
+        _get_pipette(ctx).blowout.side_effect = lambda speed: events.append(("blowout", speed))
+
+        mix(ctx, "plate_1.A1", 50, height=-5, speed=25, blowout_height=blowout_height)
+
+        assert events == [
+            (100, 50, PIPETTE_HEIGHT_MM - 5),
+            "mix",
+            (100, 50, PIPETTE_HEIGHT_MM + blowout_height),
+            ("blowout", 25),
+        ]
+        ctx.gantry.move_to_labware.assert_called_once()
+
+    @pytest.mark.parametrize("blowout_height", [float("nan"), float("inf"), True, "bad"])
+    def test_invalid_blowout_height_rejected_before_motion(self, blowout_height):
+        from cubos.protocol_engine.commands.pipette import mix
+
+        ctx = _mock_context()
+        with pytest.raises(ProtocolExecutionError, match="blowout_height.*finite"):
+            mix(ctx, "plate_1.A1", 50, blowout_height=blowout_height)
+        ctx.gantry.move_to_labware.assert_not_called()
+        ctx.gantry.move.assert_not_called()
+        _get_pipette(ctx).mix.assert_not_called()
+
+    @pytest.mark.parametrize("failure_phase", ["move", "blowout"])
+    def test_legacy_finish_failure_is_not_committed(self, failure_phase):
+        from cubos.gantry.gantry_driver.exceptions import MillConnectionError
+        from cubos.protocol_engine.commands.pipette import mix
+
+        ctx = _mock_context()
+        ctx.campaign_id = 7
+        ctx.fluid_state_id = 11
+        ctx.data_store = MagicMock()
+        ctx.data_store.begin_fluid_mix.return_value = True
+        ctx.deck.resolve_labware_target.return_value = SimpleNamespace(
+            labware_key="plate", location_id="A1",
+        )
+        failure = MillConnectionError("finish interrupted")
+        if failure_phase == "move":
+            ctx.gantry.move.side_effect = [None, failure]
+        else:
+            _get_pipette(ctx).blowout.side_effect = failure
+
+        with pytest.raises(MillConnectionError) as raised:
+            mix(ctx, "plate.A1", 25, height=-5)
+
+        assert raised.value is failure
+        ctx.data_store.complete_fluid_mix.assert_not_called()
+        ctx.data_store.mark_fluid_reconciliation_required.assert_called_once()
+        if failure_phase == "move":
+            _get_pipette(ctx).blowout.assert_not_called()
 
     def test_tracked_mix_skips_exact_already_applied_replay_without_motion(self):
         from cubos.protocol_engine.commands.pipette import mix
@@ -379,6 +442,7 @@ class TestMixCommand:
         assert mix(ctx, position="plate.A1", volume_ul=25.0) is None
         ctx.gantry.move_to_labware.assert_not_called()
         _get_pipette(ctx).mix.assert_not_called()
+        _get_pipette(ctx).blowout.assert_not_called()
         ctx.data_store.complete_fluid_mix.assert_not_called()
 
     def test_tracked_mix_failure_requires_reconciliation(self):

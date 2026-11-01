@@ -494,6 +494,30 @@ def _append_pipette_targets(
             measurement_height=height,
             tip_extension=tip_extension,
         )
+        if command_name == "mix":
+            blowout_height = _height_arg(step_args, "blowout_height")
+            if blowout_height is not None:
+                _append_position_engage(
+                    targets,
+                    deck=deck,
+                    gantry=gantry,
+                    position=step_args.get("position"),
+                    instrument="pipette",
+                    measurement_height=blowout_height,
+                    tip_extension=tip_extension,
+                )
+    elif command_name == "rinse_well":
+        repetitions = step_args.get("mix_repetitions", 0)
+        if _is_finite_number(repetitions) and repetitions > 0:
+            _append_position_engage(
+                targets,
+                deck=deck,
+                gantry=gantry,
+                position=step_args.get("well"),
+                instrument="pipette",
+                measurement_height=0.0,
+                tip_extension=tip_extension,
+            )
     elif command_name == "pick_up_tip":
         _append_position_engage(
             targets,

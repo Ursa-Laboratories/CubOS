@@ -286,6 +286,7 @@ class RoutingSession:
                     position=args["position"],
                     height=float(args.get("height", 0.0)),
                     cycles=int(args.get("cycles", 3)),
+                    blowout_height=float(args.get("blowout_height", 0.0)),
                     tool_state=state,
                     current_target=current_target,
                     current_instrument=current_instrument,
@@ -485,6 +486,7 @@ class RoutingSession:
         position: str,
         height: float,
         cycles: int,
+        blowout_height: float,
         tool_state: ToolState,
         current_target: str | None,
         current_instrument: str | None,
@@ -503,7 +505,16 @@ class RoutingSession:
         for _ in range(cycles):
             plans.append(self._plan(low, high, "pipette", tool_state, (fixture_key,), "mix", "lift"))
             plans.append(self._plan(high, low, "pipette", tool_state, (fixture_key,), "mix", "lower"))
-        return PreparedMotionStep("mix", tuple(plans), {"cycles": cycles}), low, fixture_key
+        coordinate = self.context.deck.resolve_coordinate(position)
+        finish = _carriage_for(
+            self.context, "pipette",
+            Point3D(coordinate.x, coordinate.y, coordinate.z + blowout_height),
+            tool_state,
+        )
+        plans.append(self._plan(
+            low, finish, "pipette", tool_state, (fixture_key,), "mix", "blowout",
+        ))
+        return PreparedMotionStep("mix", tuple(plans), {"cycles": cycles}), finish, fixture_key
 
     def _plan_drop(
         self,

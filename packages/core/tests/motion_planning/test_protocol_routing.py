@@ -256,6 +256,7 @@ def test_native_planned_commands_execute_preflighted_exact_segments() -> None:
         "dispense:50.0",
         "aspirate:50.0",
         "dispense:50.0",
+        "blowout",
         "drop_tip",
     ]
     assert controller.moves

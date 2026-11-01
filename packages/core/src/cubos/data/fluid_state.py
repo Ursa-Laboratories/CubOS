@@ -455,6 +455,8 @@ def begin_fluid_mix(
     speed: float,
     height: float = 0.0,
     campaign_id: int | None = None,
+    *,
+    blowout_height: float | None = None,
 ) -> bool:
     """Preflight and journal a net-zero mix before physical actuation."""
     _validate_operation_key(operation_key)
@@ -468,6 +470,8 @@ def begin_fluid_mix(
         "repetitions": repetitions,
         "speed": mix_speed,
     }
+    if blowout_height is not None:
+        parameters["blowout_height"] = _finite_number(blowout_height, "blowout_height")
 
     with _immediate_transaction(connection):
         _require_state(connection, fluid_state_id)
