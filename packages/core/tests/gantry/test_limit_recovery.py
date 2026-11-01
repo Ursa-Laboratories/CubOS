@@ -18,6 +18,11 @@ class _RecoveringGantry:
         self.calls: list[tuple] = []
         self.statuses = list(statuses or ["Idle"])
 
+    def jog_for_limit_recovery(self, *, check_cancelled=None, **kwargs):
+        if check_cancelled is not None:
+            check_cancelled()
+        return self.jog(**kwargs)
+
     def jog_cancel(self) -> None:
         self.calls.append(("jog_cancel",))
 
@@ -32,6 +37,9 @@ class _RecoveringGantry:
         feed_rate: float = 2000,
     ) -> None:
         self.calls.append(("jog", x, y, z, feed_rate))
+
+    def get_recovery_status(self) -> str:
+        return self.get_status()
 
     def get_status(self) -> str:
         self.calls.append(("get_status",))
@@ -67,119 +75,95 @@ def test_recover_from_limit_alarm_resets_unlocks_and_pulls_off_opposite_delta():
     assert any("Pulled off the limit switch" in message for message in messages)
 
 
-def test_recover_from_limit_alarm_retries_status_that_still_reports_limit():
-    messages: list[str] = []
-    gantry = _RecoveringGantry(["<Alarm|Pn:X>", "<Idle|WPos:0,0,0>"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "<Alarm|Pn:Z>",
+        "<Idle|Pn:Z>",
+        "<Hold:0|WPos:0,0,0>",
+        "[MSG:Check Limits]",
+        "ok",
+        StatusReturnError("Failed to get status from the mill"),
+        MillConnectionError("USB disconnected"),
+    ],
+)
+def test_recovery_faults_stop_without_another_reset_or_jog(failure):
+    gantry = _RecoveringGantry([failure])
+    expected = type(failure) if isinstance(failure, Exception) else StatusReturnError
+
+    with pytest.raises(expected):
+        recover_from_limit_alarm(
+            gantry, {"z": -1}, pull_off_mm=5, feed_rate=800, output=lambda _: None,
+        )
+
+    assert gantry.calls.count(("reset_and_unlock",)) == 1
+    assert gantry.calls.count(("jog", 0, 0, 5, 800)) == 1
+    assert gantry.calls.count(("get_status",)) == 1
+
+
+def test_recovery_waits_for_jog_completion_without_another_move(monkeypatch):
+    monkeypatch.setattr("cubos.gantry.limit_recovery.time.sleep", lambda _: None)
+    gantry = _RecoveringGantry(["<Jog|Pn:Z>", "<Jog|WPos:0,0,0>", "<Idle|WPos:0,0,0>"])
 
     result = recover_from_limit_alarm(
-        gantry,
-        {"x": -1.0, "y": 0.0, "z": 0.0},
-        pull_off_mm=6.0,
-        feed_rate=1200.0,
-        output=messages.append,
+        gantry, {"z": 1}, pull_off_mm=5, feed_rate=800, output=lambda _: None,
     )
 
-    assert result.attempts == 2
-    assert gantry.calls.count(("reset_and_unlock",)) == 2
-    assert gantry.calls.count(("jog", 6.0, 0.0, 0.0, 1200.0)) == 2
-    assert any("1/5 did not clear" in message for message in messages)
-
-
-def test_recover_from_limit_alarm_retries_failed_status_read_before_success():
-    messages: list[str] = []
-    gantry = _RecoveringGantry(
-        [
-            StatusReturnError("Failed to get status from the mill"),
-            "<Idle|WPos:0,0,0>",
-        ]
-    )
-
-    result = recover_from_limit_alarm(
-        gantry,
-        {"x": 1.0, "y": 0.0, "z": 0.0},
-        pull_off_mm=5.0,
-        feed_rate=1000.0,
-        output=messages.append,
-    )
-
-    assert result.attempts == 2
+    assert result.attempts == 1
     assert result.final_status == "<Idle|WPos:0,0,0>"
-    assert gantry.calls.count(("reset_and_unlock",)) == 2
-    assert gantry.calls.count(("jog", -5.0, 0.0, 0.0, 1000.0)) == 2
-    assert any("1/5 did not clear" in message for message in messages)
+    assert gantry.calls.count(("reset_and_unlock",)) == 1
+    assert gantry.calls.count(("jog", 0, 0, -5, 800)) == 1
+    assert gantry.calls.count(("get_status",)) == 3
 
 
-def test_recover_from_limit_alarm_raises_after_five_uncleared_attempts():
-    messages: list[str] = []
-    gantry = _RecoveringGantry(["<Alarm|Pn:Y>"] * 5)
+def test_recovery_timeout_cancels_without_retry(monkeypatch):
+    monkeypatch.setattr("cubos.gantry.limit_recovery.time.monotonic", iter([0, 11]).__next__)
+    gantry = _RecoveringGantry(["<Jog|Pn:Z>"])
 
-    with pytest.raises(StatusReturnError, match="did not clear"):
+    with pytest.raises(StatusReturnError, match="timed out"):
         recover_from_limit_alarm(
-            gantry,
-            {"x": 0.0, "y": -1.0, "z": 0.0},
-            pull_off_mm=5.0,
-            feed_rate=2500.0,
-            output=messages.append,
+            gantry, {"z": 1}, pull_off_mm=5, feed_rate=800, output=lambda _: None,
         )
 
-    assert gantry.calls.count(("reset_and_unlock",)) == 5
-    assert gantry.calls.count(("jog", 0.0, 5.0, 0.0, 2500.0)) == 5
-    assert any("after 5 attempts" in message for message in messages)
+    assert gantry.calls.count(("jog_cancel",)) == 2
+    assert gantry.calls.count(("reset_and_unlock",)) == 1
+    assert gantry.calls.count(("jog", 0, 0, -5, 800)) == 1
 
 
-def test_recover_from_limit_alarm_raises_after_repeated_status_read_failures():
-    messages: list[str] = []
-    gantry = _RecoveringGantry(
-        [StatusReturnError("Failed to get status from the mill")] * 5
-    )
+@pytest.mark.parametrize("cancel_check", [1, 2, 3, 4, 5])
+def test_recovery_cancel_never_restarts_motion(cancel_check):
+    gantry = _RecoveringGantry()
+    checks = 0
 
-    with pytest.raises(StatusReturnError, match="could not verify"):
+    def cancelled():
+        nonlocal checks
+        checks += 1
+        return checks >= cancel_check
+
+    with pytest.raises(CommandExecutionError, match="cancelled"):
         recover_from_limit_alarm(
-            gantry,
-            {"x": 0.0, "y": 1.0, "z": 0.0},
-            pull_off_mm=5.0,
-            feed_rate=800.0,
-            output=messages.append,
+            gantry, {"z": 1}, pull_off_mm=5, feed_rate=800,
+            output=lambda _: None, cancelled=cancelled,
         )
 
-    assert gantry.calls.count(("reset_and_unlock",)) == 5
-    assert gantry.calls.count(("jog", 0.0, -5.0, 0.0, 800.0)) == 5
-    assert any("could not verify controller status" in message for message in messages)
+    assert gantry.calls.count(("reset_and_unlock",)) <= 1
+    assert gantry.calls.count(("jog", 0, 0, -5, 800)) == (1 if cancel_check == 5 else 0)
+    assert not any(call[0] in ("home", "reconnect") for call in gantry.calls)
 
 
-def test_recover_from_limit_alarm_retries_failed_pull_off_jog_until_success():
-    messages: list[str] = []
+def test_recovery_rejected_jog_never_retries():
+    class RejectedGantry(_RecoveringGantry):
+        def jog(self, **kwargs):
+            super().jog(**kwargs)
+            raise CommandExecutionError("ALARM:1")
 
-    class RetryingGantry(_RecoveringGantry):
-        def __init__(self):
-            super().__init__(["Idle"])
-            self.failures_left = 2
+    gantry = RejectedGantry()
+    with pytest.raises(CommandExecutionError):
+        recover_from_limit_alarm(
+            gantry, {"z": 1}, pull_off_mm=5, feed_rate=800, output=lambda _: None,
+        )
 
-        def jog(
-            self,
-            x: float = 0,
-            y: float = 0,
-            z: float = 0,
-            feed_rate: float = 2000,
-        ) -> None:
-            super().jog(x=x, y=y, z=z, feed_rate=feed_rate)
-            if self.failures_left:
-                self.failures_left -= 1
-                raise CommandExecutionError("ALARM:1 hard limit")
-
-    gantry = RetryingGantry()
-
-    result = recover_from_limit_alarm(
-        gantry,
-        {"x": 0.0, "y": 0.0, "z": 1.0},
-        pull_off_mm=5.0,
-        feed_rate=900.0,
-        output=messages.append,
-    )
-
-    assert result.attempts == 3
-    assert gantry.calls.count(("reset_and_unlock",)) == 3
-    assert gantry.calls.count(("jog", 0.0, 0.0, -5.0, 900.0)) == 3
+    assert gantry.calls == [("jog_cancel",), ("reset_and_unlock",), ("jog", 0, 0, -5, 800)]
 
 
 @pytest.mark.parametrize(
@@ -270,7 +254,7 @@ def test_jog_cancel_command_execution_error_propagates():
             output=messages.append,
         )
 
-    assert any("Aborting" in m for m in messages)
+    assert not any(call[0] == "reset_and_unlock" for call in gantry.calls)
     assert not any(m for m in messages if "Attempting limit pull-off" in m)
 
 
@@ -404,3 +388,75 @@ def test_opposite_pull_off_delta_covers_xy_simultaneous_case():
 )
 def test_looks_like_limit_alarm_false_for_non_alarm_strings(text: str):
     assert looks_like_limit_alarm(text) is False
+
+
+@pytest.mark.parametrize("status", ["<Idle|Pn:P>", "<Idle|Pn:>", "error:90", None])
+def test_non_limit_pin_or_unrelated_error_does_not_match_limit_alarm(status):
+    assert not looks_like_limit_alarm(status)
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"pull_off_mm": 0}, {"pull_off_mm": float("nan")}, {"feed_rate": 0}, {"feed_rate": float("inf")}, {"timeout_s": 0}, {"timeout_s": float("nan")}, {"max_pull_off_attempts": 2}],
+)
+def test_invalid_recovery_parameters_never_actuate(kwargs):
+    gantry = _RecoveringGantry()
+    params = {"pull_off_mm": 5, "feed_rate": 800, "output": lambda _: None, **kwargs}
+
+    with pytest.raises(ValueError):
+        recover_from_limit_alarm(gantry, {"z": -1}, **params)
+
+    assert not gantry.calls
+
+
+def test_active_z_acknowledgement_cannot_authorize_xy_pull_off():
+    gantry = _RecoveringGantry()
+    with pytest.raises(ValueError, match="matching single-axis"):
+        recover_from_limit_alarm(
+            gantry, {"x": 1}, pull_off_mm=5, feed_rate=800,
+            output=lambda _: None, confirmed_limit_axis="z",
+        )
+    assert not gantry.calls
+
+
+@pytest.mark.parametrize("status", ["<Idle>", "<Idle|Pn:XZ>", "<Idle|Pn:ZP>", "<Alarm|Pn:Z>", "<Jog|Pn:Z>"])
+def test_guarded_recovery_rechecks_switch_and_idle_after_reset_before_jog(status):
+    class ActiveZRecovery(_RecoveringGantry):
+        def reset_and_unlock_for_limit_recovery(self, *, axis, check_cancelled=None):
+            self.calls.append(("guarded_reset_and_unlock",))
+
+    gantry = ActiveZRecovery([status])
+    with pytest.raises(StatusReturnError):
+        recover_from_limit_alarm(
+            gantry, {"z": -1}, pull_off_mm=5, feed_rate=800,
+            output=lambda _: None, confirmed_limit_axis="z",
+        )
+
+    assert gantry.calls == [("jog_cancel",), ("guarded_reset_and_unlock",), ("get_status",)]
+
+
+@pytest.mark.parametrize("delta", [{}, {"z": float("nan")}, {"z": float("inf")}])
+def test_recovery_without_finite_direction_never_actuates(delta):
+    gantry = _RecoveringGantry()
+    with pytest.raises(ValueError, match="nonzero failed jog"):
+        recover_from_limit_alarm(gantry, delta, pull_off_mm=5, feed_rate=800, output=lambda _: None)
+    assert not gantry.calls
+
+
+def test_recovery_without_status_api_never_actuates():
+    gantry = _RecoveringGantry()
+    gantry.get_status = None
+    with pytest.raises(StatusReturnError, match="verification"):
+        recover_from_limit_alarm(gantry, {"z": -1}, pull_off_mm=5, feed_rate=800, output=lambda _: None)
+    assert not gantry.calls
+
+
+def test_verified_recovery_requires_scoped_jog_method_before_any_actuation():
+    gantry = _RecoveringGantry()
+    gantry.jog_for_limit_recovery = None
+    with pytest.raises(CommandExecutionError, match="jog_for_limit_recovery"):
+        recover_from_limit_alarm(
+            gantry, {"y": -1}, pull_off_mm=5, feed_rate=100,
+            output=lambda _: None, confirmed_limit_axis="y",
+        )
+    assert not gantry.calls

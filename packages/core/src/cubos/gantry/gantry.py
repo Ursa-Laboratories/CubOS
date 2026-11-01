@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from .calibration_utils import (
     round_mm,
@@ -278,6 +278,20 @@ class Gantry:
             self.logger.error("Jog error: %s", exc)
             raise
 
+    def jog_for_limit_recovery(
+        self, x: float = 0, y: float = 0, z: float = 0, feed_rate: float = 100,
+        check_cancelled: Callable[[], None] | None = None,
+    ) -> None:
+        """Send the bounded jog after the guarded recovery's fresh pin checks."""
+        if self._offline:
+            self.jog(x=x, y=y, z=z, feed_rate=feed_rate)
+            return
+        axes = [axis for axis, value in (("x", x), ("y", y), ("z", z)) if value]
+        if len(axes) != 1:
+            raise ValueError("Guarded recovery jog requires one axis.")
+        assert self._mill is not None
+        self._mill.jog(x=x, y=y, z=z, feed_rate=feed_rate, recovery_axis=axes[0], check_cancelled=check_cancelled)
+
     def jog_cancel(self) -> None:
         """Cancel any in-progress jog motion immediately."""
         if self._offline:
@@ -301,7 +315,7 @@ class Gantry:
             raise
 
     def unlock(self) -> None:
-        """Send GRBL unlock command ($X) to clear alarm state."""
+        """Send GRBL unlock command ($X) and await its acknowledgement."""
         if self._offline:
             return
         assert self._mill is not None
@@ -322,6 +336,33 @@ class Gantry:
             self.logger.error("Reset and unlock error: %s", exc)
             raise
 
+    def reset_and_unlock_for_limit_recovery(
+        self, *, axis: str, check_cancelled: Callable[[], None] | None = None,
+    ) -> list[str]:
+        """Reset once, verify the selected switch freshly, then acknowledge unlock."""
+        if axis not in ("x", "y", "z"):
+            raise ValueError("Guarded reset requires an x, y, or z axis.")
+        if self._offline:
+            return []
+        assert self._mill is not None
+        notices = self._mill.soft_reset(recovery_axis=axis) or []
+        if check_cancelled is not None:
+            check_cancelled()
+        status = self.get_recovery_status()
+        pins = re.search(r"Pn:([^|>;\s]*)", status, re.IGNORECASE)
+        if not (
+            re.match(r"^<?(?:idle|alarm)(?:\||>)", status, re.IGNORECASE)
+            and pins and set(pins.group(1).lower()) == {axis}
+        ):
+            raise StatusReturnError(f"Active {axis.upper()} switch did not verify before unlock: {status}")
+        self.logger.info("Guarded reset pre-unlock status: %s", status)
+        if check_cancelled is not None:
+            check_cancelled()
+        self._mill.unlock()
+        if check_cancelled is not None:
+            check_cancelled()
+        return [*notices, f"Pre-unlock status: {status}"]
+
     def get_status(self) -> str:
         """Return the current status string with normalized coordinates."""
         if self._offline:
@@ -332,6 +373,17 @@ class Gantry:
         except (MillConnectionError, StatusReturnError) as exc:
             self.logger.error("Error getting status: %s", exc)
             raise
+
+    def get_recovery_status(self) -> str:
+        """Read a fresh status frame, tolerating only Check Limits courtesy messages."""
+        if self._offline:
+            return "Idle"
+        assert self._mill is not None
+        return translate_status_string(self._mill.current_status(recovery=True))
+
+    def get_recovery_position_info(self) -> Dict[str, Any]:
+        """Read fresh recovery coordinates without hiding controller faults."""
+        return self.get_position_info(recovery=True)
 
     def stop(self) -> None:
         """Immediately stop all gantry motion (GRBL feed hold)."""
@@ -374,20 +426,21 @@ class Gantry:
         coords = self._mill.current_coordinates()
         return {"x": float(coords.x), "y": float(coords.y), "z": float(coords.z)}
 
-    def get_position_info(self) -> Dict[str, Any]:
+    def get_position_info(self, *, recovery: bool = False) -> Dict[str, Any]:
         """Return coordinates, work position, and last-known status."""
         if self._offline:
             coords = dict(self._offline_coords)
             return {"coords": dict(coords), "work_pos": dict(coords), "status": "Idle"}
 
         assert self._mill is not None
-        coords = self._mill.current_coordinates()
+        coords = self._mill.current_coordinates(recovery=True) if recovery else self._mill.current_coordinates()
         user_coords = {"x": float(coords.x), "y": float(coords.y), "z": float(coords.z)}
         status = self._extract_status()
         return {
             "coords": dict(user_coords),
             "work_pos": dict(user_coords),
             "status": status,
+            "raw_status": self._mill.last_status,
         }
 
     def set_serial_timeout(self, timeout: float) -> None:

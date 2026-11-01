@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent, TouchEvent } from "react";
 import { gantryApi } from "../../api/client";
 import * as theme from "../../theme";
 import CameraPreview from "./CameraPreview";
+import LimitRecoveryControls from "./LimitRecoveryControls";
 import type { FinalizeOriginResponse, GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import {
   buildCalibratedConfig,
@@ -13,6 +14,8 @@ import {
   type ZCalibrationResult,
 } from "./calibrationMath";
 import { createJogPacer, jogPaceMs } from "./jogPacing";
+import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "./gantryAlarm";
+import { useCalibrationAutoRecovery } from "../../hooks/useCalibrationAutoRecovery";
 
 interface Props {
   open: boolean;
@@ -65,11 +68,13 @@ export default function CalibrationWizard({
   position,
   onSaveCalibrated,
 }: Props) {
+  const autoRecovery = useCalibrationAutoRecovery(open, position?.connected ?? false);
   const [step, setStep] = useState(0);
   const [xyStep, setXyStep] = useState("0.5");
   const [zStep, setZStep] = useState("0.5");
   const [blockHeight, setBlockHeight] = useState("10");
   const [busy, setBusy] = useState(false);
+  const [recoveryBusy, setRecoveryBusy] = useState(false);
   const [operation, setOperation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [alarmPrompt, setAlarmPrompt] = useState<string | null>(null);
@@ -87,15 +92,11 @@ export default function CalibrationWizard({
   const [outputFile, setOutputFile] = useState("");
   const [referenceInstrument, setReferenceInstrument] = useState("");
   const [lowestInstrument, setLowestInstrument] = useState("");
-  const [resolvedAlarmStatus, setResolvedAlarmStatus] = useState<string | null>(null);
   const jogHeld = useRef<JogDelta | null>(null);
   const jogPumpActive = useRef(false);
   const jogRequestCount = useRef(0);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
-  const recoveryInProgress = useRef(false);
-  const lastJogDelta = useRef<JogDelta | null>(null);
-  const recoveryAttemptKey = useRef<string | null>(null);
   const previousOpen = useRef(false);
   const previousStep = useRef(step);
   const pendingSingleOrigin = useRef<PendingSingleOrigin | null>(null);
@@ -126,13 +127,14 @@ export default function CalibrationWizard({
   const isMulti = calibratableInstruments.length > 1;
   const connected = position?.connected ?? false;
   const status = position?.status ?? "";
-  const rawIsAlarm = looksLikeAlarm(status);
-  const isAlarm = rawIsAlarm && status !== resolvedAlarmStatus;
+  const isAlarm = hasGantryAlarm(status);
+  const homing = isGantryHoming(status);
   const alarmRecoveryMessage = alarmPrompt ?? (
     isAlarm
       ? `${status} - controls are locked until limit recovery or manual reset clears the controller.`
       : null
   );
+  const homeRequired = /home required/i.test(alarmRecoveryMessage ?? "");
   const normalizedOutput = outputFile.trim() || defaultOutputFilename(filename);
   const selectedReference = referenceInstrument || contactInstruments[0] || "";
   const selectedLowest = lowestInstrument || contactInstruments[0] || "";
@@ -173,7 +175,7 @@ export default function CalibrationWizard({
   const readyForSave = isMulti
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
-  const controlsLocked = busy || !!alarmRecoveryMessage;
+  const controlsLocked = busy || homing || !!alarmRecoveryMessage;
 
   useEffect(() => {
     const wasOpen = previousOpen.current;
@@ -182,6 +184,7 @@ export default function CalibrationWizard({
     setStep(0);
     setOriginPolicy(config?.origin_policy ?? "deck_origin");
     setBusy(false);
+    setRecoveryBusy(false);
     setOperation(null);
     setError(null);
     setAlarmPrompt(null);
@@ -198,10 +201,7 @@ export default function CalibrationWizard({
     setReferenceInstrument(contactInstruments[0] ?? "");
     setLowestInstrument(contactInstruments[0] ?? "");
     setBlockHeight(formatOptionalNumber(config?.cnc.calibration_block_height_mm));
-    setResolvedAlarmStatus(null);
-    lastJogDelta.current = null;
     jogRequestCount.current = 0;
-    recoveryAttemptKey.current = null;
     pendingSingleOrigin.current = null;
     pendingZReference.current = null;
     finalizedOrigin.current = null;
@@ -222,6 +222,12 @@ export default function CalibrationWizard({
 
   const jogPacer = useRef(createJogPacer()).current;
 
+  const haltJogLocally = useCallback(() => {
+    jogHeld.current = null;
+    jogRequestCount.current = 0;
+    jogPacer.wake();
+  }, [jogPacer]);
+
   const stopJog = useCallback(() => {
     if (jogHeld.current === null) return;
     jogHeld.current = null;
@@ -229,99 +235,47 @@ export default function CalibrationWizard({
     // held jog cancels so motion stops at release instead of running out
     // whatever GRBL has queued.
     if (jogRequestCount.current > 1) {
+      autoRecovery.cancel();
       gantryApi.jogCancel().catch(() => undefined);
     }
     jogRequestCount.current = 0;
     jogPacer.wake();
-  }, [jogPacer]);
+  }, [autoRecovery, jogPacer]);
 
-  const rememberJogDelta = useCallback((delta: JogDelta) => {
-    if (!isZeroDelta(delta)) {
-      lastJogDelta.current = delta;
-    }
+  const invalidateCaptures = useCallback(() => {
+    setXyOrigin(null);
+    setZReference(null);
+    setBlockTouch(null);
+    setCalibrationHome(null);
+    setZCalibration(null);
+    setXyBounds(null);
+    setInstrumentPositions({});
+    pendingSingleOrigin.current = null;
+    pendingZReference.current = null;
+    finalizedOrigin.current = null;
+    finalizedConfig.current = null;
   }, []);
 
   useEffect(() => {
-    if (!rawIsAlarm && resolvedAlarmStatus !== null) {
-      setResolvedAlarmStatus(null);
-      recoveryAttemptKey.current = null;
-    }
-  }, [rawIsAlarm, resolvedAlarmStatus]);
-
-  useEffect(() => {
-    if (resolvedAlarmStatus === null) return;
-    const timer = window.setTimeout(() => {
-      setResolvedAlarmStatus(null);
-      recoveryAttemptKey.current = null;
-    }, 1000);
-    return () => window.clearTimeout(timer);
-  }, [resolvedAlarmStatus]);
-
-  const recoverFromLimitAlarm = useCallback(async (delta: JogDelta, err: unknown, resolvedStatus?: string) => {
-    if (recoveryInProgress.current) return;
-    recoveryInProgress.current = true;
-    stopJog();
-    const message = err instanceof Error ? err.message : String(err);
-    setBusy(true);
-    setOperation("Recovering from limit switch");
-    setError(null);
-    setAlarmPrompt(
-      "The gantry hit a limit switch. Wait while it backs off.",
-    );
+    if (!open || !connected || !isAlarm) return;
+    haltJogLocally();
+    invalidateCaptures();
+    setAlarmPrompt(status);
     setStatusNote(null);
-    try {
-      await gantryApi.recoverCalibrationLimit(delta);
-      setAlarmPrompt(null);
-      if (resolvedStatus) {
-        setResolvedAlarmStatus(resolvedStatus);
-      }
-      setStatusNote(
-        "Backed off the limit switch. You can continue.",
-      );
-    } catch (recoveryErr) {
-      const recoveryMessage = recoveryErr instanceof Error ? recoveryErr.message : String(recoveryErr);
-      setResolvedAlarmStatus(null);
-      // A lost serial link needs a power-cycle, not an E-stop — tell the
-      // operator the actionable step instead of the generic lockout text.
-      setAlarmPrompt(
-        /connection lost/i.test(recoveryMessage)
-          ? recoveryMessage
-          : "Could not back off the limit switch. Press E-stop or reset the controller, then try again.",
-      );
-      setError(`Limit recovery failed after jog error (${message}): ${recoveryMessage}`);
-    } finally {
-      setOperation(null);
-      setBusy(false);
-      recoveryInProgress.current = false;
-    }
-  }, [stopJog]);
-
-  useEffect(() => {
-    if (!open || !connected || busy || !isAlarm || alarmPrompt || recoveryInProgress.current) return;
-    stopJog();
-    const delta = lastJogDelta.current;
-    if (!delta || isZeroDelta(delta)) {
-      setAlarmPrompt(
-        "The gantry hit a limit switch and cannot back off on its own. Press E-stop or reset the controller, then continue.",
-      );
-      return;
-    }
-    const key = `${status}|${delta.x}|${delta.y}|${delta.z}`;
-    if (recoveryAttemptKey.current === key) return;
-    recoveryAttemptKey.current = key;
-    void recoverFromLimitAlarm(delta, new Error(status), status);
-  }, [alarmPrompt, busy, connected, isAlarm, open, recoverFromLimitAlarm, status, stopJog]);
+  }, [connected, haltJogLocally, invalidateCaptures, isAlarm, open, status]);
 
   const reportError = useCallback((err: unknown) => {
-    stopJog();
     const message = err instanceof Error ? err.message : String(err);
     if (looksLikeAlarm(message)) {
+      haltJogLocally();
+      invalidateCaptures();
+      setStatusNote(null);
       setAlarmPrompt(
         "The gantry is in an alarm state. Clear it before continuing.",
       );
-    }
+    } else stopJog();
     setError(message);
-  }, [stopJog]);
+  }, [haltJogLocally, invalidateCaptures, stopJog]);
 
   const clearPendingCaptures = () => {
     pendingSingleOrigin.current = null;
@@ -331,6 +285,8 @@ export default function CalibrationWizard({
   };
 
   const resetFlow = () => {
+    autoRecovery.begin();
+    setRecoveryBusy(false);
     setStep(0);
     setOperation(null);
     setError(null);
@@ -347,15 +303,13 @@ export default function CalibrationWizard({
     setOutputFile(defaultOutputFilename(filename));
     setReferenceInstrument(contactInstruments[0] ?? "");
     setLowestInstrument(contactInstruments[0] ?? "");
-    setResolvedAlarmStatus(null);
     clearPendingCaptures();
-    lastJogDelta.current = null;
     jogRequestCount.current = 0;
-    recoveryAttemptKey.current = null;
   };
 
   const reset = async () => {
     if (busy) return;
+    autoRecovery.end();
     stopJog();
     let restoreError: string | null = null;
     if (connected) {
@@ -377,7 +331,15 @@ export default function CalibrationWizard({
   };
 
   const close = async () => {
+    autoRecovery.end();
     stopJog();
+    if (recoveryBusy) {
+      try {
+        await gantryApi.jogCancel();
+      } catch (failure) {
+        setError(errorMessage(failure));
+      }
+    }
     if (!connected) {
       onClose();
       return;
@@ -450,38 +412,53 @@ export default function CalibrationWizard({
     }
   };
 
-  const runAction = async (label: string, action: () => Promise<void>) => {
-    lastJogDelta.current = null;
+  const runAction = async (label: string, action: (generation: number) => Promise<void>) => {
+    const generation = autoRecovery.generation;
+    const lifetime = autoRecovery.lifetime;
+    if (!autoRecovery.active) return;
     setBusy(true);
     setOperation(label);
     setError(null);
     try {
-      await action();
+      await action(generation);
     } catch (err) {
-      reportError(err);
+      if (autoRecovery.active && autoRecovery.lifetime === lifetime) reportError(err);
     } finally {
-      setOperation(null);
-      setBusy(false);
+      if (autoRecovery.active && autoRecovery.lifetime === lifetime) {
+        setOperation(null);
+        setBusy(false);
+      }
     }
   };
 
-  const unlockAlarm = () => runAction("Clearing alarm", async () => {
-    await gantryApi.unlock();
+  const assertGeneration = (generation: number) => {
+    if (!autoRecovery.active || autoRecovery.generation !== generation) throw new Error("Calibration closed.");
+  };
+
+  const unlockAlarm = () => runAction("Clearing alarm", async (generation) => {
+    const result = await gantryApi.unlock();
+    assertGeneration(generation);
+    if (/home required/i.test(result.status)) {
+      setAlarmPrompt("Home required. Close calibration, clear the gantry path, then Home before continuing.");
+      return;
+    }
+    if (!isVerifiedIdle(result)) throw new Error(`Controller is still blocked: ${result.status}`);
     setAlarmPrompt(null);
-    setStatusNote("Alarm cleared. Jog Z+ away from the limit before continuing.");
+    setStatusNote("Alarm cleared.");
   });
 
-  const jogBlockingWithRecovery = async (delta: JogDelta, timeout_s: number): Promise<boolean> => {
-    rememberJogDelta(delta);
+  const jogBlocking = async (delta: JogDelta, timeout_s: number, generation: number) => {
+    const id = autoRecovery.issueJogId(generation);
+    if (!id) throw new Error("Calibration closed.");
     try {
-      await gantryApi.jogBlocking(delta.x, delta.y, delta.z, timeout_s);
-      return false;
-    } catch (err) {
-      if (looksLikeAlarm(errorMessage(err))) {
-        await recoverFromLimitAlarm(delta, err);
-        return true;
+      await gantryApi.jogBlocking(delta.x, delta.y, delta.z, timeout_s, id);
+      assertGeneration(generation);
+    } catch (failure) {
+      if (autoRecovery.active && autoRecovery.generation === generation) {
+        invalidateCaptures();
+        if (!looksLikeAlarm(errorMessage(failure))) autoRecovery.cancel();
       }
-      throw err;
+      throw failure;
     }
   };
 
@@ -510,13 +487,17 @@ export default function CalibrationWizard({
   };
 
   // Step 1: connect (if needed) then home. This is the first hardware action.
-  const homeForCalibration = () => runAction("Homing", async () => {
+  const homeForCalibration = () => runAction("Homing", async (generation) => {
     if (!filename) throw new Error("Select a gantry config first.");
     if (!connected) {
       await gantryApi.connect(filename);
+      assertGeneration(generation);
     }
     const result = await gantryApi.prepareCalibrationOrigin();
+    assertGeneration(generation);
+    if (!isVerifiedIdle(result)) throw new Error(`Homing is unverified: ${result.status}`);
     const homed = requirePosition(result);
+    setAlarmPrompt(null);
     setCalibrationHome(homed);
     setStatusNote("Homed.");
     setStep(2);
@@ -524,12 +505,14 @@ export default function CalibrationWizard({
 
   const setXY = () => runAction(
     "Setting XY origin",
-    async () => {
+    async (generation) => {
     if (referenceTipLengthError) throw new Error(referenceTipLengthError);
     const result = await gantryApi.setWorkCoordinates({ x: 0, y: 0 });
+    assertGeneration(generation);
     const captured = requirePosition(result);
     setXyOrigin(captured);
     const centered = await gantryApi.homeAndCenterForCalibration();
+    assertGeneration(generation);
     setXyBounds(capturedFromPlain(centered.xy_bounds));
     setStatusNote("XY origin set.");
     setStep(3);
@@ -549,17 +532,19 @@ export default function CalibrationWizard({
     setStep(nextStep);
   };
 
-  const setSingleInstrumentOrigin = () => runAction("Setting origin", async () => {
+  const setSingleInstrumentOrigin = () => runAction("Setting origin", async (generation) => {
     if (!config) throw new Error("No gantry config is loaded.");
     let pending = pendingSingleOrigin.current;
     if (!pending) {
       const height = parseBlockHeight(blockHeight);
       const blockTouch = requirePosition(await gantryApi.getPosition());
+      assertGeneration(generation);
       // Set WPos before restoring soft limits: if setWorkCoordinates fails,
       // soft limits stay disabled so the operator can still jog freely and
       // retry. Once this succeeds, retries must not re-capture in the shifted
       // frame.
       const result = await gantryApi.setWorkCoordinates({ x: 0, y: 0, z: height });
+      assertGeneration(generation);
       pending = {
         blockTouch,
         zReference: requirePosition(result),
@@ -567,6 +552,7 @@ export default function CalibrationWizard({
       pendingSingleOrigin.current = pending;
     }
     await gantryApi.restoreCalibrationSoftLimits();
+    assertGeneration(generation);
     setBlockTouch(pending.blockTouch);
     setZReference(pending.zReference);
     setZCalibration(null);
@@ -578,7 +564,7 @@ export default function CalibrationWizard({
     isMulti && selectedLowest
       ? `Setting Z reference with ${selectedLowest}`
       : "Setting Z reference",
-    async () => {
+    async (generation) => {
     if (!config) throw new Error("No gantry config is loaded.");
     let pending = pendingZReference.current;
     if (!pending) {
@@ -586,6 +572,7 @@ export default function CalibrationWizard({
       const factoryZTravel = getFactoryZTravel(config);
       // Travel uses carriage readbacks; tip extension belongs in tool depth.
       const blockTouch = requirePosition(await gantryApi.getPosition());
+      assertGeneration(generation);
       const homeZ = isMulti
         ? requireCaptured(xyBounds, "Homed XY bounds")
         : requireCaptured(calibrationHome, "Home position");
@@ -596,6 +583,7 @@ export default function CalibrationWizard({
         factoryZTravel,
       });
       const result = await gantryApi.setWorkCoordinates({ z: height });
+      assertGeneration(generation);
       pending = {
         blockTouch,
         zReference: requirePosition(result),
@@ -608,12 +596,9 @@ export default function CalibrationWizard({
     setZCalibration(pending.calibration);
     if (isMulti && pending.lowestInstrument) {
       setInstrumentPositions((prev) => ({ ...prev, [pending.lowestInstrument]: pending.zReference }));
-      const recovered = await jogBlockingWithRecovery({ x: 0, y: 0, z: 15 }, 15);
-      setStatusNote(
-        recovered
-          ? `Recorded ${pending.lowestInstrument}. The gantry hit a limit while lifting and backed off.`
-          : `Recorded ${pending.lowestInstrument}.`,
-      );
+      await jogBlocking({ x: 0, y: 0, z: 15 }, 15, generation);
+      assertGeneration(generation);
+      setStatusNote(`Recorded ${pending.lowestInstrument}.`);
     } else {
       setStatusNote("Z reference set.");
     }
@@ -622,7 +607,7 @@ export default function CalibrationWizard({
 
   const recordCurrentInstrument = (name: string) => runAction(
     `Recording ${name}`,
-    async () => {
+    async (generation) => {
     if (!name) return;
     const isCamera = nonContactInstruments.includes(name);
     if (isCamera) {
@@ -634,6 +619,7 @@ export default function CalibrationWizard({
       if (message) throw new Error(message);
     }
     const captured = requirePosition(await gantryApi.getPosition());
+    assertGeneration(generation);
     const nextPositions = { ...instrumentPositions, [name]: captured };
     setInstrumentPositions(nextPositions);
     if (isCamera) {
@@ -643,18 +629,15 @@ export default function CalibrationWizard({
       }
       return;
     }
-    const recovered = await jogBlockingWithRecovery({ x: 0, y: 0, z: 15 }, 15);
-    setStatusNote(
-      recovered
-        ? `Recorded ${name}. The gantry hit a limit while lifting and backed off.`
-        : `Recorded ${name}.`,
-    );
+    await jogBlocking({ x: 0, y: 0, z: 15 }, 15, generation);
+    assertGeneration(generation);
+    setStatusNote(`Recorded ${name}.`);
     if (allInstrumentPositionsReady(calibratableInstruments, nextPositions, selectedReference, selectedLowest)) {
       setStep(6);
     }
   });
 
-  const save = () => runAction("Measuring travel and saving", async () => {
+  const save = () => runAction("Measuring travel and saving", async (generation) => {
     if (!config) throw new Error("No gantry config is loaded.");
     if (!readyForSave) throw new Error("Complete the calibration positions before saving.");
     if (!finalizedConfig.current) {
@@ -667,6 +650,7 @@ export default function CalibrationWizard({
           factory_z_travel: initial?.factoryZTravel ?? getFactoryZTravel(config),
           origin_policy: originPolicy,
         });
+        assertGeneration(generation);
       }
       const finalized = finalizedOrigin.current;
       const verifiedVolume = validateFinalizedOrigin({ ...config, origin_policy: originPolicy }, finalized);
@@ -700,25 +684,27 @@ export default function CalibrationWizard({
       finalizedConfig.current = calibrated;
     }
     await onSaveCalibrated(normalizedOutput, structuredClone(finalizedConfig.current));
+    assertGeneration(generation);
+    autoRecovery.end();
     onClose();
   });
 
-  const jog = useCallback(async (x: number, y: number, z: number): Promise<boolean> => {
-    if (!connected || busy || alarmRecoveryMessage || recoveryInProgress.current) return false;
-    rememberJogDelta({ x, y, z });
+  const jog = useCallback(async (x: number, y: number, z: number, generation = autoRecovery.generation): Promise<boolean> => {
+    if (!open || !connected || busy || homing || alarmRecoveryMessage) return false;
+    const id = autoRecovery.issueJogId(generation);
+    if (!id) return false;
     jogRequestCount.current += 1;
     try {
-      await gantryApi.jog(x, y, z);
-      return true;
+      await gantryApi.jog(x, y, z, id);
+      return autoRecovery.active && autoRecovery.generation === generation;
     } catch (err) {
-      if (looksLikeAlarm(errorMessage(err))) {
-        void recoverFromLimitAlarm({ x, y, z }, err);
-      } else {
-        reportError(err);
-      }
+      if (!autoRecovery.active || autoRecovery.generation !== generation) return false;
+      invalidateCaptures();
+      if (!looksLikeAlarm(errorMessage(err))) autoRecovery.cancel();
+      reportError(err);
       return false;
     }
-  }, [alarmRecoveryMessage, busy, connected, recoverFromLimitAlarm, rememberJogDelta, reportError]);
+  }, [alarmRecoveryMessage, autoRecovery, busy, connected, homing, invalidateCaptures, open, reportError]);
 
   // The held-jog pump reads jog through a ref so an in-flight hold always
   // uses the latest guards (alarm/busy state) instead of a stale closure.
@@ -728,7 +714,8 @@ export default function CalibrationWizard({
   }, [jog]);
 
   const startJog = (x: number, y: number, z: number) => {
-    if (busy || alarmRecoveryMessage || recoveryInProgress.current) return;
+    if (busy || homing || alarmRecoveryMessage) return;
+    const generation = autoRecovery.generation;
     const heldBefore = jogHeld.current !== null;
     jogHeld.current = { x, y, z };
     if (heldBefore && jogPumpActive.current) {
@@ -746,14 +733,14 @@ export default function CalibrationWizard({
     }
     // The first jog of a distinct press always sends immediately — a click
     // must never wait behind a previous press's pacing.
-    const first = jogRef.current(x, y, z);
+    const first = jogRef.current(x, y, z, generation);
     if (jogPumpActive.current) return;
     jogPumpActive.current = true;
     const pump = async () => {
       try {
         let sent = { x, y, z };
         let ok = await first;
-        while (ok && jogHeld.current) {
+        while (ok && jogHeld.current && autoRecovery.generation === generation) {
           // Held repeats stay one-in-flight, paced by the segment actually
           // sent last (the held delta can change mid-hold) — soft limits
           // are off during calibration, so an unbounded jog backlog here
@@ -762,7 +749,7 @@ export default function CalibrationWizard({
           const delta = jogHeld.current;
           if (!delta) break;
           sent = delta;
-          ok = await jogRef.current(delta.x, delta.y, delta.z);
+          ok = await jogRef.current(delta.x, delta.y, delta.z, generation);
         }
         if (!ok) {
           jogHeld.current = null;
@@ -879,19 +866,29 @@ export default function CalibrationWizard({
               <div style={alarmStyle}>
                 <span style={alarmTitleStyle}>GANTRY ALARM</span>
                 <span>{alarmRecoveryMessage}</span>
-                <button
+                {(!homeRequired || recoveryBusy) && <LimitRecoveryControls
+                  connected={connected} disabled={busy || homing}
+                  onStart={haltJogLocally}
+                  autoRecovery={autoRecovery}
+                  onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value); }}
+                  onRecovered={(result) => {
+                    setAlarmPrompt("Home required. Close calibration, clear the gantry path, then Home before continuing.");
+                    setStatusNote(result.mode === "manual" ? "Manual pull-off complete." : "Pull-off complete.");
+                  }}
+                  onError={setError}
+                />}
+                {!homeRequired && <button
                   onClick={unlockAlarm}
                   disabled={busy}
                   style={buttonStateStyle(alarmButtonStyle, busy)}
                 >
                   Unlock alarm
-                </button>
+                </button>}
               </div>
             )}
             {!alarmRecoveryMessage && connected && (
               <div style={softLimitNoticeStyle}>
-                Jog in small steps near the edges of travel. The gantry stops at its
-                limit switches and backs off on its own.
+                Jog in small steps near the edges of travel. Eligible limit faults back off once automatically.
               </div>
             )}
             <div style={noteStyle}>Configured Z travel: {config?.cnc.factory_z_travel_mm ?? "unset"} mm</div>
@@ -1486,7 +1483,8 @@ function defaultOutputFilename(filename: string): string {
 
 function requirePosition(position: GantryPosition): CapturedPosition {
   if (!position.connected) throw new Error("Gantry is not connected.");
-  if (position.work_x == null || position.work_y == null || position.work_z == null) {
+  if (isGantryHoming(position.status)) throw new Error("Wait for homing to finish before recording a position.");
+  if (![position.work_x, position.work_y, position.work_z].every((value) => typeof value === "number" && Number.isFinite(value))) {
     throw new Error("Work coordinate position is not available. Ensure homing and work coordinate setup completed before recording positions.");
   }
   return {
@@ -1608,16 +1606,11 @@ function roundMm(value: number): number {
 }
 
 function looksLikeAlarm(message: string): boolean {
-  const lower = message.toLowerCase();
-  return lower.includes("alarm") || lower.includes("hard limit") || lower.includes("reset to continue") || lower.includes("pn:") || lower.includes("error:9");
+  return hasGantryAlarm(message);
 }
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
-}
-
-function isZeroDelta(delta: JogDelta): boolean {
-  return delta.x === 0 && delta.y === 0 && delta.z === 0;
 }
 
 function getFocusableElements(root: HTMLElement): HTMLElement[] {
