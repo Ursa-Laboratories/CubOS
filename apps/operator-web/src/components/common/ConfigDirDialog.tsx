@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import * as theme from "../../theme";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 /**
  * In-app fallback for the config-directory Browse action. The
@@ -14,6 +15,7 @@ interface ConfigDirDialogProps {
   error: string | null;
   onSubmit: (path: string) => void;
   onCancel: () => void;
+  returnFocus?: React.RefObject<HTMLElement | null>;
 }
 
 export function ConfigDirDialog({
@@ -21,11 +23,12 @@ export function ConfigDirDialog({
   error,
   onSubmit,
   onCancel,
+  returnFocus,
 }: ConfigDirDialogProps) {
   const [path, setPath] = useState(initialPath);
   const inputRef = useRef<HTMLInputElement>(null);
+  const containFocus = useDialogFocus(inputRef, returnFocus);
   useEffect(() => {
-    inputRef.current?.focus();
     inputRef.current?.select();
   }, []);
 
@@ -45,6 +48,7 @@ export function ConfigDirDialog({
           // stopPropagation keeps Escape (and any other key) from reaching
           // window-level handlers like the gantry keyboard-jog listener.
           event.stopPropagation();
+          containFocus(event);
           if (event.key === "Escape") onCancel();
         }}
       >
