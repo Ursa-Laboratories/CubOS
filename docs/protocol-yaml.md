@@ -502,10 +502,14 @@ the selected pipette's capacity, resolution, tip state, and motion bounds.
 Saved YAML retains the parallel `destinations` and `volumes` lists, and
 **Edit raw YAML** remains available.
 
-`multi_dispense` currently requires a deck without `motion_planning`. On routed
-decks, whole-protocol preflight rejects it before any step moves; direct command
-calls also reject it before motion or aspiration. Use routed `transfer` commands
-until multi-dispense has an immutable collision-aware plan implementation.
+On decks with `motion_planning`, the complete batch is preflighted before any
+protocol movement: source access, every destination, and any final Picus
+retraction. Execution uses those exact collision-checked segments, with the
+same runtime pose and attached-tip checks as routed `transfer`. A blocked or
+out-of-bounds last destination rejects the whole protocol before pickup or
+aspiration. Direct calls on routed decks require the matching preflighted active
+step; changed arguments are rejected. Travel uses the carriage ceiling, without
+introducing a local-clearance override for this command.
 
 The [offline example](https://github.com/Ursa-Laboratories/CubOS/blob/main/packages/core/tests/fixtures/configs/pipette_tip_transfer/multi_dispense.yaml)
 uses the adjacent simulated gantry/deck fixtures; their geometry is not a

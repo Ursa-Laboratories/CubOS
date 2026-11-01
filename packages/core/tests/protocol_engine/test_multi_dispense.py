@@ -151,7 +151,7 @@ def test_direct_call_cannot_bypass_collision_planning(ctx, monkeypatch):
     pipette = ctx.gantry.instruments["pipette"]
     aspirate = MagicMock(wraps=pipette.aspirate)
     monkeypatch.setattr(pipette, "aspirate", aspirate)
-    with pytest.raises(ProtocolExecutionError, match="not supported with motion planning"):
+    with pytest.raises(ProtocolExecutionError, match="requires whole-protocol preflight"):
         run(ctx)
     assert not ctx.gantry.mock_calls
     aspirate.assert_not_called()

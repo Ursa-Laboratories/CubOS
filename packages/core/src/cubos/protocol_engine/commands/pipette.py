@@ -1139,11 +1139,15 @@ def multi_dispense(
     destination_height: StrictFloat = 0.0,
 ) -> None:
     """Aspirate the sum once, then dispense each portion in destination order."""
+    planned = None
     if getattr(context.deck, "planning_enabled", False) is True:
-        raise ProtocolExecutionError(
-            "multi_dispense is not supported with motion planning enabled. "
-            "Use routed transfer commands; no movement or aspiration was attempted."
-        )
+        from ..routing import prepared_step
+
+        planned = prepared_step(context, "multi_dispense")
+        if planned.data["arguments"] != (
+            source, tuple(destinations), tuple(volumes), speed, source_height, destination_height,
+        ):
+            raise ProtocolExecutionError("multi_dispense arguments differ from the preflighted plan.")
     if _tracked_fluid_state(context):
         raise ProtocolExecutionError(
             "multi_dispense is disabled while durable fluid tracking is active: "
@@ -1175,20 +1179,32 @@ def multi_dispense(
         )
 
     retract_z = _blowout_retract_z(context, pipette, destinations[-1], destination_height)
-    _engage(context, source, command_label="multi_dispense.aspirate", height=source_height)
+    if planned is None:
+        _engage(context, source, command_label="multi_dispense.aspirate", height=source_height)
+    else:
+        if (retract_z is not None) != (planned.data.get("blowout_retract") is not None):
+            raise ProtocolExecutionError("multi_dispense blowout requirements changed since preflight.")
+        context.routing_session.execute(planned.plans[0])
     result = pipette.aspirate(total, speed)
     if not result.success:
         raise ProtocolExecutionError("multi_dispense aspiration did not succeed.")
-    for destination, volume in zip(destinations, volumes):
-        destination_tip = _engage(
-            context, destination, command_label="multi_dispense.dispense",
-            height=destination_height,
-        )
+    for i, (destination, volume) in enumerate(zip(destinations, volumes), start=1):
+        if planned is None:
+            destination_tip = _engage(
+                context, destination, command_label="multi_dispense.dispense",
+                height=destination_height,
+            )
+        else:
+            context.routing_session.execute(planned.plans[i])
+            destination_tip = _planned_tip_position(context, planned.plans[i])
         result = pipette.dispense(volume, speed)
         if not result.success:
             raise ProtocolExecutionError("multi_dispense dispense did not succeed.")
         _record_transfer_to_store(context, source, destination, volume)
-    _blowout_and_retract(context, pipette, destination_tip, speed, retract_z)
+    _blowout_and_retract(
+        context, pipette, destination_tip, speed, retract_z,
+        planned.data.get("blowout_retract") if planned else None,
+    )
 
 
 @protocol_command("serial_transfer", summary=_summaries.serial_transfer)

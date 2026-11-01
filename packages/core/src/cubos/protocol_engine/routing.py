@@ -32,7 +32,7 @@ from .pipette_routing import validate_pipette_travel_clearance
 
 SUPPORTED_PLANNED_COMMANDS = frozenset({
     "move", "pick_up_tip", "transfer", "mix", "drop_tip", "capture",
-    "pause", "aspirate", "dispense", "blowout",
+    "pause", "aspirate", "dispense", "blowout", "multi_dispense",
 })
 
 
@@ -99,6 +99,26 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
                     if "." in args["position"] else args["position"]
                 )
                 _motion_for(context.deck, rack_key)
+            elif step.command_name == "multi_dispense":
+                if context.fluid_state_id is not None:
+                    raise InvalidGeometryError("multi_dispense is disabled while durable fluid tracking is active.")
+                from .commands._liquid_transfer import pipette_capacity, plan_multi_dispense
+                from .commands._movement import _assert_finite_number
+
+                plan_multi_dispense(args["destinations"], args["volumes"],
+                                    pipette_capacity(context.gantry.instruments["pipette"]))
+                for name, default in (("speed", 50.0), ("source_height", 0.0), ("destination_height", 0.0)):
+                    _assert_finite_number(args.get(name, default), field_name=name, source="multi_dispense")
+                if not 0 <= args.get("speed", 50.0) <= 100:
+                    raise InvalidGeometryError("multi_dispense speed must be between 0 and 100.")
+                _assert_finite_number(context.gantry.safe_z, field_name="safe_z", source="multi_dispense")
+                for target, height in [
+                    (args["source"], args.get("source_height", 0.0)),
+                    *((target, args.get("destination_height", 0.0)) for target in args["destinations"]),
+                ]:
+                    _motion_for(context.deck, _fixture_key(context.deck, target))
+                    if context.deck.resolve_coordinate(target).z + height > context.gantry.safe_z:
+                        raise InvalidGeometryError(f"multi_dispense target {target!r} exceeds safe_z.")
             elif step.command_name == "transfer":
                 _motion_for(context.deck, _fixture_key(context.deck, args["source"]))
                 _motion_for(context.deck, _fixture_key(context.deck, args["destination"]))
@@ -273,6 +293,11 @@ class RoutingSession:
                     current_target=current_target,
                     current_instrument=current_instrument,
                     consumed=consumed,
+                )
+                current_instrument = "pipette"
+            elif command == "multi_dispense":
+                value, current, current_target = self._plan_multi_dispense(
+                    current, args, state, current_target, current_instrument,
                 )
                 current_instrument = "pipette"
             elif command == "transfer":
@@ -539,6 +564,38 @@ class RoutingSession:
             plans.append(retract)
             data["blowout_retract"] = retract
         return PreparedMotionStep("transfer", tuple(plans), data), current, previous_target
+
+    def _plan_multi_dispense(
+        self, current: Point3D, args: Mapping[str, Any], tool_state: ToolState,
+        current_target: str | None, current_instrument: str | None,
+    ) -> tuple[PreparedMotionStep, Point3D, str]:
+        if tool_state.attached_tip_extension_mm <= 0:
+            raise InvalidGeometryError("multi_dispense requires an attached pipette tip.")
+        source_height = args.get("source_height", 0.0)
+        destination_height = args.get("destination_height", 0.0)
+        targets = [(args["source"], source_height, "aspirate")]
+        targets.extend((target, destination_height, "dispense") for target in args["destinations"])
+        plans = []
+        for target, height, operation in targets:
+            plan, current = self._plan_engage(
+                current, target, height, "pipette", tool_state,
+                command="multi_dispense", operation=operation,
+                previous_target=current_target, previous_instrument=current_instrument,
+            )
+            plans.append(plan)
+            current_target = _fixture_key(self.context.deck, target)
+            current_instrument = "pipette"
+        retract, current = self._plan_blowout_retract(
+            current, args["destinations"][-1], destination_height, tool_state,
+        )
+        data = {"arguments": (
+            args["source"], tuple(args["destinations"]), tuple(args["volumes"]),
+            args.get("speed", 50.0), source_height, destination_height,
+        )}
+        if retract is not None:
+            plans.append(retract)
+            data["blowout_retract"] = retract
+        return PreparedMotionStep("multi_dispense", tuple(plans), data), current, current_target
 
     def _plan_blowout_retract(
         self, current: Point3D, position: str, height: float, tool_state: ToolState,

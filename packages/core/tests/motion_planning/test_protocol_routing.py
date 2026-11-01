@@ -367,10 +367,6 @@ def test_transfer_destination_no_route_rejects_before_pickup_or_aspirate() -> No
 
 @pytest.mark.parametrize("command,args", [
     ("home", {}),
-    ("multi_dispense", {
-        "source": "source", "destinations": ["destination", "waste"],
-        "volumes": [20.0, 30.0],
-    }),
 ])
 def test_unsupported_command_rejects_before_earlier_supported_movement(command, args) -> None:
     context, controller, pipette = _context()
@@ -1091,3 +1087,213 @@ def test_new_unsupported_commands_remain_fail_closed_on_routed_decks(command, ar
         ]).execute(context)
     assert controller.moves == []
     assert pipette.actions == []
+
+
+@pytest.fixture(params=["opentrons", "picus"])
+def multi_rig(request, monkeypatch):
+    from cubos.instruments.pipette.vendors.opentrons import OpentronsPipette
+    from cubos.instruments.pipette.vendors.sartorius import SartoriusPicus2Pipette
+
+    monkeypatch.setattr("serial.Serial", lambda *a, **kw: pytest.fail("No physical serial ports"))
+    context, controller, _ = _context()
+    cls, model = (OpentronsPipette, "p300_single_gen2") if request.param == "opentrons" else (
+        SartoriusPicus2Pipette, "picus2_1ch_120",
+    )
+    pipette = cls(name="pipette", depth=-20, pipette_model=model, offline=True)
+    context.gantry.instruments["pipette"] = pipette
+    events = []
+    for name in ("pick_up_tip", "aspirate", "dispense", "blowout", "home", "drop_tip"):
+        original = getattr(pipette, name)
+
+        def record(*args, name=name, original=original):
+            result = original(*args)
+            events.append((name, args, pipette.loaded_volume_ul))
+            return result
+
+        monkeypatch.setattr(pipette, name, record)
+    original_move = controller.move_linear_to
+
+    def move(x, y, z):
+        original_move(x, y, z)
+        events.append(("move", (x, y, z)))
+
+    monkeypatch.setattr(controller, "move_linear_to", move)
+    monkeypatch.setattr(context.gantry, "move", lambda *a, **kw: pytest.fail("Unplanned movement"))
+    return context, controller, pipette, events
+
+
+def _multi_protocol(**overrides):
+    args = {"source": "source", "destinations": ["destination", "waste"], "volumes": [40.0, 60.0]}
+    args.update(overrides)
+    return compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall("multi_dispense", args),
+        CommandCall("drop_tip", {"position": "waste"}),
+    ])
+
+
+def test_routed_multi_dispense_executes_exact_plans_and_one_aspiration(multi_rig):
+    context, controller, pipette, events = multi_rig
+    protocol = _multi_protocol(source_height=-2, destination_height=3)
+    prepare_planning_context(protocol, context)
+    segments = [segment for plan in context.motion_plans for segment in plan.segments]
+    assert not events
+    protocol.execute(context)
+    assert [(x, y, z) for x, y, z, _ in controller.moves] == [
+        (segment.end.x, segment.end.y, segment.end.z) for segment in segments
+    ]
+    assert [(e[0], e[1][0], e[2]) for e in events if e[0] in ("aspirate", "dispense")] == [
+        ("aspirate", 100, 100), ("dispense", 40, 60), ("dispense", 60, 0),
+    ]
+    assert len([e for e in events if e[0] == "blowout"]) == 1
+    index = next(i for i, e in enumerate(events) if e[0] == "blowout")
+    assert events[index - 1] == ("dispense", (60.0, 50.0), 0)
+    if pipette.requires_home_after_blowout:
+        assert events[index + 1:index + 3] == [("move", (100.0, 60.0, 80.0)), ("home", (), 0)]
+    assert pipette.loaded_volume_ul == 0
+    assert pipette.attached_tip_extension == 0
+
+
+@pytest.mark.parametrize("destinations,volumes", [(["destination"], [100.0]), (["destination", "destination"], [40.0, 60.0])])
+def test_routed_multi_dispense_single_and_repeated_targets(multi_rig, destinations, volumes):
+    context, _, _, events = multi_rig
+    _multi_protocol(destinations=destinations, volumes=volumes).execute(context)
+    assert len([e for e in events if e[0] == "aspirate"]) == 1
+    assert [e[1][0] for e in events if e[0] == "dispense"] == volumes
+
+
+@pytest.mark.parametrize("overrides,match", [
+    ({"destinations": ["destination", "missing"]}, "missing"),
+    ({"volumes": [1000.0, 1000.0]}, "volume|stroke"),
+    ({"volumes": []}, "one volume"),
+    ({"destination_height": 50.0}, "safe_z"),
+    ({"destination_height": -100.0}, "preflight failed"),
+    ({"speed": 101.0}, "speed"),
+])
+def test_routed_multi_dispense_bad_last_target_or_batch_prevents_prior_pickup(multi_rig, overrides, match):
+    context, controller, _, events = multi_rig
+    with pytest.raises(ProtocolExecutionError, match=match):
+        _multi_protocol(**overrides).execute(context)
+    assert controller.moves == []
+    assert events == []
+
+
+def test_routed_multi_dispense_blocked_final_destination_rejects_entire_protocol(multi_rig):
+    context, controller, _, events = multi_rig
+    raw = {"motion_planning": {"clearance_mm": 1}, "labware": {
+        "source": _vial("source", 60, 60),
+        "destination": _vial("destination", 80, 60),
+        "waste": _vial("waste", 100, 60),
+        "blocker": _vial("blocker", 100, 60, size=16),
+    }}
+    context.deck = _build_deck_from_raw(raw)
+    context.gantry.instruments["pipette"].set_attached_tip_extension(20)
+    protocol = compile_protocol([CommandCall("multi_dispense", _multi_protocol().steps[1].args)])
+    with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+        protocol.execute(context)
+    assert controller.moves == []
+    assert events == []
+
+
+def test_routed_multi_dispense_detours_around_tall_obstacle(multi_rig):
+    context, controller, pipette, events = multi_rig
+    obstacle = _vial("obstacle", 70, 60, size=8)
+    obstacle["motion"]["box"]["size"]["z"] = 100
+    context.deck = _build_deck_from_raw({"motion_planning": {"clearance_mm": 1}, "labware": {
+        "source": _vial("source", 50, 60), "destination": _vial("destination", 90, 60),
+        "waste": _vial("waste", 105, 60), "obstacle": obstacle,
+    }})
+    pipette.set_attached_tip_extension(20)
+    protocol = compile_protocol([CommandCall("multi_dispense", _multi_protocol().steps[1].args)])
+    prepare_planning_context(protocol, context)
+    transit = context.planned_motion_steps[0].plans[1]
+    assert any(abs(segment.end.y - 60) > 6 for segment in transit.segments)
+    protocol.execute(context)
+    assert len([e for e in events if e[0] == "aspirate"]) == 1
+    assert controller.moves
+
+
+@pytest.mark.parametrize("kind", ["tip", "pose", "loaded", "arguments", "blowout"])
+def test_routed_multi_dispense_runtime_rejects_stale_state_or_arguments(multi_rig, kind):
+    from cubos.protocol_engine.commands.pipette import multi_dispense
+
+    context, controller, pipette, events = multi_rig
+    pipette.set_attached_tip_extension(20)
+    args = _multi_protocol().steps[1].args
+    protocol = compile_protocol([CommandCall("multi_dispense", args)])
+    prepare_planning_context(protocol, context)
+    context.active_step_index = 0
+    if kind == "tip":
+        pipette.clear_attached_tip_extension()
+    elif kind == "pose":
+        controller.coords["x"] -= 1
+    elif kind == "loaded":
+        pipette.aspirate(40)
+        events.clear()
+    elif kind == "arguments":
+        args = {**args, "destinations": ["waste", "destination"]}
+    else:
+        # Toggle only the simulated pipette capability after its plan was built.
+        from unittest.mock import PropertyMock, patch
+        with patch.object(type(pipette), "requires_home_after_blowout", new_callable=PropertyMock, return_value=not pipette.requires_home_after_blowout):
+            with pytest.raises(ProtocolExecutionError, match="requirements changed"):
+                multi_dispense(context, **args)
+        assert not events
+        return
+    with pytest.raises((ProtocolExecutionError, ValueError)):
+        multi_dispense(context, **args)
+    assert controller.moves == []
+    assert events == []
+
+
+@pytest.mark.parametrize("stage", ["aspirate", "second_dispense", "move", "blowout", "retract", "home"])
+def test_routed_multi_dispense_failure_stops_without_retry_or_recovery(multi_rig, monkeypatch, stage):
+    from cubos.gantry.errors import MillConnectionError
+
+    context, _, pipette, events = multi_rig
+    if stage in {"retract", "home"} and not pipette.requires_home_after_blowout:
+        pytest.skip("This pipette does not retract/home after blowout")
+    failure = MillConnectionError("simulated connection loss")
+    protocol = _multi_protocol()
+    prepare_planning_context(protocol, context)
+    if stage in {"aspirate", "blowout", "home"}:
+        monkeypatch.setattr(pipette, stage, Mock(side_effect=failure))
+    elif stage == "second_dispense":
+        original = pipette.dispense
+        calls = []
+        def dispense(*args):
+            calls.append(args)
+            if len(calls) == 2:
+                raise failure
+            return original(*args)
+        monkeypatch.setattr(pipette, "dispense", dispense)
+    else:
+        original = context.routing_session.execute
+        planned = context.planned_motion_steps[1]
+        target = planned.data["blowout_retract"] if stage == "retract" else planned.plans[2]
+        def execute(plan):
+            if plan is target:
+                raise failure
+            original(plan)
+        monkeypatch.setattr(context.routing_session, "execute", execute)
+    with pytest.raises(MillConnectionError) as caught:
+        protocol.execute(context)
+    assert caught.value is failure
+    assert len([e for e in events if e[0] == "aspirate"]) <= 1
+    assert not any(e[0] == "drop_tip" for e in events)
+    if stage in {"move", "second_dispense"}:
+        assert pipette.loaded_volume_ul == 60
+        assert not any(e[0] in {"blowout", "home"} for e in events)
+
+
+def test_routed_multi_dispense_requires_tip_and_rejects_durable_tracking(multi_rig):
+    context, controller, _, events = multi_rig
+    protocol = compile_protocol([CommandCall("multi_dispense", _multi_protocol().steps[1].args)])
+    with pytest.raises(ProtocolExecutionError, match="attached pipette tip"):
+        protocol.execute(context)
+    context.fluid_state_id = 1
+    context.data_store = Mock()
+    with pytest.raises(ProtocolExecutionError, match="durable fluid tracking"):
+        _multi_protocol().execute(context)
+    assert controller.moves == []
+    assert events == []
