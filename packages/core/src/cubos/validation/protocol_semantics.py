@@ -19,7 +19,9 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
-from cubos.gantry.instrument_mount import InstrumentedGantry
+from cubos.gantry.instrument_mount import (
+    InstrumentedGantry, resolve_multi_tool_safe_travel_z,
+)
 from cubos.data.cap_state import CapStateError, resolve_cap_target
 from cubos.deck.deck import Deck
 from cubos.deck.labware.container_role import STOCK, WASTE
@@ -33,6 +35,7 @@ from cubos.deck.labware.well_plate import WellPlate
 from cubos.gantry.gantry_config import GantryConfig
 from cubos.gantry.machine_geometry import FixedStructureBox, fixed_structures_for_gantry
 from cubos.protocol_engine.protocol import Protocol
+from cubos.protocol_engine.camera_motion import plan_image_well
 from cubos.protocol_engine.registry import CommandRegistry
 from cubos.protocol_engine.scan_args import (
     NormalizedScanArguments,
@@ -1837,6 +1840,73 @@ def _validate_pipette_command(
     return violations, tip_state
 
 
+def _validate_pipette_blowout_retracts(
+    *, step_index: int, command_name: str, args: dict[str, Any],
+    instrumented_gantry: InstrumentedGantry, deck: Deck, gantry: GantryConfig,
+    current_poses: dict[str, Point3D], tip_extension: float,
+) -> list[ProtocolSemanticViolation]:
+    pipette = instrumented_gantry.instruments.get("pipette")
+    if getattr(pipette, "requires_home_after_blowout", False) is not True:
+        return []
+    destinations = []
+    if command_name == "blowout":
+        destinations.append((args.get("position"), args.get("height", 0.0),
+                             args.get("x_offset_mm", 0.0), args.get("y_offset_mm", 0.0)))
+    elif command_name == "transfer":
+        destinations.append((args.get("destination"), args.get("destination_height", 0.0),
+                             args.get("destination_x_offset_mm", 0.0), args.get("destination_y_offset_mm", 0.0)))
+    elif command_name == "serial_transfer":
+        plate_name = args.get("plate")
+        try:
+            plate = deck.resolve_labware(plate_name)
+        except (KeyError, TypeError, AttributeError):
+            return []
+        if isinstance(plate, WellPlate):
+            destinations.extend((f"{plate_name}.{well}", args.get("destination_height", 0.0),
+                                 args.get("destination_x_offset_mm", 0.0), args.get("destination_y_offset_mm", 0.0))
+                                for well in _wells_for_axis(plate, args.get("axis")))
+    elif command_name in {"rinse_well", "flush_pipette", "purge_pipette", "clear_well"}:
+        if command_name == "rinse_well":
+            destinations.append((args.get("well"), args.get("well_height", 0.0), 0.0, 0.0))
+        destinations.append((args.get("waste"), args.get("waste_height", 0.0), 0.0, 0.0))
+    violations = []
+    for position, height, dx, dy in destinations:
+        if height is None and command_name != "blowout":
+            height = 0.0
+        if not isinstance(position, str):
+            current_poses.pop("pipette", None)
+            continue
+        try:
+            coord = deck.resolve_coordinate(position)
+        except (KeyError, ValueError):
+            continue
+        if any(_finite_field_violation(step_index, command_name, name, value) is not None
+               for name, value in (("height", height), ("x_offset_mm", dx), ("y_offset_mm", dy))):
+            continue
+        safe_z = gantry.resolved_safe_z
+        action = (coord.x + dx, coord.y + dy, coord.z + height)
+        retract = (action[0], action[1], safe_z)
+        if safe_z <= max(coord.z, action[2]):
+            violations.append(_violation(
+                step_index, command_name,
+                f"blowout at {position!r} requires safe_z above both the labware "
+                "surface and action height before returning the piston home.",
+            ))
+        violations.extend(_validate_gantry_waypoint(
+            step_index=step_index, command_name=command_name, gantry=gantry,
+            label=f"blowout retract at {position!r}", instrument="pipette",
+            instrumented_gantry=instrumented_gantry, x=retract[0], y=retract[1], z=retract[2],
+            tip_extension=tip_extension,
+        ))
+        violations.extend(_validate_machine_structure_segment(
+            step_index=step_index, command_name=command_name, gantry=gantry,
+            label=f"blowout retract at {position!r}", instrument="pipette",
+            start=action, end=retract,
+        ))
+        current_poses["pipette"] = retract
+    return violations
+
+
 def _validate_asmi_indentation(
     *,
     step_index: int,
@@ -2043,90 +2113,59 @@ def _validate_image_well_command(
     args: dict[str, Any],
     instrumented_gantry: InstrumentedGantry,
     deck: Deck,
+    gantry: GantryConfig,
+    current_poses: dict[str, Point3D],
 ) -> list[ProtocolSemanticViolation]:
-    """Check ``image_well``'s ``camera``/``lights``/``well`` resolve."""
+    """Validate the camera's clearance, captures, and connecting segments."""
+    camera = args.get("camera")
     violations = _validate_instrument_reference(
-        step_index=step_index,
-        command_name="image_well",
-        instrument=args.get("camera"),
-        field_name="camera",
-        instrumented_gantry=instrumented_gantry,
+        step_index=step_index, command_name="image_well", instrument=camera,
+        field_name="camera", instrumented_gantry=instrumented_gantry,
     )
     lights = args.get("lights")
     if lights is not None:
         violations.extend(_validate_instrument_reference(
-            step_index=step_index,
-            command_name="image_well",
-            instrument=lights,
-            field_name="lights instrument",
-            instrumented_gantry=instrumented_gantry,
+            step_index=step_index, command_name="image_well", instrument=lights,
+            field_name="lights instrument", instrumented_gantry=instrumented_gantry,
         ))
-    sweep_start = args.get("x_sweep_start_mm")
-    sweep_stop = args.get("x_sweep_stop_mm")
-    sweep_step = args.get("x_sweep_step_mm", 1.0)
-    sweep_requested = sweep_start is not None or sweep_stop is not None
-    if sweep_requested:
-        if sweep_start is None or sweep_stop is None:
-            violations.append(_violation(
-                step_index,
-                "image_well",
-                "x_sweep_start_mm and x_sweep_stop_mm must be provided together.",
-            ))
-        else:
-            for field_name, value in (
-                ("x_sweep_start_mm", sweep_start),
-                ("x_sweep_stop_mm", sweep_stop),
-                ("x_sweep_step_mm", sweep_step),
-            ):
-                violation = _finite_field_violation(
-                    step_index, "image_well", field_name, value,
-                )
-                if violation is not None:
-                    violations.append(violation)
-            if not violations:
-                difference = float(sweep_stop) - float(sweep_start)
-                if float(sweep_step) == 0.0:
-                    violations.append(_violation(
-                        step_index,
-                        "image_well",
-                        "x_sweep_step_mm must be non-zero.",
-                    ))
-                elif difference * float(sweep_step) < 0:
-                    violations.append(_violation(
-                        step_index,
-                        "image_well",
-                        "x_sweep_step_mm points away from x_sweep_stop_mm.",
-                    ))
-                elif math.floor(abs(difference / float(sweep_step))) + 1 > 1000:
-                    violations.append(_violation(
-                        step_index,
-                        "image_well",
-                        "X sweep exceeds 1000 positions.",
-                    ))
-        if args.get("mode", "standard") != "standard":
-            violations.append(_violation(
-                step_index,
-                "image_well",
-                "X sweeps require mode 'standard'.",
-            ))
-        if args.get("x_offset_mm", 0.0) != 0.0:
-            violations.append(_violation(
-                step_index,
-                "image_well",
-                "use either x_offset_mm or x_sweep_* fields, not both.",
-            ))
     if violations:
         return violations
     well = args.get("well")
     try:
-        deck.resolve_coordinate(well)
+        coord = deck.resolve_coordinate(well)
     except (KeyError, AttributeError, ValueError) as exc:
-        return [_violation(
-            step_index,
-            "image_well",
-            f"well {well!r} cannot be resolved on the deck: {exc}",
-        )]
-    return []
+        return [_violation(step_index, "image_well", f"well {well!r} cannot be resolved on the deck: {exc}")]
+    try:
+        motion = plan_image_well(coord, args)
+    except ValueError as exc:
+        return [_violation(step_index, "image_well", str(exc))]
+    clearance = resolve_multi_tool_safe_travel_z(
+        safe_z=gantry.resolved_safe_z,
+        carriage_ceiling=gantry.working_volume.z_max,
+        effective_depth=instrumented_gantry.instruments[camera].effective_depth,
+    )
+    approach = (*motion.positions[0][:2], clearance)
+    retract = (*motion.positions[-1][:2], clearance)
+    points = [approach, *motion.positions, retract]
+    for index, point in enumerate(points):
+        violations.extend(_validate_gantry_waypoint(
+            step_index=step_index, command_name="image_well", gantry=gantry,
+            label=f"image_well {well!r} waypoint {index}", instrument=camera,
+            instrumented_gantry=instrumented_gantry,
+            x=point[0], y=point[1], z=point[2],
+        ))
+    violations.extend(_validate_known_transit(
+        step_index=step_index, command_name="image_well", gantry=gantry,
+        label=f"image_well {well!r} approach", instrument=camera,
+        current=current_poses.get(camera), target=approach, travel_z=clearance,
+    ))
+    for start, end in zip(points, points[1:]):
+        violations.extend(_validate_machine_structure_segment(
+            step_index=step_index, command_name="image_well", gantry=gantry,
+            label=f"image_well {well!r}", instrument=camera, start=start, end=end,
+        ))
+    current_poses[camera] = retract
+    return violations
 
 
 def validate_protocol_semantics(
@@ -2211,6 +2250,8 @@ def validate_protocol_semantics(
                 args=step.args,
                 instrumented_gantry=instrumented_gantry,
                 deck=deck,
+                gantry=gantry,
+                current_poses=current_poses,
             ))
         else:
             pipette_violations, pipette_tip_state = _validate_pipette_command(
@@ -2224,4 +2265,9 @@ def validate_protocol_semantics(
                 tip_state=pipette_tip_state,
             )
             violations.extend(pipette_violations)
+            violations.extend(_validate_pipette_blowout_retracts(
+                step_index=step.index, command_name=step.command_name, args=step.args,
+                instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+                current_poses=current_poses, tip_extension=pipette_tip_state.tip_extension,
+            ))
     return violations

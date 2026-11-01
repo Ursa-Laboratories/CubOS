@@ -182,6 +182,10 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         return self._loaded_volume_ul
 
     @property
+    def requires_home_after_blowout(self) -> bool:
+        return not self._blowout_go_home
+
+    @property
     def _holding_liquid(self) -> bool:
         return self._loaded_volume_ul > 0.0
 
@@ -380,8 +384,9 @@ class SartoriusPicus2Pipette(PipetteInstrument):
         """Expel residual liquid without a return stroke unless configured.
 
         Keeping the piston at blow-out prevents the return-to-home stroke
-        from aspirating liquid while the tip is still immersed. Protocols
-        can call ``pipette_home`` after moving the tip clear of the liquid.
+        from aspirating liquid while the tip is still immersed. Protocol
+        commands retract to safe_z before homing; direct driver callers must
+        provide their own clearance and home sequence.
         """
         if self._offline:
             self._loaded_volume_ul = 0.0

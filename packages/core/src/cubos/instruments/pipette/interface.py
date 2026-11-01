@@ -85,6 +85,11 @@ class PipetteInstrument(BaseInstrument):
     def blowout(self, speed: float = 50.0) -> None:
         """Move the plunger to the blowout position."""
 
+    @property
+    def requires_home_after_blowout(self) -> bool:
+        """Whether protocols must retract clear of liquid before homing."""
+        return False
+
     def mix(
         self,
         volume_ul: float,

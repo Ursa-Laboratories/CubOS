@@ -18,8 +18,11 @@ from cubos.deck.labware.tip_rack import (
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.deck.labware.vial import Vial
 from cubos.gantry.gantry_config import GantryConfig, WorkingVolume
-from cubos.gantry.instrument_mount import InstrumentedGantry
+from cubos.gantry.instrument_mount import (
+    InstrumentedGantry, resolve_multi_tool_safe_travel_z,
+)
 from cubos.protocol_engine.protocol import Protocol
+from cubos.protocol_engine.camera_motion import plan_image_well
 
 from .errors import BoundsViolation
 
@@ -500,61 +503,30 @@ def _append_image_well_targets(
     step_args: dict[str, Any],
     deck: Deck,
     gantry: GantryConfig,
+    instrumented_gantry: InstrumentedGantry | None = None,
 ) -> None:
-    camera = step_args.get("camera")
-    well = step_args.get("well")
-    image_height = _height_arg(step_args, "image_height")
-    x_offset = _height_arg(step_args, "x_offset_mm")
-    y_offset = _height_arg(step_args, "y_offset_mm")
-    if (
-        not isinstance(camera, str)
-        or not isinstance(well, str)
-        or image_height is None
-        or x_offset is None
-        or y_offset is None
-    ):
+    camera, well = step_args.get("camera"), step_args.get("well")
+    if not isinstance(camera, str) or not isinstance(well, str):
         return
     try:
-        coord = deck.resolve_coordinate(well)
+        motion = plan_image_well(deck.resolve_coordinate(well), step_args)
     except (KeyError, ValueError):
         return
-    deepest_height = image_height
-    if step_args.get("mode", "standard") == "curvature":
-        z_steps = step_args.get("z_steps", 11)
-        z_step_mm = step_args.get("z_step_mm", 0.2)
-        if (
-            isinstance(z_steps, int)
-            and z_steps >= 1
-            and _is_finite_number(z_step_mm)
-        ):
-            deepest_height -= (z_steps - 1) * float(z_step_mm)
-    image_y = coord.y + y_offset
-    sweep_start = step_args.get("x_sweep_start_mm")
-    sweep_stop = step_args.get("x_sweep_stop_mm")
-    if _is_finite_number(sweep_start) and _is_finite_number(sweep_stop):
-        image_offsets = [float(sweep_start), float(sweep_stop)]
-    else:
-        image_offsets = [x_offset]
-    for index, image_offset in enumerate(image_offsets):
-        image_x = coord.x + image_offset
-        if index == 0:
-            _append_target(
-                targets,
-                target=well,
-                suffix="safe_z",
-                instrument=camera,
-                x=image_x,
-                y=image_y,
-                z=gantry.resolved_safe_z,
-            )
+    depth = gantry.instruments.get(camera, {}).get("depth", 0.0)
+    if instrumented_gantry is not None and camera in instrumented_gantry.instruments:
+        depth = instrumented_gantry.instruments[camera].effective_depth
+    clearance = resolve_multi_tool_safe_travel_z(
+        safe_z=gantry.resolved_safe_z,
+        carriage_ceiling=gantry.working_volume.z_max,
+        effective_depth=depth,
+    )
+    points = [("clearance_z", (*motion.positions[0][:2], clearance))]
+    points.extend((f"image_{index}_z", point) for index, point in enumerate(motion.positions))
+    points.append(("retract_z", (*motion.positions[-1][:2], clearance)))
+    for label, (x, y, z) in points:
         _append_target(
-            targets,
-            target=well,
-            suffix=("action_z" if len(image_offsets) == 1 else f"sweep_{index}_action_z"),
-            instrument=camera,
-            x=image_x,
-            y=image_y,
-            z=coord.z + deepest_height,
+            targets, target=well, suffix=label, instrument=camera,
+            x=x, y=y, z=z,
         )
 
 
@@ -750,6 +722,7 @@ def collect_protocol_motion_targets(
     gantry: GantryConfig,
     protocol: Protocol,
     deck: Deck,
+    instrumented_gantry: InstrumentedGantry | None = None,
 ) -> list[ProtocolMotionTarget]:
     """Return concrete working-volume targets implied by *protocol*.
 
@@ -795,6 +768,7 @@ def collect_protocol_motion_targets(
                 step_args=step.args,
                 deck=deck,
                 gantry=gantry,
+                instrumented_gantry=instrumented_gantry,
             )
         elif step.command_name in {"cap", "decap"}:
             _append_capper_targets(
@@ -825,7 +799,7 @@ def validate_protocol_motion_bounds(
     """Validate gantry positions for only the points this protocol can command."""
     violations: list[BoundsViolation] = []
     volume = gantry.working_volume
-    for target in collect_protocol_motion_targets(gantry, protocol, deck):
+    for target in collect_protocol_motion_targets(gantry, protocol, deck, instrumented_gantry):
         instrument = instrumented_gantry.instruments.get(target.instrument_name)
         if instrument is None:
             continue

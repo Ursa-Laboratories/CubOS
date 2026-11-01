@@ -440,10 +440,10 @@ class FlirCamera(CameraInstrument):
 
             image = pixels.reshape(height, width)
             conversion = {
-                "BayerRG8": cv2.COLOR_BayerRG2RGB,
-                "BayerBG8": cv2.COLOR_BayerBG2RGB,
-                "BayerGR8": cv2.COLOR_BayerGR2RGB,
-                "BayerGB8": cv2.COLOR_BayerGB2RGB,
+                "BayerRG8": cv2.COLOR_BayerRGGB2RGB,
+                "BayerBG8": cv2.COLOR_BayerBGGR2RGB,
+                "BayerGR8": cv2.COLOR_BayerGRBG2RGB,
+                "BayerGB8": cv2.COLOR_BayerGBRG2RGB,
                 "Mono8": cv2.COLOR_GRAY2RGB,
             }[pixel_format]
             return cv2.cvtColor(image, conversion)

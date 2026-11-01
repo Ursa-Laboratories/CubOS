@@ -25,6 +25,15 @@ _XY_SAME_TOL_MM = 0.01
 _Z_CEILING_CLEARANCE_MM = 0.5
 
 
+def resolve_multi_tool_safe_travel_z(
+    *, safe_z: float | None, carriage_ceiling: float | None, effective_depth: float,
+) -> float | None:
+    """Resolve instrument-tip clearance from the configured carriage ceiling."""
+    if carriage_ceiling is not None:
+        return carriage_ceiling - _Z_CEILING_CLEARANCE_MM - effective_depth
+    return float(safe_z) if safe_z is not None else None
+
+
 class InstrumentedGantry:
     """Gantry plus the instruments mounted on it.
 
@@ -139,30 +148,16 @@ class InstrumentedGantry:
         ``safe_z`` nor a working volume is configured.
         """
         instr = self._resolve_instrument(instrument)
-        candidates = []
-        if self.safe_z is not None:
-            candidates.append(float(self.safe_z))
-        # The multi-tool guarantee needs working_volume.z_max on the controller
-        # config; without it only safe_z (the active tool's own clearance) applies.
-        ceiling = self._gantry_z_ceiling()
-        if ceiling is not None:
-            ceiling_tip_z = (
-                ceiling
-                - _Z_CEILING_CLEARANCE_MM
-                - self._effective_depth(instr)
-            )
-            candidates.append(ceiling_tip_z)
-        if not candidates:
+        travel_z = resolve_multi_tool_safe_travel_z(
+            safe_z=self.safe_z,
+            carriage_ceiling=self._gantry_z_ceiling(),
+            effective_depth=self._effective_depth(instr),
+        )
+        if travel_z is None:
             self.logger.warning(
                 "No safe_z or working_volume configured; XY travel for %s "
                 "will not lift first.", instr.name,
             )
-            return None
-        travel_z = max(candidates)
-        if ceiling is not None:
-            # A configured safe_z can itself translate beyond the carriage
-            # ceiling for an unusually deep tool. The hardware ceiling wins.
-            travel_z = min(travel_z, ceiling_tip_z)
         return travel_z
 
     def _xy_changes(self, gantry_x: float, gantry_y: float) -> bool:

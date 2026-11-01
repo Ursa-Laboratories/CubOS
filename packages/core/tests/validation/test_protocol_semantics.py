@@ -777,7 +777,7 @@ def test_image_well_valid_x_sweep_passes():
         "camera": "asmi",
         "well": "plate.A1",
         "image_height": 0.0,
-        "x_sweep_start_mm": -4.0,
+        "x_sweep_start_mm": 0.0,
         "x_sweep_stop_mm": 4.0,
         "x_sweep_step_mm": 1.0,
     }, command_name="image_well")

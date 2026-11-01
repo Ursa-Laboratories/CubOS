@@ -297,9 +297,14 @@ Move to a position and aspirate.
 
 #### `blowout`
 
-Move to a position and blow out. Sartorius Picus blowout does not return the
-piston home automatically, preventing a return stroke from drawing liquid back
-into a submerged tip. Move the tip clear, then call `pipette_home` explicitly.
+Move to a position and blow out. By default, Sartorius Picus protocols then
+lift the tip vertically to `safe_z` before returning the piston home. This
+also applies to the final blowout in each `transfer` and `serial_transfer`
+destination. `safe_z` must be above both the calibrated labware surface and
+the blowout height. A failed lift stops the command without homing; tracked
+transfer failures require reconciliation. Other pipette drivers retain their
+existing behavior. Setting `blowout_go_home: true` explicitly keeps the Picus
+return stroke at the blowout position, which can draw liquid into a submerged tip.
 
 - `position` *(str, required)* — deck target.
 - `speed` *(float, default `50.0`)* — blowout speed.
@@ -484,9 +489,11 @@ placeholder PNG so dry runs exercise the full file/persistence path.
 
 #### `image_well`
 
-The packaged well-imaging sequence: travel above the well at `safe_z`,
-descend to the imaging plane, light the well, capture, lights off, retract
-to `safe_z` — with lights-off and the retract guaranteed even on failure.
+The packaged well-imaging sequence: approach through the multi-tool carriage
+clearance plane, descend to the imaging plane, light the well, capture, lights
+off, and retract to clearance. Lights-off and retraction are attempted even
+on failure. Setup validation checks the same capture positions and clearance
+plane as execution, including the segments between sweep positions.
 
 - `camera` *(str, required)* — camera instrument.
 - `well` *(str, required)* — deck target of the well to image.
@@ -501,7 +508,10 @@ to `safe_z` — with lights-off and the retract guaranteed even on failure.
   lights at 5% (or `brightness`); `curvature` is a contact-angle Z-stack:
   from `image_height` descend `z_step_mm` per plane for `z_steps` planes
   (defaults 0.2 mm × 11) with contact lights at 50% (or `brightness`),
-  labeling each image `{label}_z{z}mm_b{brightness}`.
+  labeling each image `{label}_z={absolute_z}mm_b{brightness}`. This preserves
+  the existing filename format: `absolute_z` is carriage WPos Z (well Z +
+  image height + camera depth), formatted to three decimal places with `-`
+  replacing the decimal point.
 - `brightness` *(int, optional)* — override the mode's default level.
 - `x_offset_mm`, `y_offset_mm` *(float, default `0`)* — shift a single
   capture from the calibrated well center while preserving attribution to
@@ -513,6 +523,11 @@ to `safe_z` — with lights-off and the retract guaranteed even on failure.
 - `x_sweep_step_mm` *(float, default `1`)* — signed spacing between sweep
   positions. Its sign must point from the start toward the stop. Sweep image
   labels are prefixed with `left_*`, `center_*`, or `right_*`.
+
+Sweep validation rejects out-of-bounds positions and paths intersecting the
+configured gantry family's built-in fixed structures. Check actual labware
+and all mounted tools for clearance before a physical run; these checks do
+not model arbitrary objects placed on the deck.
 
 Capture and lighting failures **log and continue** (an image is never
 worth failing a run over) and the command returns the list of image paths

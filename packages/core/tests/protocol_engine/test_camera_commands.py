@@ -157,13 +157,13 @@ class TestImageWell:
 
     def test_curvature_z_stack(self):
         context = _context({"cam": _camera(), "lights": _lights()})
+        context.gantry.instruments["cam"].depth = -10.0
         saved = image_well(context, camera="cam", well="plate.B1",
                            image_height=30.0, lights="lights", label="b1",
                            mode="curvature", z_steps=3, z_step_mm=0.5)
         assert len(saved) == 3
-        # Labels encode the requested labware-relative image height for each
-        # plane: 30.0, 29.5, and 29.0 mm.
-        assert any("height=29-500mm" in path for path in saved)
+        assert any("z=45-500mm" in path for path in saved)
+        assert all("height=" not in path for path in saved)
         planes = [
             entry[1][2] - WELL.z
             for entry in context.gantry.trace[:3]

@@ -26,7 +26,7 @@ from cubos.instruments.lighting.interface import LightingInstrument
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
 from . import _summaries
-from ._movement import _assert_finite_number
+from ..camera_motion import plan_image_well
 from .lights import _get_lighting
 
 if TYPE_CHECKING:
@@ -43,62 +43,6 @@ _CURVATURE_DEFAULT_BRIGHTNESS = 50
 
 # Settle after motion before lighting/capturing.
 _SETTLE_S = 0.2
-_MAX_SWEEP_POSITIONS = 1000
-
-
-def _x_sweep_offsets(
-    start: float | None,
-    stop: float | None,
-    step: float,
-) -> list[float] | None:
-    """Return an inclusive lateral sweep, or ``None`` when not requested."""
-    if start is None and stop is None:
-        return None
-    if start is None or stop is None:
-        raise ProtocolExecutionError(
-            "image_well: x_sweep_start_mm and x_sweep_stop_mm must be "
-            "provided together."
-        )
-    try:
-        _assert_finite_number(
-            start, field_name="x_sweep_start_mm", source="image_well",
-        )
-        _assert_finite_number(
-            stop, field_name="x_sweep_stop_mm", source="image_well",
-        )
-        _assert_finite_number(
-            step, field_name="x_sweep_step_mm", source="image_well",
-        )
-    except ValueError as exc:
-        raise ProtocolExecutionError(str(exc)) from exc
-    start_value = float(start)
-    stop_value = float(stop)
-    step_value = float(step)
-    if step_value == 0.0:
-        raise ProtocolExecutionError(
-            "image_well: x_sweep_step_mm must be non-zero."
-        )
-    if (stop_value - start_value) * step_value < 0:
-        raise ProtocolExecutionError(
-            "image_well: x_sweep_step_mm points away from x_sweep_stop_mm."
-        )
-    offsets: list[float] = []
-    value = start_value
-    tolerance = abs(step_value) * 1e-9 + 1e-9
-    within = (
-        (lambda current: current <= stop_value + tolerance)
-        if step_value > 0
-        else (lambda current: current >= stop_value - tolerance)
-    )
-    while within(value):
-        offsets.append(value)
-        if len(offsets) > _MAX_SWEEP_POSITIONS:
-            raise ProtocolExecutionError(
-                "image_well: X sweep exceeds 1000 positions."
-            )
-        value = start_value + len(offsets) * step_value
-    return offsets
-
 
 def _x_offset_label(offset_mm: float) -> str:
     magnitude = f"{abs(offset_mm):g}"
@@ -287,9 +231,8 @@ def image_well(
     * ``standard`` — one shot: descend to ``well.z + image_height``.
     * ``curvature`` — Z-stack: descend ``z_step_mm`` per plane for
       ``z_steps`` planes; images are labeled
-      ``{label}_height={image_height}mm_b{brightness}``, where the recorded
-      height is the labware-relative image height for that plane
-      (``image_height - index * z_step_mm``).
+      ``{label}_z={absolute_z}mm_b{brightness}``, where ``absolute_z``
+      is the carriage WPos Z (well Z + image height + camera depth).
 
     Lighting is part of the shot, not a separate step: ``light`` picks
     ``"off"`` (ambient), a lighting channel (e.g. ``"white"`` or
@@ -317,42 +260,6 @@ def image_well(
     """
     camera_instr = _get_camera(context, camera)
     lighting = _resolve_lighting(context, lights)
-    if mode not in ("standard", "curvature"):
-        raise ProtocolExecutionError(
-            f"image_well: unknown mode {mode!r}; expected 'standard' or "
-            "'curvature'."
-        )
-    try:
-        _assert_finite_number(
-            image_height, field_name="image_height", source="image_well",
-        )
-        _assert_finite_number(
-            x_offset_mm, field_name="x_offset_mm", source="image_well",
-        )
-        _assert_finite_number(
-            y_offset_mm, field_name="y_offset_mm", source="image_well",
-        )
-    except ValueError as exc:
-        raise ProtocolExecutionError(str(exc)) from exc
-    if mode == "curvature":
-        if z_steps < 1:
-            raise ProtocolExecutionError("image_well: z_steps must be >= 1.")
-        if z_step_mm < 0:
-            raise ProtocolExecutionError("image_well: z_step_mm must be >= 0.")
-    sweep_offsets = _x_sweep_offsets(
-        x_sweep_start_mm, x_sweep_stop_mm, x_sweep_step_mm,
-    )
-    if sweep_offsets is not None:
-        if mode != "standard":
-            raise ProtocolExecutionError(
-                "image_well: X sweeps require mode 'standard'."
-            )
-        if float(x_offset_mm) != 0.0:
-            raise ProtocolExecutionError(
-                "image_well: use either x_offset_mm or x_sweep_* fields, "
-                "not both."
-            )
-
     if brightness is not None and not (0 <= brightness <= 100):
         raise ProtocolExecutionError(
             f"image_well: brightness must be between 0 and 100, got {brightness}."
@@ -389,6 +296,18 @@ def image_well(
             f"image_well: cannot resolve well {well!r}: {exc}"
         ) from exc
 
+    try:
+        motion = plan_image_well(coord, {
+            "image_height": image_height, "mode": mode,
+            "z_steps": z_steps, "z_step_mm": z_step_mm,
+            "x_offset_mm": x_offset_mm, "y_offset_mm": y_offset_mm,
+            "x_sweep_start_mm": x_sweep_start_mm,
+            "x_sweep_stop_mm": x_sweep_stop_mm,
+            "x_sweep_step_mm": x_sweep_step_mm,
+        })
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
+    sweep_offsets = motion.sweep_offsets
     saved_paths: list[str] = []
     base_label = label or f"{well}"
     image_x = coord.x + float(x_offset_mm)
@@ -419,13 +338,6 @@ def image_well(
             )
             return False
 
-    planes = (
-        [image_height]
-        if mode == "standard"
-        else [
-            image_height - index * z_step_mm for index in range(z_steps)
-        ]
-    )
     clearance_z = context.gantry.multi_tool_safe_travel_z(camera)
 
     if sweep_offsets is not None:
@@ -433,11 +345,13 @@ def image_well(
         last_x = coord.x + sweep_offsets[0]
         lights_ready = lights_off
         try:
-            for index, offset in enumerate(sweep_offsets):
-                last_x = coord.x + offset
+            for index, (offset, position) in enumerate(
+                zip(sweep_offsets, motion.positions)
+            ):
+                last_x = position[0]
                 context.gantry.move(
                     camera,
-                    (last_x, image_y, action_z),
+                    position,
                     travel_z=(clearance_z if index == 0 else action_z),
                 )
                 time.sleep(_SETTLE_S)
@@ -466,21 +380,19 @@ def image_well(
         return saved_paths
 
     try:
-        for index, plane in enumerate(planes):
+        for index, position in enumerate(motion.positions):
             context.gantry.move(
                 camera,
-                (image_x, image_y, coord.z + plane),
+                position,
                 travel_z=clearance_z if index == 0 else None,
             )
             time.sleep(_SETTLE_S)
             if mode == "standard":
                 shot_label = base_label
             else:
-                # Label with the requested labware-relative image height so
-                # the filename directly reflects the protocol's image_height
-                # and each descending Z-stack step.
-                height_text = f"{plane:.3f}".replace(".", "-")
-                shot_label = f"{base_label}_height={height_text}mm_b{level}"
+                wpos_z = position[2] + camera_instr.effective_depth
+                z_text = f"{wpos_z:.3f}".replace(".", "-")
+                shot_label = f"{base_label}_z={z_text}mm_b{level}"
             if lights_off:
                 _capture_one(shot_label)
             elif _lights("set_channel", channel, level):

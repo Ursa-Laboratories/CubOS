@@ -654,10 +654,10 @@ class TestFlirAravisHardwarePath:
         _install_fake_aravis(monkeypatch, [aravis_camera])
         cv2 = SimpleNamespace(
             COLOR_BGR2RGB="bgr",
-            COLOR_BayerRG2RGB="rg",
-            COLOR_BayerBG2RGB="bg",
-            COLOR_BayerGR2RGB="gr",
-            COLOR_BayerGB2RGB="gb",
+            COLOR_BayerRGGB2RGB="rggb",
+            COLOR_BayerBGGR2RGB="bggr",
+            COLOR_BayerGRBG2RGB="grbg",
+            COLOR_BayerGBRG2RGB="gbrg",
             COLOR_GRAY2RGB="gray",
             cvtColor=lambda image, code: FakeNumpyArray((image, code)),
         )
@@ -677,6 +677,37 @@ class TestFlirAravisHardwarePath:
         camera.connect()
         with pytest.raises(CameraCaptureError, match="grab failed"):
             camera._capture_aravis()
+
+    @pytest.mark.parametrize(
+        ("pixel_format", "mosaic"),
+        [
+            ("BayerRG8", [[231, 79], [79, 17]]),
+            ("BayerBG8", [[17, 79], [79, 231]]),
+            ("BayerGR8", [[79, 231], [17, 79]]),
+            ("BayerGB8", [[79, 17], [231, 79]]),
+        ],
+    )
+    def test_bayer_capture_preserves_rgb_channels(
+        self, monkeypatch, pixel_format, mosaic
+    ):
+        cv2 = pytest.importorskip("cv2")
+        np = pytest.importorskip("numpy")
+        raw = np.tile(np.array(mosaic, dtype=np.uint8), (4, 4))
+        buffer = FakeAravisBuffer(width=8, height=8)
+        buffer.get_data = lambda: raw.tobytes()
+        aravis_camera = FakeAravisCamera(formats=[pixel_format], buffer=buffer)
+        _install_fake_aravis(monkeypatch, [aravis_camera])
+        monkeypatch.setitem(sys.modules, "numpy", np)
+        monkeypatch.setitem(sys.modules, "cv2", cv2)
+
+        camera = FlirCamera(backend="aravis", offline=False)
+        camera.connect()
+        image = camera._capture_aravis()
+
+        expected = np.broadcast_to(
+            np.array([231, 79, 17], dtype=np.uint8), (8, 8, 3),
+        )
+        np.testing.assert_array_equal(image, expected)
 
     def test_capture_rejects_incomplete_buffer(self, monkeypatch, tmp_path):
         aravis_camera = FakeAravisCamera(
