@@ -1,5 +1,6 @@
-import React, { useEffect, useRef } from "react";
+import React, { useRef } from "react";
 import * as theme from "../../theme";
+import { useDialogFocus } from "../../hooks/useDialogFocus";
 
 /**
  * In-app replacement for window.confirm. Native dialogs are silently
@@ -31,9 +32,7 @@ export function ConfirmDialog({
   onCancel,
 }: ConfirmDialogProps) {
   const confirmRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    confirmRef.current?.focus();
-  }, []);
+  const containFocus = useDialogFocus(confirmRef);
 
   return (
     <div
@@ -51,6 +50,7 @@ export function ConfirmDialog({
           // stopPropagation keeps Escape (and any other key) from reaching
           // window-level handlers like the gantry keyboard-jog listener.
           event.stopPropagation();
+          containFocus(event);
           if (event.key === "Escape") onCancel();
         }}
       >
