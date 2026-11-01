@@ -67,6 +67,8 @@ python -m cubos.tools.validate_setup <gantry.yaml> <deck.yaml> <protocol.yaml>
 
 Placement rules for new code — decide the layer before writing:
 
+- **Tests**: put tests in dedicated `tests/` directories, never beside source modules or components. Use `packages/core/tests/`, `services/api/tests/`, `sdk/python/tests/`, and `apps/operator-web/tests/unit/` (or `tests/e2e/` for Playwright). Mirror source subdirectories within the test tree. When modifying an existing colocated test, move it into the appropriate test directory and update its imports; unrelated legacy tests can be migrated separately.
+
 - **New vendor driver for an existing instrument type**: `packages/core/src/cubos/instruments/<type>/vendors/<vendor>.py` plus an entry in `packages/core/src/cubos/instruments/registry.yaml`. Vendor SDK imports stay lazy (tied to connect or the method that needs them); the SDK dependency goes in a `packages/core/pyproject.toml` optional extra, never core dependencies. Support `offline=True` when a meaningful dry-run exists.
 - **New instrument type**: `packages/core/src/cubos/instruments/<type>/` with `interface.py`, `models.py`, `exceptions.py`, `vendors/`. Generic behavior lives in the interface/models/exceptions; device-specific quirks live only in the vendor module.
 - **New measurement method or result**: method on the type interface, result models in that type's `models.py`, persistence through `packages/core/src/cubos/protocol_engine/measurements.py` and `packages/core/src/cubos/data/data_store.py`. Do not add a parallel storage path.
@@ -100,7 +102,7 @@ Do not treat the pull-off reserve as usable WPos.
 
 ## Development Modes
 
-**TDD Mode** is the default: planning sessions, new features, and cross-repo interface changes. Write tests alongside implementation and update docs as you go. New or changed core Python lines must be exercised by tests before the PR is final — CI enforces this with a diff-coverage gate.
+**TDD Mode** is the default: planning sessions, new features, and cross-repo interface changes. Write tests with each implementation change in the test directories above and update docs as you go. New or changed core Python lines must be exercised by tests before the PR is final — CI enforces this with a diff-coverage gate.
 
 **Hardware Iteration Mode** covers two situations where TDD is deferred:
 

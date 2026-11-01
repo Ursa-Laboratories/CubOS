@@ -1,8 +1,8 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import DeckEditor from "./DeckEditor";
-import type { DeckResponse } from "../../types";
+import DeckEditor from "../../../../src/components/editor/DeckEditor";
+import type { DeckResponse } from "../../../../src/types";
 
 function deckFixture(): DeckResponse {
   return {

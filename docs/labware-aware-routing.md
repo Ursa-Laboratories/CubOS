@@ -55,7 +55,7 @@ fixtures. Transit first tries a clear XY diagonal, then direct axis orders and
 obstacle-edge detours. It is a conservative finite search, so it can reject a
 complex route that might be physically possible.
 
-For an open-ended tip rack, declare:
+For a tip rack with clear vertical access, declare:
 
 ```yaml
 motion:
@@ -66,16 +66,14 @@ motion:
   occupied_tip_radius_mm: 2.5
   access:
     pick_up_tip:
-      strategy: side_exit
-      lift_mm: 30
-      exit_edge: x_min
-      clearance_mm: 8
+      strategy: vertical
 ```
 
-Again, these are example dimensions. The planner checks approach, engagement,
-tip attachment, lift and exit before pickup. `exit_edge` is in the labware-local
-frame. Other loaded tips can block withdrawal; consume tips from the exposed
-edge inward. The lift is carriage displacement, not lift plus tip length.
+Again, these are example dimensions. Before any pickup, the planner checks
+approach, vertical engagement, tip attachment and vertical retraction to the
+carriage ceiling. The attached tip must clear the rack and all neighboring
+fixtures at that ceiling. If vertical access or retraction is blocked, validation
+fails before motion. Only `strategy: vertical` is accepted.
 
 Runtime planning uses the observed carriage position and requires an idle
 controller. Each segment checks the actual starting pose and attached-tool

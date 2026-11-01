@@ -331,7 +331,7 @@ def test_fixture_access_requires_matching_fixture_and_corridor_names():
             allowed_corridor_names=("a1-exit",),
             allowed_tool_names=("pipette",),
         ),
-        operation="side-exit",
+        operation="target-access",
     )
 
     assert plan.segments[-1].end == end

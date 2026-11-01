@@ -1086,6 +1086,39 @@ def test_locked_entry_failure_preserves_exception_and_releases_lock(monkeypatch,
     assert session.connect(_write_gantry(tmp_path), filename="gantry.yaml").connected
 
 
+@pytest.mark.parametrize("status", ["Idle", "<Idle|WPos:10,20,30>", "Alarm", "Run"])
+def test_planned_session_requires_idle_without_automatic_prepare(monkeypatch, tmp_path, status):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import cubos.gantry.session as session_module
+
+    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    fake.status = status
+    board = Mock()
+    protocol = Mock()
+    protocol.execute.return_value = []
+    context = SimpleNamespace(gantry=board, deck=SimpleNamespace(planning_enabled=True))
+    monkeypatch.setattr(session_module, "DataStore", Mock())
+    monkeypatch.setattr(session_module, "create_campaign_for_protocol_run", lambda *a, **k: 1)
+    monkeypatch.setattr(session_module, "setup_protocol", lambda *a, **k: (protocol, context))
+    args = dict(
+        gantry_path=tmp_path / "gantry.yaml", deck_path=tmp_path / "deck.yaml",
+        protocol_path=tmp_path / "protocol.yaml", gantry_file="gantry.yaml",
+        deck_file="deck.yaml", protocol_file="protocol.yaml",
+    )
+    if status in {"Alarm", "Run"}:
+        with pytest.raises(GantrySessionHealthCheckError, match="requires an Idle controller"):
+            session.run_protocol(**args)
+        board.connect_instruments.assert_not_called()
+        protocol.execute.assert_not_called()
+    else:
+        session.run_protocol(**args)
+        protocol.execute.assert_called_once_with(context)
+    assert ("prepare_for_protocol_run", None) not in fake.calls
+
+
 @pytest.mark.parametrize("status", ["<Idle|WPos:0,0,0|Pn:Z>", "<idle|Pn:XY>"])
 def test_blocking_jog_rejects_idle_with_active_limit(tmp_path, status):
     session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _: None)
@@ -2407,36 +2440,3 @@ def test_active_limit_before_any_healthy_idle_keeps_accepted_auto_ownership(tmp_
     context = session.limit_recovery_context()
     assert context.failed_jog_id == "active-step"
     assert context.eligible
-
-
-@pytest.mark.parametrize("status", ["Idle", "<Idle|WPos:10,20,30>", "Alarm", "Run"])
-def test_planned_session_requires_idle_without_automatic_prepare(monkeypatch, tmp_path, status):
-    from types import SimpleNamespace
-    from unittest.mock import Mock
-    import cubos.gantry.session as session_module
-
-    session = GantrySession(gantry_factory=FakeGantry, sleep=lambda _seconds: None)
-    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
-    fake = FakeGantry.instances[-1]
-    fake.status = status
-    board = Mock()
-    protocol = Mock()
-    protocol.execute.return_value = []
-    context = SimpleNamespace(gantry=board, deck=SimpleNamespace(planning_enabled=True))
-    monkeypatch.setattr(session_module, "DataStore", Mock())
-    monkeypatch.setattr(session_module, "create_campaign_for_protocol_run", lambda *a, **k: 1)
-    monkeypatch.setattr(session_module, "setup_protocol", lambda *a, **k: (protocol, context))
-    args = dict(
-        gantry_path=tmp_path / "gantry.yaml", deck_path=tmp_path / "deck.yaml",
-        protocol_path=tmp_path / "protocol.yaml", gantry_file="gantry.yaml",
-        deck_file="deck.yaml", protocol_file="protocol.yaml",
-    )
-    if status in {"Alarm", "Run"}:
-        with pytest.raises(GantrySessionHealthCheckError, match="requires an Idle controller"):
-            session.run_protocol(**args)
-        board.connect_instruments.assert_not_called()
-        protocol.execute.assert_not_called()
-    else:
-        session.run_protocol(**args)
-        protocol.execute.assert_called_once_with(context)
-    assert ("prepare_for_protocol_run", None) not in fake.calls

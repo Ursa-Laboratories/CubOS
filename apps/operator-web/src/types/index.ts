@@ -17,9 +17,9 @@ export interface MotionBox {
   size: Coordinate3D;
 }
 
-export type MotionAccess =
-  | { strategy: "vertical" }
-  | { strategy: "side_exit"; lift_mm: number; exit_edge: "x_min" | "x_max" | "y_min" | "y_max"; clearance_mm: number };
+export interface MotionAccess {
+  strategy: "vertical";
+}
 
 export interface LabwareMotion {
   box: MotionBox;

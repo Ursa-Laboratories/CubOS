@@ -6,7 +6,6 @@ from pydantic import ValidationError
 from cubos.deck.loader import _build_deck_from_raw
 from cubos.deck.yaml_schema import DeckYamlSchema
 from cubos.gantry.loader import load_gantry_from_yaml
-from cubos.protocol_engine.routing import _world_edge
 
 
 def _tip_rack(*, motion: dict) -> dict:
@@ -38,10 +37,7 @@ def test_a1_motion_box_ignores_stale_holder_location() -> None:
         "occupied_tip_radius_mm": 2.5,
         "access": {
             "pick_up_tip": {
-                "strategy": "side_exit",
-                "lift_mm": 30,
-                "exit_edge": "x_min",
-                "clearance_mm": 8,
+                "strategy": "vertical",
             }
         },
     }
@@ -126,24 +122,6 @@ def test_access_rejects_unsupported_operation_keys(operation: str) -> None:
         DeckYamlSchema.model_validate({"labware": {"tips": _tip_rack(motion=motion)}})
 
 
-def test_side_exit_rejected_for_non_pickup_operation() -> None:
-    motion = {
-        "box": {
-            "offset": {"x": 0, "y": 0, "z": -10},
-            "size": {"x": 20, "y": 20, "z": 10},
-        },
-        "access": {
-            "transfer": {
-                "strategy": "side_exit",
-                "lift_mm": 30,
-                "exit_edge": "x_min",
-            }
-        },
-    }
-    with pytest.raises(ValidationError, match="only for pick_up_tip"):
-        DeckYamlSchema.model_validate({"labware": {"tips": _tip_rack(motion=motion)}})
-
-
 def test_gantry_loader_extracts_tcp_relative_motion_envelopes(tmp_path) -> None:
     path = tmp_path / "gantry.yaml"
     path.write_text(
@@ -178,13 +156,13 @@ instruments:
 
 
 @pytest.mark.parametrize(
-    ("a2", "expected"),
+    ("a2", "minimum", "maximum"),
     [
-        ({"x": 90, "y": 100}, "x_max"),
-        ({"x": 100, "y": 110}, "y_min"),
+        ({"x": 90, "y": 100}, (85, 85), (105, 105)),
+        ({"x": 100, "y": 110}, (85, 95), (105, 115)),
     ],
 )
-def test_local_exit_edge_rotates_with_a1_a2_frame(a2, expected) -> None:
+def test_motion_box_rotates_with_a1_a2_frame(a2, minimum, maximum) -> None:
     motion = {
         "box": {
             "anchor": "A1",
@@ -192,21 +170,35 @@ def test_local_exit_edge_rotates_with_a1_a2_frame(a2, expected) -> None:
             "size": {"x": 20, "y": 20, "z": 10},
         },
         "occupied_tip_radius_mm": 2.5,
-        "access": {
-            "pick_up_tip": {
-                "strategy": "side_exit",
-                "lift_mm": 30,
-                "exit_edge": "x_min",
-            }
-        },
+        "access": {"pick_up_tip": {"strategy": "vertical"}},
     }
     rack = _tip_rack(motion=motion)
     rack["calibration"] = {
         "a1": {"x": 100, "y": 100, "z": 50},
         "a2": a2,
     }
-    deck = _build_deck_from_raw(
-        {"motion_planning": {}, "labware": {"tips": rack}}
-    )
+    deck = _build_deck_from_raw({"motion_planning": {}, "labware": {"tips": rack}})
+    assert deck["tips"].motion["resolved_box"] == {
+        "min": {"x": minimum[0], "y": minimum[1], "z": 40},
+        "max": {"x": maximum[0], "y": maximum[1], "z": 50},
+    }
 
-    assert _world_edge(deck["tips"].motion, "x_min") == expected
+
+@pytest.mark.parametrize("planning", [None, {}])
+@pytest.mark.parametrize("legacy_field", [False, True])
+def test_retired_tip_access_configuration_is_rejected(planning, legacy_field) -> None:
+    motion = {
+        "box": {
+            "offset": {"x": -5, "y": -5, "z": -10},
+            "size": {"x": 20, "y": 20, "z": 10},
+        },
+    }
+    rack = _tip_rack(motion=motion)
+    if legacy_field:
+        rack["side_exit"] = {"lift_mm": 30, "exit_x": 100}
+    else:
+        motion["access"] = {"pick_up_tip": {
+            "strategy": "side_exit", "lift_mm": 30, "exit_edge": "x_min",
+        }}
+    with pytest.raises(ValidationError, match="extra_forbidden|literal_error"):
+        _build_deck_from_raw({"motion_planning": planning, "labware": {"tips": rack}})

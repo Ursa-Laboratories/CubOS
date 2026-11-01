@@ -121,31 +121,6 @@ def test_saved_deck_low_z_transit_selects_y_first_around_tall_rack() -> None:
         ).intersects(rack.expanded(scene.clearance_mm))
 
 
-def test_saved_rack_legacy_exit_is_inside_conservative_collision_clearance() -> None:
-    rack_x_min = 139.456
-    scene = build_scene(
-        bounds=_box("calibrated-carriage", 0, 258.205, 0, 144.645, 10.5, 66.5),
-        fixtures=(
-            _box("tips", rack_x_min, 263.456, -2.965, 81.035, 28.5, 91.5),
-        ),
-        tool_envelopes=(_tool(tip_radius=2.5),),
-        clearance_mm=2,
-    )
-    attached = ToolState(instrument="pipette", attached_tip_extension_mm=70)
-
-    with pytest.raises(NoRouteError, match="stationary carriage pose is in collision"):
-        plan_motion(scene, Point3D(140, 75.035, 58.5), Point3D(140, 75.035, 58.5), tool_state=attached)
-
-    derived_exit_x = rack_x_min - scene.clearance_mm - 2.5 - 1e-6
-    plan = plan_motion(
-        scene,
-        Point3D(derived_exit_x, 75.035, 58.5),
-        Point3D(derived_exit_x, 75.035, 58.5),
-        tool_state=attached,
-    )
-    assert plan.strategy == "stationary"
-
-
 def test_target_corridor_never_authorizes_overlap_with_another_fixture() -> None:
     target = _box("tips", 4, 6, 4, 6, 4, 6)
     non_target_barrier = _box("neighbor", 4, 6, 0, 10, 0, 20)
@@ -171,7 +146,7 @@ def test_target_corridor_never_authorizes_overlap_with_another_fixture() -> None
             scene,
             Point3D(2, 5, 5),
             Point3D(8, 5, 5),
-            operation="side-exit",
+            operation="target-access",
             access=target_only,
         )
 
@@ -198,10 +173,10 @@ def test_plan_state_change_must_match_the_exact_segment_boundary() -> None:
 
     plan = MotionPlan(
         command="pick_up_tip",
-        operation="side_exit",
+        operation="pick_up_tip",
         start=bare_segment.start,
         end=attached_segment.end,
-        strategy="vertical-then-side-exit",
+        strategy="vertical",
         segments=(bare_segment, attached_segment),
         state_changes=(ToolStateChange(engage, "pipette", 70),),
     )
@@ -210,20 +185,20 @@ def test_plan_state_change_must_match_the_exact_segment_boundary() -> None:
     with pytest.raises(InvalidGeometryError, match="ToolStateChange|tool-state|state change"):
         MotionPlan(
             command="pick_up_tip",
-            operation="side_exit",
+            operation="pick_up_tip",
             start=bare_segment.start,
             end=attached_segment.end,
-            strategy="vertical-then-side-exit",
+            strategy="vertical",
             segments=(bare_segment, attached_segment),
         )
 
     with pytest.raises(InvalidGeometryError, match="ToolStateChange|tool-state|state change"):
         MotionPlan(
             command="pick_up_tip",
-            operation="side_exit",
+            operation="pick_up_tip",
             start=bare_segment.start,
             end=attached_segment.end,
-            strategy="vertical-then-side-exit",
+            strategy="vertical",
             segments=(bare_segment, attached_segment),
             state_changes=(ToolStateChange(engage, "pipette", 50),),
         )
@@ -231,10 +206,10 @@ def test_plan_state_change_must_match_the_exact_segment_boundary() -> None:
     with pytest.raises(InvalidGeometryError, match="state change"):
         MotionPlan(
             command="pick_up_tip",
-            operation="side_exit",
+            operation="pick_up_tip",
             start=bare_segment.start,
             end=attached_segment.end,
-            strategy="vertical-then-side-exit",
+            strategy="vertical",
             segments=(bare_segment, attached_segment),
             state_changes=(
                 ToolStateChange(Point3D(9, 9, 9), "pipette", 70),
