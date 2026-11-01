@@ -106,6 +106,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
+  const browseButtonRef = React.useRef<HTMLButtonElement>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
   const [browseDialog, setBrowseDialog] = useState<{ path: string; error: string | null } | null>(null);
 
@@ -502,7 +503,7 @@ export default function App() {
     setImportError(null);
     setDeckFile(null);
     setDeckImportedFrom(null);
-    setLocalDeck(null);
+    setLocalDeck({ filename: "unsaved", labware: [] });
   };
   const handleNewProtocol = async () => {
     if (!(await confirmDiscard(protocolDirty, "Discard unsaved protocol changes and start a new protocol?"))) return;
@@ -770,7 +771,7 @@ export default function App() {
               color: configDir ? theme.color.textSecondary : theme.color.textFaint,
             }}
           />
-          <button onClick={handleBrowse} disabled={browseLoading} style={browseButtonStyle}>
+          <button ref={browseButtonRef} onClick={handleBrowse} disabled={browseLoading} style={browseButtonStyle}>
             {browseLoading ? "..." : "Browse"}
           </button>
         </div>
@@ -1065,6 +1066,7 @@ export default function App() {
       />
       {browseDialog && (
         <ConfigDirDialog
+          returnFocus={browseButtonRef}
           initialPath={browseDialog.path}
           error={browseDialog.error}
           onSubmit={submitBrowseDialog}

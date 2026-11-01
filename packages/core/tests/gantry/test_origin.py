@@ -118,13 +118,19 @@ class TestValidateDeckOriginMinima:
     def test_z_min_at_negative_tolerance(self):
         validate_deck_origin_minima(_deck_origin_config(z_min=-1e-12))
 
-    def test_rejects_nonzero_x_min(self):
+    def test_accepts_negative_x_min_for_travel_beyond_deck_origin(self):
+        validate_deck_origin_minima(_deck_origin_config(x_min=-20.0))
+
+    def test_accepts_negative_y_min_for_travel_beyond_deck_origin(self):
+        validate_deck_origin_minima(_deck_origin_config(y_min=-5.0))
+
+    def test_rejects_positive_x_min(self):
         with pytest.raises(ValueError, match="x_min"):
             validate_deck_origin_minima(_deck_origin_config(x_min=0.5))
 
-    def test_rejects_nonzero_y_min(self):
+    def test_rejects_positive_y_min(self):
         with pytest.raises(ValueError, match="y_min"):
-            validate_deck_origin_minima(_deck_origin_config(y_min=-0.5))
+            validate_deck_origin_minima(_deck_origin_config(y_min=0.5))
 
     def test_rejects_both_x_and_y_min(self):
         with pytest.raises(ValueError) as info:
@@ -172,7 +178,7 @@ class TestValidateWorkingVolumeOrigin:
     def test_dispatches_home_origin_config_to_home_maxima(self):
         validate_working_volume_origin(_home_origin_config())
 
-    def test_deck_origin_config_still_rejected_for_nonzero_minima(self):
+    def test_deck_origin_config_rejects_positive_minimum(self):
         with pytest.raises(ValueError, match="x_min"):
             validate_working_volume_origin(_deck_origin_config(x_min=5.0))
 

@@ -127,3 +127,49 @@ def test_tracked_mix_finish_failure_requires_reconciliation_and_stops_protocol(f
     store.complete_fluid_mix.assert_not_called()
     store.begin_drop_tip.assert_not_called()
     assert "drop_tip" not in pipette.actions
+
+
+@pytest.mark.parametrize("reset", [False, True])
+def test_routed_mix_preserves_xy_offsets_and_plans_required_reset(reset):
+    context, controller, pipette = _context()
+    pipette.requires_home_after_blowout = reset
+    events = []
+    pipette.blowout = lambda speed: events.append(("blowout", controller.get_coordinates()))
+    pipette.home = lambda: events.append(("home", controller.get_coordinates()))
+    protocol = compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall("mix", {"position": "destination", "volume_ul": 50.0,
+                            "height": -10.0, "blowout_height": 3.0,
+                            "x_offset_mm": 1.0, "y_offset_mm": -1.0}),
+        CommandCall("drop_tip", {"position": "waste"}),
+    ])
+    prepare_planning_context(protocol, context)
+    planned = context.planned_motion_steps[1]
+    assert ("blowout_retract" in planned.data) is reset
+    protocol.execute(context)
+    assert events[0] == ("blowout", {"x": 81.0, "y": 59.0, "z": 43.0})
+    if reset:
+        assert events[1] == ("home", {"x": 81.0, "y": 59.0, "z": 80.0})
+    else:
+        assert len(events) == 1
+    assert controller.moves == [
+        (s.end.x, s.end.y, s.end.z, None)
+        for plan in context.motion_plans for s in plan.segments
+    ]
+
+
+def test_routed_mix_rejects_changed_reset_requirement_before_motion():
+    from cubos.protocol_engine.commands.pipette import mix
+
+    context, controller, pipette = _context()
+    pipette.set_attached_tip_extension(20.0)
+    protocol = compile_protocol([CommandCall("mix", {
+        "position": "destination", "volume_ul": 50.0,
+    })])
+    prepare_planning_context(protocol, context)
+    context.active_step_index = 0
+    pipette.requires_home_after_blowout = True
+    with pytest.raises(ProtocolExecutionError, match="requirements changed"):
+        mix(context, "destination", 50.0)
+    assert controller.moves == []
+    assert pipette.actions == []

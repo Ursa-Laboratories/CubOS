@@ -470,3 +470,27 @@ class TestRetiredInstrumentFields:
             load_instrumented_gantry_from_config(
                 load_gantry_from_yaml(gantry_path), _mock_controller(), mock_mode=True,
             )
+
+
+@pytest.mark.parametrize("pixel_format", [None, "RGB8"])
+def test_aravis_camera_config_rejects_unconsumed_pixel_format(tmp_path, pixel_format):
+    from cubos.instruments.camera.vendors.flir import FlirCamera
+
+    config = "camera:\n  type: camera\n  vendor: flir\n  backend: aravis\n"
+    if pixel_format:
+        config += f"  pixel_format: {pixel_format}\n"
+    path = _write_gantry_yaml(tmp_path, _gantry_yaml(config))
+    gantry_config = load_gantry_from_yaml(path)
+    if pixel_format:
+        with pytest.raises(ValueError, match="pixel_format"):
+            load_instrumented_gantry_from_config(
+                gantry_config, _mock_controller(), mock_mode=True,
+            )
+    else:
+        mounted = load_instrumented_gantry_from_config(
+            gantry_config, _mock_controller(), mock_mode=True,
+        )
+        camera = mounted.instruments["camera"]
+        assert isinstance(camera, FlirCamera)
+        assert camera.backend == "aravis"
+        assert camera._offline is True

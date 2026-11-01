@@ -77,6 +77,14 @@ python -m cubos.tools.validate_setup \
 
 **Want the browser interface?** Follow [Getting Started](docs/getting-started.md) to install the API, build Operator, and launch it. That guide also covers Windows, instrument dependencies, and preinstalled stations.
 
+**Looking for workflow configs?** Station gantry/deck files and experiment
+protocols live in the [CubOS Protocol Library](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library),
+organized under `cub/`, `cubxl/`, and `cubxl_plus/`. The
+[Polar Bear workflow](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library/tree/main/cubxl_plus/polar_bear)
+includes its configuration snapshots and validation status. See
+[YAML File Overview](docs/configuration.md) to select an external config directory.
+The files used above are bundled examples for learning and offline checks.
+
 > [!IMPORTANT]
 > CubOS controls real hardware. Before a physical run, commission and calibrate your machine, confirm that the deck matches its configuration, validate the exact setup, check physical clearance, and keep an E-stop reachable. A passing offline check does not establish physical safety or measurement accuracy.
 

@@ -34,6 +34,8 @@ def measure(
     method: str = "measure",
     indentation_limit_height: float | None = None,
     method_kwargs: Dict[str, Any] = {},
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Any:
     """Measure at a deck position using *instrument*.
 
@@ -126,6 +128,8 @@ def measure(
             context, instrument, position,
             measurement_height=measurement_height,
             command_label="measure",
+            x_offset_mm=x_offset_mm,
+            y_offset_mm=y_offset_mm,
         )
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
