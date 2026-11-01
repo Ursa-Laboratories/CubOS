@@ -75,6 +75,10 @@ class _RecordingController:
     def get_coordinates(self):
         return self.coordinates
 
+    def move_linear_to(self, x: float, y: float, z: float) -> None:
+        self.calls.append((x, y, z, None))
+        self.coordinates = {"x": x, "y": y, "z": z}
+
     def move_to(self, x: float, y: float, z: float, *, travel_z=None) -> None:
         self.calls.append((x, y, z, travel_z))
         self.coordinates = {"x": x, "y": y, "z": z}

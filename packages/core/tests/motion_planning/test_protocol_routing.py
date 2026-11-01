@@ -28,6 +28,9 @@ class FakeController:
     def get_coordinates(self):
         return dict(self.coords)
 
+    def move_linear_to(self, x, y, z):
+        self.move_to(x, y, z)
+
     def move_to(self, x, y, z, travel_z=None):
         self.moves.append((x, y, z, travel_z))
         self.coords = {"x": x, "y": y, "z": z}
