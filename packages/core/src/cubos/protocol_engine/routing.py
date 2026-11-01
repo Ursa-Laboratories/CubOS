@@ -762,7 +762,7 @@ class RoutingSession:
                     if not direct.segments:
                         self._stationary_engagements[id(direct)] = (direct, tool_state)
                     return direct, end
-                lowest, _ = _all_tool_axis_extents(self.base_scene, "z", tool_state)
+                lowest = _lowest_tool_z(self.base_scene, tool_state)
                 top = max(coordinate.z, motion["resolved_box"]["max"]["z"])
                 margin = max(travel_clearance, self.base_scene.clearance_mm + 1e-6)
                 transit_z = max(current.z, end.z, top + margin - lowest)
@@ -1144,6 +1144,21 @@ def _all_tool_axis_extents(
             lows.append(tool.tcp.z - tool_state.attached_tip_extension_mm)
             highs.append(tool.tcp.z)
     return min(lows), max(highs)
+
+
+def _lowest_tool_z(scene: Scene, tool_state: ToolState) -> float:
+    heights = [
+        box.minimum.z
+        for tool in scene.tool_envelopes
+        for box in (tool.box, *tool.additional_boxes)
+    ]
+    heights.extend(
+        tool.tcp.z - tool_state.attached_tip_extension_mm
+        for tool in scene.tool_envelopes
+        if tool.name == tool_state.instrument
+        and tool_state.attached_tip_extension_mm > 0
+    )
+    return min(heights)
 
 
 def _active_tool_swept_box(
