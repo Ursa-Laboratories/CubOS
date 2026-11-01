@@ -256,6 +256,14 @@ class Gantry:
             )
             raise
 
+    def move_linear_to(self, x: float, y: float, z: float) -> None:
+        """Execute one collision-checked straight segment without extra waypoints."""
+        if self._offline:
+            self._offline_coords = {"x": x, "y": y, "z": z}
+            return
+        assert self._mill is not None
+        self._mill.move_linear_to(*to_machine_coordinates(x, y, z))
+
     def jog(
         self,
         x: float = 0,

@@ -18,6 +18,8 @@ nav:
     - Set Up Gantry YAML: gantry-setup.md
     - Calibrate Gantry: calibration.md
     - Set Up Deck and Labware: deck.md
+    - Collision-Aware Routing: labware-aware-routing.md
+    - Side-Exit Tip Racks: side-exit-tip-rack.md
     - Run a Protocol with YAML: protocol-yaml.md
     - Fluid State Tracking: fluid-state.md
     - PANDA-CUB Quickstart: panda-cub-quickstart.md
