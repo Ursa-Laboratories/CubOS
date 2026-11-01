@@ -18,6 +18,7 @@ def _mix_protocol(blowout_height: float = 0.0):
             "position": "destination",
             "volume_ul": 50.0,
             "cycles": 2,
+            "height": -10.0,
             "blowout_height": blowout_height,
         }),
         CommandCall("drop_tip", {"position": "waste"}),
@@ -28,6 +29,7 @@ def _mix_protocol(blowout_height: float = 0.0):
 def test_routed_mix_preflights_and_executes_vertical_blowout(blowout_height):
     context, controller, pipette = _context()
     events = []
+    blowout_poses = []
     move_to = controller.move_to
 
     def record_move(x, y, z, travel_z=None):
@@ -40,6 +42,8 @@ def test_routed_mix_preflights_and_executes_vertical_blowout(blowout_height):
 
         def record_action(*args, _action=action, _original=original, **kwargs):
             events.append((_action,))
+            if _action == "blowout":
+                blowout_poses.append(controller.get_coordinates())
             return _original(*args, **kwargs)
 
         setattr(pipette, action, record_action)
@@ -50,12 +54,12 @@ def test_routed_mix_preflights_and_executes_vertical_blowout(blowout_height):
     endpoint = mix_step.plans[-1].end
 
     assert (endpoint.x, endpoint.y, endpoint.z) == (80.0, 60.0, 40.0 + blowout_height)
-    if blowout_height:
-        finish_plan = mix_step.plans[-1]
-        assert len(finish_plan.segments) == 1
-        assert finish_plan.segments[0].axis == "z"
-        assert finish_plan.start.x == endpoint.x
-        assert finish_plan.start.y == endpoint.y
+    finish_plan = mix_step.plans[-1]
+    assert len(finish_plan.segments) == 1
+    assert finish_plan.segments[0].axis == "z"
+    assert finish_plan.start.x == endpoint.x
+    assert finish_plan.start.y == endpoint.y
+    assert finish_plan.start.z == 30.0
 
     protocol.execute(context)
 
@@ -65,13 +69,10 @@ def test_routed_mix_preflights_and_executes_vertical_blowout(blowout_height):
         for segment in plan.segments
     ]
     blowout_index = events.index(("blowout",))
-    assert events[blowout_index + 1] == ("move", 100.0, 60.0, 80.0)
-    assert events[-2:] == [("drop_tip",), events[-1]] or events[-1] == ("drop_tip",)
+    assert blowout_index < events.index(("drop_tip",))
+    assert blowout_poses == [{"x": 80.0, "y": 60.0, "z": 40.0 + blowout_height}]
     assert pipette.actions[-2:] == ["blowout", "drop_tip"]
-    if blowout_height:
-        assert events[blowout_index - 1] == ("move", endpoint.x, endpoint.y, endpoint.z)
-    else:
-        assert ("move", endpoint.x, endpoint.y, endpoint.z) in events[:blowout_index]
+    assert events[blowout_index - 1] == ("move", endpoint.x, endpoint.y, endpoint.z)
 
 
 @pytest.mark.parametrize("blowout_height", [float("nan"), float("inf"), 100.0])
@@ -85,7 +86,7 @@ def test_invalid_mix_blowout_height_rejects_before_any_motion(blowout_height):
     assert pipette.actions == []
 
 
-def test_colliding_mix_finish_rejects_before_any_motion():
+def test_mix_with_finish_keeps_collision_preflight():
     context, controller, pipette = _context(blocker=True)
 
     with pytest.raises(ProtocolExecutionError, match="preflight failed"):
