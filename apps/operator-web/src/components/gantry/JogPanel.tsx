@@ -46,6 +46,7 @@ export default function JogPanel({
       if (!jogLocked) onStartJog(x, y, dz);
     },
     onTouchEnd: onStopJog,
+    onTouchCancel: onStopJog,
   });
 
   return (

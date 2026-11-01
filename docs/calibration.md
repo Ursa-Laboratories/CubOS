@@ -225,11 +225,95 @@ unless the gantry YAML's `grbl_settings` sets `hard_limits: true`, in
 which case it stays enabled. Jog with small steps as you approach the
 edges of travel.
 
-If a jog does trip a hard-limit switch, CubOS soft-resets, unlocks GRBL,
-and attempts a small pull-off opposite the failed jog direction. If
-recovery fails, or the machine ends up stuck on a switch after a power
-cycle, see
+In the CLI calibration flow, a failed jog can trigger one reset/unlock and
+pull-off opposite the failed jog. A failure stops that recovery attempt;
+CubOS does not repeat the reset or motion. Operator calibration wizards also
+attempt one guarded backoff for an eligible fault from their own accepted jog.
+If recovery fails or a switch
+remains pressed after a power cycle, see
 [Stuck on a Limit Switch](troubleshooting.md#stuck-on-a-limit-switch).
+
+## Operator recovery after a limit or alarm
+
+During labware calibration, an alarm or **Check Limits** stays visible even
+if a later position query fails. Jogging and coordinate capture stay blocked;
+cached coordinates are not a valid calibration reference.
+
+An eligible fault from an accepted jog in the open calibration wizard triggers
+one automatic backoff. CubOS verifies the wizard's jog ID and fresh matching
+limit pin before moving. Old alarms, other-client jogs, uncertain acceptance,
+and missing or conflicting pin reports require explicit recovery. Stop or
+closing calibration cancels the attempt; failed attempts never retry on a poll.
+Captured calibration points are discarded after a fault. Successful backoff
+still requires Home and new captures; it does not resume the held jog.
+
+When reconnecting with a switch pressed, CubOS can stay connected in a faulted
+recovery-only state if it verifies a controller fault report. Work coordinates
+remain unavailable, and ordinary movement and capture stay blocked. Connecting
+does not reset, unlock, home, or pull off the gantry. An unknown response or
+connection failure still aborts the connection. Recovery controls query the
+current pin state instead of trusting queued reports from earlier polling.
+
+**Unlock** consumes informational **Check Limits** messages through the single
+command acknowledgement, then verifies fresh Idle status, no active limit pins,
+and finite work coordinates. An acknowledgement alone does not clear the fault
+or restore the physical position reference. CubOS shows **Home required** until
+you explicitly home successfully. Clear the full instrument head, deck,
+fixtures, and cables before choosing **Home**; homing moves the gantry. Recheck
+the reference before capturing calibration.
+
+**Pull off limit** uses CubOS's recorded accepted jog, not the last direction
+button you pressed. It is available for a single X, Y, or Z jog only when a
+fresh controller report confirms that same switch and no other input pins.
+It attempts one 5 mm reverse jog at 100 mm/min after one reset/unlock sequence,
+then verifies Idle, no active limit pins, and fresh finite work coordinates.
+Later rejected jogs cannot change the recovery direction.
+
+If the original direction is unknown, **Manual recovery** shows the verified
+active axis. Explicitly choose the direction away from the switch and confirm
+the path is clear. It performs exactly one 1 mm jog at 100 mm/min. It
+does not infer the direction or pretend that an original failed jog was known.
+Check the machine before confirming; a limit pin identifies the axis, not which
+end of that axis is pressed.
+
+A held switch may keep emitting **Check Limits** notices after reset. Guarded
+recovery collects only a bounded set of expected startup/fault notices instead
+of waiting for silence. It preserves those notices in the recovery messages,
+then requires a fresh Alarm-or-Idle report of only the selected pin before
+unlock, and a fresh Idle report of that same pin after the acknowledgement
+before moving. Unexpected reset responses, real errors, or changed pins stop
+the attempt. Notices alone never establish that recovery succeeded.
+
+**Stop** cancels recovery. A failed pull-off, status query, or connection does
+not trigger another move, reset, or reconnect. Recovery does not disable limits
+or zero coordinates. A successful pull-off still leaves **Home required**
+before normal movement or coordinate capture. If the controller rejects the
+jog or the pin remains active, inspect the machine before another explicit
+attempt; see [Stuck on a Limit Switch](troubleshooting.md#stuck-on-a-limit-switch).
+
+HTTP clients can read the current recovery candidate from
+`GET /api/v1/gantry/calibration/recovery-context`. Known recovery uses
+`POST /api/v1/gantry/calibration/recover-limit` with that candidate's `x`, `y`,
+and `z`. Manual recovery uses `POST /api/v1/gantry/calibration/recover-limit/manual`
+with `axis`, `away_direction` (`-1` or `1`), and `operator_confirmed: true`.
+Manual distance and speed are fixed; the response labels the mode and actual
+`commanded_delta` without inventing an original failed jog.
+
+`POST /api/v1/gantry/jog-blocking` also accepts `feed_rate` in mm/min: finite,
+greater than zero, and at most 2000 (the default). Set `feed_rate: 100` for a
+deliberately slow bounded jog without changing persistent controller settings.
+
+While homing, Operator reports **Homing** and withholds work coordinates until
+fresh Idle status and coordinates verify. Existing controller alarms remain
+visible during recovery; failed homing leaves **Home required** or the actual
+alarm visible.
+
+Homing sends one `$H` command. Missing status frames cause bounded status
+checks within the original homing timeout; they never resend `$H`. An alarm,
+held controller, or connection failure ends verification immediately. If the
+deadline expires, completion is unverified and the gantry may still be moving.
+Use **Stop** and inspect the controller before retrying. CubOS does not repeat
+homing automatically.
 
 ## Jog Controls
 
@@ -249,9 +333,10 @@ During calibration:
     holding a key can still overshoot past where you meant to stop, especially
     at 25 mm or larger step sizes. Press Space to cancel an active jog.
 
-If a jog trips a hard limit, CubOS soft-resets, unlocks GRBL, and attempts a
-small pull-off opposite the failed jog direction. If recovery fails, stop and
-follow [Stuck on a Limit Switch](troubleshooting.md#stuck-on-a-limit-switch).
+If a CLI jog trips a hard limit, CubOS attempts one directed pull-off. Operator
+calibration wizards automatically attempt one eligible, correlated backoff;
+they never retry a failed backoff or home automatically. If recovery fails, stop and follow
+[Stuck on a Limit Switch](troubleshooting.md#stuck-on-a-limit-switch).
 
 ## Single-Instrument Calibration
 
