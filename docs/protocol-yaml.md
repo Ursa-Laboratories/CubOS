@@ -270,6 +270,29 @@ All pipette commands require an instrument registered under the name `pipette`.
 The `height`/`source_height`/`destination_height` args follow the labware-relative
 height convention.
 
+`aspirate`, `dispense`, `blowout`, `mix`, and `transfer` accept
+`travel_clearance` (default `3.0` mm): a requested travel clearance above the
+registered plate top for consecutive operations on that same plate. Use a
+finite, non-negative number. During same-plate transitions between wells, the
+planner can travel at this local height; direct same-well transitions between
+action depths can move directly without first retracting to the local travel
+height. The planner may raise the requested height for scene or tool clearance,
+or use the full travel ceiling when needed. Set it to `null` to request full
+ceiling retraction. Decks without routing keep their existing routes. This
+setting does not change engage depths or the tip reuse policy.
+
+```yaml
+protocol:
+  - aspirate:
+      position: plate.A1
+      volume_ul: 20
+      travel_clearance: 5
+  - dispense:
+      position: plate.A1
+      volume_ul: 20
+      travel_clearance: null
+```
+
 **`speed` is a normalized 0–100 percentage** of the instrument's usable speed
 range, not a physical unit — each vendor driver maps it onto its own hardware
 scale, so a protocol stays portable. The `sartorius` driver maps the default
