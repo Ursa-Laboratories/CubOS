@@ -123,7 +123,7 @@ class InstrumentedGantry:
             "gantry_position": end_xyz,
             "travel_z": None,
         }
-        self.controller.move_to(*end_xyz, travel_z=None)
+        self.controller.move_linear_to(*end_xyz)
 
     def move(
         self,
