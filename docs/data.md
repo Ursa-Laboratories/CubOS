@@ -9,7 +9,7 @@ no setup and no external database server required.
 By default, results are written to:
 
 ```text
-data/databases/panda_data.db
+~/.cubos/panda_data.db
 ```
 
 Set `CUBOS_DATA_DB_PATH` to write a run to a different file. After a
@@ -65,8 +65,11 @@ pip install pandas
 
 List experiment IDs for a campaign:
 
+Omit `--db-path` to read the runtime database selected by `CUBOS_DATA_DB_PATH`
+or, when unset, `~/.cubos/panda_data.db`. An explicit `--db-path` takes precedence.
+
 ```bash
-python -m data.export_helpers \
+python -m cubos.data.export_helpers \
   --db-path runs/example.db \
   campaign-experiments 1 \
   --csv runs/campaign_1_experiments.csv
@@ -75,7 +78,7 @@ python -m data.export_helpers \
 Export all measurements for one experiment:
 
 ```bash
-python -m data.export_helpers \
+python -m cubos.data.export_helpers \
   --db-path runs/example.db \
   experiment-all 42 \
   --csv runs/experiment_42_measurements.csv
@@ -84,7 +87,7 @@ python -m data.export_helpers \
 Export one supported instrument table for an experiment:
 
 ```bash
-python -m data.export_helpers \
+python -m cubos.data.export_helpers \
   --db-path runs/example.db \
   experiment-instrument 42 asmi \
   --csv runs/experiment_42_asmi.csv
