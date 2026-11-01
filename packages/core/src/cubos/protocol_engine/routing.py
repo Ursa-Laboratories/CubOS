@@ -86,27 +86,12 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
                 ):
                     _motion_for(context.deck, _fixture_key(context.deck, position))
             elif step.command_name == "pick_up_tip":
-                rack, _ = resolve_tip_rack_slot(context.deck, args["position"])
+                resolve_tip_rack_slot(context.deck, args["position"])
                 rack_key = (
                     args["position"].rsplit(".", 1)[0]
                     if "." in args["position"] else args["position"]
                 )
-                motion = _motion_for(context.deck, rack_key)
-                policy = motion.get("access", {}).get(
-                    "pick_up_tip", {"strategy": "vertical"},
-                )
-                if policy["strategy"] == "side_exit":
-                    if motion.get("occupied_tip_radius_mm") is None:
-                        raise InvalidGeometryError(
-                            f"side-exit rack {rack_key!r} requires occupied_tip_radius_mm."
-                        )
-                    envelope = context.gantry.motion_envelopes.get("pipette", {})
-                    if envelope.get("attached_tip_radius_mm") is None:
-                        raise InvalidGeometryError(
-                            "side-exit pickup requires pipette "
-                            "motion_envelope.attached_tip_radius_mm."
-                        )
-                del rack
+                _motion_for(context.deck, rack_key)
             elif step.command_name == "transfer":
                 _motion_for(context.deck, _fixture_key(context.deck, args["source"]))
                 _motion_for(context.deck, _fixture_key(context.deck, args["destination"]))
@@ -403,98 +388,36 @@ class RoutingSession:
         target = Point3D(coordinate.x, coordinate.y, coordinate.z)
         bare = ToolState()
         attached = ToolState("pipette", rack.tip_length)
-        fixture = _motion_for(self.context.deck, rack_key)
-        policy = fixture.get("access", {}).get("pick_up_tip", {"strategy": "vertical"})
+        _motion_for(self.context.deck, rack_key)
         engage = _carriage_for(self.context, "pipette", target, bare)
 
-        if policy["strategy"] == "side_exit":
-            world_edge = _world_edge(fixture, policy["exit_edge"])
-            if fixture.get("occupied_tip_radius_mm") is None:
-                raise InvalidGeometryError(
-                    f"side-exit rack {rack_key!r} requires occupied_tip_radius_mm."
-                )
-            envelope = self.context.gantry.motion_envelopes.get("pipette", {})
-            if envelope.get("attached_tip_radius_mm") is None:
-                raise InvalidGeometryError(
-                    "side-exit pickup requires pipette motion_envelope.attached_tip_radius_mm."
-                )
-            blockers = _side_exit_blockers(
-                rack, tip_id, world_edge, consumed, rack_key,
-                durable_status=self.tip_status,
-            )
-            if blockers:
-                raise InvalidGeometryError(
-                    f"side-exit lane for {target_name!r} is blocked by loaded tips {blockers}."
-                )
-            lift = float(policy["lift_mm"])
-            approach = Point3D(engage.x, engage.y, engage.z + lift)
-            entrance = self._approach(
-                current, approach, "pipette", bare,
-                previous_target=current_target,
-                previous_instrument=current_instrument,
-                command="pick_up_tip", phase="approach", consumed=consumed,
-            )
-            ingress = self._plan(
-                approach, engage, "pipette", bare, (rack_key, target_tip_fixture),
-                "pick_up_tip", "engage", consumed=consumed,
-            )
-            lifted = Point3D(engage.x, engage.y, engage.z + lift)
-            body = _box_from_mapping(rack_key, fixture["resolved_box"])
-            clearance = float(policy.get("clearance_mm", 0.0))
-            edge = world_edge
-            exit_point = _side_exit_point(
-                lifted, body, edge, clearance, self.base_scene, attached,
-            )
-            lift_plan = self._plan(
-                engage, lifted, "pipette", attached, (rack_key, target_tip_fixture),
-                "pick_up_tip", "lift", consumed=consumed,
-            )
-            exit_plan = self._plan(
-                lifted, exit_point, "pipette", attached, (rack_key, target_tip_fixture),
-                "pick_up_tip", "exit", consumed=consumed,
-            )
-            if any(segment.axis != edge[0] for segment in exit_plan.segments):
-                raise InvalidGeometryError("side-exit route is not a single exact exit-axis withdrawal.")
-            clear_scene, _ = self._scene_and_access(
-                "pipette", (), consumed, exit_point, exit_point, attached,
-            )
-            plan_motion(
-                clear_scene, exit_point, exit_point,
-                tool_state=attached,
-                command="pick_up_tip",
-                operation="post_exit_clearance",
-                phase="post_exit_clearance",
-            )
-            plans = (entrance, ingress, lift_plan, exit_plan)
-            end = exit_point
-        else:
-            hover = Point3D(engage.x, engage.y, self.context.gantry_config.working_volume.z_max)
-            entrance = self._approach(
-                current, hover, "pipette", bare,
-                previous_target=current_target,
-                previous_instrument=current_instrument,
-                command="pick_up_tip", phase="approach", consumed=consumed,
-            )
-            ingress = self._plan(
-                hover, engage, "pipette", bare, (rack_key, target_tip_fixture),
-                "pick_up_tip", "engage", consumed=consumed,
-            )
-            departure = self._plan(
-                engage, hover, "pipette", attached, (rack_key, target_tip_fixture),
-                "pick_up_tip", "departure", consumed=consumed,
-            )
-            clear_scene, _ = self._scene_and_access(
-                "pipette", (), consumed, hover, hover, attached,
-            )
-            plan_motion(
-                clear_scene, hover, hover,
-                tool_state=attached,
-                command="pick_up_tip",
-                operation="post_pickup_clearance",
-                phase="post_pickup_clearance",
-            )
-            plans = (entrance, ingress, departure)
-            end = hover
+        hover = Point3D(engage.x, engage.y, self.context.gantry_config.working_volume.z_max)
+        entrance = self._approach(
+            current, hover, "pipette", bare,
+            previous_target=current_target,
+            previous_instrument=current_instrument,
+            command="pick_up_tip", phase="approach", consumed=consumed,
+        )
+        ingress = self._plan(
+            hover, engage, "pipette", bare, (rack_key, target_tip_fixture),
+            "pick_up_tip", "engage", consumed=consumed,
+        )
+        departure = self._plan(
+            engage, hover, "pipette", attached, (rack_key, target_tip_fixture),
+            "pick_up_tip", "departure", consumed=consumed,
+        )
+        clear_scene, _ = self._scene_and_access(
+            "pipette", (), consumed, hover, hover, attached,
+        )
+        plan_motion(
+            clear_scene, hover, hover,
+            tool_state=attached,
+            command="pick_up_tip",
+            operation="post_pickup_clearance",
+            phase="post_pickup_clearance",
+        )
+        plans = (entrance, ingress, departure)
+        end = hover
 
         change = ToolStateChange(engage, "pipette", rack.tip_length)
         departure_index = 2
@@ -946,71 +869,6 @@ def _carriage_for(context: Any, instrument_name: str, target: Point3D, state: To
     )
 
 
-def _side_exit_point(
-    start: Point3D,
-    body: AABB,
-    edge: str,
-    clearance: float,
-    scene: Scene,
-    tool_state: ToolState,
-) -> Point3D:
-    values = {"x": start.x, "y": start.y, "z": start.z}
-    axis = edge[0]
-    boundary = getattr(body, edge)
-    relative_min, relative_max = _all_tool_axis_extents(scene, axis, tool_state)
-    if edge.endswith("min"):
-        requested = boundary - clearance
-        required = boundary - scene.clearance_mm - relative_max - 1e-6
-        values[axis] = min(requested, required)
-    else:
-        requested = boundary + clearance
-        required = boundary + scene.clearance_mm - relative_min + 1e-6
-        values[axis] = max(requested, required)
-    return Point3D(**values)
-
-
-def _world_edge(motion: Mapping[str, Any], local_edge: str) -> str:
-    """Rotate a local A1-frame exit edge into deck-frame axis/direction."""
-    local_axis = local_edge[0]
-    basis = motion["basis"][local_axis]
-    component_axis = "x" if abs(float(basis["x"])) > 0.5 else "y"
-    component = float(basis[component_axis])
-    local_sign = -1.0 if local_edge.endswith("min") else 1.0
-    world_sign = local_sign * component
-    return f"{component_axis}_{'min' if world_sign < 0 else 'max'}"
-
-
-def _all_tool_axis_extents(
-    scene: Scene,
-    axis: str,
-    tool_state: ToolState,
-) -> tuple[float, float]:
-    parts = [
-        box
-        for tool in scene.tool_envelopes
-        for box in (tool.box, *tool.additional_boxes)
-    ]
-    lows = [getattr(box.minimum, axis) for box in parts]
-    highs = [getattr(box.maximum, axis) for box in parts]
-    if tool_state.attached_tip_extension_mm > 0:
-        tool = next(
-            item for item in scene.tool_envelopes
-            if item.name == tool_state.instrument
-        )
-        if tool.attached_tip_radius_mm is None:
-            raise InvalidGeometryError(
-                f"Attached-tip instrument {tool.name!r} has no attached tip radius."
-            )
-        if axis in {"x", "y"}:
-            center = getattr(tool.tcp, axis)
-            lows.append(center - tool.attached_tip_radius_mm)
-            highs.append(center + tool.attached_tip_radius_mm)
-        else:
-            lows.append(tool.tcp.z - tool_state.attached_tip_extension_mm)
-            highs.append(tool.tcp.z)
-    return min(lows), max(highs)
-
-
 def _active_tool_swept_box(
     scene: Scene,
     instrument: str,
@@ -1060,43 +918,6 @@ def _active_tool_swept_box(
             max(start.z, end.z) + rel_max["z"],
         ),
     )
-
-
-def _side_exit_blockers(
-    rack: TipRack,
-    tip_id: str,
-    edge: str,
-    consumed: set[str],
-    rack_key: str,
-    *,
-    durable_status: Mapping[tuple[str, str], str] | None = None,
-) -> list[str]:
-    target = rack.get_tip_location(tip_id)
-    axis = edge[0]
-    target_value = getattr(target, axis)
-    blockers = []
-    for other_id, coordinate in rack.tips.items():
-        persisted = (durable_status or {}).get((rack_key, other_id))
-        tip_present = (
-            persisted == "available"
-            if persisted is not None
-            else rack.is_tip_present(other_id)
-        )
-        if other_id == tip_id or not tip_present:
-            continue
-        if f"{rack_key}.tip.{other_id}" in consumed:
-            continue
-        cross_axis = "y" if axis == "x" else "x"
-        if abs(getattr(coordinate, cross_axis) - getattr(target, cross_axis)) > 1e-6:
-            continue
-        other_value = getattr(coordinate, axis)
-        between = (
-            other_value < target_value if edge.endswith("min")
-            else other_value > target_value
-        )
-        if between:
-            blockers.append(other_id)
-    return sorted(blockers)
 
 
 def _combine_plans(command: str, operation: str, *plans: MotionPlan) -> MotionPlan:

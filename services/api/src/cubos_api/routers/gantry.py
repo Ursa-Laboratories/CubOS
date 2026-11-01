@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from dataclasses import asdict, is_dataclass
 from typing import Any, Dict, List, Literal, Optional
@@ -32,7 +33,7 @@ from cubos.instruments.registry import (
     get_supported_types,
     get_supported_vendors,
 )
-from pydantic import BaseModel, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, ValidationError, field_validator, model_validator
 
 from cubos_api.config import get_settings
 from cubos_api.models.gantry import GantryPosition, GantryResponse
@@ -86,6 +87,7 @@ class InstrumentOffsetsRequest(BaseModel):
 
 
 class JogRequest(BaseModel):
+    jog_id: Optional[str] = Field(default=None, min_length=1, max_length=128, strict=True, pattern=r"\S")
     x: float = 0.0
     y: float = 0.0
     z: float = 0.0
@@ -129,18 +131,51 @@ class SetGrblSettingRequest(BaseModel):
 
 
 class JogBlockingRequest(BaseModel):
+    jog_id: Optional[str] = Field(default=None, min_length=1, max_length=128, strict=True, pattern=r"\S")
     x: float = 0.0
     y: float = 0.0
     z: float = 0.0
     timeout_s: float = 10.0
+    feed_rate: float = Field(default=2000.0, gt=0, le=2000, allow_inf_nan=False)
+
+    @field_validator("feed_rate", mode="before")
+    @classmethod
+    def _json_safe_feed_rate(cls, value):
+        # Non-finite numbers also break FastAPI's validation-error JSON.
+        return str(value) if isinstance(value, float) and not math.isfinite(value) else value
 
 
 class LimitRecoveryRequest(BaseModel):
+    jog_id: Optional[str] = Field(default=None, min_length=1, max_length=128, strict=True, pattern=r"\S")
     x: float = 0.0
     y: float = 0.0
     z: float = 0.0
     pull_off_mm: float = 5.0
-    feed_rate: float = 2500.0
+    feed_rate: float = 100.0
+
+
+class ManualLimitRecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    axis: Literal["x", "y", "z"]
+    away_direction: StrictInt
+    operator_confirmed: StrictBool
+
+    @model_validator(mode="after")
+    def _direction_is_signed(self):
+        if self.away_direction not in (-1, 1):
+            raise ValueError("away_direction must be -1 or 1.")
+        return self
+
+
+class LimitRecoveryContextResponse(BaseModel):
+    failed_jog_id: Optional[str] = None
+    raw_status: str
+    active_limit_axes: List[Literal["x", "y", "z"]]
+    failed_jog_delta: Optional[Dict[str, float]]
+    eligible: bool
+    blocked_reason: Optional[str]
+    pull_off_delta: Optional[Dict[str, float]]
+    manual_available: bool
 
 
 class LimitRecoveryResponse(BaseModel):
@@ -148,6 +183,9 @@ class LimitRecoveryResponse(BaseModel):
     attempts: int
     pull_off: Dict[str, float]
     messages: List[str]
+    mode: Literal["known_jog", "manual"]
+    commanded_delta: Dict[str, float]
+    failed_delta: Optional[Dict[str, float]] = None
 
 
 class CalibrationCenterResponse(BaseModel):
@@ -398,7 +436,7 @@ def home() -> GantryPosition:
 def jog(req: JogRequest) -> dict:
     _reject_if_run_active()
     try:
-        _require_session().jog(x=req.x, y=req.y, z=req.z)
+        _require_session().jog(x=req.x, y=req.y, z=req.z, **({"jog_id": req.jog_id} if req.jog_id is not None else {}))
     except Exception as exc:
         logging.warning("Jog error: %s", exc)
         raise _session_http_exception(exc, default_action="Jog") from exc
@@ -439,6 +477,8 @@ def jog_blocking(req: JogBlockingRequest) -> GantryPosition:
                 y=req.y,
                 z=req.z,
                 timeout_s=req.timeout_s,
+                feed_rate=req.feed_rate,
+                **({"jog_id": req.jog_id} if req.jog_id is not None else {}),
             ),
             session=session,
         )
@@ -559,45 +599,72 @@ def finalize_calibration_origin(req: FinalizeOriginRequest) -> FinalizeOriginRes
     return FinalizeOriginResponse(**payload)
 
 
-@router.post("/calibration/recover-limit")
-def recover_calibration_limit(req: LimitRecoveryRequest) -> LimitRecoveryResponse:
-    try:
-        result, messages = _require_session().recover_calibration_limit(
-            x=req.x,
-            y=req.y,
-            z=req.z,
-            pull_off_mm=req.pull_off_mm,
-            feed_rate=req.feed_rate,
-        )
-    except ValueError as exc:
-        raise _session_http_exception(exc, default_action="Limit recovery") from exc
-    except GantryAlarmError as exc:
-        raise HTTPException(
-            409,
-            "Limit recovery did not clear the gantry alarm. "
-            f"Use E-stop/controller reset before continuing: {exc}",
-        ) from exc
-    except MillConnectionError as exc:
-        raise HTTPException(
+def _limit_recovery_exception(exc: Exception) -> HTTPException:
+    if isinstance(exc, ValueError):
+        return _session_http_exception(exc, default_action="Limit recovery")
+    if isinstance(exc, MillConnectionError):
+        return HTTPException(
             503,
             "Controller connection lost during limit recovery. Power-cycle "
             "the controller, re-seat the USB cable, then Disconnect and "
             f"Connect again before continuing: {exc}",
-        ) from exc
-    except Exception as exc:
-        if looks_like_limit_alarm(exc):
-            raise HTTPException(
-                409,
-                "Limit recovery did not clear the gantry alarm. "
-                f"Use E-stop/controller reset before continuing: {exc}",
-            ) from exc
-        raise _session_http_exception(exc, default_action="Limit recovery") from exc
+        )
+    if isinstance(exc, GantryAlarmError) or looks_like_limit_alarm(exc):
+        return HTTPException(
+            409,
+            "Limit recovery did not clear the gantry alarm. "
+            f"Use E-stop/controller reset before continuing: {exc}",
+        )
+    return _session_http_exception(exc, default_action="Limit recovery")
+
+
+def _limit_recovery_response(result, messages) -> LimitRecoveryResponse:
     return LimitRecoveryResponse(
         status="recovered",
         attempts=result.attempts,
         pull_off=result.pull_off_delta,
         messages=messages,
+        mode=getattr(result, "mode", "known_jog"),
+        commanded_delta=getattr(result, "commanded_delta", None) or result.pull_off_delta,
+        failed_delta=getattr(result, "failed_delta", None),
     )
+
+
+@router.get("/calibration/recovery-context")
+def limit_recovery_context() -> LimitRecoveryContextResponse:
+    _reject_if_run_active()
+    try:
+        context = _require_session().limit_recovery_context()
+    except Exception as exc:
+        raise _limit_recovery_exception(exc) from exc
+    return LimitRecoveryContextResponse(**asdict(context))
+
+
+@router.post("/calibration/recover-limit")
+def recover_calibration_limit(req: LimitRecoveryRequest) -> LimitRecoveryResponse:
+    _reject_if_run_active()
+    try:
+        result, messages = _require_session().recover_calibration_limit(
+            x=req.x, y=req.y, z=req.z,
+            pull_off_mm=req.pull_off_mm, feed_rate=req.feed_rate,
+            **({"jog_id": req.jog_id} if req.jog_id is not None else {}),
+        )
+    except Exception as exc:
+        raise _limit_recovery_exception(exc) from exc
+    return _limit_recovery_response(result, messages)
+
+
+@router.post("/calibration/recover-limit/manual")
+def recover_calibration_limit_manual(req: ManualLimitRecoveryRequest) -> LimitRecoveryResponse:
+    _reject_if_run_active()
+    try:
+        result, messages = _require_session().recover_calibration_limit_manual(
+            axis=req.axis, away_direction=req.away_direction,
+            operator_confirmed=req.operator_confirmed,
+        )
+    except Exception as exc:
+        raise _limit_recovery_exception(exc) from exc
+    return _limit_recovery_response(result, messages)
 
 
 @router.post("/unlock")

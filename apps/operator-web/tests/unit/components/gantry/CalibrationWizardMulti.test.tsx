@@ -1,8 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import CalibrationWizard from "./CalibrationWizard";
-import type { GantryConfig, GantryPosition } from "../../types";
+import CalibrationWizard from "../../../../src/components/gantry/CalibrationWizard";
+import type { GantryConfig, GantryPosition } from "../../../../src/types";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -400,7 +400,7 @@ describe("CalibrationWizard multi-instrument block height step", () => {
     expect(await screen.findByRole("heading", { name: "Save" })).toBeInTheDocument();
   });
 
-  it("retries a failed Z retract without re-zeroing in the shifted frame", async () => {
+  it("requires a new reference after an uncertain Z retract without re-zeroing the shifted frame", async () => {
     const user = userEvent.setup();
     const onSaveCalibrated = vi.fn<(filename: string, config: GantryConfig) => Promise<void>>(async () => undefined);
     let positionReadCount = 0;
@@ -464,8 +464,10 @@ describe("CalibrationWizard multi-instrument block height step", () => {
     await user.click(setZ);
     expect(await screen.findByText("retract failed")).toBeInTheDocument();
 
+    expect(setZ).toBeDisabled();
     await user.click(setZ);
-    expect(await screen.findByText("Record Instruments")).toBeInTheDocument();
+    expect(screen.getByText("retract failed")).toBeInTheDocument();
+    expect(screen.queryByText("Record Instruments")).not.toBeInTheDocument();
     expect(setWorkCoordinateCount).toBe(2);
     const workCoordinateBodies = fetchMock.mock.calls.filter(([input]) => {
       const url = new URL(
@@ -477,14 +479,8 @@ describe("CalibrationWizard multi-instrument block height step", () => {
     expect(workCoordinateBodies).toHaveLength(2);
     expect(workCoordinateBodies.filter((body) => "z" in body)).toHaveLength(1);
 
-    await user.click(screen.getByRole("button", { name: "Record pipette" }));
-    expect(await screen.findByRole("heading", { name: "Save" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Save" }));
-
-    await waitFor(() => expect(onSaveCalibrated).toHaveBeenCalled());
-    const savedConfig = onSaveCalibrated.mock.calls[0][1] as GantryConfig;
-    expect(savedConfig.working_volume.z_min).toBe(0);
-    expect(savedConfig.working_volume.z_max).toBe(88);
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/jog-blocking"))).toHaveLength(1);
+    expect(onSaveCalibrated).not.toHaveBeenCalled();
   });
 
   it("keeps focus inside the modal and closes with Escape when idle", async () => {

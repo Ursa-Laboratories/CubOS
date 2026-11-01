@@ -151,10 +151,7 @@ def _context(
                 "occupied_tip_radius_mm": 1,
                 "access": {
                     "pick_up_tip": {
-                        "strategy": "side_exit",
-                        "lift_mm": 30,
-                        "exit_edge": "x_min",
-                        "clearance_mm": 5,
+                        "strategy": "vertical",
                     }
                 },
             },
@@ -271,6 +268,90 @@ def test_native_planned_commands_execute_preflighted_exact_segments() -> None:
         for plan in serialized
         for segment in plan["segments"]
     )
+
+
+def test_vertical_pickup_attaches_between_engagement_and_retraction() -> None:
+    context, controller, pipette = _context()
+    observed = []
+    move = controller.move_linear_to
+
+    def record_move(x, y, z):
+        observed.append(((x, y, z), pipette.attached_tip_extension))
+        move(x, y, z)
+
+    controller.move_linear_to = record_move
+    compile_protocol([CommandCall("pick_up_tip", {"position": "tips.A1"})]).execute(context)
+
+    pickup = context.planned_motion_steps[0]
+    assert [plan.operation for plan in pickup.plans] == ["approach", "engage", "departure"]
+    assert observed == [
+        ((20, 20, 80), 0),
+        ((20, 20, 30), 0),
+        ((20, 20, 80), 20),
+    ]
+    assert all(segment.axis == "z" for plan in pickup.plans[1:] for segment in plan.segments)
+    assert pickup.plans[2].state_changes[0].position == pickup.plans[1].end
+    assert not context.deck["tips"].is_tip_present("A1")
+    assert pipette.actions == ["pick_up_tip"]
+
+
+@pytest.mark.parametrize("obstruction", ["long_tip", "neighbor_tip", "passive_camera"])
+def test_vertical_pickup_collision_rejects_before_movement(obstruction) -> None:
+    context, controller, pipette = _context(with_camera=obstruction == "passive_camera")
+    rack = context.deck["tips"]
+    if obstruction == "long_tip":
+        rack.tip_length = 70
+    elif obstruction == "neighbor_tip":
+        rack.tips["A2"] = type(rack.tips["A1"])(x=22, y=20, z=50)
+        rack.tip_present["A2"] = True
+    else:
+        context.gantry.instruments["camera"].offset_y = 0
+
+    with pytest.raises(ProtocolExecutionError, match="preflight failed"):
+        compile_protocol([CommandCall("pick_up_tip", {"position": "tips.A1"})]).execute(context)
+
+    assert controller.moves == []
+    assert pipette.actions == []
+    assert rack.is_tip_present("A1")
+
+
+@pytest.mark.parametrize("fail_retraction", [False, True])
+def test_tracked_vertical_pickup_commits_only_after_retraction(fail_retraction) -> None:
+    from cubos.gantry.gantry_driver.exceptions import MillConnectionError
+
+    context, controller, pipette = _context()
+    context.fluid_state_id, context.campaign_id = 17, 7
+    store = context.data_store = Mock()
+    store.get_tip_snapshot.return_value = {"containers": [
+        {"rack_key": "tips", "slot_id": "A1", "status": "available"},
+    ]}
+    store.begin_pick_up_tip.return_value = (True, "A1", 20)
+    failure = MillConnectionError("retraction interrupted")
+    move = controller.move_linear_to
+
+    def retract(x, y, z):
+        if fail_retraction and pipette.attached_tip_extension:
+            raise failure
+        move(x, y, z)
+
+    def commit(_operation_key):
+        assert controller.get_coordinates() == {"x": 20, "y": 20, "z": 80}
+
+    controller.move_linear_to = retract
+    store.complete_pick_up_tip.side_effect = commit
+    protocol = compile_protocol([CommandCall("pick_up_tip", {"position": "tips.A1"})])
+    if fail_retraction:
+        with pytest.raises(MillConnectionError) as raised:
+            protocol.execute(context)
+        assert raised.value is failure
+        store.complete_pick_up_tip.assert_not_called()
+        store.mark_tip_reconciliation_required.assert_called_once()
+    else:
+        protocol.execute(context)
+        store.complete_pick_up_tip.assert_called_once()
+        store.mark_tip_reconciliation_required.assert_not_called()
+    assert not context.deck["tips"].is_tip_present("A1")
+    assert pipette.attached_tip_extension == 20
 
 
 def test_transfer_destination_no_route_rejects_before_pickup_or_aspirate() -> None:
@@ -479,7 +560,7 @@ def test_consumed_tip_is_absent_from_later_unscoped_transit_scene(monkeypatch) -
     assert all("tips.tip.A1" not in names for names in observed_fixture_sets)
 
 
-def test_durable_tip_state_removes_consumed_side_exit_blockers() -> None:
+def test_durable_tip_state_selects_an_available_tip() -> None:
     context, controller, _pipette = _context()
     rack = context.deck["tips"]
     coordinate_type = type(rack.tips["A1"])

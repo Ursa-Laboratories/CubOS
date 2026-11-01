@@ -153,7 +153,6 @@ def _resolved_motion(entry: BaseModel) -> dict[str, Any] | None:
             "z": a1.z + oz + sz,
         },
     }
-    resolved["basis"] = {"x": {"x": ux, "y": uy}, "y": {"x": vx, "y": vy}}
     return resolved
 
 

@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from cubos.data.data_reader import DataReader
+from cubos.data.data_store import default_database_path
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -14,8 +15,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--db-path",
-        default="data/databases/panda_data.db",
-        help="Path to SQLite database file.",
+        default=str(default_database_path()),
+        help="Path to SQLite database file (default: CUBOS_DATA_DB_PATH or ~/.cubos/panda_data.db).",
     )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
