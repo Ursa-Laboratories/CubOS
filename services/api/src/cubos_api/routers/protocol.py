@@ -63,6 +63,7 @@ def _build_command_info(name: str) -> CommandInfo:
                 type=_type_name(field_info.annotation),
                 required=field_info.is_required(),
                 default=None if field_info.is_required() else field_info.default,
+                description=field_info.description or "",
             )
         )
     return CommandInfo(

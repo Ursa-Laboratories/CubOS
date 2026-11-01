@@ -7,6 +7,7 @@ import math
 from typing import Any, Iterable, Mapping
 
 from cubos.deck.labware.tip_rack import TipRack, resolve_tip_rack_slot
+from cubos.deck.labware.well_plate import WellPlate
 from cubos.instruments.camera.interface import CameraInstrument
 from cubos.motion_planning import (
     AABB,
@@ -26,6 +27,7 @@ from cubos.motion_planning import (
 )
 
 from .errors import ProtocolExecutionError
+from .pipette_routing import validate_pipette_travel_clearance
 
 
 SUPPORTED_PLANNED_COMMANDS = frozenset({
@@ -191,6 +193,7 @@ class RoutingSession:
         self.context = context
         self.tip_status = _durable_tip_status(context)
         self.base_scene = _build_scene_from_context(context, self.tip_status)
+        self._stationary_engagements: dict[int, tuple[MotionPlan, ToolState]] = {}
 
     def current_carriage(self) -> Point3D:
         try:
@@ -202,6 +205,19 @@ class RoutingSession:
             ) from exc
 
     def execute(self, plan: MotionPlan) -> None:
+        stationary = self._stationary_engagements.get(id(plan))
+        if stationary is not None:
+            self._validate_actual_tool_state(stationary[1])
+            coordinates = self.context.gantry.controller.get_coordinates()
+            actual = Point3D(coordinates["x"], coordinates["y"], coordinates["z"])
+            if any(
+                abs(getattr(actual, axis) - getattr(plan.start, axis)) > 0.01
+                for axis in ("x", "y", "z")
+            ):
+                raise ProtocolExecutionError(
+                    "Stationary pipette plan does not match the controller pose. "
+                    "No liquid action was attempted."
+                )
         for segment in plan.segments:
             self._validate_actual_tool_state(segment.tool_state)
             active_tools = segment.access.allowed_tool_names
@@ -281,6 +297,7 @@ class RoutingSession:
                     tool_state=state,
                     current_target=current_target,
                     current_instrument=current_instrument,
+                    travel_clearance=args.get("travel_clearance", 3.0),
                 )
                 current_instrument = "pipette"
             elif command in {"aspirate", "dispense", "blowout"}:
@@ -291,6 +308,7 @@ class RoutingSession:
                     "pipette", state, command=command, operation=command,
                     previous_target=current_target,
                     previous_instrument=current_instrument,
+                    travel_clearance=args.get("travel_clearance", 3.0),
                 )
                 value = PreparedMotionStep(command, (plan,), {})
                 current_target = _fixture_key(self.context.deck, args["position"])
@@ -301,6 +319,7 @@ class RoutingSession:
                     position=args["position"],
                     height=float(args.get("height", 0.0)),
                     cycles=int(args.get("cycles", 3)),
+                    travel_clearance=args.get("travel_clearance", 3.0),
                     tool_state=state,
                     current_target=current_target,
                     current_instrument=current_instrument,
@@ -529,6 +548,7 @@ class RoutingSession:
         source_height: float,
         destination_height: float,
         stroke_count: int,
+        travel_clearance: float | None,
         tool_state: ToolState,
         current_target: str | None,
         current_instrument: str | None,
@@ -542,6 +562,7 @@ class RoutingSession:
                 current, source, source_height, "pipette", tool_state,
                 command="transfer", operation="aspirate", previous_target=previous_target,
                 previous_instrument=current_instrument,
+                travel_clearance=travel_clearance,
             )
             plans.append(source_plan)
             source_key = _fixture_key(self.context.deck, source)
@@ -549,6 +570,7 @@ class RoutingSession:
                 current, destination, destination_height, "pipette", tool_state,
                 command="transfer", operation="dispense", previous_target=source_key,
                 previous_instrument="pipette",
+                travel_clearance=travel_clearance,
             )
             plans.append(destination_plan)
             previous_target = _fixture_key(self.context.deck, destination)
@@ -562,6 +584,7 @@ class RoutingSession:
         position: str,
         height: float,
         cycles: int,
+        travel_clearance: float | None,
         tool_state: ToolState,
         current_target: str | None,
         current_instrument: str | None,
@@ -572,6 +595,7 @@ class RoutingSession:
             current, position, height, "pipette", tool_state,
             command="mix", operation="engage", previous_target=current_target,
             previous_instrument=current_instrument,
+            travel_clearance=travel_clearance,
         )
         fixture_key = _fixture_key(self.context.deck, position)
         plans = [engage]
@@ -643,12 +667,54 @@ class RoutingSession:
         operation: str,
         previous_target: str | None,
         previous_instrument: str | None,
+        travel_clearance: float | None = None,
     ) -> tuple[MotionPlan, Point3D]:
+        validate_pipette_travel_clearance(travel_clearance)
         coordinate = self.context.deck.resolve_coordinate(position)
         fixture_key = _fixture_key(self.context.deck, position)
-        _motion_for(self.context.deck, fixture_key)
+        motion = _motion_for(self.context.deck, fixture_key)
         action = Point3D(coordinate.x, coordinate.y, coordinate.z + height)
         end = _carriage_for(self.context, instrument, action, tool_state)
+        target = self.context.deck.resolve_labware_target(position)
+        if (
+            travel_clearance is not None
+            and instrument == previous_instrument == tool_state.instrument == "pipette"
+            and tool_state.attached_tip_extension_mm > 0
+            and previous_target == fixture_key
+            and isinstance(target.labware, WellPlate)
+            and target.location_id is not None
+        ):
+            try:
+                if current.x == end.x and current.y == end.y:
+                    direct = self._plan(
+                        current, end, instrument, tool_state, (fixture_key,),
+                        command, operation,
+                    )
+                    if not direct.segments:
+                        self._stationary_engagements[id(direct)] = (direct, tool_state)
+                    return direct, end
+                lowest, _ = _all_tool_axis_extents(self.base_scene, "z", tool_state)
+                top = max(coordinate.z, motion["resolved_box"]["max"]["z"])
+                margin = max(travel_clearance, self.base_scene.clearance_mm + 1e-6)
+                transit_z = max(current.z, end.z, top + margin - lowest)
+                if transit_z < self.context.gantry_config.working_volume.z_max:
+                    lifted = Point3D(current.x, current.y, transit_z)
+                    local_hover = Point3D(end.x, end.y, transit_z)
+                    departure = self._plan(
+                        current, lifted, instrument, tool_state, (fixture_key,),
+                        command, f"{operation}_local_departure",
+                    )
+                    transit = self._plan(
+                        lifted, local_hover, instrument, tool_state, (),
+                        command, f"{operation}_local_transit",
+                    )
+                    ingress = self._plan(
+                        local_hover, end, instrument, tool_state, (fixture_key,),
+                        command, operation,
+                    )
+                    return _combine_plans(command, operation, departure, transit, ingress), end
+            except NoRouteError:
+                pass
         hover = Point3D(end.x, end.y, self.context.gantry_config.working_volume.z_max)
         approach = self._approach(
             current, hover, instrument, tool_state,

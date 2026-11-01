@@ -120,7 +120,9 @@ def _build_schema_from_signature(
         from .runtime import ProtocolContext
 
         globalns["ProtocolContext"] = ProtocolContext
-    type_hints = get_type_hints(func, globalns=globalns, localns=globalns)
+    type_hints = get_type_hints(
+        func, globalns=globalns, localns=globalns, include_extras=True,
+    )
     field_definitions: Dict[str, Any] = {}
 
     skip_params = {"self", "context"}

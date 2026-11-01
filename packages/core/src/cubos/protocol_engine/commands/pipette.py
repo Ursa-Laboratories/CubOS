@@ -17,6 +17,10 @@ from cubos.instruments.pipette.liquid_class import IDENTITY_CORRECTION
 
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
+from ..pipette_routing import (
+    PipetteTravelClearance,
+    validate_pipette_travel_clearance,
+)
 from . import _summaries
 from ._cap_preflight import require_uncapped as _require_uncapped
 from ._liquid_selection import (
@@ -312,8 +316,13 @@ def aspirate(
     volume_ul: float,
     speed: float = 50.0,
     height: float = 0.0,
+    travel_clearance: PipetteTravelClearance = 3.0,
 ) -> Any:
     """Move pipette to *position*, then aspirate."""
+    try:
+        validate_pipette_travel_clearance(travel_clearance)
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     if _tracked_fluid_state(context):
         raise ProtocolExecutionError(
             "Standalone aspirate is disabled while durable fluid tracking is "
@@ -332,8 +341,13 @@ def dispense(
     volume_ul: float,
     speed: float = 50.0,
     height: float = 0.0,
+    travel_clearance: PipetteTravelClearance = 3.0,
 ) -> Any:
     """Move pipette to *position*, then dispense without durable fluid tracking."""
+    try:
+        validate_pipette_travel_clearance(travel_clearance)
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     if _tracked_fluid_state(context):
         raise ProtocolExecutionError(
             "Standalone dispense is disabled while durable fluid tracking is "
@@ -350,8 +364,13 @@ def blowout(
     position: str,
     speed: float = 50.0,
     height: float = 0.0,
+    travel_clearance: PipetteTravelClearance = 3.0,
 ) -> None:
     """Move pipette to *position*, then blowout."""
+    try:
+        validate_pipette_travel_clearance(travel_clearance)
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     if getattr(context.deck, "planning_enabled", False) is True and _tracked_fluid_state(context):
         raise ProtocolExecutionError(
             "Standalone blowout is disabled while durable fluid tracking is "
@@ -371,9 +390,14 @@ def mix(
     cycles: int = 3,
     speed: float = 50.0,
     height: float = 0.0,
+    travel_clearance: PipetteTravelClearance = 3.0,
 ) -> Any:
     """Move pipette to *position* at *height*, then mix ``cycles`` times
     between that height and 1 mm above it."""
+    try:
+        validate_pipette_travel_clearance(travel_clearance)
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     tracked = _tracked_fluid_state(context)
     pipette = _get_pipette(context)
     operation_key = None
@@ -581,6 +605,7 @@ def transfer(
     destination_height: Optional[float] = None,
     liquid_class: Optional[str] = None,
     require_uncapped: Optional[List[str]] = None,
+    travel_clearance: PipetteTravelClearance = 3.0,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*.
 
@@ -642,6 +667,10 @@ def transfer(
     tracked dispense volume; a blow-out failure is treated the same as a
     dispense failure (the stroke is marked ``reconciliation_required``).
     """
+    try:
+        validate_pipette_travel_clearance(travel_clearance)
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
     _require_uncapped(context, require_uncapped, command_label="transfer")
 
     tracked = _tracked_fluid_state(context)
