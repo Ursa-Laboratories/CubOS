@@ -50,6 +50,10 @@ def test_cub_exposes_no_fixed_machine_geometry():
     assert fixed_structures_for_gantry_type(GantryType.CUB) == ()
 
 
+def test_genmitsu_4040_pro_max_does_not_inherit_cub_xl_rail_geometry():
+    assert fixed_structures_for_gantry_type(GantryType.GENMITSU_4040_PRO_MAX) == ()
+
+
 def test_fixed_geometry_is_returned_as_immutable_tuple():
     structures = fixed_structures_for_gantry_type(GantryType.CUB_XL)
 

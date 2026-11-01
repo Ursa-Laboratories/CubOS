@@ -2,8 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import GantryEditor from "./GantryEditor";
-import type { GantryResponse, InstrumentSchemas, InstrumentTypeInfo } from "../../types";
+import GantryEditor from "../../../../src/components/editor/GantryEditor";
+import type { GantryResponse, InstrumentSchemas, InstrumentTypeInfo } from "../../../../src/types";
 
 const INSTRUMENT_TYPES: InstrumentTypeInfo[] = [
   { type: "pipette", vendors: ["opentrons"], is_mock: false },
@@ -153,6 +153,13 @@ describe("GantryEditor", () => {
     expect(card).not.toHaveTextContent("Factory Z travel");
     expect(card).not.toHaveTextContent("Instruments");
     expect(card).not.toHaveTextContent("Working Volume");
+  });
+
+  it("offers the Genmitsu 4040-PRO MAX as a distinct gantry type", () => {
+    renderGantry({ gantry: gantryFixture({ gantry_type: "genmitsu_4040_pro_max" }) });
+
+    expect(screen.getByLabelText(/Gantry type/)).toHaveValue("genmitsu_4040_pro_max");
+    expect(screen.getByRole("option", { name: "Genmitsu 4040-PRO MAX" })).toBeInTheDocument();
   });
 
   it("never renders a Y-axis motion control (unnecessary for operators)", async () => {

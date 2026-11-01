@@ -21,6 +21,18 @@ Position = Any
 _XY_SAME_TOL_MM = 0.01
 
 
+def resolve_multi_tool_safe_travel_z(
+    *, safe_z: float | None, carriage_ceiling: float | None, effective_depth: float,
+) -> float | None:
+    """Resolve instrument-tip clearance from the configured carriage ceiling."""
+    candidates = []
+    if safe_z is not None:
+        candidates.append(float(safe_z))
+    if carriage_ceiling is not None:
+        candidates.append(carriage_ceiling - effective_depth)
+    return max(candidates) if candidates else None
+
+
 class InstrumentedGantry:
     """Gantry plus the instruments mounted on it.
 
@@ -214,21 +226,17 @@ class InstrumentedGantry:
         nor a working volume is configured.
         """
         instr = self._resolve_instrument(instrument)
-        candidates = []
-        if self.safe_z is not None:
-            candidates.append(float(self.safe_z))
-        # The multi-tool guarantee needs working_volume.z_max on the controller
-        # config; without it only safe_z (the active tool's own clearance) applies.
-        ceiling = self._gantry_z_ceiling()
-        if ceiling is not None:
-            candidates.append(ceiling - self._effective_depth(instr))
-        if not candidates:
+        travel_z = resolve_multi_tool_safe_travel_z(
+            safe_z=self.safe_z,
+            carriage_ceiling=self._gantry_z_ceiling(),
+            effective_depth=self._effective_depth(instr),
+        )
+        if travel_z is None:
             self.logger.warning(
                 "No safe_z or working_volume configured; XY travel for %s "
                 "will not lift first.", instr.name,
             )
-            return None
-        return max(candidates)
+        return travel_z
 
     def _xy_changes(self, gantry_x: float, gantry_y: float) -> bool:
         """Whether a move to gantry XY leaves the current XY.

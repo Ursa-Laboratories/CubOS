@@ -72,6 +72,8 @@ def _engage(
     *,
     command_label: str,
     height: float = 0.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> tuple[float, float, float]:
     """Wrap ``engage_at_labware`` so configuration errors surface as
     ``ProtocolExecutionError`` instead of bare ``ValueError``s — matching
@@ -85,6 +87,7 @@ def _engage(
         x, y, _, action_z = engage_at_labware(
             context, "pipette", position,
             measurement_height=height, command_label=command_label,
+            x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
         )
         return x, y, action_z
     except ValueError as exc:
@@ -111,6 +114,51 @@ def _tracked_fluid_state(context: ProtocolContext) -> bool:
             f"set but {', '.join(missing)} is missing. No motion was attempted."
         )
     return True
+
+
+def _blowout_retract_z(
+    context: ProtocolContext,
+    pipette: Any,
+    position: str,
+    height: float,
+) -> float | None:
+    if getattr(pipette, "requires_home_after_blowout", False) is not True:
+        return None
+    try:
+        safe_z = context.gantry.safe_z
+        _assert_finite_number(safe_z, field_name="safe_z", source="blowout")
+        _assert_finite_number(height, field_name="height", source="blowout")
+        surface_z = context.deck.resolve_coordinate(position).z
+        _assert_finite_number(surface_z, field_name="surface_z", source="blowout")
+    except (AttributeError, KeyError, ValueError) as exc:
+        raise ProtocolExecutionError(
+            f"Cannot establish clearance for blowout at {position!r}: "
+            f"{type(exc).__name__}: {exc}"
+        ) from exc
+    if safe_z <= max(surface_z, surface_z + height):
+        raise ProtocolExecutionError(
+            f"blowout at {position!r} requires safe_z above both the labware "
+            "surface and action height before returning the piston home."
+        )
+    return float(safe_z)
+
+
+def _blowout_and_retract(
+    context: ProtocolContext,
+    pipette: Any,
+    tip_position: tuple[float, float, float],
+    speed: float,
+    retract_z: float | None,
+    planned_retract: Any = None,
+) -> None:
+    pipette.blowout(speed)
+    if retract_z is not None:
+        if planned_retract is not None:
+            context.routing_session.execute(planned_retract)
+        else:
+            x, y, _ = tip_position
+            context.gantry.move("pipette", (x, y, retract_z))
+        pipette.home()
 
 
 def _parse_position(position: str) -> tuple[str, Optional[str]]:
@@ -301,16 +349,29 @@ def _mark_tip_uncertain(
         )
 
 
+def _planned_tip_position(context: ProtocolContext, plan: Any) -> tuple[float, float, float]:
+    pipette = _get_pipette(context)
+    return (
+        plan.end.x + pipette.offset_x,
+        plan.end.y + pipette.offset_y,
+        plan.end.z - pipette.effective_depth,
+    )
+
+
 def _engage_standalone(
     context: ProtocolContext, position: str, *, command: str, height: float,
-) -> None:
+    x_offset_mm: float = 0.0, y_offset_mm: float = 0.0,
+) -> tuple[float, float, float]:
     if getattr(context.deck, "planning_enabled", False) is True:
         from ..routing import prepared_step
 
         planned = prepared_step(context, command)
         context.routing_session.execute(planned.plans[0])
-    else:
-        _engage(context, position, command_label=command, height=height)
+        return _planned_tip_position(context, planned.plans[0])
+    return _engage(
+        context, position, command_label=command, height=height,
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )
 
 
 @protocol_command("aspirate", summary=_summaries.aspirate)
@@ -321,6 +382,8 @@ def aspirate(
     speed: float = 50.0,
     height: float = 0.0,
     travel_clearance: PipetteTravelClearance = 3.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then aspirate."""
     try:
@@ -334,7 +397,10 @@ def aspirate(
             "known destination. Use transfer or serial_transfer."
         )
     pipette = _get_pipette(context)
-    _engage_standalone(context, position, command="aspirate", height=height)
+    _engage_standalone(
+        context, position, command="aspirate", height=height,
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )
     return pipette.aspirate(volume_ul, speed)
 
 
@@ -346,6 +412,8 @@ def dispense(
     speed: float = 50.0,
     height: float = 0.0,
     travel_clearance: PipetteTravelClearance = 3.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Any:
     """Move pipette to *position*, then dispense without durable fluid tracking."""
     try:
@@ -358,7 +426,10 @@ def dispense(
             "active because its source is unknown. Use transfer or serial_transfer."
         )
     pipette = _get_pipette(context)
-    _engage_standalone(context, position, command="dispense", height=height)
+    _engage_standalone(
+        context, position, command="dispense", height=height,
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )
     return pipette.dispense(volume_ul, speed)
 
 
@@ -369,8 +440,10 @@ def blowout(
     speed: float = 50.0,
     height: float = 0.0,
     travel_clearance: PipetteTravelClearance = 3.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
-    """Move pipette to *position*, then blowout."""
+    """Blow out at *position*, retracting before any required piston reset."""
     try:
         validate_pipette_travel_clearance(travel_clearance)
     except ValueError as exc:
@@ -382,8 +455,25 @@ def blowout(
             "for tracked liquid handling."
         )
     pipette = _get_pipette(context)
-    _engage_standalone(context, position, command="blowout", height=height)
-    pipette.blowout(speed)
+    retract_z = _blowout_retract_z(context, pipette, position, height)
+    tip_position = _engage_standalone(
+        context, position, command="blowout", height=height,
+        x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+    )
+    planned_retract = None
+    if getattr(context.deck, "planning_enabled", False) is True:
+        from ..routing import prepared_step
+
+        planned_retract = prepared_step(context, "blowout").data.get("blowout_retract")
+    _blowout_and_retract(
+        context, pipette, tip_position, speed, retract_z, planned_retract,
+    )
+
+
+@protocol_command("pipette_home", summary=_summaries.pipette_home)
+def pipette_home(context: ProtocolContext) -> None:
+    """Return the pipette piston home at its current gantry position."""
+    _get_pipette(context).home()
 
 
 @protocol_command("mix", summary=_summaries.mix)
@@ -395,6 +485,8 @@ def mix(
     speed: float = 50.0,
     height: float = 0.0,
     travel_clearance: PipetteTravelClearance = 3.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> Any:
     """Move pipette to *position* at *height*, then mix ``cycles`` times
     between that height and 1 mm above it."""
@@ -440,7 +532,10 @@ def mix(
 
             result = MixResult(success=True, volume_ul=volume_ul, cycles=cycles)
         else:
-            tip = _engage(context, position, command_label="mix", height=height)
+            tip = _engage(
+                context, position, command_label="mix", height=height,
+                x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+            )
             result = pipette.mix(
                 volume_ul, cycles, speed, gantry=context.gantry, position=tip,
             )
@@ -466,6 +561,8 @@ def pick_up_tip(
     context: ProtocolContext,
     position: str,
     speed: float = 50.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
     """Move pipette to *position*, then pick up a tip.
 
@@ -551,7 +648,10 @@ def pick_up_tip(
             for plan in planned.plans[attach_after + 1:]:
                 context.routing_session.execute(plan)
         else:
-            _engage(context, position, command_label="pick_up_tip")
+            _engage(
+                context, position, command_label="pick_up_tip",
+                x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+            )
             pipette.pick_up_tip(speed)
             pipette.set_attached_tip_extension(rack.tip_length)
             rack.mark_tip_used(tip_id)
@@ -583,6 +683,10 @@ def transfer(
     liquid_class: Optional[str] = None,
     require_uncapped: Optional[List[str]] = None,
     travel_clearance: PipetteTravelClearance = 3.0,
+    source_x_offset_mm: float = 0.0,
+    source_y_offset_mm: float = 0.0,
+    destination_x_offset_mm: float = 0.0,
+    destination_y_offset_mm: float = 0.0,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*.
 
@@ -641,8 +745,9 @@ def transfer(
     right after the *final* stroke's dispense -- clearing any fluid left in
     the tip after the transfer is otherwise complete, rather than after
     every stroke of a multi-stroke transfer. It does not change the
-    tracked dispense volume; a blow-out failure is treated the same as a
-    dispense failure (the stroke is marked ``reconciliation_required``).
+    tracked dispense volume. Instruments requiring a piston reset retract
+    to ``safe_z`` first, then home. Blow-out, retract, and home failures
+    require reconciliation before the final stroke can be considered complete.
     """
     try:
         validate_pipette_travel_clearance(travel_clearance)
@@ -764,6 +869,9 @@ def transfer(
     if resolved_destination_height is None:
         resolved_destination_height = 0.0
 
+    retract_z = _blowout_retract_z(
+        context, pipette, destination, resolved_destination_height,
+    )
     planned = None
     if getattr(context.deck, "planning_enabled", False) is True:
         from ..routing import prepared_step
@@ -798,6 +906,12 @@ def transfer(
                 planned_source=(planned.plans[2 * stroke_index] if planned else None),
                 planned_destination=(planned.plans[2 * stroke_index + 1] if planned else None),
                 blow_out=stroke_index == stroke_count - 1,
+                blowout_retract_z=retract_z,
+                planned_blowout_retract=(planned.data.get("blowout_retract") if planned else None),
+                source_x_offset_mm=source_x_offset_mm,
+                source_y_offset_mm=source_y_offset_mm,
+                destination_x_offset_mm=destination_x_offset_mm,
+                destination_y_offset_mm=destination_y_offset_mm,
             )
     finally:
         context.active_substep = previous_substep
@@ -822,6 +936,12 @@ def _execute_transfer_stroke(
     planned_source: Any = None,
     planned_destination: Any = None,
     blow_out: bool = False,
+    blowout_retract_z: float | None = None,
+    planned_blowout_retract: Any = None,
+    source_x_offset_mm: float = 0.0,
+    source_y_offset_mm: float = 0.0,
+    destination_x_offset_mm: float = 0.0,
+    destination_y_offset_mm: float = 0.0,
 ) -> None:
     """Journal, actuate, and commit exactly one transfer stroke.
 
@@ -864,20 +984,26 @@ def _execute_transfer_stroke(
             _engage(
                 context, source, command_label="transfer.aspirate",
                 height=source_height,
+                x_offset_mm=source_x_offset_mm, y_offset_mm=source_y_offset_mm,
             )
         else:
             context.routing_session.execute(planned_source)
         pipette.aspirate(commanded_volume_ul, speed)
         if planned_destination is None:
-            _engage(
+            destination_tip = _engage(
                 context, destination, command_label="transfer.dispense",
                 height=destination_height,
+                x_offset_mm=destination_x_offset_mm, y_offset_mm=destination_y_offset_mm,
             )
         else:
             context.routing_session.execute(planned_destination)
+            destination_tip = _planned_tip_position(context, planned_destination)
         pipette.dispense(commanded_volume_ul, speed)
         if blow_out:
-            pipette.blowout(speed)
+            _blowout_and_retract(
+                context, pipette, destination_tip, speed, blowout_retract_z,
+                planned_blowout_retract,
+            )
     except BaseException as exc:
         if operation_key is not None:
             _mark_transfer_stroke_uncertain(
@@ -909,6 +1035,8 @@ def drop_tip(
     context: ProtocolContext,
     position: str,
     speed: float = 50.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
     """Move pipette to *position*, then drop the tip.
 
@@ -950,7 +1078,10 @@ def drop_tip(
 
     try:
         if planned is None:
-            _engage(context, position, command_label="drop_tip")
+            _engage(
+                context, position, command_label="drop_tip",
+                x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
+            )
         else:
             context.routing_session.execute(planned.plans[0])
         pipette.drop_tip(speed)
@@ -1043,12 +1174,13 @@ def multi_dispense(
             "Resolve any remaining or uncertain liquid before starting a batch."
         )
 
+    retract_z = _blowout_retract_z(context, pipette, destinations[-1], destination_height)
     _engage(context, source, command_label="multi_dispense.aspirate", height=source_height)
     result = pipette.aspirate(total, speed)
     if not result.success:
         raise ProtocolExecutionError("multi_dispense aspiration did not succeed.")
     for destination, volume in zip(destinations, volumes):
-        _engage(
+        destination_tip = _engage(
             context, destination, command_label="multi_dispense.dispense",
             height=destination_height,
         )
@@ -1056,7 +1188,7 @@ def multi_dispense(
         if not result.success:
             raise ProtocolExecutionError("multi_dispense dispense did not succeed.")
         _record_transfer_to_store(context, source, destination, volume)
-    pipette.blowout(speed)
+    _blowout_and_retract(context, pipette, destination_tip, speed, retract_z)
 
 
 @protocol_command("serial_transfer", summary=_summaries.serial_transfer)
@@ -1070,6 +1202,10 @@ def serial_transfer(
     speed: float = 50.0,
     source_height: float = 0.0,
     destination_height: float = 0.0,
+    source_x_offset_mm: float = 0.0,
+    source_y_offset_mm: float = 0.0,
+    destination_x_offset_mm: float = 0.0,
+    destination_y_offset_mm: float = 0.0,
 ) -> None:
     """Transfer from *source* to each well along a row or column.
 
@@ -1117,7 +1253,11 @@ def serial_transfer(
             context.active_substep = f"{index}:{destination}"
             transfer(context, source=source, destination=destination,
                      volume_ul=vol, speed=speed, source_height=source_height,
-                     destination_height=destination_height)
+                     destination_height=destination_height,
+                     source_x_offset_mm=source_x_offset_mm,
+                     source_y_offset_mm=source_y_offset_mm,
+                     destination_x_offset_mm=destination_x_offset_mm,
+                     destination_y_offset_mm=destination_y_offset_mm)
     finally:
         context.active_substep = previous_substep
 

@@ -88,6 +88,11 @@ def validate_planning_configuration(protocol: Any, context: Any) -> None:
                 ):
                     _motion_for(context.deck, _fixture_key(context.deck, position))
             elif step.command_name == "pick_up_tip":
+                if args.get("x_offset_mm", 0.0) or args.get("y_offset_mm", 0.0):
+                    raise InvalidGeometryError(
+                        "planned pick_up_tip requires zero XY offsets so pickup "
+                        "matches the registered tip slot and vertical access corridor."
+                    )
                 resolve_tip_rack_slot(context.deck, args["position"])
                 rack_key = (
                     args["position"].rsplit(".", 1)[0]
@@ -282,6 +287,10 @@ class RoutingSession:
                     tool_state=state,
                     current_target=current_target,
                     current_instrument=current_instrument,
+                    source_x_offset_mm=args.get("source_x_offset_mm", 0.0),
+                    source_y_offset_mm=args.get("source_y_offset_mm", 0.0),
+                    destination_x_offset_mm=args.get("destination_x_offset_mm", 0.0),
+                    destination_y_offset_mm=args.get("destination_y_offset_mm", 0.0),
                     travel_clearance=args.get("travel_clearance", 3.0),
                 )
                 current_instrument = "pipette"
@@ -293,9 +302,20 @@ class RoutingSession:
                     "pipette", state, command=command, operation=command,
                     previous_target=current_target,
                     previous_instrument=current_instrument,
+                    x_offset_mm=args.get("x_offset_mm", 0.0),
+                    y_offset_mm=args.get("y_offset_mm", 0.0),
                     travel_clearance=args.get("travel_clearance", 3.0),
                 )
-                value = PreparedMotionStep(command, (plan,), {})
+                plans = (plan,)
+                data = {}
+                if command == "blowout":
+                    retract, current = self._plan_blowout_retract(
+                        current, args["position"], float(args.get("height", 0.0)), state,
+                    )
+                    if retract is not None:
+                        plans += (retract,)
+                        data["blowout_retract"] = retract
+                value = PreparedMotionStep(command, plans, data)
                 current_target = _fixture_key(self.context.deck, args["position"])
                 current_instrument = "pipette"
             elif command == "mix":
@@ -308,6 +328,8 @@ class RoutingSession:
                     tool_state=state,
                     current_target=current_target,
                     current_instrument=current_instrument,
+                    x_offset_mm=args.get("x_offset_mm", 0.0),
+                    y_offset_mm=args.get("y_offset_mm", 0.0),
                 )
                 current_instrument = "pipette"
             elif command == "drop_tip":
@@ -317,6 +339,8 @@ class RoutingSession:
                     tool_state=state,
                     current_target=current_target,
                     current_instrument=current_instrument,
+                    x_offset_mm=args.get("x_offset_mm", 0.0),
+                    y_offset_mm=args.get("y_offset_mm", 0.0),
                 )
                 current_instrument = "pipette"
             elif command == "capture":
@@ -339,6 +363,8 @@ class RoutingSession:
         current_target: str | None,
         current_instrument: str | None,
         tool_state: ToolState,
+        x_offset_mm: float = 0.0,
+        y_offset_mm: float = 0.0,
     ) -> tuple[MotionPlan, Point3D]:
         if travel_z is not None:
             raise InvalidGeometryError(
@@ -357,11 +383,12 @@ class RoutingSession:
             target_fixture = _fixture_key(self.context.deck, position)
             mounted = self.context.gantry.instruments[instrument]
             end = Point3D(
-                coordinate.x - mounted.offset_x,
-                coordinate.y - mounted.offset_y,
+                coordinate.x + x_offset_mm - mounted.offset_x,
+                coordinate.y + y_offset_mm - mounted.offset_y,
                 self.context.gantry_config.working_volume.z_max,
             )
         if target_fixture is None:
+            action = Point3D(action.x + x_offset_mm, action.y + y_offset_mm, action.z)
             end = _carriage_for(self.context, instrument, action, tool_state)
         plan = self._approach(
             current, end, instrument, tool_state,
@@ -475,6 +502,10 @@ class RoutingSession:
         tool_state: ToolState,
         current_target: str | None,
         current_instrument: str | None,
+        source_x_offset_mm: float = 0.0,
+        source_y_offset_mm: float = 0.0,
+        destination_x_offset_mm: float = 0.0,
+        destination_y_offset_mm: float = 0.0,
     ) -> tuple[PreparedMotionStep, Point3D, str]:
         if tool_state.attached_tip_extension_mm <= 0:
             raise InvalidGeometryError("transfer requires an attached pipette tip.")
@@ -485,6 +516,7 @@ class RoutingSession:
                 current, source, source_height, "pipette", tool_state,
                 command="transfer", operation="aspirate", previous_target=previous_target,
                 previous_instrument=current_instrument,
+                x_offset_mm=source_x_offset_mm, y_offset_mm=source_y_offset_mm,
                 travel_clearance=travel_clearance,
             )
             plans.append(source_plan)
@@ -493,12 +525,39 @@ class RoutingSession:
                 current, destination, destination_height, "pipette", tool_state,
                 command="transfer", operation="dispense", previous_target=source_key,
                 previous_instrument="pipette",
+                x_offset_mm=destination_x_offset_mm, y_offset_mm=destination_y_offset_mm,
                 travel_clearance=travel_clearance,
             )
             plans.append(destination_plan)
             previous_target = _fixture_key(self.context.deck, destination)
             current_instrument = "pipette"
-        return PreparedMotionStep("transfer", tuple(plans), {"stroke_count": stroke_count}), current, previous_target
+        retract, current = self._plan_blowout_retract(
+            current, destination, destination_height, tool_state,
+        )
+        data = {"stroke_count": stroke_count}
+        if retract is not None:
+            plans.append(retract)
+            data["blowout_retract"] = retract
+        return PreparedMotionStep("transfer", tuple(plans), data), current, previous_target
+
+    def _plan_blowout_retract(
+        self, current: Point3D, position: str, height: float, tool_state: ToolState,
+    ) -> tuple[MotionPlan | None, Point3D]:
+        from .commands.pipette import _blowout_retract_z
+
+        pipette = self.context.gantry.instruments["pipette"]
+        retract_z = _blowout_retract_z(self.context, pipette, position, height)
+        if retract_z is None:
+            return None, current
+        end = Point3D(
+            current.x, current.y,
+            retract_z + pipette.depth + tool_state.attached_tip_extension_mm,
+        )
+        plan = self._plan(
+            current, end, "pipette", tool_state,
+            (_fixture_key(self.context.deck, position),), "blowout", "withdrawal",
+        )
+        return plan, end
 
     def _plan_mix(
         self,
@@ -511,6 +570,8 @@ class RoutingSession:
         tool_state: ToolState,
         current_target: str | None,
         current_instrument: str | None,
+        x_offset_mm: float = 0.0,
+        y_offset_mm: float = 0.0,
     ) -> tuple[PreparedMotionStep, Point3D, str]:
         if tool_state.attached_tip_extension_mm <= 0:
             raise InvalidGeometryError("mix requires an attached pipette tip.")
@@ -518,6 +579,7 @@ class RoutingSession:
             current, position, height, "pipette", tool_state,
             command="mix", operation="engage", previous_target=current_target,
             previous_instrument=current_instrument,
+            x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
             travel_clearance=travel_clearance,
         )
         fixture_key = _fixture_key(self.context.deck, position)
@@ -537,6 +599,8 @@ class RoutingSession:
         tool_state: ToolState,
         current_target: str | None,
         current_instrument: str | None,
+        x_offset_mm: float = 0.0,
+        y_offset_mm: float = 0.0,
     ) -> tuple[PreparedMotionStep, Point3D, ToolState, None]:
         if tool_state.attached_tip_extension_mm <= 0:
             raise InvalidGeometryError("drop_tip requires an attached pipette tip.")
@@ -544,6 +608,7 @@ class RoutingSession:
             current, position, 0.0, "pipette", tool_state,
             command="drop_tip", operation="engage", previous_target=current_target,
             previous_instrument=current_instrument,
+            x_offset_mm=x_offset_mm, y_offset_mm=y_offset_mm,
         )
         bare = ToolState()
         fixture_key = _fixture_key(self.context.deck, position)
@@ -590,13 +655,17 @@ class RoutingSession:
         operation: str,
         previous_target: str | None,
         previous_instrument: str | None,
+        x_offset_mm: float = 0.0,
+        y_offset_mm: float = 0.0,
         travel_clearance: float | None = None,
     ) -> tuple[MotionPlan, Point3D]:
         validate_pipette_travel_clearance(travel_clearance)
         coordinate = self.context.deck.resolve_coordinate(position)
         fixture_key = _fixture_key(self.context.deck, position)
         motion = _motion_for(self.context.deck, fixture_key)
-        action = Point3D(coordinate.x, coordinate.y, coordinate.z + height)
+        action = Point3D(
+            coordinate.x + x_offset_mm, coordinate.y + y_offset_mm, coordinate.z + height,
+        )
         end = _carriage_for(self.context, instrument, action, tool_state)
         target = self.context.deck.resolve_labware_target(position)
         if (

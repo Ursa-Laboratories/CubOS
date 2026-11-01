@@ -32,6 +32,7 @@ def ctx(request, monkeypatch):
         pipette = SartoriusPicus2Pipette(pipette_model="picus2_1ch_120", offline=True)
     pipette.pick_up_tip()
     board = MagicMock()
+    board.safe_z = 100.0
     board.instruments = {"pipette": pipette}
     deck = Deck({
         name: Vial(
@@ -53,7 +54,7 @@ def test_one_aspiration_order_and_volume_bookkeeping(ctx, monkeypatch):
     pipette = ctx.gantry.instruments["pipette"]
     events = []
     ctx.gantry.move.side_effect = lambda tool, xyz: events.append(("move", xyz))
-    for method in ["aspirate", "dispense", "blowout"]:
+    for method in ["aspirate", "dispense", "blowout", "home"]:
         original = getattr(pipette, method)
 
         def record(*args, method=method, original=original):
@@ -63,12 +64,15 @@ def test_one_aspiration_order_and_volume_bookkeeping(ctx, monkeypatch):
 
         monkeypatch.setattr(pipette, method, record)
     run(ctx, source_height=-2, destination_height=3, speed=25)
-    assert events == [
+    expected = [
         ("move", (30, 50, 18)), ("aspirate", (100, 25), 100),
         ("move", (50, 50, 23)), ("dispense", (40, 25), 60),
         ("move", (70, 50, 23)), ("dispense", (60, 25), 0),
         ("blowout", (25,), 0),
     ]
+    if pipette.requires_home_after_blowout:
+        expected.extend([("move", (70, 50, 100)), ("home", (), 0)])
+    assert events == expected
 
 
 @pytest.mark.parametrize("volumes", [[], [40], [0, 40], [-20, 40], [True, 40],

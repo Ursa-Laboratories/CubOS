@@ -3,6 +3,14 @@
 YAML is the standard operator-facing protocol format and the path used by the
 stock validation and run scripts.
 
+For complete workflow configurations and experiment recipes, use the
+[CubOS Protocol Library](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library).
+The [Polar Bear files](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library/tree/main/cubxl_plus/polar_bear)
+are maintained there with their provenance and validation status. See
+[YAML File Overview](configuration.md) for the directory layout and Operator
+configuration. The bundled paths used in the examples below remain available
+for learning and offline checks.
+
 ## Before You Validate and Run
 
 Check these before every run, not just the first one of the day:
@@ -115,6 +123,17 @@ Two conventions apply throughout:
 - **Height arguments** (`measurement_height`, `interwell_scan_height`, pipette
   `height`, …) are labware-relative offsets in mm: positive is above the
   labware surface Z, negative is below.
+- **Lateral offsets** (`x_offset_mm` and `y_offset_mm`) are signed millimetre
+  adjustments from the resolved target: positive follows the gantry's +X/+Y
+  direction and negative follows -X/-Y. `move`, `measure`, `scan`, `cure`,
+  `cap`, `decap`, and the direct pipette commands support them. Transfers use
+  `source_x_offset_mm`/`source_y_offset_mm` and
+  `destination_x_offset_mm`/`destination_y_offset_mm`.
+
+These command fields belong to the shared CubOS protocol engine. They are
+available to every station and vendor using the corresponding generic command.
+Station-specific values, mounting calibrations, and workflow recipes belong
+in the [protocol library](https://github.com/Ursa-Laboratories/CubOS-Protocol-Library).
 
 Commands available in YAML:
 
@@ -129,6 +148,7 @@ Commands available in YAML:
 - `aspirate`
 - `dispense`
 - `blowout`
+- `pipette_home`
 - `mix`
 - `transfer`
 - `serial_transfer`
@@ -183,6 +203,14 @@ approach and ends **above** the target (no descent).
   ceiling (`max(safe_z, z_max - instrument depth)`) before XY travel so every
   mounted tool clears the deck; a Z-only move is sent as-is. Applies **only**
   to literal/named targets; supplying it with a deck target is an error.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
+  adjustments applied to the resolved destination.
+
+With `motion_planning` enabled on the deck, the collision-aware router owns
+the exact segments, including coordinated XY motion when clear. Offsets are
+applied before planning for literal, named, and deck targets; `travel_z` is
+rejected. Deck targets end at the carriage ceiling. Legacy decks retain
+axis-by-axis travel and the clearance behavior above.
 
 ### `measure`
 
@@ -201,6 +229,8 @@ instrument method, and persist the result if a campaign is attached.
   to the sensor-detected sample surface instead and must be at or below `0`.
 - `method_kwargs` *(dict, default `{}`)* — forwarded verbatim to the instrument
   method. See [method_kwargs](#method_kwargs) below.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
+  adjustments applied to the resolved well.
 
 ### `scan`
 
@@ -219,6 +249,8 @@ instrument method at each well. Returns a `{well_id: result}` mapping.
   sample surface instead and must be at or below `0`.
 - `delay_s` *(float, default `0.0`)* — seconds to pause between wells.
 - `method_kwargs` *(dict, default `null`)* — forwarded to the method per well.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — apply the same signed
+  lateral adjustment at every well in the scan.
 
 ### `pause`
 
@@ -304,7 +336,7 @@ Move to a position and dispense a specified volume from the attached tip.
 - `height` *(float, default `0.0`)* — labware-relative Z offset in mm.
 
 Standalone `aspirate`, `dispense`, and `blowout` support collision-aware routing,
-including attached-tip geometry and the configured `height`. Timed `pause`
+including attached-tip geometry, XY offsets, and the configured `height`. Timed `pause`
 keeps the current pose and does not add motion. All routes are checked before
 any step executes. These standalone liquid commands do not update durable
 fluid inventory and are rejected in routed runs when durable fluid tracking is active; use
@@ -312,11 +344,37 @@ fluid inventory and are rejected in routed runs when durable fluid tracking is a
 
 #### `blowout`
 
-Move to a position and blow out.
+Move to a position and blow out. By default, Sartorius Picus protocols then
+lift the tip vertically to `safe_z` before returning the piston home. This
+also applies to the final blowout in each `transfer` and `serial_transfer`
+destination, and at the last `multi_dispense` destination. `safe_z` must be above
+both the calibrated labware surface and the blowout height. A failed lift stops the command without homing; tracked
+transfer failures require reconciliation. Other pipette drivers retain their
+existing behavior. Setting `blowout_go_home: true` explicitly keeps the Picus
+return stroke at the blowout position, which can draw liquid into a submerged tip.
+
+For routed runs, the Picus withdrawal is checked during whole-protocol
+preflight and executed as an exact planned segment before piston homing.
+The following step starts from that withdrawn pose. Routed `transfer`, `mix`,
+and `drop_tip` also apply their XY offsets before collision checks. Routed
+`pick_up_tip` requires zero XY offsets to match the registered slot and its
+vertical access corridor.
+
+Routing v1 still rejects unsupported commands before any movement, including
+`image_well` sweeps and `pipette_home`. Those commands remain available on
+legacy decks; a planning-enabled deck never falls back to unplanned motion.
 
 - `position` *(str, required)* — deck target.
 - `speed` *(float, default `50.0`)* — blowout speed.
 - `height` *(float, default `0.0`)* — engage offset.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
+  adjustments from the target.
+
+#### `pipette_home`
+
+Return the pipette piston to its home position without moving the gantry. Call
+this only after a separate `move` has lifted or moved the tip clear of liquid.
+No arguments.
 
 #### `mix`
 
@@ -405,6 +463,10 @@ list order, and dispense one portion at each. Blow out only after the last
 portion, at the last destination. `transfer` and `serial_transfer` retain their
 existing behavior; use this command to share a single aspiration.
 
+With the default Picus configuration, the final blowout is followed by a vertical
+retraction to `safe_z`, then piston homing. Clearance at the last destination is
+checked before aspiration. A retraction or homing failure stops without retry.
+
 - `source` *(str, required)* — source deck target.
 - `destinations` *(list of str, required)* — nonempty ordered deck targets.
 - `volumes` *(list of float, required)* — one positive, finite volume in µL
@@ -484,11 +546,14 @@ Instruments](gantry-setup.md#define-instruments)). Both take:
   gantry.
 - `vial` *(str, required)* — deck target naming the vial (or vial-grid
   position) to decap/cap.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0.0`)* — signed lateral
+  adjustments from the resolved vial position.
 
 Motion is fixed and built entirely from generic gantry primitives, never
 hardcoded per vial: **approach** at `safe_z` → **engage** at the
 instrument's configured `engage_depth_mm` (a labware-relative Z offset) →
-**capture**/**release** (sensor-confirmed, retried up to the instrument's
+**capture**/**release** (with the configured decap Y shimmy, if any;
+sensor-confirmed and retried up to the instrument's
 `capture_retries`) → **retract** to `safe_z`. The tool is left above the
 vial; the next command lifts to the working-volume ceiling before any XY
 travel. A sensor timeout or a reading
@@ -555,9 +620,11 @@ placeholder PNG so dry runs exercise the full file/persistence path.
 
 #### `image_well`
 
-The packaged well-imaging sequence: travel above the well at `safe_z`,
-descend to the imaging plane, light the well, capture, lights off, retract
-to `safe_z` — with lights-off and the retract guaranteed even on failure.
+The packaged well-imaging sequence: approach through the multi-tool carriage
+clearance plane, descend to the imaging plane, light the well, capture, lights
+off, and retract to clearance. Lights-off and retraction are attempted even
+on failure. Setup validation checks the same capture positions and clearance
+plane as execution, including the segments between sweep positions.
 
 - `camera` *(str, required)* — camera instrument.
 - `well` *(str, required)* — deck target of the well to image.
@@ -572,8 +639,26 @@ to `safe_z` — with lights-off and the retract guaranteed even on failure.
   lights at 5% (or `brightness`); `curvature` is a contact-angle Z-stack:
   from `image_height` descend `z_step_mm` per plane for `z_steps` planes
   (defaults 0.2 mm × 11) with contact lights at 50% (or `brightness`),
-  labeling each image `{label}_z{z}mm_b{brightness}`.
+  labeling each image `{label}_z={absolute_z}mm_b{brightness}`. This preserves
+  the existing filename format: `absolute_z` is carriage WPos Z (well Z +
+  image height + camera depth), formatted to three decimal places with `-`
+  replacing the decimal point.
 - `brightness` *(int, optional)* — override the mode's default level.
+- `x_offset_mm`, `y_offset_mm` *(float, default `0`)* — shift a single
+  capture from the calibrated well center while preserving attribution to
+  that well.
+- `x_sweep_start_mm`, `x_sweep_stop_mm` *(float, optional pair)* — in
+  `standard` mode, capture an inclusive X sweep between these offsets. The
+  camera approaches the first point through clearance, then moves directly
+  between X positions at the image height and retracts after the last image.
+- `x_sweep_step_mm` *(float, default `1`)* — signed spacing between sweep
+  positions. Its sign must point from the start toward the stop. Sweep image
+  labels are prefixed with `left_*`, `center_*`, or `right_*`.
+
+Sweep validation rejects out-of-bounds positions and paths intersecting the
+configured gantry family's built-in fixed structures. Check actual labware
+and all mounted tools for clearance before a physical run; these checks do
+not model arbitrary objects placed on the deck.
 
 Capture and lighting failures **log and continue** (an image is never
 worth failing a run over) and the command returns the list of image paths

@@ -48,6 +48,24 @@ def unpack_xyz(coord: Any) -> tuple[float, float, float]:
     return (coord.x, coord.y, coord.z)
 
 
+def offset_xy(
+    coord: Any,
+    *,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
+    source: str,
+) -> tuple[float, float, float]:
+    """Return *coord* shifted laterally by finite signed offsets."""
+    _assert_finite_number(
+        x_offset_mm, field_name="x_offset_mm", source=source,
+    )
+    _assert_finite_number(
+        y_offset_mm, field_name="y_offset_mm", source=source,
+    )
+    x, y, z = unpack_xyz(coord)
+    return x + float(x_offset_mm), y + float(y_offset_mm), z
+
+
 def engage_at_labware(
     context: Any,
     instrument: str,
@@ -55,6 +73,8 @@ def engage_at_labware(
     *,
     measurement_height: float,
     command_label: str,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> tuple[float, float, float, float]:
     """Travel above *position* at ``safe_z``, descend to the action plane.
 
@@ -95,8 +115,18 @@ def engage_at_labware(
             f"{command_label}: cannot resolve position {position!r} on the "
             f"deck: {exc}"
         ) from exc
-    x, y, well_z = unpack_xyz(coord)
+    x, y, well_z = offset_xy(
+        coord,
+        x_offset_mm=x_offset_mm,
+        y_offset_mm=y_offset_mm,
+        source=f"command '{command_label}'",
+    )
     action_z = well_z + measurement_height
-    context.gantry.move_to_labware(instrument, coord)
+    approach_coord = (
+        coord
+        if float(x_offset_mm) == 0.0 and float(y_offset_mm) == 0.0
+        else (x, y, well_z)
+    )
+    context.gantry.move_to_labware(instrument, approach_coord)
     context.gantry.move(instrument, (x, y, action_z))
     return x, y, well_z, action_z

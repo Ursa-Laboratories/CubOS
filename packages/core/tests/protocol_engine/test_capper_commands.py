@@ -47,7 +47,7 @@ class FakeGantry:
         if self.move_to_labware_raises is not None:
             raise self.move_to_labware_raises
 
-    def move(self, instrument, position):
+    def move(self, instrument, position, **_kwargs):
         self._move_call_count += 1
         self.trace.append(("move", position))
         if self.move_raises_on_call == self._move_call_count:
@@ -137,6 +137,28 @@ class TestDecapSequencing:
         decap(ctx, "capper", "vial_1")
         assert gantry.instruments["capper"].read_cap_present() is True
 
+    def test_applies_xy_offsets_to_the_whole_sequence(self):
+        ctx, gantry = _untracked_context()
+        decap(ctx, "capper", "vial_1", x_offset_mm=1.5, y_offset_mm=-2.0)
+        assert gantry.trace[0] == (
+            "approach", (11.5, 18.0, 30.0),
+        )
+        assert gantry.trace[1] == ("move", (11.5, 18.0, 22.0))
+        assert gantry.trace[-2] == ("move", (11.5, 18.0, SAFE_Z))
+
+    def test_cap_release_shimmy_does_not_run_during_decap(self):
+        capper = _make_capper(cap_release_shimmy_y_mm=2.0)
+        ctx, gantry = _untracked_context(capper=capper)
+        decap(ctx, "capper", "vial_1")
+        engage_z = 30.0 + capper.engage_depth_mm
+        assert gantry.trace == [
+            ("approach", Coordinate3D(x=10.0, y=20.0, z=30.0)),
+            ("move", (10.0, 20.0, engage_z)),
+            "capture_cap",
+            ("move", (10.0, 20.0, SAFE_Z)),
+            "read_cap_present",
+        ]
+
 
 class TestCapSequencing:
     def test_exact_action_order(self):
@@ -154,12 +176,76 @@ class TestCapSequencing:
             "read_cap_present",
         ]
 
+    def test_release_shimmy_runs_plus_minus_center_only_after_failed_cap(self):
+        capper = _make_capper(
+            cap_release_shimmy_y_mm=5.0,
+            capture_retries=1,
+        )
+        capper.capture_cap()
+        original_release = capper.release_cap
+        release_attempt = {"count": 0}
+
+        def fail_first_release():
+            release_attempt["count"] += 1
+            if release_attempt["count"] == 1:
+                capper.actuation_log.append("release_cap")
+                return
+            original_release()
+
+        capper.release_cap = fail_first_release
+        ctx, gantry = _untracked_context(capper=capper)
+        gantry.trace.clear()
+        cap(ctx, "capper", "vial_1")
+        engage_z = 30.0 + capper.engage_depth_mm
+        assert gantry.trace == [
+            ("approach", Coordinate3D(x=10.0, y=20.0, z=30.0)),
+            ("move", (10.0, 20.0, engage_z)),
+            "release_cap",
+            ("move", (10.0, 20.0, SAFE_Z)),
+            "read_cap_present",
+            ("move", (10.0, 20.0, engage_z)),
+            "release_cap",
+            ("move", (10.0, 25.0, engage_z)),
+            ("move", (10.0, 15.0, engage_z)),
+            ("move", (10.0, 20.0, engage_z)),
+            ("move", (10.0, 20.0, SAFE_Z)),
+            "read_cap_present",
+        ]
+
+    def test_successful_cap_does_not_shimmy(self):
+        capper = _make_capper(cap_release_shimmy_y_mm=5.0)
+        capper.capture_cap()
+        ctx, gantry = _untracked_context(capper=capper)
+        gantry.trace.clear()
+        cap(ctx, "capper", "vial_1")
+        assert ("move", (10.0, 25.0, 22.0)) not in gantry.trace
+        assert ("move", (10.0, 15.0, 22.0)) not in gantry.trace
+
     def test_cap_absent_after_cap(self):
         capper = _make_capper()
         capper.capture_cap()
         ctx, gantry = _untracked_context(capper=capper)
         cap(ctx, "capper", "vial_1")
         assert gantry.instruments["capper"].read_cap_present() is False
+
+    def test_release_overtravel_only_changes_cap_engagement(self):
+        capper = _make_capper(release_overtravel_mm=0.5)
+        capper.capture_cap()
+        ctx, gantry = _untracked_context(capper=capper)
+        gantry.trace.clear()
+
+        cap(ctx, "capper", "vial_1")
+
+        assert gantry.trace[1] == (
+            "move", (10.0, 20.0, 30.0 + capper.engage_depth_mm - 0.5),
+        )
+
+        capper = _make_capper(release_overtravel_mm=0.5)
+        ctx, gantry = _untracked_context(capper=capper)
+        decap(ctx, "capper", "vial_1")
+        assert gantry.trace[1] == (
+            "move", (10.0, 20.0, 30.0 + capper.engage_depth_mm),
+        )
 
     def test_release_confirm_reads_after_retract_with_beam_realistic_sensor(self):
         """Regression: the real line-break sensor reads cap-present at engage

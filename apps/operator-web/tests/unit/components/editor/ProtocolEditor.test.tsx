@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import ProtocolEditor from "../../../../src/components/editor/ProtocolEditor";
+import { expandStepsAcrossWells } from "../../../../src/components/editor/protocolRepeat";
 import type { CommandInfo, DeckResponse, GantryResponse, ProtocolResponse, ProtocolStep } from "../../../../src/types";
 
 const COMMANDS: CommandInfo[] = [
@@ -119,6 +120,71 @@ function renderProtocol(overrides: Partial<React.ComponentProps<typeof ProtocolE
 }
 
 describe("ProtocolEditor", () => {
+  it("expands a step block across wells and labels each image for processing", () => {
+    const result = expandStepsAcrossWells(
+      [
+        { command: "aspirate", args: { position: "plate_1.A1", volume_ul: 10 } },
+        { command: "image_well", args: { position: "plate_1.A1", label: "after_dispense" } },
+        { command: "wait", args: { seconds: 1 } },
+      ],
+      1,
+      2,
+      "plate_1",
+      "A1",
+      ["A2", "B1"],
+    );
+
+    expect(result).toEqual([
+      { command: "aspirate", args: { position: "plate_1.A2", volume_ul: 10 } },
+      { command: "image_well", args: { position: "plate_1.A2", label: "after_dispense_A2" } },
+      { command: "aspirate", args: { position: "plate_1.B1", volume_ul: 10 } },
+      { command: "image_well", args: { position: "plate_1.B1", label: "after_dispense_B1" } },
+      { command: "wait", args: { seconds: 1 } },
+    ]);
+  });
+
+  it("supports fresh-tip blocks, shared-tip blocks, and several expansions", () => {
+    const freshTip = expandStepsAcrossWells(
+      [
+        { command: "pick_up_tip", args: { position: "tips" } },
+        { command: "dispense", args: { position: "plate_1.A1", volume_ul: 10 } },
+        { command: "drop_tip", args: { position: "waste" } },
+      ],
+      1, 3, "plate_1", "A1", ["A1", "A2"],
+    );
+    expect(freshTip.map((step) => step.command)).toEqual([
+      "pick_up_tip", "dispense", "drop_tip",
+      "pick_up_tip", "dispense", "drop_tip",
+    ]);
+
+    const sharedTip = expandStepsAcrossWells(
+      [
+        { command: "pick_up_tip", args: { position: "tips" } },
+        { command: "dispense", args: { position: "plate_1.A1", volume_ul: 10 } },
+        { command: "drop_tip", args: { position: "waste" } },
+      ],
+      2, 2, "plate_1", "A1", ["A1", "A2"],
+    );
+    expect(sharedTip.map((step) => step.command)).toEqual([
+      "pick_up_tip", "dispense", "dispense", "drop_tip",
+    ]);
+
+    const firstBlock = expandStepsAcrossWells(
+      [
+        { command: "dispense", args: { position: "plate_1.A1", label: "first" } },
+        { command: "pause", args: { seconds: 1 } },
+        { command: "measure", args: { position: "plate_1.A1", label: "second" } },
+      ],
+      1, 1, "plate_1", "A1", ["A1", "A2"],
+    );
+    const secondBlock = expandStepsAcrossWells(
+      firstBlock, 4, 4, "plate_1", "A1", ["B1", "B2"],
+    );
+    expect(secondBlock.map((step) => step.args.position).filter(Boolean)).toEqual([
+      "plate_1.A1", "plate_1.A2", "plate_1.B1", "plate_1.B2",
+    ]);
+  });
+
   it("adds Rinse with a potentiostat and vial choices and saves the selected depth", async () => {
     const user = userEvent.setup();
     const rinse: CommandInfo = {
@@ -892,6 +958,36 @@ function renderMulti(args: Record<string, unknown> = MULTI_ARGS, overrides: Part
 }
 
 describe("multi-dispense destination rows", () => {
+  it("repeats paired destinations across wells and keeps incomplete rows blocked", async () => {
+    const user = userEvent.setup();
+    const args = { ...MULTI_ARGS, source: "stock", destinations: ["plate_1.A1", "plate_1.B2"] };
+    const props = renderMulti(args, {
+      deck: { ...DECK, labware: [{ ...DECK.labware[0], wells: {
+        A1: { x: 0, y: 0, z: 0 }, A2: { x: 9, y: 0, z: 0 },
+      } }] },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Build Repeated Steps" }));
+
+    expect(screen.getByLabelText("Step 1 destination 1")).toHaveValue("plate_1.A1");
+    expect(screen.getByLabelText("Step 2 destination 1")).toHaveValue("plate_1.A2");
+    expect(screen.getByLabelText("Step 2 destination 2")).toHaveValue("plate_1.B2");
+    expect(screen.getByLabelText("Step 2 volume 1 (µL)")).toHaveValue("20");
+    expect(screen.getByLabelText("Step 2 volume 2 (µL)")).toHaveValue("30");
+    await user.click(screen.getByRole("button", { name: "Validate" }));
+    expect(props.onValidate).toHaveBeenLastCalledWith({ protocol: [
+      { command: "multi_dispense", args },
+      { command: "multi_dispense", args: { ...args, destinations: ["plate_1.A2", "plate_1.B2"] } },
+    ] });
+    expect(screen.getByRole("button", { name: "Save" })).toBeEnabled();
+
+    await user.clear(screen.getByLabelText("Step 2 destination 2"));
+
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Validate" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Run Protocol" })).toBeDisabled();
+  });
+
   it("loads saved arrays and submits paired numeric arrays to Save and Validate", async () => {
     const user = userEvent.setup();
     const props = renderMulti();

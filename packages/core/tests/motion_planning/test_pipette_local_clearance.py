@@ -436,3 +436,55 @@ def test_unreachable_requested_clearance_falls_back_to_ceiling():
     plan = context.planned_motion_steps[1].plans[0]
     assert not _local_transit(plan)
     assert max(s.end.z for s in plan.segments) == 100
+
+
+@pytest.mark.parametrize("command", ["dispense", "mix", "transfer"])
+def test_local_plate_clearance_and_xy_offsets_work_together(command):
+    context, controller, _pipette = _plate()
+    if command == "transfer":
+        args = {
+            "source": "plate.A1", "destination": "plate.A2", "volume_ul": 25,
+            "source_x_offset_mm": 1, "source_y_offset_mm": 1,
+            "destination_x_offset_mm": 2, "destination_y_offset_mm": -3,
+        }
+    else:
+        args = {"position": "plate.A2", "volume_ul": 25, "x_offset_mm": 2, "y_offset_mm": -3}
+    args["travel_clearance"] = 7
+    compile_protocol([
+        CommandCall("aspirate", {
+            "position": "plate.A1", "volume_ul": 25, "x_offset_mm": 1, "y_offset_mm": 1,
+        }),
+        CommandCall(command, args),
+    ]).execute(context)
+
+    plans = context.planned_motion_steps[1].plans
+    plan = plans[1] if command == "transfer" else plans[0]
+    assert plan.end == Point3D(82, 47, 40)
+    assert {segment.start.z for segment in _local_transit(plan)} == {47.0}
+    assert controller.moves == [
+        (segment.end.x, segment.end.y, segment.end.z, None)
+        for plan in context.motion_plans for segment in plan.segments
+    ]
+
+
+def test_local_transfer_preserves_picus_withdrawal_before_next_plate_action():
+    context, controller, pipette = _plate()
+    pipette.requires_home_after_blowout = True
+    home_poses = []
+    pipette.home = lambda: home_poses.append(controller.get_coordinates())
+    compile_protocol([
+        CommandCall("transfer", {
+            "source": "plate.A1", "destination": "plate.A2", "volume_ul": 25,
+            "destination_x_offset_mm": 2, "destination_y_offset_mm": -3,
+            "travel_clearance": 7,
+        }),
+        CommandCall("aspirate", {"position": "plate.A1", "volume_ul": 25}),
+    ]).execute(context)
+
+    assert _local_transit(context.planned_motion_steps[0].plans[1])
+    assert home_poses == [{"x": 82.0, "y": 47.0, "z": 100.0}]
+    assert context.planned_motion_steps[1].plans[0].start == Point3D(82, 47, 100)
+    assert controller.moves == [
+        (segment.end.x, segment.end.y, segment.end.z, None)
+        for plan in context.motion_plans for segment in plan.segments
+    ]

@@ -26,7 +26,7 @@ from cubos.instruments.lighting.interface import LightingInstrument
 from ..errors import ProtocolExecutionError
 from ..registry import protocol_command
 from . import _summaries
-from ._movement import _assert_finite_number
+from ..camera_motion import plan_image_well
 from .lights import _get_lighting
 
 if TYPE_CHECKING:
@@ -43,6 +43,14 @@ _CURVATURE_DEFAULT_BRIGHTNESS = 50
 
 # Settle after motion before lighting/capturing.
 _SETTLE_S = 0.2
+
+def _x_offset_label(offset_mm: float) -> str:
+    magnitude = f"{abs(offset_mm):g}"
+    if offset_mm < 0:
+        return f"left_{magnitude}mm"
+    if offset_mm > 0:
+        return f"right_{magnitude}mm"
+    return "center_0mm"
 
 
 def default_images_dir() -> Path:
@@ -212,14 +220,19 @@ def image_well(
     brightness: int | None = None,
     z_steps: int = _CURVATURE_DEFAULT_Z_STEPS,
     z_step_mm: float = _CURVATURE_DEFAULT_Z_STEP_MM,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
+    x_sweep_start_mm: float | None = None,
+    x_sweep_stop_mm: float | None = None,
+    x_sweep_step_mm: float = 1.0,
 ) -> list[str]:
     """Move the camera over *well*, light it, capture, lights off, retract.
 
     * ``standard`` — one shot: descend to ``well.z + image_height``.
     * ``curvature`` — Z-stack: descend ``z_step_mm`` per plane for
-      ``z_steps`` planes; images are labeled ``{label}_z={absolute_z}mm_b{brightness}``,
-      where ``absolute_z`` is the carriage WPos Z at that plane (well Z +
-      offset + camera depth), matching the gantry readout.
+      ``z_steps`` planes; images are labeled
+      ``{label}_z={absolute_z}mm_b{brightness}``, where ``absolute_z``
+      is the carriage WPos Z (well Z + image height + camera depth).
 
     Lighting is part of the shot, not a separate step: ``light`` picks
     ``"off"`` (ambient), a lighting channel (e.g. ``"white"`` or
@@ -231,29 +244,22 @@ def image_well(
     ``image_height`` is a labware-relative offset (mm above the well's
     surface Z), like ``measure``'s ``measurement_height``. ``lights``
     names the lighting *instrument* and defaults to the gantry's lighting
-    instrument when it has exactly one. Capture and lighting failures log
+    instrument when it has exactly one. ``x_offset_mm`` and ``y_offset_mm``
+    shift the camera from the calibrated well center while keeping image
+    attribution on that well. Capture and lighting failures log
     and continue; motion failures raise. Lights-off and the retract to
-    ``safe_z`` run even on failure. Returns the saved image paths.
+    high carriage clearance run even on failure. Returns the saved image
+    paths.
+
+    For a fast lateral scan, provide ``x_sweep_start_mm``,
+    ``x_sweep_stop_mm``, and ``x_sweep_step_mm`` in ``standard`` mode. The
+    camera approaches the first offset through clearance, stays at the image
+    height while moving directly between X positions, and retracts only after
+    the final capture. Sweep filenames begin with ``left_*``, ``center_*``, or
+    ``right_*`` so each offset is easy to process separately.
     """
     camera_instr = _get_camera(context, camera)
     lighting = _resolve_lighting(context, lights)
-    if mode not in ("standard", "curvature"):
-        raise ProtocolExecutionError(
-            f"image_well: unknown mode {mode!r}; expected 'standard' or "
-            "'curvature'."
-        )
-    try:
-        _assert_finite_number(
-            image_height, field_name="image_height", source="image_well",
-        )
-    except ValueError as exc:
-        raise ProtocolExecutionError(str(exc)) from exc
-    if mode == "curvature":
-        if z_steps < 1:
-            raise ProtocolExecutionError("image_well: z_steps must be >= 1.")
-        if z_step_mm < 0:
-            raise ProtocolExecutionError("image_well: z_step_mm must be >= 0.")
-
     if brightness is not None and not (0 <= brightness <= 100):
         raise ProtocolExecutionError(
             f"image_well: brightness must be between 0 and 100, got {brightness}."
@@ -290,8 +296,22 @@ def image_well(
             f"image_well: cannot resolve well {well!r}: {exc}"
         ) from exc
 
+    try:
+        motion = plan_image_well(coord, {
+            "image_height": image_height, "mode": mode,
+            "z_steps": z_steps, "z_step_mm": z_step_mm,
+            "x_offset_mm": x_offset_mm, "y_offset_mm": y_offset_mm,
+            "x_sweep_start_mm": x_sweep_start_mm,
+            "x_sweep_stop_mm": x_sweep_stop_mm,
+            "x_sweep_step_mm": x_sweep_step_mm,
+        })
+    except ValueError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
+    sweep_offsets = motion.sweep_offsets
     saved_paths: list[str] = []
     base_label = label or f"{well}"
+    image_x = coord.x + float(x_offset_mm)
+    image_y = coord.y + float(y_offset_mm)
 
     def _capture_one(shot_label: str) -> None:
         path = build_image_path(context, shot_label, camera)
@@ -318,26 +338,59 @@ def image_well(
             )
             return False
 
-    try:
-        context.gantry.move_to_labware(camera, coord)
-        planes = (
-            [image_height]
-            if mode == "standard"
-            else [
-                image_height - index * z_step_mm for index in range(z_steps)
-            ]
+    clearance_z = context.gantry.multi_tool_safe_travel_z(camera)
+
+    if sweep_offsets is not None:
+        action_z = coord.z + image_height
+        last_x = coord.x + sweep_offsets[0]
+        lights_ready = lights_off
+        try:
+            for index, (offset, position) in enumerate(
+                zip(sweep_offsets, motion.positions)
+            ):
+                last_x = position[0]
+                context.gantry.move(
+                    camera,
+                    position,
+                    travel_z=(clearance_z if index == 0 else action_z),
+                )
+                time.sleep(_SETTLE_S)
+                if index == 0 and not lights_off:
+                    lights_ready = _lights("set_channel", channel, level)
+                if lights_ready:
+                    _capture_one(
+                        f"{_x_offset_label(offset)}_{base_label}"
+                    )
+        finally:
+            _lights("all_off")
+            if clearance_z is not None:
+                try:
+                    context.gantry.move(
+                        camera, (last_x, image_y, clearance_z),
+                    )
+                except Exception as exc:
+                    context.logger.error(
+                        "image_well: retract after X sweep failed; manual "
+                        "hardware check required: %s", exc, exc_info=True,
+                    )
+        context.logger.info(
+            "image_well: %s captured %d X-sweep image(s) at %s",
+            camera, len(saved_paths), well,
         )
-        for plane in planes:
+        return saved_paths
+
+    try:
+        for index, position in enumerate(motion.positions):
             context.gantry.move(
-                camera, (coord.x, coord.y, coord.z + plane),
+                camera,
+                position,
+                travel_z=clearance_z if index == 0 else None,
             )
             time.sleep(_SETTLE_S)
             if mode == "standard":
                 shot_label = base_label
             else:
-                # Label with the carriage WPos Z the operator sees on the
-                # gantry readout, not the deck-frame focal plane.
-                wpos_z = coord.z + plane + context.gantry.instruments[camera].effective_depth
+                wpos_z = position[2] + camera_instr.effective_depth
                 z_text = f"{wpos_z:.3f}".replace(".", "-")
                 shot_label = f"{base_label}_z={z_text}mm_b{level}"
             if lights_off:
@@ -347,15 +400,15 @@ def image_well(
             _lights("all_off")
     finally:
         _lights("all_off")
-        safe_z = context.gantry.safe_z
-        if safe_z is not None:
+        if clearance_z is not None:
             try:
                 context.gantry.move(
-                    camera, (coord.x, coord.y, safe_z), travel_z=safe_z,
+                    camera, (image_x, image_y, clearance_z),
                 )
             except Exception as exc:
                 context.logger.error(
-                    "image_well: retract to safe_z failed; manual hardware "
+                    "image_well: retract to the carriage clearance plane "
+                    "failed; manual hardware "
                     "check required: %s", exc, exc_info=True,
                 )
 

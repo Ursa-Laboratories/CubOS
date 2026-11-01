@@ -18,8 +18,11 @@ from cubos.deck.labware.tip_rack import (
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.deck.labware.vial import Vial
 from cubos.gantry.gantry_config import GantryConfig, WorkingVolume
-from cubos.gantry.instrument_mount import InstrumentedGantry
+from cubos.gantry.instrument_mount import (
+    InstrumentedGantry, resolve_multi_tool_safe_travel_z,
+)
 from cubos.protocol_engine.protocol import Protocol
+from cubos.protocol_engine.camera_motion import plan_image_well
 
 from .errors import BoundsViolation
 
@@ -172,14 +175,18 @@ def _append_engage_targets(
     measurement_height: float,
     gantry: GantryConfig,
     tip_extension: float = 0.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
+    x = coord.x + x_offset_mm
+    y = coord.y + y_offset_mm
     _append_target(
         targets,
         target=target,
         suffix="safe_z",
         instrument=instrument,
-        x=coord.x,
-        y=coord.y,
+        x=x,
+        y=y,
         z=gantry.resolved_safe_z,
         tip_extension=tip_extension,
     )
@@ -188,8 +195,8 @@ def _append_engage_targets(
         target=target,
         suffix="action_z",
         instrument=instrument,
-        x=coord.x,
-        y=coord.y,
+        x=x,
+        y=y,
         z=coord.z + measurement_height,
         tip_extension=tip_extension,
     )
@@ -204,8 +211,15 @@ def _append_position_engage(
     instrument: str,
     measurement_height: float,
     tip_extension: float = 0.0,
+    x_offset_mm: float = 0.0,
+    y_offset_mm: float = 0.0,
 ) -> None:
-    if not isinstance(position, str) or not _is_finite_number(measurement_height):
+    if (
+        not isinstance(position, str)
+        or not _is_finite_number(measurement_height)
+        or not _is_finite_number(x_offset_mm)
+        or not _is_finite_number(y_offset_mm)
+    ):
         return
     coord = _resolve_deck_coord(deck, position)
     if coord is None:
@@ -218,6 +232,8 @@ def _append_position_engage(
         measurement_height=float(measurement_height),
         gantry=gantry,
         tip_extension=tip_extension,
+        x_offset_mm=float(x_offset_mm),
+        y_offset_mm=float(y_offset_mm),
     )
 
 
@@ -248,7 +264,11 @@ def _append_move_targets(
     instrument = step_args.get("instrument")
     position = step_args.get("position")
     travel_z = step_args.get("travel_z")
+    x_offset = _height_arg(step_args, "x_offset_mm")
+    y_offset = _height_arg(step_args, "y_offset_mm")
     if not isinstance(instrument, str):
+        return
+    if x_offset is None or y_offset is None:
         return
     tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
 
@@ -269,8 +289,8 @@ def _append_move_targets(
             target=position,
             suffix=("carriage_ceiling" if deck.planning_enabled else "safe_z"),
             instrument=instrument,
-            x=coord.x,
-            y=coord.y,
+            x=coord.x + x_offset,
+            y=coord.y + y_offset,
             z=gantry.resolved_safe_z,
             tip_extension=tip_ext,
             carriage_z=planned_carriage_z,
@@ -282,6 +302,8 @@ def _append_move_targets(
     if target_xyz is None:
         return
     x, y, z = target_xyz
+    x += x_offset
+    y += y_offset
     _append_target(
         targets,
         target=target_label,
@@ -319,6 +341,10 @@ def _append_measure_targets(
     tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
     position = step_args.get("position")
     measurement_height = step_args.get("measurement_height")
+    x_offset = _height_arg(step_args, "x_offset_mm")
+    y_offset = _height_arg(step_args, "y_offset_mm")
+    if x_offset is None or y_offset is None:
+        return
     _append_position_engage(
         targets,
         deck=deck,
@@ -327,6 +353,8 @@ def _append_measure_targets(
         instrument=instrument,
         measurement_height=measurement_height,
         tip_extension=tip_ext,
+        x_offset_mm=x_offset,
+        y_offset_mm=y_offset,
     )
     if not isinstance(position, str):
         return
@@ -364,8 +392,8 @@ def _append_measure_targets(
         target=position,
         suffix="indentation_limit_z",
         instrument=instrument,
-        x=coord.x,
-        y=coord.y,
+        x=coord.x + x_offset,
+        y=coord.y + y_offset,
         z=deepest_z,
         tip_extension=tip_ext,
     )
@@ -414,11 +442,15 @@ def _append_scan_targets(
     plate = step_args.get("plate")
     measurement_height = step_args.get("measurement_height")
     interwell_scan_height = step_args.get("interwell_scan_height")
+    x_offset = _height_arg(step_args, "x_offset_mm")
+    y_offset = _height_arg(step_args, "y_offset_mm")
     if (
         not isinstance(instrument, str)
         or not isinstance(plate, str)
         or not _is_finite_number(measurement_height)
         or not _is_finite_number(interwell_scan_height)
+        or x_offset is None
+        or y_offset is None
     ):
         return
     tip_ext = pipette_tip_extension if instrument == "pipette" else 0.0
@@ -445,8 +477,8 @@ def _append_scan_targets(
                 target=well_target,
                 suffix="safe_z",
                 instrument=instrument,
-                x=well.x,
-                y=well.y,
+                x=well.x + x_offset,
+                y=well.y + y_offset,
                 z=gantry.resolved_safe_z,
                 tip_extension=tip_ext,
             )
@@ -455,8 +487,8 @@ def _append_scan_targets(
             target=well_target,
             suffix="approach_z",
             instrument=instrument,
-            x=well.x,
-            y=well.y,
+            x=well.x + x_offset,
+            y=well.y + y_offset,
             z=approach_z,
             tip_extension=tip_ext,
         )
@@ -465,11 +497,98 @@ def _append_scan_targets(
             target=well_target,
             suffix="action_z",
             instrument=instrument,
-            x=well.x,
-            y=well.y,
+            x=well.x + x_offset,
+            y=well.y + y_offset,
             z=action_z,
             tip_extension=tip_ext,
         )
+
+
+def _append_image_well_targets(
+    targets: list[ProtocolMotionTarget],
+    *,
+    step_args: dict[str, Any],
+    deck: Deck,
+    gantry: GantryConfig,
+    instrumented_gantry: InstrumentedGantry | None = None,
+) -> None:
+    camera, well = step_args.get("camera"), step_args.get("well")
+    if not isinstance(camera, str) or not isinstance(well, str):
+        return
+    try:
+        motion = plan_image_well(deck.resolve_coordinate(well), step_args)
+    except (KeyError, ValueError):
+        return
+    depth = gantry.instruments.get(camera, {}).get("depth", 0.0)
+    if instrumented_gantry is not None and camera in instrumented_gantry.instruments:
+        depth = instrumented_gantry.instruments[camera].effective_depth
+    clearance = resolve_multi_tool_safe_travel_z(
+        safe_z=gantry.resolved_safe_z,
+        carriage_ceiling=gantry.working_volume.z_max,
+        effective_depth=depth,
+    )
+    points = [("clearance_z", (*motion.positions[0][:2], clearance))]
+    points.extend((f"image_{index}_z", point) for index, point in enumerate(motion.positions))
+    points.append(("retract_z", (*motion.positions[-1][:2], clearance)))
+    for label, (x, y, z) in points:
+        _append_target(
+            targets, target=well, suffix=label, instrument=camera,
+            x=x, y=y, z=z,
+        )
+
+
+def _append_capper_targets(
+    targets: list[ProtocolMotionTarget],
+    *,
+    command_name: str,
+    step_args: dict[str, Any],
+    deck: Deck,
+    gantry: GantryConfig,
+) -> None:
+    instrument = step_args.get("instrument")
+    vial = step_args.get("vial")
+    x_offset = _height_arg(step_args, "x_offset_mm")
+    y_offset = _height_arg(step_args, "y_offset_mm")
+    if (
+        not isinstance(instrument, str)
+        or not isinstance(vial, str)
+        or x_offset is None
+        or y_offset is None
+    ):
+        return
+    coord = _resolve_deck_coord(deck, vial)
+    config = gantry.instruments.get(instrument, {})
+    engage_depth = config.get("engage_depth_mm")
+    if coord is None or not _is_finite_number(engage_depth):
+        return
+    x = coord.x + x_offset
+    y = coord.y + y_offset
+    action_z = coord.z + float(engage_depth)
+    if command_name == "cap":
+        overtravel = config.get("release_overtravel_mm", 0.0)
+        if not _is_finite_number(overtravel):
+            return
+        action_z -= float(overtravel)
+    for suffix, target_x, target_y, target_z in (
+        ("safe_z", x, y, gantry.resolved_safe_z),
+        ("action_z", x, y, action_z),
+    ):
+        _append_target(
+            targets, target=vial, suffix=suffix, instrument=instrument,
+            x=target_x, y=target_y, z=target_z,
+        )
+    if command_name == "cap":
+        shimmy = config.get("cap_release_shimmy_y_mm", 0.0)
+        if _is_finite_number(shimmy) and float(shimmy):
+            shimmy = float(shimmy)
+            for suffix, target_y in (
+                ("release_shimmy_y_plus", y + shimmy),
+                ("release_shimmy_y_minus", y - shimmy),
+            ):
+                _append_target(
+                    targets, target=vial, suffix=suffix,
+                    instrument=instrument, x=x, y=target_y, z=action_z,
+                )
 
 
 def _append_pipette_targets(
@@ -483,7 +602,9 @@ def _append_pipette_targets(
 ) -> float:
     if command_name in {"aspirate", "dispense", "blowout", "mix"}:
         height = _height_arg(step_args, "height")
-        if height is None:
+        x_offset = _height_arg(step_args, "x_offset_mm")
+        y_offset = _height_arg(step_args, "y_offset_mm")
+        if height is None or x_offset is None or y_offset is None:
             return tip_extension
         _append_position_engage(
             targets,
@@ -493,8 +614,14 @@ def _append_pipette_targets(
             instrument="pipette",
             measurement_height=height,
             tip_extension=tip_extension,
+            x_offset_mm=x_offset,
+            y_offset_mm=y_offset,
         )
     elif command_name == "pick_up_tip":
+        x_offset = _height_arg(step_args, "x_offset_mm")
+        y_offset = _height_arg(step_args, "y_offset_mm")
+        if x_offset is None or y_offset is None:
+            return tip_extension
         _append_position_engage(
             targets,
             deck=deck,
@@ -503,11 +630,17 @@ def _append_pipette_targets(
             instrument="pipette",
             measurement_height=0.0,
             tip_extension=tip_extension,
+            x_offset_mm=x_offset,
+            y_offset_mm=y_offset,
         )
         picked_up_tip_length = _tip_length_for_pickup(deck, step_args.get("position"))
         if picked_up_tip_length is not None:
             return picked_up_tip_length
     elif command_name == "drop_tip":
+        x_offset = _height_arg(step_args, "x_offset_mm")
+        y_offset = _height_arg(step_args, "y_offset_mm")
+        if x_offset is None or y_offset is None:
+            return tip_extension
         _append_position_engage(
             targets,
             deck=deck,
@@ -516,15 +649,19 @@ def _append_pipette_targets(
             instrument="pipette",
             measurement_height=0.0,
             tip_extension=tip_extension,
+            x_offset_mm=x_offset,
+            y_offset_mm=y_offset,
         )
         return 0.0
     elif command_name == "transfer":
-        for position_key, height_key in (
-            ("source", "source_height"),
-            ("destination", "destination_height"),
+        for position_key, height_key, offset_prefix in (
+            ("source", "source_height", "source"),
+            ("destination", "destination_height", "destination"),
         ):
             height = _height_arg(step_args, height_key)
-            if height is None:
+            x_offset = _height_arg(step_args, f"{offset_prefix}_x_offset_mm")
+            y_offset = _height_arg(step_args, f"{offset_prefix}_y_offset_mm")
+            if height is None or x_offset is None or y_offset is None:
                 continue
             _append_position_engage(
                 targets,
@@ -534,6 +671,8 @@ def _append_pipette_targets(
                 instrument="pipette",
                 measurement_height=height,
                 tip_extension=tip_extension,
+                x_offset_mm=x_offset,
+                y_offset_mm=y_offset,
             )
     elif command_name == "multi_dispense":
         for position, height_key in [
@@ -549,8 +688,12 @@ def _append_pipette_targets(
                 )
     elif command_name == "serial_transfer":
         source_height = _height_arg(step_args, "source_height")
+        source_x_offset = _height_arg(step_args, "source_x_offset_mm")
+        source_y_offset = _height_arg(step_args, "source_y_offset_mm")
         if source_height is None:
             source_height = 0.0
+        if source_x_offset is None or source_y_offset is None:
+            return tip_extension
         _append_position_engage(
             targets,
             deck=deck,
@@ -559,13 +702,25 @@ def _append_pipette_targets(
             instrument="pipette",
             measurement_height=source_height,
             tip_extension=tip_extension,
+            x_offset_mm=source_x_offset,
+            y_offset_mm=source_y_offset,
         )
         plate_name = step_args.get("plate")
         plate_obj = _resolve_labware(deck, plate_name)
         if not isinstance(plate_obj, WellPlate) or not isinstance(plate_name, str):
             return tip_extension
         destination_height = _height_arg(step_args, "destination_height")
-        if destination_height is None:
+        destination_x_offset = _height_arg(
+            step_args, "destination_x_offset_mm",
+        )
+        destination_y_offset = _height_arg(
+            step_args, "destination_y_offset_mm",
+        )
+        if (
+            destination_height is None
+            or destination_x_offset is None
+            or destination_y_offset is None
+        ):
             return tip_extension
         for well_id in _wells_for_axis(plate_obj, step_args.get("axis")):
             _append_position_engage(
@@ -576,6 +731,8 @@ def _append_pipette_targets(
                 instrument="pipette",
                 measurement_height=destination_height,
                 tip_extension=tip_extension,
+                x_offset_mm=destination_x_offset,
+                y_offset_mm=destination_y_offset,
             )
     return tip_extension
 
@@ -584,6 +741,7 @@ def collect_protocol_motion_targets(
     gantry: GantryConfig,
     protocol: Protocol,
     deck: Deck,
+    instrumented_gantry: InstrumentedGantry | None = None,
 ) -> list[ProtocolMotionTarget]:
     """Return concrete working-volume targets implied by *protocol*.
 
@@ -603,7 +761,7 @@ def collect_protocol_motion_targets(
                 gantry=gantry,
                 pipette_tip_extension=pipette_tip_extension,
             )
-        elif step.command_name == "measure":
+        elif step.command_name in {"measure", "cure"}:
             _append_measure_targets(
                 targets,
                 step_args=step.args,
@@ -622,6 +780,22 @@ def collect_protocol_motion_targets(
                 deck=deck,
                 gantry=gantry,
                 pipette_tip_extension=pipette_tip_extension,
+            )
+        elif step.command_name == "image_well":
+            _append_image_well_targets(
+                targets,
+                step_args=step.args,
+                deck=deck,
+                gantry=gantry,
+                instrumented_gantry=instrumented_gantry,
+            )
+        elif step.command_name in {"cap", "decap"}:
+            _append_capper_targets(
+                targets,
+                command_name=step.command_name,
+                step_args=step.args,
+                deck=deck,
+                gantry=gantry,
             )
         else:
             pipette_tip_extension = _append_pipette_targets(
@@ -644,7 +818,7 @@ def validate_protocol_motion_bounds(
     """Validate gantry positions for only the points this protocol can command."""
     violations: list[BoundsViolation] = []
     volume = gantry.working_volume
-    for target in collect_protocol_motion_targets(gantry, protocol, deck):
+    for target in collect_protocol_motion_targets(gantry, protocol, deck, instrumented_gantry):
         instrument = instrumented_gantry.instruments.get(target.instrument_name)
         if instrument is None:
             continue
