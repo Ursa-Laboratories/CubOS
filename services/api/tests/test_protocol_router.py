@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import List, Optional
 from unittest.mock import MagicMock
 
 import pytest
@@ -19,6 +20,7 @@ from cubos.validation.errors import BoundsViolation, SetupValidationError
 from tests.api_client import api_request
 from cubos_api.app import create_app
 from cubos_api.config import get_settings
+from cubos_api.routers.protocol import _type_name
 from cubos_api.services.yaml_io import read_yaml, write_yaml
 
 
@@ -83,6 +85,15 @@ def test_transfer_command_exposes_travel_clearance_metadata(client):
     assert clearance["type"] == "float | None"
     assert "registered plate top" in clearance["description"]
     assert "null" in clearance["description"]
+
+
+def test_type_name_formats_union_annotations_and_preserves_generic_formatting():
+    assert _type_name(Optional[float]) == "float | None"
+    assert _type_name(float | None) == "float | None"
+    assert _type_name(float | int) == "float | int"
+    for annotation in (List[int], list[int]):
+        legacy_name = getattr(annotation, "__name__", None) or str(annotation)
+        assert _type_name(annotation) == legacy_name
 
 
 def test_get_unknown_command(client):

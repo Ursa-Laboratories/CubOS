@@ -152,6 +152,9 @@ def test_repeat_validates_and_preserves_child_commands():
     {"labware": "plate", "template_well": "A1", "wells": ["A1", "A1"], "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}]},
     {"labware": "plate", "template_well": "A1", "wells": ["A1"], "steps": []},
     {"labware": "plate", "template_well": "A1", "wells": ["A1"], "steps": [{"repeat": {}}]},
+    {"labware": "plate", "template_well": "A.1", "wells": ["A1"], "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}]},
+    {"labware": "plate", "template_well": "A1", "wells": ["A.1"], "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}]},
+    {"labware": "plate", "template_well": "A1", "wells": ["A1"], "steps": [1]},
 ])
 def test_repeat_rejects_malformed_or_nested_blocks(args):
     with pytest.raises(ValidationError):

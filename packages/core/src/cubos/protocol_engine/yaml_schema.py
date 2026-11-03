@@ -88,8 +88,6 @@ class RepeatArgsSchema(BaseModel):
             raise ValueError("repeat wells must contain non-empty well ids without dots.")
         if len(set(self.wells)) != len(self.wells):
             raise ValueError("repeat wells must not contain duplicate targets.")
-        if any(not isinstance(step, dict) for step in self.steps):
-            raise ValueError("repeat steps must be command mappings.")
         if any("repeat" in step or step.get("command") == "repeat" for step in self.steps):
             raise ValueError("nested repeat blocks are not supported.")
         for step in self.steps:

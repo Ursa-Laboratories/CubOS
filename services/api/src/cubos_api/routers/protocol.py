@@ -7,7 +7,9 @@ so any new @protocol_command in CubOS is automatically available.
 from __future__ import annotations
 
 import logging
+import types
 from typing import Any, Dict, List
+from typing import Union, get_args, get_origin
 
 from fastapi import APIRouter, HTTPException
 from cubos.gantry.session import (
@@ -45,6 +47,12 @@ router = APIRouter(prefix="/api/v1/protocol", tags=["protocol"])
 
 def _type_name(annotation: Any) -> str:
     """Convert a Python type annotation to a simple string for the frontend."""
+    origin = get_origin(annotation)
+    if origin is Union or origin is types.UnionType:
+        return " | ".join(
+            "None" if arg is type(None) else _type_name(arg)
+            for arg in get_args(annotation)
+        )
     name = getattr(annotation, "__name__", None)
     if name:
         return name
