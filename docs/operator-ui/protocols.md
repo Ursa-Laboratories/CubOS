@@ -32,9 +32,15 @@ validation status. See [YAML File Overview](../configuration.md) for details.
 4. **Add step.** Choose a command and click **Add** to append a card.
    Positions are addressed by the Component IDs from your deck file
    (`plate.A1`) or by named positions.
-   **Repeat Steps Across Wells** can then copy any consecutive block of steps
-   from a template well to the checked wells. The expanded steps remain visible
-   and editable before saving; image labels receive the target well suffix.
+   Click **Add repeat**, choose a plate, and set **From step**, **Through step**,
+   and **Template well**. Click wells on the plate to select targets; row and
+   column labels select entire rows or columns. **Select all** and **Clear**
+   change the whole selection. **Minimize** folds the panel away without losing
+   your choices. **Create repeat** groups the selected steps into a saved repeat
+   block. Edit its plate, wells, and child steps in place; add, remove, or reorder
+   child steps using the controls inside the block. **Edit raw YAML** shows the
+   same `repeat:` block and accepts edits back into the form. Click **Add repeat**
+   again for another block. Nested repeats are not supported.
 
 ### Repeat blocks and tip use
 
@@ -50,9 +56,11 @@ makes the exact run order visible before validation.
   `drop_tip` after it. Only the actions between them are copied.
 - Do not put `pick_up_tip` inside the block while leaving `drop_tip` outside:
   the second copy would try to pick up another tip while one is attached.
-- You can create **several repeat blocks**. Expand the first one, inspect the
-  resulting step numbers, then select and expand the next template block.
-  Each expansion produces ordinary steps that can be edited independently.
+- You can create **several repeat blocks**. Create the first one, inspect the
+  resulting step numbers, then select and group the next template block.
+  Each block stays editable and is preserved in YAML. CubOS expands its child
+  steps for each selected well before validation and execution; image labels
+  receive the target well suffix.
 
 The builder is part of the shared CubOS Protocol editor and works with any
 loaded deck that exposes addressable wells; it is not tied to a particular

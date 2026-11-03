@@ -54,12 +54,44 @@ class ProtocolStepSchema(BaseModel):
     @model_validator(mode="after")
     def _validate_command_registered(self) -> "ProtocolStepSchema":
         """Ensure the command is registered and args match its schema."""
+        if self.command == "repeat":
+            RepeatArgsSchema.model_validate(self.args)
+            return self
         registry = CommandRegistry.instance()
         try:
             registered = registry.get(self.command)
         except KeyError as exc:
             raise ValueError(str(exc)) from exc
         registered.schema.model_validate(self.args)
+        return self
+
+
+class RepeatArgsSchema(BaseModel):
+    """Authored repeat block. Its child commands are validated as normal steps."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    labware: str
+    template_well: str
+    wells: List[str]
+    steps: List[Dict[str, Any]]
+
+    @model_validator(mode="after")
+    def _validate_repeat(self) -> "RepeatArgsSchema":
+        if not self.labware or any(not part for part in self.labware.split(".")):
+            raise ValueError("repeat labware must be a non-empty labware id or nested path.")
+        if not self.template_well or "." in self.template_well:
+            raise ValueError("repeat template_well must be a non-empty well id without dots.")
+        if not self.wells or not self.steps:
+            raise ValueError("repeat requires at least one target well and one step.")
+        if any(not well or "." in well for well in self.wells):
+            raise ValueError("repeat wells must contain non-empty well ids without dots.")
+        if len(set(self.wells)) != len(self.wells):
+            raise ValueError("repeat wells must not contain duplicate targets.")
+        if any("repeat" in step or step.get("command") == "repeat" for step in self.steps):
+            raise ValueError("nested repeat blocks are not supported.")
+        for step in self.steps:
+            ProtocolStepSchema.model_validate(step)
         return self
 
 

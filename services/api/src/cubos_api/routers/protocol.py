@@ -7,7 +7,9 @@ so any new @protocol_command in CubOS is automatically available.
 from __future__ import annotations
 
 import logging
+import types
 from typing import Any, Dict, List
+from typing import Union, get_args, get_origin
 
 from fastapi import APIRouter, HTTPException
 from cubos.gantry.session import (
@@ -45,6 +47,12 @@ router = APIRouter(prefix="/api/v1/protocol", tags=["protocol"])
 
 def _type_name(annotation: Any) -> str:
     """Convert a Python type annotation to a simple string for the frontend."""
+    origin = get_origin(annotation)
+    if origin is Union or origin is types.UnionType:
+        return " | ".join(
+            "None" if arg is type(None) else _type_name(arg)
+            for arg in get_args(annotation)
+        )
     name = getattr(annotation, "__name__", None)
     if name:
         return name
@@ -85,6 +93,41 @@ def _protocol_schema_payload(data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _validate_protocol_schema(data: Dict[str, Any]) -> ProtocolYamlSchema:
     return ProtocolYamlSchema.model_validate(_protocol_schema_payload(data))
+
+
+def _step_to_yaml(step: ProtocolStepConfig) -> Dict[str, Any]:
+    args = dict(step.args)
+    if step.command == "repeat" and isinstance(args.get("steps"), list):
+        args["steps"] = [
+            _step_to_yaml(child if isinstance(child, ProtocolStepConfig) else ProtocolStepConfig.model_validate(child))
+            for child in args["steps"]
+        ]
+    return {step.command: args or None}
+
+
+def _reject_nested_repeats(steps: List[ProtocolStepConfig]) -> None:
+    pending = [(step, False) for step in steps]
+    while pending:
+        step, inside_repeat = pending.pop()
+        if inside_repeat and step.command == "repeat":
+            raise ValueError("nested repeat blocks are not supported.")
+        children = step.args.get("steps") if step.command == "repeat" else None
+        if isinstance(children, list):
+            for child in children:
+                if isinstance(child, dict) and child.get("command") == "repeat":
+                    raise ValueError("nested repeat blocks are not supported.")
+                if isinstance(child, dict):
+                    pending.append((ProtocolStepConfig.model_validate(child), True))
+
+
+def _step_from_schema(step: Any) -> ProtocolStepConfig:
+    args = dict(step.args)
+    if step.command == "repeat":
+        args["steps"] = [
+            _step_from_schema(ProtocolYamlSchema.model_validate({"protocol": [child]}).protocol[0]).model_dump()
+            for child in args["steps"]
+        ]
+    return ProtocolStepConfig(command=step.command, args=args)
 
 
 # ---------------------------------------------------------------------------
@@ -144,10 +187,7 @@ def get_protocol(filename: str) -> ProtocolResponse:
     except (ValueError, ValidationError) as e:
         raise HTTPException(400, str(e)) from e
 
-    steps = [
-        ProtocolStepConfig(command=step.command, args=step.args)
-        for step in schema.protocol
-    ]
+    steps = [_step_from_schema(step) for step in schema.protocol]
 
     return ProtocolResponse(filename=filename, positions=schema.positions, steps=steps)
 
@@ -158,10 +198,12 @@ def save_protocol(filename: str, body: ProtocolConfig) -> dict:
         path = resolve_config_path(get_settings().configs_dir, "protocol", filename)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    # Convert to YAML-native format: list of {command: {args}}
-    protocol_list = []
-    for step in body.protocol:
-        protocol_list.append({step.command: step.args if step.args else None})
+    # Convert to YAML-native format while keeping authored repeat blocks intact.
+    try:
+        _reject_nested_repeats(body.protocol)
+        protocol_list = [_step_to_yaml(step) for step in body.protocol]
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     try:
         data: Dict[str, Any] = read_yaml(path) if path.is_file() else {}
@@ -200,23 +242,32 @@ def delete_protocol(filename: str) -> dict:
 @router.post("/validate")
 def validate_protocol(body: ProtocolConfig) -> ProtocolValidationResponse:
     """Validate a protocol against CubOS's command schemas."""
-    registry = CommandRegistry.instance()
-    errors: List[str] = []
-    for i, step in enumerate(body.protocol):
-        if step.command not in registry.command_names:
-            errors.append(
-                f"Step {i}: Unknown command '{step.command}'. "
-                f"Available: {', '.join(registry.command_names)}"
-            )
-            continue
+    from cubos.protocol_engine.compiler import CommandCall, compile_protocol
 
-        cmd = registry.get(step.command)
-        try:
-            cmd.schema.model_validate(step.args)
-        except Exception as e:
-            errors.append(f"Step {i} ({step.command}): {e}")
-
-    return ProtocolValidationResponse(valid=len(errors) == 0, errors=errors)
+    try:
+        _reject_nested_repeats(body.protocol)
+        raw_steps = [_step_to_yaml(step) for step in body.protocol]
+        schema = ProtocolYamlSchema.model_validate({
+            "protocol": raw_steps,
+            **({"positions": body.positions} if body.positions is not None else {}),
+        })
+        compile_protocol([
+            CommandCall(command=step.command, args=step.args)
+            for step in schema.protocol
+        ], positions=schema.positions or {})
+    except Exception as exc:
+        error = str(exc)
+        if isinstance(exc, ValidationError) and exc.errors():
+            details = []
+            for item in exc.errors():
+                location = ".".join(str(part) for part in item.get("loc", ()))
+                message = str(item.get("msg", error)).replace(
+                    "Unknown protocol command", "Unknown command",
+                )
+                details.append(f"{location}: {message}" if location else message)
+            error = "; ".join(details)
+        return ProtocolValidationResponse(valid=False, errors=[error])
+    return ProtocolValidationResponse(valid=True)
 
 
 @router.post("/validate-setup")

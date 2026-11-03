@@ -61,6 +61,31 @@ Each list entry is a single command keyed by its name (see
 [Protocol command reference](#protocol-command-reference) below). The schema is
 strict — an unknown key under a command is rejected.
 
+Use `repeat` to keep one authored set of commands and apply it to several wells:
+
+```yaml
+protocol:
+  - repeat:
+      labware: plate
+      template_well: A1
+      wells: [A1, A2, A3]
+      steps:
+        - move:
+            instrument: pipette
+            position: plate.A1
+        - aspirate:
+            position: plate.A1
+            volume_ul: 100
+```
+
+`labware` may be a top-level labware id or nested path. Each target in `wells`
+must exist on that well plate. Within `steps`, exact string values matching
+`<labware>.<template_well>` are changed to the corresponding target; strings
+that only contain that text are left alone. A non-empty `label` argument gets
+the target well appended (for example, `sample_A2`). Repeat blocks need at
+least one target and one step; targets must be unique, and nesting repeats is
+not supported. Expanded protocols are limited to 1,000 concrete steps.
+
 ## Validate offline
 
 Run `packages/core/src/cubos/tools/validate_setup.py` before connecting hardware, using the exact

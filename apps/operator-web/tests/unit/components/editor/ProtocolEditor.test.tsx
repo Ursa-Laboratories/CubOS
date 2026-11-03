@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import ProtocolEditor from "../../../../src/components/editor/ProtocolEditor";
-import { expandStepsAcrossWells } from "../../../../src/components/editor/protocolRepeat";
+import { stepToYaml, stepsFromYaml, createRepeatBlock } from "../../../../src/components/editor/protocolRepeat";
 import type { CommandInfo, DeckResponse, GantryResponse, ProtocolResponse, ProtocolStep } from "../../../../src/types";
 
 const COMMANDS: CommandInfo[] = [
@@ -120,69 +120,100 @@ function renderProtocol(overrides: Partial<React.ComponentProps<typeof ProtocolE
 }
 
 describe("ProtocolEditor", () => {
-  it("expands a step block across wells and labels each image for processing", () => {
-    const result = expandStepsAcrossWells(
-      [
-        { command: "aspirate", args: { position: "plate_1.A1", volume_ul: 10 } },
-        { command: "image_well", args: { position: "plate_1.A1", label: "after_dispense" } },
-        { command: "wait", args: { seconds: 1 } },
-      ],
-      1,
-      2,
-      "plate_1",
-      "A1",
-      ["A2", "B1"],
-    );
-
-    expect(result).toEqual([
-      { command: "aspirate", args: { position: "plate_1.A2", volume_ul: 10 } },
-      { command: "image_well", args: { position: "plate_1.A2", label: "after_dispense_A2" } },
-      { command: "aspirate", args: { position: "plate_1.B1", volume_ul: 10 } },
-      { command: "image_well", args: { position: "plate_1.B1", label: "after_dispense_B1" } },
-      { command: "wait", args: { seconds: 1 } },
+  it("selects plate wells, preserves them when minimized, and builds only selected targets", async () => {
+    const user = userEvent.setup();
+    const wells = Object.fromEntries(["A1", "A2", "B1", "B2"].map(w => [w, { x: 0, y: 0, z: 0 }]));
+    const props = renderProtocol({ deck: { ...DECK, labware: [{ ...DECK.labware[0], wells }] } });
+    expect(screen.queryByRole("group", { name: "Target well plate" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Add repeat/ }));
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    await user.click(screen.getByRole("button", { name: "Row B" }));
+    await user.click(screen.getByRole("button", { name: "Repeat target B1" }));
+    expect(screen.getByRole("button", { name: "Repeat target B2" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: /Minimize/ }));
+    expect(screen.queryByRole("group", { name: "Target well plate" })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Expand/ }));
+    expect(screen.getByRole("button", { name: "Repeat target B2" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Create repeat" }));
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([
+      { command: "repeat", args: { labware: "plate_1", template_well: "A1", wells: ["B2"], steps: STEPS } },
     ]);
+    expect(screen.getByRole("button", { name: /Add repeat/ })).toHaveAttribute("aria-expanded", "false");
   });
 
-  it("supports fresh-tip blocks, shared-tip blocks, and several expansions", () => {
-    const freshTip = expandStepsAcrossWells(
-      [
-        { command: "pick_up_tip", args: { position: "tips" } },
-        { command: "dispense", args: { position: "plate_1.A1", volume_ul: 10 } },
-        { command: "drop_tip", args: { position: "waste" } },
-      ],
-      1, 3, "plate_1", "A1", ["A1", "A2"],
-    );
-    expect(freshTip.map((step) => step.command)).toEqual([
-      "pick_up_tip", "dispense", "drop_tip",
-      "pick_up_tip", "dispense", "drop_tip",
-    ]);
+  it("retains a native repeat through raw YAML, child edits, and saving", async () => {
+    const user = userEvent.setup();
+    const wells = Object.fromEntries(["A1", "A2"].map(w => [w, { x: 0, y: 0, z: 0 }]));
+    const repeat = { command: "repeat", args: { labware: "plate_1", template_well: "A1", wells: ["A1", "A2"], steps: STEPS } };
+    const props = renderProtocol({ steps: [repeat], deck: { ...DECK, labware: [{ ...DECK.labware[0], wells }] } });
+    const block = screen.getByRole("region", { name: "Repeat block 1" });
+    await user.click(within(block).getByRole("button", { name: "Repeat target A2" }));
+    const travel = within(block).getByLabelText(/Travel Z/i);
+    fireEvent.change(travel, { target: { value: "7" } });
+    await user.click(screen.getByRole("button", { name: "Edit raw YAML" }));
+    expect((screen.getByLabelText("Raw YAML") as HTMLTextAreaElement).value).toContain("repeat:");
+    expect((screen.getByLabelText("Raw YAML") as HTMLTextAreaElement).value).toContain("travel_z: 7");
+    await user.click(screen.getByRole("button", { name: "Apply to form" }));
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onSave).toHaveBeenCalledWith("move.yaml", { protocol: [{ command: "repeat", args: {
+      labware: "plate_1", template_well: "A1", wells: ["A1"], steps: [{ command: "move", args: { instrument: "asmi", position: "plate_1.A1", travel_z: 7 } }],
+    } }] });
+  });
 
-    const sharedTip = expandStepsAcrossWells(
-      [
-        { command: "pick_up_tip", args: { position: "tips" } },
-        { command: "dispense", args: { position: "plate_1.A1", volume_ul: 10 } },
-        { command: "drop_tip", args: { position: "waste" } },
-      ],
-      2, 2, "plate_1", "A1", ["A1", "A2"],
-    );
-    expect(sharedTip.map((step) => step.command)).toEqual([
-      "pick_up_tip", "dispense", "dispense", "drop_tip",
-    ]);
+  it("edits a repeat plate and adds and removes child steps without flattening", async () => {
+    const user = userEvent.setup();
+    const repeat = { command: "repeat", args: { labware: "plate_1", template_well: "A1", wells: ["A1"], steps: STEPS } };
+    const props = renderProtocol({ steps: [repeat], deck: { ...DECK, labware: [
+      { ...DECK.labware[0], wells: { A1: { x: 0, y: 0, z: 0 } } },
+      { ...DECK.labware[0], key: "plate_2", wells: { B2: { x: 1, y: 1, z: 0 } } },
+    ] } });
+    await user.click(screen.getByRole("button", { name: "Use plate_2 for repeat 1" }));
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([{ command: "repeat", args: {
+      labware: "plate_2", template_well: "B2", wells: ["B2"], steps: [{ ...STEPS[0], args: { ...STEPS[0].args, position: "plate_2.B2" } }],
+    } }]);
+    await user.click(screen.getByRole("button", { name: "Add step to repeat" }));
+    expect(screen.getByRole("button", { name: "Remove repeat 1 step 2" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Remove repeat 1 step 2" }));
+    expect(screen.queryByRole("button", { name: "Remove repeat 1 step 2" })).not.toBeInTheDocument();
+    expect(props.onLocalChange).toHaveBeenLastCalledWith([{ command: "repeat", args: {
+      labware: "plate_2", template_well: "B2", wells: ["B2"], steps: [{ ...STEPS[0], args: { ...STEPS[0].args, position: "plate_2.B2" } }],
+    } }]);
+  });
 
-    const firstBlock = expandStepsAcrossWells(
-      [
-        { command: "dispense", args: { position: "plate_1.A1", label: "first" } },
-        { command: "pause", args: { seconds: 1 } },
-        { command: "measure", args: { position: "plate_1.A1", label: "second" } },
-      ],
-      1, 1, "plate_1", "A1", ["A1", "A2"],
-    );
-    const secondBlock = expandStepsAcrossWells(
-      firstBlock, 4, 4, "plate_1", "A1", ["B1", "B2"],
-    );
-    expect(secondBlock.map((step) => step.args.position).filter(Boolean)).toEqual([
-      "plate_1.A1", "plate_1.A2", "plate_1.B1", "plate_1.B2",
-    ]);
+  it("round trips native YAML and rejects nested repeat creation", () => {
+    const steps = createRepeatBlock(STEPS, 1, 1, "plate_1", "A1", ["A1", "A2"]);
+    expect(stepsFromYaml(steps.map(stepToYaml))).toEqual(steps);
+    expect(() => createRepeatBlock(steps, 1, 1, "plate_1", "A1", ["A1"])).toThrow("cannot contain another repeat");
+    expect(() => stepsFromYaml([{ repeat: { labware: "plate_1", template_well: "A1", wells: ["A1"], steps: steps.map(stepToYaml) } }])).toThrow("cannot contain another repeat");
+  });
+
+  it("switches visual plates and supports column selection", async () => {
+    const user = userEvent.setup();
+    const wells = Object.fromEntries(["A1", "A2", "B1", "B2"].map(w => [w, { x: 0, y: 0, z: 0 }]));
+    renderProtocol({ deck: { ...DECK, labware: [
+      { ...DECK.labware[0], wells }, { ...DECK.labware[0], key: "plate_2", wells: { C3: { x: 0, y: 0, z: 0 } } },
+    ] } });
+    await user.click(screen.getByRole("button", { name: /Add repeat/ }));
+    await user.click(screen.getByRole("button", { name: "Column 2" }));
+    expect(screen.getByRole("button", { name: "Repeat target A2" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Repeat target B2" })).toHaveAttribute("aria-pressed", "false");
+    await user.click(screen.getByRole("button", { name: "Use plate_2" }));
+    expect(screen.getByLabelText("Template well")).toHaveValue("C3");
+    expect(screen.getByRole("button", { name: "Repeat target C3" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.queryByRole("button", { name: "Repeat target A1" })).not.toBeInTheDocument();
+  });
+
+  it("groups only the selected child steps while retaining surrounding tip steps", () => {
+    const input = [
+      { command: "pick_up_tip", args: { position: "tips" } },
+      { command: "dispense", args: { position: "plate_1.A1", volume_ul: 10 } },
+      { command: "drop_tip", args: { position: "waste" } },
+    ];
+    const grouped = createRepeatBlock(input, 2, 2, "plate_1", "A1", ["A1", "A2"]);
+    expect(grouped.map(step => step.command)).toEqual(["pick_up_tip", "repeat", "drop_tip"]);
+    expect(grouped[1].args.steps).toEqual([input[1]]);
+    expect(grouped[1].args.wells).toEqual(["A1", "A2"]);
+    expect(input[1].command).toBe("dispense");
   });
 
   it("adds Rinse with a potentiostat and vial choices and saves the selected depth", async () => {

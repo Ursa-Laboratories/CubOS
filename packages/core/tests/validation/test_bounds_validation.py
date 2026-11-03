@@ -13,6 +13,7 @@ from cubos.deck.labware.well_plate_holder import WellPlateHolder
 from cubos.instruments.base_instrument import BaseInstrument
 from cubos.gantry.gantry_config import GantryConfig, GantryType, OriginPolicy, WorkingVolume
 from cubos.protocol_engine.protocol import Protocol, ProtocolStep
+from cubos.protocol_engine.compiler import CommandCall, compile_protocol
 from cubos.validation.bounds import (
     collect_protocol_motion_targets,
     validate_deck_positions,
@@ -170,6 +171,24 @@ def test_image_well_x_sweep_collects_captures_and_clearance():
         *[(f"A1.image_{i}_z", float(6 + i)) for i in range(9)],
         ("A1.retract_z", 14.0),
     ]
+
+
+def test_repeat_expanded_steps_are_checked_by_motion_bounds():
+    gantry = _make_gantry(x_max=12.0)
+    deck = _make_deck(plate=_make_plate(rows=1, columns=2))
+    protocol = compile_protocol([CommandCall("repeat", {
+        "labware": "plate", "template_well": "A1", "wells": ["A1", "A2"],
+        "steps": [{"move": {
+            "instrument": "pipette", "position": "plate.A1",
+            "x_offset_mm": 0.0, "y_offset_mm": 0.0,
+        }}],
+    })])
+
+    violations = validate_protocol_motion_bounds(
+        gantry, protocol, deck, _make_instrumented_gantry(("pipette", _make_instrument())),
+    )
+
+    assert any(violation.position_id == "A2.safe_z" for violation in violations)
 
 
 # ── Deck position validation ────────────────────────────────────────────

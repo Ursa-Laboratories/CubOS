@@ -2,6 +2,8 @@
 
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
+from types import SimpleNamespace
 
 import pytest
 
@@ -175,6 +177,73 @@ def test_serial_transfer_compiles_from_yaml():
         }
     finally:
         Path(path).unlink(missing_ok=True)
+
+
+def test_repeat_expands_targets_recursively_and_suffixes_labels():
+    path = _write_yaml("""
+protocol:
+  - repeat:
+      labware: plate
+      template_well: A1
+      wells: [A1, A2]
+      steps:
+        - move:
+            instrument: pipette
+            position: plate.A1
+        - capture:
+            instrument: camera
+            label: sample
+            position: plate.A1
+""")
+    try:
+        protocol = load_protocol_from_yaml(path)
+        assert [step.command_name for step in protocol.steps] == ["move", "capture", "move", "capture"]
+        assert protocol.steps[0].args["position"] == "plate.A1"
+        assert protocol.steps[1].args == {
+            "instrument": "camera", "label": "sample_A1", "position": "plate.A1",
+        }
+        assert protocol.steps[3].args == {
+            "instrument": "camera", "label": "sample_A2", "position": "plate.A2",
+        }
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_repeat_expansion_is_bounded():
+    path = _write_yaml("""
+protocol:
+  - repeat:
+      labware: plate
+      template_well: A1
+      wells: [A1, A2]
+      steps:
+        - move:
+            instrument: pipette
+            position: plate.A1
+""")
+    try:
+        from cubos.protocol_engine.compiler import MAX_EXPANDED_PROTOCOL_STEPS
+        from cubos.protocol_engine.compiler import CommandCall, compile_protocol
+
+        with pytest.raises(ValueError, match="maximum"):
+            compile_protocol([CommandCall("repeat", {
+                "labware": "plate", "template_well": "A1",
+                "wells": [f"A{i}" for i in range(1, MAX_EXPANDED_PROTOCOL_STEPS + 2)],
+                "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}],
+            })])
+    finally:
+        Path(path).unlink(missing_ok=True)
+
+
+def test_repeat_setup_validation_rejects_missing_deck_wells():
+    from cubos.protocol_engine.compiler import CommandCall, compile_protocol
+
+    deck = SimpleNamespace(resolve_labware=lambda _path: SimpleNamespace(wells={"A1", "A2"}))
+    with pytest.raises(ValueError, match="unknown well"):
+        compile_protocol([CommandCall("repeat", {
+            "labware": "plate", "template_well": "A1", "wells": ["A1", "B9"],
+            "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}],
+        })], deck=deck)
 
 
 def test_scan_rejects_yaml_missing_measurement_height():

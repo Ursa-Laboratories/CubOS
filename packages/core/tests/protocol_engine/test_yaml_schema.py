@@ -136,3 +136,26 @@ def test_command_with_null_args_normalised_to_empty_dict():
     schema = ProtocolYamlSchema.model_validate(data)
     assert schema.protocol[0].command == "home"
     assert schema.protocol[0].args == {}
+
+
+def test_repeat_validates_and_preserves_child_commands():
+    schema = ProtocolYamlSchema.model_validate({"protocol": [{"repeat": {
+        "labware": "plate", "template_well": "A1", "wells": ["A1", "A2"],
+        "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}],
+    }}]})
+    assert schema.protocol[0].command == "repeat"
+    assert schema.protocol[0].args["wells"] == ["A1", "A2"]
+
+
+@pytest.mark.parametrize("args", [
+    {"labware": "", "template_well": "A1", "wells": ["A1"], "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}]},
+    {"labware": "plate", "template_well": "A1", "wells": ["A1", "A1"], "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}]},
+    {"labware": "plate", "template_well": "A1", "wells": ["A1"], "steps": []},
+    {"labware": "plate", "template_well": "A1", "wells": ["A1"], "steps": [{"repeat": {}}]},
+    {"labware": "plate", "template_well": "A.1", "wells": ["A1"], "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}]},
+    {"labware": "plate", "template_well": "A1", "wells": ["A.1"], "steps": [{"move": {"instrument": "pipette", "position": "plate.A1"}}]},
+    {"labware": "plate", "template_well": "A1", "wells": ["A1"], "steps": [1]},
+])
+def test_repeat_rejects_malformed_or_nested_blocks(args):
+    with pytest.raises(ValidationError):
+        ProtocolYamlSchema.model_validate({"protocol": [{"repeat": args}]})
