@@ -173,6 +173,60 @@ def test_transfer_without_prior_tip_pickup_violates():
     assert any("requires an attached pipette tip" in v.message for v in violations)
 
 
+def test_mix_finish_is_included_in_bounds_and_semantics():
+    protocol = _protocol(
+        _step(0, "pick_up_tip", position="tips.A1"),
+        _step(1, "mix", position="plate.A1", volume_ul=25, height=-5, blowout_height=100),
+    )
+    deck, gantry, board = _deck(tip_length=42), _gantry(z_max=85, safe_z=80), _board(depth=-42)
+    bounds = validate_protocol_motion_bounds(gantry, protocol, deck, board)
+    semantics = validate_protocol_semantics(protocol, board, deck, gantry)
+    assert any(v.z == 112 and v.bound_name == "z_max" for v in bounds)
+    assert any("mix blowout" in v.message and "112" in v.message for v in semantics)
+
+
+@pytest.mark.parametrize("height", [float("nan"), float("inf"), True, "bad"])
+def test_mix_finish_invalid_height_is_reported(height, caplog):
+    from cubos.validation.bounds import collect_protocol_motion_targets
+
+    protocol = _protocol(
+        _step(0, "pick_up_tip", position="tips.A1"),
+        _step(1, "mix", position="plate.A1", volume_ul=25, height=-5, blowout_height=height),
+    )
+    deck, gantry, board = _deck(), _gantry(), _board()
+    violations = validate_protocol_semantics(protocol, board, deck, gantry)
+    assert any("blowout_height must be a finite number" in v.message for v in violations)
+    collect_protocol_motion_targets(gantry, protocol, deck)
+    assert "blowout_height" in caplog.text
+
+
+def test_mix_default_finish_target_is_the_reference_height():
+    from cubos.validation.bounds import collect_protocol_motion_targets
+
+    protocol = _protocol(
+        _step(0, "pick_up_tip", position="tips.A1"),
+        _step(1, "mix", position="plate.A1", volume_ul=25, height=-5),
+    )
+    targets = collect_protocol_motion_targets(_gantry(), protocol, _deck())
+    action_heights = [t.z for t in targets if t.labware_key == "plate" and t.position_id.endswith("action_z")]
+    assert action_heights == [7, 12]
+
+
+@pytest.mark.parametrize("repetitions", [0, 1])
+def test_rinse_well_checks_the_inherited_mix_finish(repetitions):
+    protocol = _protocol(
+        _step(0, "pick_up_tip", position="tips.A1"),
+        _step(1, "rinse_well", well="plate.A1", source="plate.A2", waste="waste",
+              volume_ul=25, well_height=-20, mix_repetitions=repetitions),
+    )
+    deck, gantry, board = _deck(tip_length=42), _gantry(z_max=85, safe_z=80), _board(depth=-42)
+    deck["plate"].wells["A1"] = Coordinate3D(x=90, y=30, z=90)
+    semantics = validate_protocol_semantics(protocol, board, deck, gantry)
+    bounds = validate_protocol_motion_bounds(gantry, protocol, deck, board)
+    assert any("rinse_well mix blowout" in v.message for v in semantics) == bool(repetitions)
+    assert any(v.z == 90 and v.bound_name == "z_max" for v in bounds) == bool(repetitions)
+
+
 def test_tip_rack_defaults_to_opentrons_300ul_tip_length():
     rack = _tip_rack()
 

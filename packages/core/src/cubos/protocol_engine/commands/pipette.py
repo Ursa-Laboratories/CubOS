@@ -226,6 +226,7 @@ def _begin_tracked_mix(
     cycles: int,
     speed: float,
     height: float,
+    blowout_height: float,
 ) -> tuple[str, bool]:
     target = _resolve_fluid_target(context, position)
     try:
@@ -239,6 +240,7 @@ def _begin_tracked_mix(
             speed,
             height,
             campaign_id=context.campaign_id,
+            blowout_height=blowout_height,
         )
     except Exception as exc:
         raise ProtocolExecutionError(
@@ -483,15 +485,20 @@ def mix(
     travel_clearance: PipetteTravelClearance = 3.0,
     x_offset_mm: float = 0.0,
     y_offset_mm: float = 0.0,
+    blowout_height: float = 0.0,
 ) -> Any:
-    """Move pipette to *position* at *height*, then mix ``cycles`` times
-    between that height and 1 mm above it."""
+    """Mix at *height*, then blow out at *blowout_height* and reset safely."""
     try:
         validate_pipette_travel_clearance(travel_clearance)
+        _assert_finite_number(
+            blowout_height, field_name="blowout_height", source="command 'mix'",
+        )
     except ValueError as exc:
         raise ProtocolExecutionError(str(exc)) from exc
     tracked = _tracked_fluid_state(context)
     pipette = _get_pipette(context)
+    retract_z = _blowout_retract_z(context, pipette, position, blowout_height)
+    planned_retract = None
     operation_key = None
     if tracked:
         operation_key, should_execute = _begin_tracked_mix(
@@ -501,6 +508,7 @@ def mix(
             cycles=cycles,
             speed=speed,
             height=height,
+            blowout_height=blowout_height,
         )
         if not should_execute:
             context.logger.info(
@@ -513,6 +521,9 @@ def mix(
             from ..routing import prepared_step
 
             planned = prepared_step(context, "mix")
+            planned_retract = planned.data.get("blowout_retract")
+            if (retract_z is not None) != (planned_retract is not None):
+                raise ProtocolExecutionError("mix blowout requirements changed since preflight.")
             context.routing_session.execute(planned.plans[0])
             motion_index = 1
             for _ in range(cycles):
@@ -524,6 +535,9 @@ def mix(
                 context.routing_session.execute(planned.plans[motion_index])
                 motion_index += 1
                 pipette.dispense(volume_ul, speed)
+            finish_plan = planned.plans[motion_index]
+            context.routing_session.execute(finish_plan)
+            finish_tip = _planned_tip_position(context, finish_plan)
             from cubos.instruments.pipette.models import MixResult
 
             result = MixResult(success=True, volume_ul=volume_ul, cycles=cycles)
@@ -535,6 +549,11 @@ def mix(
             result = pipette.mix(
                 volume_ul, cycles, speed, gantry=context.gantry, position=tip,
             )
+            finish_tip = (tip[0], tip[1], tip[2] - height + blowout_height)
+            context.gantry.move("pipette", finish_tip)
+        _blowout_and_retract(
+            context, pipette, finish_tip, speed, retract_z, planned_retract,
+        )
     except BaseException as exc:
         if operation_key is not None:
             _mark_transfer_uncertain(context, operation_key, exc)

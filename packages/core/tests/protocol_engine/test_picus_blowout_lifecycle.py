@@ -15,6 +15,7 @@ from cubos.instruments.pipette.vendors.sartorius import SartoriusPicus2Pipette
 from cubos.protocol_engine.commands.pipette import (
     blowout,
     flush_pipette,
+    mix,
     serial_transfer,
     transfer,
 )
@@ -225,4 +226,43 @@ def test_picuses_still_refuse_home_while_holding_liquid():
     pipette._loaded_volume_ul = 10.0
     with pytest.raises(PipetteCommandError, match="still holds"):
         pipette.home()
+    assert events == []
+
+
+@pytest.mark.parametrize("failure", [None, "blowout", "retract", "home"])
+def test_mix_finishes_above_liquid_and_resets_before_commit(failure):
+    context, _, events = _rig(fail=failure)
+    context.campaign_id = 7
+    context.fluid_state_id = 11
+    context.data_store = MagicMock()
+    context.data_store.begin_fluid_mix.return_value = True
+    context.data_store.complete_fluid_mix.side_effect = (
+        lambda key: events.append(("commit", key))
+    )
+
+    def execute():
+        mix(context, "destination", 50.0, cycles=1, height=-5.0,
+            blowout_height=3.0, x_offset_mm=3.0, y_offset_mm=-4.0)
+
+    if failure:
+        with pytest.raises((RuntimeError, PipetteCommandError), match=failure):
+            execute()
+        context.data_store.complete_fluid_mix.assert_not_called()
+        context.data_store.mark_fluid_reconciliation_required.assert_called_once()
+    else:
+        execute()
+        index, = _blowout_indices(events)
+        assert events[index - 1] == ("move", 43.0, 46.0, 53.0, None)
+        assert events[index:index + 3] == [
+            ("pipette", "BLOW_OUT 0 5 3000"),
+            ("move", 43.0, 46.0, 100.0, None),
+            ("pipette", "HOME"),
+        ]
+        assert events[-1][0] == "commit"
+
+
+def test_mix_rejects_insufficient_blowout_clearance_before_motion():
+    context, _, events = _rig(safe_z=22.0)
+    with pytest.raises(ProtocolExecutionError, match="safe_z"):
+        mix(context, "destination", 50.0, height=-5.0, blowout_height=3.0)
     assert events == []

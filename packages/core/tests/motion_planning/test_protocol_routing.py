@@ -256,6 +256,7 @@ def test_native_planned_commands_execute_preflighted_exact_segments() -> None:
         "dispense:50.0",
         "aspirate:50.0",
         "dispense:50.0",
+        "blowout",
         "drop_tip",
     ]
     assert controller.moves
@@ -979,7 +980,7 @@ def test_planned_tip_pickup_rejects_shift_away_from_registered_slot(offset):
     assert pipette.actions == []
 
 
-@pytest.mark.parametrize("command", ["blowout", "transfer"])
+@pytest.mark.parametrize("command", ["blowout", "transfer", "mix"])
 @pytest.mark.parametrize("failure", [None, "withdrawal", "home"])
 def test_routed_picus_blowout_withdrawal_is_planned_and_precedes_home(command, failure, monkeypatch):
     from cubos.gantry.errors import MillConnectionError
@@ -1006,6 +1007,8 @@ def test_routed_picus_blowout_withdrawal_is_planned_and_precedes_home(command, f
             "destination_height": -5} if command == "transfer" else {
                 "position": "destination", "height": -5, "x_offset_mm": 2, "y_offset_mm": -3,
             }
+    if command == "mix":
+        args.update(volume_ul=50, cycles=1, blowout_height=3)
     protocol = compile_protocol([
         CommandCall("pick_up_tip", {"position": "tips.A1"}),
         CommandCall(command, args),

@@ -237,6 +237,10 @@ FLIR camera. Select `backend: pyspin` for the proprietary Spinnaker/PySpin
 SDK, `backend: gentl` for Spinnaker's GenTL producer, or `backend: aravis`
 for the Linux Aravis 0.8 USB3 Vision stack. On Debian, Aravis requires the
 `gir1.2-aravis-0.8`, `python3-opencv`, and `python3-numpy` system packages.
+The Aravis driver selects a supported pixel format from the camera’s advertised
+formats at connection time. `pixel_format` is not a supported gantry YAML key;
+remove it from older local configurations rather than guessing a format.
+Offline validation checks configuration loading, not camera connectivity.
 `opencv` drives a
 plain USB webcam (`camera_id: -1` auto-detects the first responsive index).
 Offline, both write placeholder PNGs so dry runs exercise the full

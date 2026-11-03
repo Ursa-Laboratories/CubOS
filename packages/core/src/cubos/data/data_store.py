@@ -1187,6 +1187,7 @@ class DataStore:
         height: float = 0.0,
         *,
         campaign_id: int | None = None,
+        blowout_height: float | None = None,
     ) -> bool:
         """Preflight and journal a net-zero mix before hardware acts."""
         from .fluid_state import begin_fluid_mix
@@ -1201,6 +1202,7 @@ class DataStore:
             speed,
             height,
             campaign_id,
+            blowout_height=blowout_height,
         )
 
     def complete_fluid_mix(self, operation_key: str) -> None:

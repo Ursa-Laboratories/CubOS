@@ -865,6 +865,48 @@ def test_mix_is_net_zero_journal_and_exact_replay_is_skipped(tmp_path):
     store.close()
 
 
+def test_mix_finish_height_is_part_of_replay_identity(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)
+    store = DataStore(":memory:")
+    state_id = _create_seeded_state(store, deck_path, deck)
+    campaign_id = _create_linked_campaign(store, state_id)
+
+    assert store.begin_fluid_mix(
+        state_id, "mix-finish", "source", 25, 3, 50,
+        campaign_id=campaign_id, blowout_height=0,
+    )
+    store.complete_fluid_mix("mix-finish")
+    snapshot = store.get_fluid_snapshot(state_id)
+    assert snapshot["operations"][0]["parameters"]["blowout_height"] == 0
+    assert not store.begin_fluid_mix(
+        state_id, "mix-finish", "source", 25, 3, 50,
+        campaign_id=campaign_id, blowout_height=0,
+    )
+    with pytest.raises(FluidStateError, match="different mix parameters"):
+        store.begin_fluid_mix(
+            state_id, "mix-finish", "source", 25, 3, 50,
+            campaign_id=campaign_id, blowout_height=3,
+        )
+    store.close()
+
+
+def test_older_mix_cannot_be_replayed_as_having_a_finishing_blowout(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)
+    store = DataStore(":memory:")
+    state_id = _create_seeded_state(store, deck_path, deck)
+    campaign_id = _create_linked_campaign(store, state_id)
+    store.begin_fluid_mix(
+        state_id, "legacy-mix", "source", 25, 3, 50, campaign_id=campaign_id,
+    )
+    store.complete_fluid_mix("legacy-mix")
+    with pytest.raises(FluidStateError, match="different mix parameters"):
+        store.begin_fluid_mix(
+            state_id, "legacy-mix", "source", 25, 3, 50,
+            campaign_id=campaign_id, blowout_height=0,
+        )
+    store.close()
+
+
 def test_pending_reservation_is_serialized_across_two_connections(tmp_path):
     deck_path, deck = _write_deck(tmp_path)
     db_path = tmp_path / "concurrent.db"
