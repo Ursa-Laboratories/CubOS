@@ -195,7 +195,7 @@ def run_setup_validation(
 
     out("[4/4] Loading protocol...")
     try:
-        protocol = load_protocol_from_yaml(protocol_path)
+        protocol = load_protocol_from_yaml(protocol_path, deck=deck)
     except Exception as exc:
         _log.error("Failed to load protocol from %s", protocol_path, exc_info=True)
         return _error_result(
