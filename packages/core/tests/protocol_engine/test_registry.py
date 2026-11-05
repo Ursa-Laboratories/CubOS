@@ -192,8 +192,12 @@ def _reload_real_command_registry() -> CommandRegistry:
 
 
 def _sample_value(annotation):
+    from typing import Annotated
+
     origin = get_origin(annotation)
     args = get_args(annotation)
+    if origin is Annotated:
+        return _sample_value(args[0])
     if origin is list:
         return [_sample_value(args[0] if args else str)]
     if origin is dict:

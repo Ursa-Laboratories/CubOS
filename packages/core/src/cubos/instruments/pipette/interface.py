@@ -53,6 +53,11 @@ class PipetteInstrument(BaseInstrument):
             ) from None
 
     @property
+    def loaded_volume_ul(self) -> float | None:
+        """Driver-tracked liquid volume; None if the driver cannot determine it."""
+        return None
+
+    @property
     @abstractmethod
     def attached_tip_extension(self) -> float:
         """Return the active disposable-tip extension below the bare nozzle."""

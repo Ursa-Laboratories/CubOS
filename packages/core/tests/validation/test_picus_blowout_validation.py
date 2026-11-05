@@ -69,6 +69,8 @@ def _validate(command, args, poses, **setup_options):
         ("transfer", {"destination": "destination", "destination_height": -5.0,
                       "destination_x_offset_mm": 3.0,
                       "destination_y_offset_mm": -4.0}, (43, 46, 70)),
+        ("multi_dispense", {"destinations": ["destination", "waste"],
+                            "destination_height": -5.0}, (60, 80, 70)),
         ("serial_transfer", {"plate": "plate", "axis": "A",
                              "destination_x_offset_mm": 3.0,
                              "destination_y_offset_mm": -4.0}, (93, 56, 70)),
@@ -85,15 +87,23 @@ def test_final_pose_matches_successful_retract(command, args, expected):
 
 
 @pytest.mark.parametrize("safe_z,height", [(20.0, -5.0), (15.0, -5.0), (70.0, 50.0)])
-@pytest.mark.parametrize("command", ["blowout", "transfer"])
+@pytest.mark.parametrize("command", ["blowout", "transfer", "multi_dispense"])
 def test_clearance_must_exceed_surface_and_action(safe_z, height, command):
     args = (
         {"position": "destination", "height": height}
         if command == "blowout"
         else {"destination": "destination", "destination_height": height}
     )
+    if command == "multi_dispense":
+        args = {"destinations": ["destination"], "destination_height": height}
     violations = _validate(command, args, {}, safe_z=safe_z)
     assert any("requires safe_z above both" in str(v) for v in violations)
+
+
+def test_empty_multi_dispense_has_no_blowout_retraction():
+    poses = {"pipette": (1, 2, 3)}
+    assert _validate("multi_dispense", {"destinations": []}, poses) == []
+    assert poses["pipette"] == (1, 2, 3)
 
 
 @pytest.mark.parametrize("command", ["rinse_well", "flush_pipette", "purge_pipette", "clear_well"])
@@ -136,11 +146,15 @@ def test_optional_null_heights_still_validate_and_track_retraction(command, args
                for v in _validate(command, args, {}, safe_z=20.0))
 
 
-def test_public_validation_supplies_retracted_pose_to_next_move(monkeypatch):
+@pytest.mark.parametrize("command,args,expected_pose", [
+    ("blowout", {"position": "destination", "height": -5.0}, (40, 50, 70)),
+    ("multi_dispense", {"source": "source", "destinations": ["destination", "waste"],
+                        "volumes": [50.0, 50.0], "destination_height": -5.0}, (60, 80, 70)),
+])
+def test_public_validation_supplies_retracted_pose_to_next_move(monkeypatch, command, args, expected_pose):
     gantry, deck, config = _setup()
     protocol = Protocol([
-        ProtocolStep(index=0, command_name="blowout", handler=lambda **kwargs: None,
-                     args={"position": "destination", "height": -5.0}),
+        ProtocolStep(index=0, command_name=command, handler=lambda **kwargs: None, args=args),
         ProtocolStep(index=1, command_name="move", handler=lambda **kwargs: None,
                      args={"instrument": "pipette", "position": [100, 100, 70],
                            "travel_z": 70.0}),
@@ -156,15 +170,19 @@ def test_public_validation_supplies_retracted_pose_to_next_move(monkeypatch):
     monkeypatch.setattr(semantics, "_validate_known_transit", record_transit)
     violations = semantics.validate_protocol_semantics(protocol, gantry, deck, config)
     assert all("attached pipette tip" in str(v) for v in violations)
-    assert seen == [(40.0, 50.0, 70.0)]
+    assert seen == [expected_pose]
 
 
-def test_public_validation_reports_blowout_clearance_error():
+@pytest.mark.parametrize("command,args", [
+    ("transfer", {"source": "source", "destination": "destination",
+                  "volume_ul": 50.0, "destination_height": -5.0}),
+    ("multi_dispense", {"source": "source", "destinations": ["destination", "waste"],
+                        "volumes": [50.0, 50.0], "destination_height": -5.0}),
+])
+def test_public_validation_reports_blowout_clearance_error(command, args):
     gantry, deck, config = _setup(safe_z=20.0)
     protocol = Protocol([
-        ProtocolStep(index=0, command_name="transfer", handler=lambda **kwargs: None,
-                     args={"source": "source", "destination": "destination",
-                           "volume_ul": 50.0, "destination_height": -5.0}),
+        ProtocolStep(index=0, command_name=command, handler=lambda **kwargs: None, args=args),
     ])
     violations = semantics.validate_protocol_semantics(protocol, gantry, deck, config)
     assert any("requires safe_z above both" in str(v) for v in violations)

@@ -9,12 +9,14 @@ from cubos.deck.labware.labware import Coordinate3D
 from cubos.deck.labware.vial import Vial
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.gantry.instrument_mount import InstrumentedGantry
+from cubos.gantry.errors import MillConnectionError
 from cubos.instruments.pipette.exceptions import PipetteCommandError
 from cubos.instruments.pipette.vendors.opentrons import OpentronsPipette
 from cubos.instruments.pipette.vendors.sartorius import SartoriusPicus2Pipette
 from cubos.protocol_engine.commands.pipette import (
     blowout,
     flush_pipette,
+    multi_dispense,
     mix,
     serial_transfer,
     transfer,
@@ -150,15 +152,67 @@ def test_composed_transfers_reset_before_next_aspiration(command):
 
 
 @pytest.mark.parametrize("safe_z", [None, float("nan"), float("inf"), 20.0, 15.0])
-@pytest.mark.parametrize("command", ["blowout", "transfer"])
+@pytest.mark.parametrize("command", ["blowout", "transfer", "multi_dispense"])
 def test_missing_or_insufficient_clearance_fails_before_motion(safe_z, command):
     context, _, events = _rig(safe_z=safe_z)
     with pytest.raises(ProtocolExecutionError, match="clearance|safe_z"):
         if command == "blowout":
             blowout(context, "destination", height=-5.0)
+        elif command == "multi_dispense":
+            multi_dispense(context, "source", ["destination", "plate.A1"], [50.0, 50.0])
         else:
             transfer(context, "source", "destination", 50.0)
     assert events == []
+
+
+def test_multi_dispense_resets_once_above_final_destination():
+    context, _, events = _rig()
+
+    multi_dispense(
+        context, "source", ["destination", "plate.A1"], [50.0, 50.0],
+        destination_height=-5.0,
+    )
+
+    index, = _blowout_indices(events)
+    assert events[index:] == [
+        ("pipette", "BLOW_OUT 0 5 3000"),
+        ("move", 80.0, 60.0, 100.0, None),
+        ("pipette", "HOME"),
+    ]
+    actions = [event[1].split()[0] for event in events if event[0] == "pipette"]
+    assert actions == ["RUN_ASPIRATE", "RUN_DISPENSE", "RUN_DISPENSE", "BLOW_OUT", "HOME"]
+
+
+@pytest.mark.parametrize("stage", ["retract", "home"])
+def test_multi_dispense_reset_connection_failure_propagates(stage, monkeypatch):
+    context, pipette, events = _rig()
+    failure = MillConnectionError("connection lost during reset")
+    retract_attempts = []
+    if stage == "home":
+        reset = MagicMock(side_effect=failure)
+        monkeypatch.setattr(pipette, "home", reset)
+    else:
+        original = context.gantry.controller.move_to
+
+        def move(*args, **kwargs):
+            if _blowout_indices(events):
+                retract_attempts.append(True)
+                raise failure
+            return original(*args, **kwargs)
+
+        reset = MagicMock(side_effect=move)
+        monkeypatch.setattr(context.gantry.controller, "move_to", reset)
+
+    with pytest.raises(MillConnectionError) as caught:
+        multi_dispense(context, "source", ["destination", "plate.A1"], [50.0, 50.0])
+
+    assert caught.value is failure
+    assert len(_blowout_indices(events)) == 1
+    assert ("pipette", "HOME") not in events
+    if stage == "home":
+        reset.assert_called_once_with()
+    else:
+        assert retract_attempts == [True]
 
 
 def test_clearance_must_also_be_above_positive_action_height():

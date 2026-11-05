@@ -136,6 +136,42 @@ def plan_strokes(
     return strokes
 
 
+def plan_multi_dispense(
+    destinations: list[str],
+    volumes: list[float],
+    capacity: PipetteConfig | None,
+) -> float:
+    """Validate one unsplit aspiration and return its total volume."""
+    if not destinations or len(destinations) != len(volumes):
+        raise LiquidTransferPreflightError(
+            "multi_dispense requires nonempty destinations and one volume per destination."
+        )
+    if capacity is None:
+        raise LiquidTransferPreflightError("multi_dispense requires pipette model capacity.")
+    for volume in volumes:
+        strokes = plan_strokes(volume, capacity)
+        if len(strokes) != 1 or not capacity.min_volume <= volume <= capacity.max_volume:
+            raise LiquidTransferPreflightError(
+                "Each dispense must fit in one pipette stroke within model volume bounds."
+            )
+        increment = capacity.volume_increment_ul
+        if increment > 0 and not math.isclose(
+            volume, round(volume / increment) * increment, rel_tol=0, abs_tol=1e-6,
+        ):
+            raise LiquidTransferPreflightError(
+                f"Volume {volume:g} uL must be a multiple of {increment:g} uL."
+            )
+    total = math.fsum(volumes)
+    if capacity.volume_increment_ul > 0:
+        total = round(total, 6)
+    if total > capacity.max_volume:
+        raise LiquidTransferPreflightError(
+            f"multi_dispense total {total:g} uL exceeds pipette capacity "
+            f"{capacity.max_volume:g} uL; split the batch explicitly."
+        )
+    return total
+
+
 def vial_for_target(target: Any) -> Vial | None:
     """Return the concrete ``Vial`` behind a resolved deck target, if any.
 

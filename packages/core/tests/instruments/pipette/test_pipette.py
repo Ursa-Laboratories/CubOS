@@ -788,3 +788,38 @@ class TestLiquidClassCorrection:
                 offline=True,
                 liquid_classes={"bad": {"scale": 2.0}},
             )
+
+
+@pytest.mark.parametrize("offline", [True, False])
+def test_partial_dispense_reports_remaining_volume(offline, monkeypatch):
+    pipette = OpentronsPipette(offline=offline)
+    wire = MagicMock(return_value="pos: 10")
+    monkeypatch.setattr(pipette, "_send_command", wire)
+    assert pipette.loaded_volume_ul == 0
+    assert pipette.aspirate(100).loaded_volume_ul == 100
+    assert pipette.dispense(20).loaded_volume_ul == 80
+    assert pipette.dispense(30).loaded_volume_ul == 50
+    assert pipette.dispense(50).loaded_volume_ul == 0
+    if not offline:
+        assert [c.args[0] for c in wire.call_args_list] == [12, 13, 13, 13]
+
+
+@pytest.mark.parametrize("offline", [True, False])
+@pytest.mark.parametrize("reset", ["home", "prime", "pick_up_tip", "drop_tip", "blowout"])
+def test_volume_bookkeeping_cleared_by_successful_reset(offline, reset, monkeypatch):
+    pipette = OpentronsPipette(offline=offline)
+    monkeypatch.setattr(pipette, "_send_command", MagicMock(return_value="pos: 10"))
+    pipette.aspirate(100)
+    getattr(pipette, reset)()
+    assert pipette.loaded_volume_ul == 0
+
+
+def test_failed_dispense_does_not_claim_volume_was_delivered(monkeypatch):
+    pipette = OpentronsPipette()
+    wire = MagicMock(return_value="pos: 10")
+    monkeypatch.setattr(pipette, "_send_command", wire)
+    pipette.aspirate(100)
+    wire.side_effect = PipetteTimeoutError("no acknowledgement")
+    with pytest.raises(PipetteTimeoutError):
+        pipette.dispense(40)
+    assert pipette.loaded_volume_ul == 100

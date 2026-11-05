@@ -455,7 +455,13 @@ def validate_protocol_fluid_volumes(
 
     for step in protocol.steps:
         args = step.args
-        if step.command_name == "transfer":
+        if step.command_name == "multi_dispense":
+            violations.append(_violation(
+                step.index, "multi_dispense",
+                "multi_dispense is disabled while durable fluid tracking is active. "
+                "Use transfer or serial_transfer.",
+            ))
+        elif step.command_name == "transfer":
             volume = args.get("volume_ul")
             if not isinstance(volume, (int, float)) or isinstance(volume, bool):
                 continue  # schema-level validation reports the type error

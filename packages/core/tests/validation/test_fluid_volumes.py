@@ -447,3 +447,12 @@ class TestRunSetupValidationWithInitialFluids:
         result = self._run(tmp_path, volume=950.0, with_fluids=False)
         assert result.passed, result.output
         assert "Validating protocol fluid volumes" not in result.output
+
+
+def test_multi_dispense_rejected_when_seed_enables_durable_tracking():
+    protocol = _protocol(("multi_dispense", {
+        "source": "source", "destinations": ["plate.A1", "plate.A2"], "volumes": [40, 60],
+    }))
+    errors = validate_protocol_fluid_volumes(protocol, _deck(), SEED, pipette_config=P300)
+    assert len(errors) == 1
+    assert "durable fluid tracking" in errors[0].message

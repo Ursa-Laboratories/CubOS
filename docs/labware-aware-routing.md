@@ -35,7 +35,7 @@ separate checks.
 ## Supported commands
 
 Routing supports `move`, `pick_up_tip`, `transfer`, `mix`, `drop_tip`,
-`aspirate`, `dispense`, `blowout`, timed `pause`, and non-moving camera `capture`.
+`aspirate`, `dispense`, `multi_dispense`, `blowout`, timed `pause`, and non-moving camera `capture`.
 Unsupported commands fail before protocol movement. `pause` preserves the pose;
 `capture` records an image without moving the camera. A camera-target `move`
 aligns the camera over that target at the carriage travel ceiling.
@@ -46,6 +46,12 @@ account for source/destination inventory and are rejected with durable fluid
 tracking in routed runs. Use `transfer` for tracked liquid handling. Tracked tip occupancy is
 included in the collision scene; uncertain operations still require operator
 reconciliation. `transfer.require_uncapped` is not supported by routing v1.
+
+`multi_dispense` plans one source engagement followed by each destination in
+order. Its optional final piston-reset retraction is part of the same preflight.
+The batch must fit one aspiration and does not support durable fluid tracking.
+Blocked destinations reject the entire protocol before any motion. A runtime
+failure stops without retry, automatic recovery movement, or replay.
 
 ## Access and execution
 

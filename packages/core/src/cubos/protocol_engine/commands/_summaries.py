@@ -154,6 +154,14 @@ def transfer(args: Dict[str, Any]) -> str:
     )
 
 
+def multi_dispense(args: dict[str, Any]) -> str:
+    return _join(
+        f"{args['source']} {ARROW} {len(args['destinations'])} destinations",
+        _volumes(args["volumes"]),
+        "one aspiration",
+    )
+
+
 def serial_transfer(args: Dict[str, Any]) -> str:
     volumes = args.get("volumes")
     volume_range = args.get("volume_range")
