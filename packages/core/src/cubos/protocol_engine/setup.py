@@ -124,7 +124,7 @@ def setup_protocol(
         )
 
     if protocol is None:
-        protocol = load_protocol_from_yaml_safe(protocol_path)
+        protocol = load_protocol_from_yaml_safe(protocol_path, deck=deck)
 
     violations = validate_protocol_motion_bounds(
         gantry_config, protocol, deck, instrumented_gantry,

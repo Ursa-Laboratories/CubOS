@@ -105,7 +105,7 @@ def _format_loader_exception(path: Path, error: Exception) -> str:
     )
 
 
-def load_protocol_from_yaml(path: str | Path) -> Protocol:
+def load_protocol_from_yaml(path: str | Path, *, deck=None) -> Protocol:
     """Load a protocol YAML file and return an executable Protocol."""
     path = Path(path)
     with path.open() as f:
@@ -121,10 +121,11 @@ def load_protocol_from_yaml(path: str | Path) -> Protocol:
         calls,
         source_path=path,
         positions=schema.positions or {},
+        deck=deck,
     )
 
 
-def load_protocol_from_yaml_safe(path: str | Path) -> Protocol:
+def load_protocol_from_yaml_safe(path: str | Path, *, deck=None) -> Protocol:
     """Load protocol YAML with user-friendly exception formatting.
 
     Raises:
@@ -132,7 +133,7 @@ def load_protocol_from_yaml_safe(path: str | Path) -> Protocol:
     """
     resolved_path = Path(path)
     try:
-        return load_protocol_from_yaml(resolved_path)
+        return load_protocol_from_yaml(resolved_path, deck=deck)
     except Exception as exc:
         raise ProtocolLoaderError(
             _format_loader_exception(resolved_path, exc)

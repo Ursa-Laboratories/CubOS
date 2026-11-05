@@ -64,6 +64,8 @@ def _validate(command, args, poses, **setup_options):
     [
         ("blowout", {"position": "destination", "height": -5.0,
                      "x_offset_mm": 3.0, "y_offset_mm": -4.0}, (43, 46, 70)),
+        ("mix", {"position": "destination", "blowout_height": 3.0,
+                 "x_offset_mm": 3.0, "y_offset_mm": -4.0}, (43, 46, 70)),
         ("transfer", {"destination": "destination", "destination_height": -5.0,
                       "destination_x_offset_mm": 3.0,
                       "destination_y_offset_mm": -4.0}, (43, 46, 70)),

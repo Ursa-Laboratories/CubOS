@@ -110,8 +110,8 @@ class PipetteInstrument(BaseInstrument):
         ``position`` is the tip ``(x, y, z)`` at the measurement height,
         which the caller has already engaged. Each cycle aspirates there,
         rises ``lift_mm`` to dispense and aspirate again, then returns to
-        the measurement height to dispense. The tip ends where it started
-        with nothing loaded.
+        the measurement height to dispense. The protocol command owns the
+        final retraction and blowout above the sample.
         """
         if isinstance(cycles, bool) or not isinstance(cycles, int) or cycles <= 0:
             raise ValueError(f"mix cycles must be a positive integer, got {cycles!r}.")

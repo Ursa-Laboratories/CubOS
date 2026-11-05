@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type {
   CommandInfo,
   CompositionSeedRow,
@@ -24,7 +24,10 @@ import RawYamlPanel from "./RawYamlPanel";
 import MultiDispenseTable from "./MultiDispenseTable";
 import { multiDispenseErrors } from "../../utils/multiDispense";
 import { useConfirm } from "../common/useConfirm";
-import { expandStepsAcrossWells } from "./protocolRepeat";
+import RepeatBlockEditor from "./RepeatBlockEditor";
+import { PlatePreview, WellPlateSelector } from "./WellPlateSelector";
+import "./repeatPlate.css";
+import { createRepeatBlock, repeatArgs, stepToYaml, stepsFromYaml } from "./protocolRepeat";
 import {
   createCompositionRow,
   createSeedRow,
@@ -203,6 +206,9 @@ export default function ProtocolEditor({
   const [repeatTargetWells, setRepeatTargetWells] = useState<string[]>(initialRepeatWells);
   const [repeatStartStep, setRepeatStartStep] = useState(1);
   const [repeatEndStep, setRepeatEndStep] = useState(Math.max(1, loadedSteps?.length ?? 1));
+  const repeatPanelId = useId();
+  const [repeatOpen, setRepeatOpen] = useState(false);
+  const [repeatStarted, setRepeatStarted] = useState(false);
   const [repeatError, setRepeatError] = useState<string | null>(null);
   const [requestConfirm, confirmDialog] = useConfirm();
 
@@ -210,7 +216,12 @@ export default function ProtocolEditor({
   const choices = buildProtocolChoices(deck, gantry, positionRows, instrumentMethods, instrumentMethodParams);
   const positionErrors = validatePositionRows(positionRows);
   const hasPositionErrors = positionErrors.length > 0;
-  const hasDispenseErrors = steps.some(step => step.command === "multi_dispense" && multiDispenseErrors(step.args).length > 0);
+  const hasInvalidDispense = (step: ProtocolStep): boolean => {
+    const repeat = repeatArgs(step);
+    return repeat ? repeat.steps.some(hasInvalidDispense)
+      : step.command === "multi_dispense" && multiDispenseErrors(step.args).length > 0;
+  };
+  const hasDispenseErrors = steps.some(hasInvalidDispense);
   const selectedRepeatLabware = repeatableLabware.find(
     (entry) => entry.key === repeatLabware,
   ) ?? repeatableLabware[0];
@@ -247,9 +258,11 @@ export default function ProtocolEditor({
     commit(next);
   };
 
-  const updateStepArg = (i: number, argName: string, value: unknown) => {
-    const next = [...steps];
-    const updatedArgs = { ...next[i].args };
+  const updateStepArg = (i: number, argName: string, value: unknown, childIndex?: number) => {
+    const next = structuredClone(steps);
+    const children = repeatArgs(next[i])?.steps;
+    const target = childIndex !== undefined && children ? children[childIndex] : next[i];
+    const updatedArgs = { ...target.args };
     if (value === null) {
       // Optional field cleared by the operator: omit the argument rather
       // than saving an empty string or a stale number.
@@ -257,7 +270,7 @@ export default function ProtocolEditor({
     } else {
       updatedArgs[argName] = value;
     }
-    const declaresMethod = commandsByName[next[i].command]?.args.some((a) => a.name === "method") ?? false;
+    const declaresMethod = commandsByName[target.command]?.args.some((a) => a.name === "method") ?? false;
     if (argName === "instrument" && declaresMethod) {
       const methods = measurementMethodsForInstrument(String(value), choices);
       if (methods.length > 0 && !methods.includes(String(updatedArgs.method ?? ""))) {
@@ -292,11 +305,125 @@ export default function ProtocolEditor({
         delete updatedArgs.method_kwargs;
       }
     }
-    next[i] = { ...next[i], args: updatedArgs };
+    target.args = updatedArgs;
     commit(next);
   };
 
+  const renderStepFields = (step: ProtocolStep, i: number, childIndex?: number) => {
+    const cmd = commandsByName[step.command];
+    const fieldId = childIndex === undefined ? `${i}` : `${i}-child-${childIndex}`;
+    return <>
+      {cmd ? (
+                  <div style={stepArgsGridStyle}>
+                    {cmd.args.map((arg) => {
+                      if (step.command === "multi_dispense" && ["destinations", "volumes"].includes(arg.name)) return null;
+                      if (isHiddenArgForStep(arg.name, step.args, choices)) {
+                        return null;
+                      }
+                      const val = step.args[arg.name];
+                      const contextualOptions = optionsForArg(arg.name, step.args, choices, step.command);
+                      const argOptions = contextualOptions.length > 0
+                        ? includeCurrentOption(contextualOptions, val)
+                        : [];
+                      if (argOptions.length > 0) {
+                        return (
+                          <SmartSelectField
+                            key={arg.name}
+                            id={`step-${fieldId}-${arg.name}`}
+                            name={`step_${fieldId}_${arg.name}`}
+                            label={argLabel(arg.name)}
+                            value={String(val ?? "")}
+                            options={argOptions}
+                            onChange={(v) => updateStepArg(i, arg.name, v, childIndex)}
+                            required={arg.required}
+                          />
+                        );
+                      }
+                      if (arg.name === "method_kwargs") {
+                        if (isAsmiIndentationStep(step.args, choices)) {
+                          return (
+                            <MethodOptionsField
+                              key={arg.name}
+                              idPrefix={`step-${fieldId}-method`}
+                              namePrefix={`step_${fieldId}_method`}
+                              value={val}
+                              asmiIndentation
+                              onChange={(v) => updateStepArg(i, arg.name, v, childIndex)}
+                            />
+                          );
+                        }
+                        return (
+                          <MethodParamsFields
+                            key={arg.name}
+                            idPrefix={`step-${fieldId}-method`}
+                            namePrefix={`step_${fieldId}_method`}
+                            params={methodParamsForStep(step.args, choices)}
+                            value={val}
+                            onChange={(v) => updateStepArg(i, arg.name, v, childIndex)}
+                          />
+                        );
+                      }
+                      if (isNumericType(arg.type)) {
+                        if (!arg.required) {
+                          return (
+                            <OptionalNumberField
+                              key={arg.name}
+                              id={`step-${fieldId}-${arg.name}`}
+                              name={`step_${fieldId}_${arg.name}`}
+                              label={argLabel(arg.name)}
+                              value={typeof val === "number" ? val : null}
+                              onChange={(v) => updateStepArg(i, arg.name, v, childIndex)}
+                            />
+                          );
+                        }
+                        return (
+                          <NumberField
+                            key={arg.name}
+                            id={`step-${fieldId}-${arg.name}`}
+                            name={`step_${fieldId}_${arg.name}`}
+                            label={argLabel(arg.name)}
+                            value={Number(val ?? 0)}
+                            onChange={(v) => updateStepArg(i, arg.name, v, childIndex)}
+                            required={arg.required}
+                          />
+                        );
+                      }
+                      return (
+                        <TextField
+                          key={arg.name}
+                          id={`step-${fieldId}-${arg.name}`}
+                          name={`step_${fieldId}_${arg.name}`}
+                          label={argLabel(arg.name)}
+                          value={String(val ?? "")}
+                          onChange={(v) => updateStepArg(i, arg.name, v, childIndex)}
+                          required={arg.required}
+                        />
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p style={{ color: theme.color.danger, fontSize: 12, margin: 0 }}>Unknown command: {step.command}</p>
+                )}
+      {step.command === "multi_dispense" && (
+        <MultiDispenseTable
+          stepIndex={i}
+          childIndex={childIndex}
+          args={step.args}
+          positions={choices.positions}
+          onChange={(destinations, volumes) => {
+            const next = structuredClone(steps);
+            const children = repeatArgs(next[i])?.steps;
+            const target = childIndex !== undefined && children ? children[childIndex] : next[i];
+            target.args = { ...target.args, destinations, volumes };
+            commit(next);
+          }}
+        />
+      )}
+    </>;
+  };
+
   const changeRepeatLabware = (key: string) => {
+    if (key === selectedRepeatLabwareKey) return;
     const entry = repeatableLabware.find((candidate) => candidate.key === key);
     const wells = Object.keys(entry?.wells ?? {});
     setRepeatLabware(key);
@@ -305,19 +432,10 @@ export default function ProtocolEditor({
     setRepeatError(null);
   };
 
-  const toggleRepeatWell = (well: string) => {
-    setRepeatTargetWells((current) => (
-      current.includes(well)
-        ? current.filter((candidate) => candidate !== well)
-        : repeatWellIds.filter((candidate) => [...current, well].includes(candidate))
-    ));
-    setRepeatError(null);
-  };
-
   const repeatStepsAcrossWells = () => {
     try {
       const orderedTargets = repeatWellIds.filter((well) => repeatTargetWells.includes(well));
-      const next = expandStepsAcrossWells(
+      const next = createRepeatBlock(
         steps,
         repeatStartStep,
         repeatEndStep,
@@ -327,6 +445,8 @@ export default function ProtocolEditor({
       );
       commit(next);
       setRepeatEndStep(Math.max(1, next.length));
+      setRepeatOpen(false);
+      setRepeatStarted(false);
       setRepeatError(null);
     } catch (error) {
       setRepeatError(error instanceof Error ? error.message : String(error));
@@ -368,23 +488,21 @@ export default function ProtocolEditor({
 
   const renamePositionReferences = (oldName: string, newName: string) => {
     let changed = false;
-    const next = steps.map((step) => {
-      const args = Object.fromEntries(
-        Object.entries(step.args).map(([name, value]) => {
-          if (step.command === "multi_dispense" && name === "destinations" && Array.isArray(value)) {
-            const renamed = value.map(target => target === oldName ? newName : target);
-            if (renamed.some((target, i) => target !== value[i])) changed = true;
-            return [name, renamed];
-          }
-          if (isPositionArg(name) && value === oldName) {
-            changed = true;
-            return [name, newName];
-          }
-          return [name, value];
-        }),
-      );
-      return changed ? { ...step, args } : step;
-    });
+    const renameStep = (step: ProtocolStep): ProtocolStep => {
+      const repeat = repeatArgs(step);
+      if (repeat) return { ...step, args: { ...repeat, steps: repeat.steps.map(renameStep) } };
+      const args = Object.fromEntries(Object.entries(step.args).map(([name, value]) => {
+        if (step.command === "multi_dispense" && name === "destinations" && Array.isArray(value)) {
+          const renamed = value.map(target => target === oldName ? newName : target);
+          if (renamed.some((target, i) => target !== value[i])) changed = true;
+          return [name, renamed];
+        }
+        if (isPositionArg(name) && value === oldName) { changed = true; return [name, newName]; }
+        return [name, value];
+      }));
+      return { ...step, args };
+    };
+    const next = steps.map(renameStep);
     if (changed) commit(next);
   };
 
@@ -584,21 +702,24 @@ export default function ProtocolEditor({
             )}
           </div>
 
-          {repeatableLabware.length > 0 && hasSteps && (
-            <div style={repeatPanelStyle}>
-              <div>
-                <h3 style={sectionTitleStyle}>Repeat Steps Across Wells</h3>
-                <p style={sectionSubtextStyle}>
-                  Build one block for a template well, then replace that block with copies for the checked wells.
-                </p>
-                <p style={sectionSubtextStyle}>
-                  Put pick-up and drop-tip steps inside the block for a fresh tip per well, or leave them outside
-                  to reuse one tip. You can build several repeated blocks in the same protocol.
-                </p>
-                <p style={sectionSubtextStyle}>
-                  For fresh tips, set pick-up position to the rack name (for example, tip_rack), so each copy
-                  automatically takes the next available tip instead of returning to one explicit slot.
-                </p>
+          {repeatableLabware.length > 0 && (
+            <section className="repeat-panel">
+              <button type="button" className="repeat-heading" aria-expanded={repeatOpen}
+                aria-controls={repeatPanelId} disabled={!hasSteps}
+                onClick={() => { setRepeatOpen(!repeatOpen); setRepeatStarted(true); }}>
+                <span>{repeatStarted ? "Repeat across wells" : "+ Add repeat"}</span>
+                <span className="repeat-heading-action">{repeatOpen ? "Minimize −" : repeatStarted ? "Expand +" : "+"}</span>
+              </button>
+              {repeatOpen && <div id={repeatPanelId} className="repeat-body">
+              <div className="repeat-labware" role="group" aria-label="Repeat labware">
+                {repeatableLabware.map((entry) => (
+                  <button type="button" key={entry.key} className="repeat-labware-choice"
+                    aria-label={`Use ${entry.key}`} aria-pressed={entry.key === selectedRepeatLabwareKey}
+                    onClick={() => changeRepeatLabware(entry.key)}>
+                    <PlatePreview wells={Object.keys(entry.wells ?? {})} />
+                    <span>{entry.key}</span>
+                  </button>
+                ))}
               </div>
               <div style={repeatControlsStyle}>
                 <label style={toolbarFieldStyle}>
@@ -610,7 +731,7 @@ export default function ProtocolEditor({
                     max={Math.max(1, steps.length)}
                     value={repeatStartStep}
                     onChange={(event) => setRepeatStartStep(Number(event.target.value))}
-                    style={inputStyle}
+                    style={{ ...inputStyle, background: "#f4f7fc", color: "#172137", borderColor: "#cbd5e5" }}
                   />
                 </label>
                 <label style={toolbarFieldStyle}>
@@ -622,21 +743,8 @@ export default function ProtocolEditor({
                     max={Math.max(1, steps.length)}
                     value={repeatEndStep}
                     onChange={(event) => setRepeatEndStep(Number(event.target.value))}
-                    style={inputStyle}
+                    style={{ ...inputStyle, background: "#f4f7fc", color: "#172137", borderColor: "#cbd5e5" }}
                   />
-                </label>
-                <label style={toolbarFieldStyle}>
-                  <span style={toolbarLabelStyle}>Labware</span>
-                  <select
-                    aria-label="Repeat labware"
-                    value={selectedRepeatLabwareKey}
-                    onChange={(event) => changeRepeatLabware(event.target.value)}
-                    style={selectStyle}
-                  >
-                    {repeatableLabware.map((entry) => (
-                      <option key={entry.key} value={entry.key}>{entry.key}</option>
-                    ))}
-                  </select>
                 </label>
                 <label style={toolbarFieldStyle}>
                   <span style={toolbarLabelStyle}>Template well</span>
@@ -644,7 +752,7 @@ export default function ProtocolEditor({
                     aria-label="Template well"
                     value={repeatTemplateWell}
                     onChange={(event) => setRepeatTemplateWell(event.target.value)}
-                    style={selectStyle}
+                    style={{ ...selectStyle, background: "#f4f7fc", color: "#172137", borderColor: "#cbd5e5" }}
                   >
                     {repeatWellIds.map((well) => (
                       <option key={well} value={well}>{well}</option>
@@ -652,50 +760,27 @@ export default function ProtocolEditor({
                   </select>
                 </label>
               </div>
-              <div style={repeatWellToolbarStyle}>
-                <span style={toolbarLabelStyle}>Target wells</span>
-                <button
-                  type="button"
-                  onClick={() => setRepeatTargetWells(repeatWellIds)}
-                  style={reorderBtnStyle}
-                >
-                  Select all
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRepeatTargetWells([])}
-                  style={reorderBtnStyle}
-                >
-                  Clear
-                </button>
-              </div>
-              <div style={repeatWellGridStyle}>
-                {repeatWellIds.map((well) => (
-                  <label key={well} style={repeatWellStyle}>
-                    <input
-                      type="checkbox"
-                      aria-label={`Repeat target ${well}`}
-                      checked={repeatTargetWells.includes(well)}
-                      onChange={() => toggleRepeatWell(well)}
-                    />
-                    {well}
-                  </label>
-                ))}
-              </div>
+              <WellPlateSelector wells={repeatWellIds} selected={repeatTargetWells}
+                template={repeatTemplateWell} onChange={(wells) => { setRepeatTargetWells(wells); setRepeatError(null); }} />
               <div style={repeatActionStyle}>
-                <button type="button" onClick={repeatStepsAcrossWells} style={addBtnStyle}>
-                  Build Repeated Steps
+                <button type="button" onClick={repeatStepsAcrossWells} style={{ ...addBtnStyle, background: "#233c78", color: "#fff", borderColor: "#233c78" }}>
+                  Create repeat
                 </button>
-                <span style={sectionSubtextStyle}>
-                  Labels receive the target well suffix automatically.
-                </span>
               </div>
-              {repeatError && <div style={positionErrorStyle}>{repeatError}</div>}
-            </div>
+              {repeatError && <div role="alert" style={positionErrorStyle}>{repeatError}</div>}
+              </div>}
+            </section>
           )}
 
           {steps.map((step, i) => {
-            const cmd = commandsByName[step.command];
+            const repeat = repeatArgs(step);
+            if (repeat) return <RepeatBlockEditor key={i} value={repeat} index={i}
+              labware={repeatableLabware} commands={commands.filter(command => command.name !== "repeat")}
+              onChange={(args) => commit(steps.map((item, index) => index === i ? { ...item, args } : item))}
+              onRemove={() => removeStep(i)} onMove={(direction) => moveStep(i, direction)}
+              first={i === 0} last={i === steps.length - 1}
+              createStep={(command) => ({ command, args: defaultArgsForCommand(commandsByName[command], choices) })}
+              renderChild={(child, childIndex) => renderStepFields(child, i, childIndex)} />;
             const color = COMMAND_COLORS[step.command] ?? theme.color.textMuted;
 
             return (
@@ -718,109 +803,9 @@ export default function ProtocolEditor({
                   </div>
                 </div>
 
-                {cmd ? (
-                  <div style={stepArgsGridStyle}>
-                    {cmd.args.map((arg) => {
-                      if (step.command === "multi_dispense" && ["destinations", "volumes"].includes(arg.name)) return null;
-                      if (isHiddenArgForStep(arg.name, step.args, choices)) {
-                        return null;
-                      }
-                      const val = step.args[arg.name];
-                      const contextualOptions = optionsForArg(arg.name, step.args, choices, step.command);
-                      const argOptions = contextualOptions.length > 0
-                        ? includeCurrentOption(contextualOptions, val)
-                        : [];
-                      if (argOptions.length > 0) {
-                        return (
-                          <SmartSelectField
-                            key={arg.name}
-                            id={`step-${i}-${arg.name}`}
-                            name={`step_${i}_${arg.name}`}
-                            label={argLabel(arg.name)}
-                            value={String(val ?? "")}
-                            options={argOptions}
-                            onChange={(v) => updateStepArg(i, arg.name, v)}
-                            required={arg.required}
-                          />
-                        );
-                      }
-                      if (arg.name === "method_kwargs") {
-                        if (isAsmiIndentationStep(step.args, choices)) {
-                          return (
-                            <MethodOptionsField
-                              key={arg.name}
-                              idPrefix={`step-${i}-method`}
-                              namePrefix={`step_${i}_method`}
-                              value={val}
-                              asmiIndentation
-                              onChange={(v) => updateStepArg(i, arg.name, v)}
-                            />
-                          );
-                        }
-                        return (
-                          <MethodParamsFields
-                            key={arg.name}
-                            idPrefix={`step-${i}-method`}
-                            namePrefix={`step_${i}_method`}
-                            params={methodParamsForStep(step.args, choices)}
-                            value={val}
-                            onChange={(v) => updateStepArg(i, arg.name, v)}
-                          />
-                        );
-                      }
-                      if (isNumericType(arg.type)) {
-                        if (!arg.required) {
-                          return (
-                            <OptionalNumberField
-                              key={arg.name}
-                              id={`step-${i}-${arg.name}`}
-                              name={`step_${i}_${arg.name}`}
-                              label={argLabel(arg.name)}
-                              value={typeof val === "number" ? val : null}
-                              onChange={(v) => updateStepArg(i, arg.name, v)}
-                            />
-                          );
-                        }
-                        return (
-                          <NumberField
-                            key={arg.name}
-                            id={`step-${i}-${arg.name}`}
-                            name={`step_${i}_${arg.name}`}
-                            label={argLabel(arg.name)}
-                            value={Number(val ?? 0)}
-                            onChange={(v) => updateStepArg(i, arg.name, v)}
-                            required={arg.required}
-                          />
-                        );
-                      }
-                      return (
-                        <TextField
-                          key={arg.name}
-                          id={`step-${i}-${arg.name}`}
-                          name={`step_${i}_${arg.name}`}
-                          label={argLabel(arg.name)}
-                          value={String(val ?? "")}
-                          onChange={(v) => updateStepArg(i, arg.name, v)}
-                          required={arg.required}
-                        />
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <p style={{ color: theme.color.danger, fontSize: 12, margin: 0 }}>Unknown command: {step.command}</p>
-                )}
+                {renderStepFields(step, i)}
 
-                {step.command === "multi_dispense" && (
-                  <MultiDispenseTable
-                    stepIndex={i}
-                    args={step.args}
-                    positions={choices.positions}
-                    onChange={(destinations, volumes) => commit(steps.map((s, j) => j === i
-                      ? { ...s, args: { ...s.args, destinations, volumes } } : s))}
-                  />
-                )}
-
-                {validationErrors &&
+                {validationErrors && !steps.some(item => item.command === "repeat") &&
                   validationErrors
                     .filter((e) => stepErrorPattern(i).test(e))
                     .map((e, j) => (
@@ -1023,9 +1008,7 @@ export default function ProtocolEditor({
             const doc: Record<string, unknown> = {};
             const rawPositions = rowsToPositions(positionRows);
             if (rawPositions) doc.positions = rawPositions;
-            doc.protocol = steps.map((s) => (
-              { [s.command]: Object.keys(s.args).length ? s.args : null }
-            ));
+            doc.protocol = steps.map(stepToYaml);
             return doc;
           })()}
           onApply={(parsed) => {
@@ -1036,26 +1019,9 @@ export default function ProtocolEditor({
             if (!Array.isArray(doc.protocol)) {
               return "`protocol:` must be a list of steps.";
             }
-            const nextSteps: ProtocolStep[] = [];
-            for (const [i, item] of doc.protocol.entries()) {
-              if (typeof item === "string") {
-                nextSteps.push({ command: item, args: {} });
-                continue;
-              }
-              if (!item || typeof item !== "object" || Array.isArray(item)) {
-                return `Step ${i + 1} must be a single-command mapping.`;
-              }
-              const keys = Object.keys(item);
-              if (keys.length !== 1) {
-                return `Step ${i + 1} must have exactly one command key, got ${keys.length}.`;
-              }
-              const command = keys[0];
-              const args = (item as Record<string, unknown>)[command];
-              if (args !== null && args !== undefined && (typeof args !== "object" || Array.isArray(args))) {
-                return `Step ${i + 1} (${command}) args must be a mapping.`;
-              }
-              nextSteps.push({ command, args: { ...((args ?? {}) as Record<string, unknown>) } });
-            }
+            let nextSteps: ProtocolStep[];
+            try { nextSteps = stepsFromYaml(doc.protocol); }
+            catch (error) { return error instanceof Error ? error.message : String(error); }
             if (doc.positions !== undefined && doc.positions !== null
                 && (typeof doc.positions !== "object" || Array.isArray(doc.positions))) {
               return "`positions:` must be a mapping of named points.";
@@ -1786,42 +1752,12 @@ const namedPositionsStyle: React.CSSProperties = {
   marginTop: 8,
 };
 
-const repeatPanelStyle: React.CSSProperties = {
-  ...theme.card,
-  padding: 14,
-  marginTop: 8,
-};
-
 const repeatControlsStyle: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
   gap: 8,
   alignItems: "end",
   marginTop: 10,
-};
-
-const repeatWellToolbarStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  flexWrap: "wrap",
-  marginTop: 12,
-};
-
-const repeatWellGridStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(58px, 1fr))",
-  gap: 6,
-  marginTop: 6,
-};
-
-const repeatWellStyle: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: 5,
-  color: theme.color.text,
-  fontSize: 12,
-  cursor: "pointer",
 };
 
 const repeatActionStyle: React.CSSProperties = {

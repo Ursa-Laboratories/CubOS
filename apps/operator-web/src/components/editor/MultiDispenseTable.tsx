@@ -4,15 +4,18 @@ import { multiDispenseErrors } from "../../utils/multiDispense";
 
 interface Props {
   stepIndex: number;
+  childIndex?: number;
   args: Record<string, unknown>;
   positions: string[];
   onChange: (destinations: unknown[], volumes: unknown[]) => void;
 }
 
-export default function MultiDispenseTable({ stepIndex, args, positions, onChange }: Props) {
+export default function MultiDispenseTable({ stepIndex, childIndex, args, positions, onChange }: Props) {
   const errors = multiDispenseErrors(args);
-  const listId = `multi-dispense-${stepIndex}-positions`;
-  const errorId = `multi-dispense-${stepIndex}-errors`;
+  const stepLabel = childIndex === undefined ? `${stepIndex + 1}` : `${stepIndex + 1} child ${childIndex + 1}`;
+  const fieldId = childIndex === undefined ? `${stepIndex}` : `${stepIndex}-child-${childIndex}`;
+  const listId = `multi-dispense-${fieldId}-positions`;
+  const errorId = `multi-dispense-${fieldId}-errors`;
   const editable = Array.isArray(args.destinations) && Array.isArray(args.volumes);
   const destinations = Array.isArray(args.destinations) ? args.destinations : [];
   const volumes = Array.isArray(args.volumes) ? args.volumes : [];
@@ -28,7 +31,7 @@ export default function MultiDispenseTable({ stepIndex, args, positions, onChang
         <datalist id={listId}>
           {positions.map(position => <option key={position} value={position} />)}
         </datalist>
-        <table aria-label={`Step ${stepIndex + 1} dispense destinations`} style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+        <table aria-label={`Step ${stepLabel} dispense destinations`} style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
           <thead>
             <tr>
               <th scope="col" style={headingStyle}>Destination</th>
@@ -41,7 +44,7 @@ export default function MultiDispenseTable({ stepIndex, args, positions, onChang
               <tr key={i}>
                 <td style={cellStyle}>
                   <input
-                    aria-label={`Step ${stepIndex + 1} destination ${i + 1}`}
+                    aria-label={`Step ${stepLabel} destination ${i + 1}`}
                     aria-invalid={typeof row.destination !== "string" || !row.destination.trim()}
                     aria-describedby={errors.length ? errorId : undefined}
                     list={listId}
@@ -53,14 +56,14 @@ export default function MultiDispenseTable({ stepIndex, args, positions, onChang
                 </td>
                 <td style={cellStyle}>
                   <VolumeInput
-                    label={`Step ${stepIndex + 1} volume ${i + 1} (µL)`}
+                    label={`Step ${stepLabel} volume ${i + 1} (µL)`}
                     errorId={errors.length ? errorId : undefined}
                     value={row.volume}
                     onChange={volume => commit(rows.map((r, j) => j === i ? { ...r, volume } : r))}
                   />
                 </td>
                 <td style={{ ...cellStyle, textAlign: "right" }}>
-                  <button type="button" aria-label={`Remove destination ${i + 1} from step ${stepIndex + 1}`}
+                  <button type="button" aria-label={`Remove destination ${i + 1} from step ${stepLabel}`}
                     onClick={() => commit(rows.filter((_, j) => j !== i))} style={theme.btn.danger}>✕</button>
                 </td>
               </tr>

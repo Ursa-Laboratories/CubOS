@@ -1632,6 +1632,23 @@ def _validate_pipette_command(
             y_offset_mm=args.get("y_offset_mm", 0.0),
         )
         violations.extend(engage_violations)
+        if command_name == "mix":
+            finish_violations, _ = _validate_pipette_engage(
+                step_index=step_index,
+                command_name=command_name,
+                label=f"mix blowout {args.get('position')!r}",
+                position=args.get("position"),
+                height=_height_value(args, "blowout_height"),
+                height_field_name="blowout_height",
+                tip_extension=tip_state.tip_extension,
+                instrumented_gantry=instrumented_gantry,
+                deck=deck,
+                gantry=gantry,
+                current_poses=current_poses,
+                x_offset_mm=args.get("x_offset_mm", 0.0),
+                y_offset_mm=args.get("y_offset_mm", 0.0),
+            )
+            violations.extend(finish_violations)
         return violations, tip_state
 
     if command_name == "transfer":
@@ -1753,6 +1770,17 @@ def _validate_pipette_command(
             instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
             current_poses=current_poses,
         ))
+        repetitions = args.get("mix_repetitions", 0)
+        if isinstance(repetitions, int) and repetitions > 0:
+            finish_violations, _ = _validate_pipette_engage(
+                step_index=step_index, command_name=command_name,
+                label=f"rinse_well mix blowout {well!r}", position=well,
+                height=0.0, height_field_name="blowout_height",
+                tip_extension=tip_state.tip_extension,
+                instrumented_gantry=instrumented_gantry, deck=deck, gantry=gantry,
+                current_poses=current_poses,
+            )
+            violations.extend(finish_violations)
         source = args.get("source")
         solution = args.get("solution")
         violations.extend(_validate_stock_or_solution(
@@ -1893,6 +1921,9 @@ def _validate_pipette_blowout_retracts(
     destinations = []
     if command_name == "blowout":
         destinations.append((args.get("position"), args.get("height", 0.0),
+                             args.get("x_offset_mm", 0.0), args.get("y_offset_mm", 0.0)))
+    elif command_name == "mix":
+        destinations.append((args.get("position"), args.get("blowout_height", 0.0),
                              args.get("x_offset_mm", 0.0), args.get("y_offset_mm", 0.0)))
     elif command_name == "transfer":
         destinations.append((args.get("destination"), args.get("destination_height", 0.0),

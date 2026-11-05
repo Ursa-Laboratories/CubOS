@@ -349,6 +349,7 @@ class RoutingSession:
                     position=args["position"],
                     height=float(args.get("height", 0.0)),
                     cycles=int(args.get("cycles", 3)),
+                    blowout_height=float(args.get("blowout_height", 0.0)),
                     travel_clearance=args.get("travel_clearance", 3.0),
                     tool_state=state,
                     current_target=current_target,
@@ -623,6 +624,7 @@ class RoutingSession:
         position: str,
         height: float,
         cycles: int,
+        blowout_height: float,
         travel_clearance: float | None,
         tool_state: ToolState,
         current_target: str | None,
@@ -646,7 +648,24 @@ class RoutingSession:
         for _ in range(cycles):
             plans.append(self._plan(low, high, "pipette", tool_state, (fixture_key,), "mix", "lift"))
             plans.append(self._plan(high, low, "pipette", tool_state, (fixture_key,), "mix", "lower"))
-        return PreparedMotionStep("mix", tuple(plans), {"cycles": cycles}), low, fixture_key
+        coordinate = self.context.deck.resolve_coordinate(position)
+        finish = _carriage_for(
+            self.context, "pipette",
+            Point3D(coordinate.x + x_offset_mm, coordinate.y + y_offset_mm,
+                    coordinate.z + blowout_height),
+            tool_state,
+        )
+        plans.append(self._plan(
+            low, finish, "pipette", tool_state, (fixture_key,), "mix", "blowout",
+        ))
+        data = {"cycles": cycles}
+        retract, finish = self._plan_blowout_retract(
+            finish, position, blowout_height, tool_state,
+        )
+        if retract is not None:
+            plans.append(retract)
+            data["blowout_retract"] = retract
+        return PreparedMotionStep("mix", tuple(plans), data), finish, fixture_key
 
     def _plan_drop(
         self,

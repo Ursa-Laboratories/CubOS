@@ -374,7 +374,7 @@ def test_multistroke_transfer_and_repeated_mix_reuse_local_plate_routes() -> Non
     assert len(transfer_plans) == 4
     assert all(_local_transit(plan) for plan in transfer_plans[1:])
     mix_plans = context.planned_motion_steps[1].plans
-    assert len(mix_plans) == 5
+    assert len(mix_plans) == 6
     assert _local_transit(mix_plans[0])
     assert all(
         segment.access.allowed_fixture_names == ("plate",)

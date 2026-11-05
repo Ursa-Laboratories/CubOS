@@ -16,6 +16,9 @@ from . import commands as _commands  # noqa: F401
 from .protocol import Protocol, ProtocolSetup
 from .registry import CommandRegistry
 from .runtime import ProtocolStep
+from .yaml_schema import ProtocolStepSchema, RepeatArgsSchema
+
+MAX_EXPANDED_PROTOCOL_STEPS = 1000
 
 _LEGACY_TOP_LEVEL_HINTS: dict[str, str] = {
     "safe_approach_height": (
@@ -117,6 +120,7 @@ def compile_protocol(
     positions: Mapping[str, Any] | None = None,
     source_path: str | Path | None = None,
     setup: ProtocolSetup | None = None,
+    deck: Any | None = None,
 ) -> Protocol:
     """Compile validated command calls into an executable ``Protocol``.
 
@@ -124,6 +128,7 @@ def compile_protocol(
     as the YAML loader. Only explicitly supplied arguments are carried into
     ``ProtocolStep.args``; handler defaults stay on the handler signature.
     """
+    calls = expand_repeat_calls(calls, deck=deck)
     registry = CommandRegistry.instance()
     steps: list[ProtocolStep] = []
 
@@ -150,3 +155,71 @@ def compile_protocol(
         positions=deepcopy(validated_positions),
         setup=setup,
     )
+
+
+def _replace_target(value: Any, source: str, target: str) -> Any:
+    if isinstance(value, str):
+        return target if value == source else value
+    if isinstance(value, dict):
+        return {key: _replace_target(item, source, target) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_replace_target(item, source, target) for item in value]
+    if isinstance(value, tuple):
+        return tuple(_replace_target(item, source, target) for item in value)
+    return value
+
+
+def expand_repeat_calls(
+    calls: Iterable[CommandCall], *, deck: Any | None = None,
+) -> list[CommandCall]:
+    """Expand authored repeat calls into bounded, schema-validated commands."""
+    registry = CommandRegistry.instance()
+    calls = list(calls)
+    has_repeat = any(call.command == "repeat" for call in calls)
+    expanded: list[CommandCall] = []
+    for call in calls:
+        if call.command != "repeat":
+            expanded.append(call)
+        else:
+            repeat = RepeatArgsSchema.model_validate(call.args)
+            contribution = len(repeat.wells) * len(repeat.steps)
+            if has_repeat and len(expanded) + contribution > MAX_EXPANDED_PROTOCOL_STEPS:
+                raise ValueError(
+                    f"Protocol expansion exceeds the maximum of "
+                    f"{MAX_EXPANDED_PROTOCOL_STEPS} concrete steps."
+                )
+            if deck is not None:
+                try:
+                    labware = deck.resolve_labware(repeat.labware)
+                except (KeyError, ValueError) as exc:
+                    raise ValueError(f"repeat labware {repeat.labware!r} cannot be resolved: {exc}") from exc
+                well_ids = getattr(labware, "wells", None)
+                if well_ids is None:
+                    raise ValueError(f"repeat labware {repeat.labware!r} does not contain wells.")
+                unknown = [well for well in repeat.wells if well not in well_ids]
+                if repeat.template_well not in well_ids:
+                    unknown.insert(0, repeat.template_well)
+                if unknown:
+                    raise ValueError(
+                        f"repeat contains unknown well(s) for {repeat.labware!r}: {unknown}."
+                    )
+            source = f"{repeat.labware}.{repeat.template_well}"
+            for well in repeat.wells:
+                target = f"{repeat.labware}.{well}"
+                for raw_step in repeat.steps:
+                    child = ProtocolStepSchema.model_validate(raw_step)
+                    args = _replace_target(deepcopy(child.args), source, target)
+                    if isinstance(args.get("label"), str) and args["label"].strip():
+                        args["label"] = f"{args['label']}_{well}"
+                    registered = registry.get(child.command)
+                    validated = registered.schema.model_validate(args)
+                    expanded.append(CommandCall(
+                        command=child.command,
+                        args=validated.model_dump(exclude_unset=True),
+                    ))
+        if has_repeat and len(expanded) > MAX_EXPANDED_PROTOCOL_STEPS:
+            raise ValueError(
+                f"Protocol expansion exceeds the maximum of "
+                f"{MAX_EXPANDED_PROTOCOL_STEPS} concrete steps."
+            )
+    return expanded
