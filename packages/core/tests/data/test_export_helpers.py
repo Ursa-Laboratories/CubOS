@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import sys
 from pathlib import Path
 
@@ -127,6 +129,53 @@ class TestCampaignExperimentsSubcommand:
 
 
 class TestExperimentAllSubcommand:
+
+    def test_csv_preserves_text_metadata_and_expands_measurement_arrays(
+        self, tmp_path, monkeypatch,
+    ):
+        pytest.importorskip("pandas")
+        db = tmp_path / "measurements.db"
+        output = tmp_path / "measurements.csv"
+        with DataStore(db_path=db) as store:
+            campaign_id = store.create_campaign(description="CSV metadata round trip")
+            experiment_id = store.create_experiment(campaign_id, "plate", "A1")
+            measurement_id = store.log_measurement(
+                experiment_id,
+                InstrumentMeasurement(
+                    measurement_type=MeasurementType.POTENTIOSTAT_CA,
+                    payload={
+                        "time_s": [0.0, 1.0],
+                        "voltage_v": [0.5, 0.5],
+                        "current_a": [0.01, 0.02],
+                    },
+                    metadata={
+                        "technique": "ca",
+                        "device_id": "123",
+                        "stop_reason": "null",
+                        "channel": 1,
+                    },
+                ),
+            )
+        monkeypatch.setattr(sys, "argv", [
+            "export", "--db-path", str(db), "experiment-all", str(experiment_id),
+            "--csv", str(output),
+        ])
+
+        assert main() == 0
+
+        with output.open(newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        assert len(rows) == 1
+        assert rows[0]["instrument"] == "potentiostat"
+        assert rows[0]["experiment_id"] == str(experiment_id)
+        assert rows[0]["measurement_id"] == str(measurement_id)
+        payload = json.loads(rows[0]["data_json"])
+        assert payload["device_id"] == "123"
+        assert payload["stop_reason"] == "null"
+        assert payload["channel"] == 1
+        assert payload["time_s"] == [0.0, 1.0]
+        assert payload["voltage_v"] == [0.5, 0.5]
+        assert payload["current_a"] == [0.01, 0.02]
 
     def test_prints_all_measurements(self, tmp_path, capsys, monkeypatch):
         pytest.importorskip("pandas")
