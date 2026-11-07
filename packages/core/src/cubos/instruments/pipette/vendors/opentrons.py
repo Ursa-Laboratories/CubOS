@@ -222,6 +222,13 @@ class OpentronsPipette(PipetteInstrument):
 
     def aspirate(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
         self._validate_volume(volume_ul)
+        if self._loaded_volume_ul + volume_ul > self._config.max_volume:
+            raise PipetteCommandError(
+                f"Aspirating {volume_ul:g} uL would put "
+                f"{self._loaded_volume_ul + volume_ul:g} uL in a "
+                f"{self._config.max_volume:g} uL pipette "
+                f"({self._loaded_volume_ul:g} uL already loaded)."
+            )
         mm_travel = volume_ul * self._config.mm_to_ul
         if self._offline:
             self._position_mm += mm_travel

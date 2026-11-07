@@ -823,3 +823,42 @@ def test_failed_dispense_does_not_claim_volume_was_delivered(monkeypatch):
     with pytest.raises(PipetteTimeoutError):
         pipette.dispense(40)
     assert pipette.loaded_volume_ul == 100
+
+
+@pytest.mark.parametrize("offline", [True, False], ids=["offline", "mock-link"])
+@pytest.mark.parametrize("model", ["p20_single_gen2", "p300_single_gen2", "flex_1channel_1000"])
+def test_cumulative_aspirate_rejects_overfill_without_actuation(offline, model, monkeypatch):
+    pip = OpentronsPipette(pipette_model=model, offline=offline)
+    send = MagicMock(return_value="OK:{pos:10.0}")
+    monkeypatch.setattr(pip, "_send_command", send)
+    initial = pip.config.max_volume - pip.config.min_volume / 2
+    pip.aspirate(initial)
+    position = pip._position_mm
+    send.reset_mock()
+
+    with pytest.raises(PipetteCommandError, match="already loaded"):
+        pip.aspirate(pip.config.min_volume)
+
+    send.assert_not_called()
+    assert pip.loaded_volume_ul == initial
+    assert pip._position_mm == position
+
+
+@pytest.mark.parametrize("offline", [True, False], ids=["offline", "mock-link"])
+def test_cumulative_aspirate_allows_exact_capacity_and_partial_refill(offline, monkeypatch):
+    pip = OpentronsPipette(offline=offline)
+    send = MagicMock(return_value="OK:{pos:10.0}")
+    monkeypatch.setattr(pip, "_send_command", send)
+
+    pip.aspirate(150.0)
+    assert pip.aspirate(50.0).loaded_volume_ul == 200.0
+    pip.dispense(100.0)
+    assert pip.aspirate(100.0).loaded_volume_ul == 200.0
+    if offline:
+        assert pip.get_status().position_mm == pytest.approx(200.0 * pip.config.mm_to_ul)
+        send.assert_not_called()
+    else:
+        assert [args[0] for args, _ in send.call_args_list] == [12, 12, 13, 12]
+        assert [args[1] for args, _ in send.call_args_list] == pytest.approx(
+            [volume * pip.config.mm_to_ul for volume in [150.0, 50.0, 100.0, 100.0]]
+        )
