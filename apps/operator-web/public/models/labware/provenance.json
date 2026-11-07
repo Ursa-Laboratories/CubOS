@@ -1,0 +1,48 @@
+{
+  "purpose": "Display-only CAD assets for Operator. These meshes do not establish calibration or collision clearance.",
+  "assets": [
+    {
+      "id": "tall_wellplate_holder",
+      "model_name": "tall_wellplate_holder",
+      "kind": "well_plate_holder",
+      "file": "tall-wellplate-holder.glb",
+      "source": "Cubware cub/labware/well_plate_holder/WellplateHolder.glb",
+      "sha256": "e07cf0ca71e0fcc9dc0b6cf1e76f502ad5dce9145d6db966fe11e5a88f7d1922",
+      "source_bounds_mm": [
+        127.4968,
+        176.4,
+        25.0
+      ],
+      "display_orientation": "source axes retained; the scene object's deck Z rotation is applied by the renderer",
+      "expected_scene_size_mm": [
+        127.5,
+        176.4,
+        25.0
+      ],
+      "dimension_tolerance_mm": 0.1,
+      "scope": "Empty holder visualization only. Nested plate seat registration is not mapped; nested assemblies use procedural fallback."
+    },
+    {
+      "id": "cubware_tip_holder_visual",
+      "model_name": "cubware_tip_holder_visual",
+      "kind": "tip_rack",
+      "file": "cubware-tip-holder-visual.glb",
+      "source": "Cubware cubxl_plus/labware/tip_rack_holder/TipRack.glb",
+      "sha256": "00f1827b5167a4c05d086f999c05720feb1b7b4a1fc27e4979225bf1e642615a",
+      "source_bounds_mm": [
+        21.0,
+        66.0,
+        138.0
+      ],
+      "display_orientation": "rigid axis mapping source Z to deck X, source X to deck Y, source Y to deck Z",
+      "expected_scene_size_mm": [
+        138.0,
+        21.0,
+        66.0
+      ],
+      "dimension_tolerance_mm": 0.1,
+      "scope": "visual fixture identifier only; it does not match the panda_2x15_tip_rack physical config"
+    }
+  ],
+  "materials": "The loader supplies geometry only. Any production renderer material or shading is illustrative and is assigned by the UI."
+}
