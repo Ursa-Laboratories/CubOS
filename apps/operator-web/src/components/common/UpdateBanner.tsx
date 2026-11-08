@@ -104,16 +104,17 @@ export function UpdateBanner({
     if (!confirmed) return;
 
     setError(null);
+    setUpdating(true);
     try {
       const applied = await systemApi.applyUpdate();
       if (!mounted.current) return;
-      setUpdating(true);
       targetSha.current = applied.target_sha;
       healthPolls.current = 0;
       serviceWentDown.current = false;
       void pollHealth();
     } catch (caught: unknown) {
       if (mounted.current) {
+        setUpdating(false);
         setError(caught instanceof Error ? caught.message : String(caught));
       }
     }

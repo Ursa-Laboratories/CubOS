@@ -1,10 +1,10 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { systemApi } from "../../api/client";
-import { UpdateBanner } from "./UpdateBanner";
+import { systemApi } from "../../../../src/api/client";
+import { UpdateBanner } from "../../../../src/components/common/UpdateBanner";
 
-vi.mock("../../api/client", () => ({
+vi.mock("../../../../src/api/client", () => ({
   systemApi: {
     getUpdateStatus: vi.fn(),
     applyUpdate: vi.fn(),
@@ -88,6 +88,70 @@ describe("UpdateBanner", () => {
     });
     await waitFor(() => expect(systemApi.applyUpdate).toHaveBeenCalledOnce());
     expect(await screen.findByText("Updating…")).toBeInTheDocument();
+  });
+
+  it("blocks a second update while the apply request is pending", async () => {
+    const user = userEvent.setup();
+    const requestConfirm = vi.fn().mockResolvedValue(true);
+    vi.mocked(systemApi.getUpdateStatus).mockResolvedValue(update);
+    let resolveApply!: (value: { status: string; target_sha: string }) => void;
+    vi.mocked(systemApi.applyUpdate).mockReturnValue(new Promise((resolve) => {
+      resolveApply = resolve;
+    }));
+    render(<UpdateBanner requestConfirm={requestConfirm} />);
+
+    const button = await screen.findByRole("button", { name: "Update & restart" });
+    await user.click(button);
+
+    expect(button).toBeDisabled();
+    expect(button).toHaveTextContent("Updating…");
+    await user.click(button);
+    expect(requestConfirm).toHaveBeenCalledOnce();
+    expect(systemApi.applyUpdate).toHaveBeenCalledOnce();
+
+    resolveApply({ status: "updating", target_sha: update.latest_sha });
+    await waitFor(() => expect(systemApi.getUpdateStatus).toHaveBeenCalledTimes(2));
+    expect(button).toBeDisabled();
+  });
+
+  it("allows retry after a delayed apply failure", async () => {
+    const user = userEvent.setup();
+    const requestConfirm = vi.fn().mockResolvedValue(true);
+    vi.mocked(systemApi.getUpdateStatus).mockResolvedValue(update);
+    let rejectApply!: (error: Error) => void;
+    vi.mocked(systemApi.applyUpdate).mockReturnValueOnce(new Promise((_, reject) => {
+      rejectApply = reject;
+    })).mockResolvedValue({ status: "updating", target_sha: update.latest_sha });
+    render(<UpdateBanner requestConfirm={requestConfirm} />);
+
+    const button = await screen.findByRole("button", { name: "Update & restart" });
+    await user.click(button);
+    expect(button).toBeDisabled();
+    rejectApply(new Error("Cannot update while a run is active"));
+
+    expect(await screen.findByText("Cannot update while a run is active")).toBeInTheDocument();
+    expect(button).toBeEnabled();
+    await user.click(button);
+    await waitFor(() => expect(systemApi.applyUpdate).toHaveBeenCalledTimes(2));
+    expect(button).toBeDisabled();
+    expect(screen.queryByText("Cannot update while a run is active")).not.toBeInTheDocument();
+  });
+
+  it("leaves the update available after cancelling confirmation", async () => {
+    const user = userEvent.setup();
+    const requestConfirm = vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    vi.mocked(systemApi.getUpdateStatus).mockResolvedValue(update);
+    vi.mocked(systemApi.applyUpdate).mockResolvedValue({
+      status: "updating", target_sha: update.latest_sha,
+    });
+    render(<UpdateBanner requestConfirm={requestConfirm} />);
+
+    const button = await screen.findByRole("button", { name: "Update & restart" });
+    await user.click(button);
+    expect(button).toBeEnabled();
+    expect(systemApi.applyUpdate).not.toHaveBeenCalled();
+    await user.click(button);
+    await waitFor(() => expect(systemApi.applyUpdate).toHaveBeenCalledOnce());
   });
 
   it("reloads once the service reports the target revision", async () => {
