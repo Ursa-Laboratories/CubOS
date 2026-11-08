@@ -38,7 +38,11 @@ export function ConfirmDialog({
     <div
       style={overlayStyle}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
+        if (event.target === event.currentTarget) {
+          // Keep the pointer's default focus change from undoing restored focus.
+          event.preventDefault();
+          onCancel();
+        }
       }}
     >
       <div
