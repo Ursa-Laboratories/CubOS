@@ -29,6 +29,6 @@ clear and validation-first.
 ## Common Checks
 
 ```bash
-python -m pytest -q
+python -m pytest packages/core/tests -q
 python -m mkdocs build --strict
 ```

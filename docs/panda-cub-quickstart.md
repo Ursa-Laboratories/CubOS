@@ -183,25 +183,42 @@ tracked as an open hardware bring-up task. The `*_pipetting_mock` pair
 exists solely so the state-tracking acceptance bar is runnable today; do
 not point it at hardware.
 
-## 7. Operator-UI / API alternative
+## 7. API mock submission
+
+This checks API submission and run progress. The API's current mock executor
+does not attach the data store or linked fluid state to the protocol context,
+so it does not persist transfer volumes or tip usage. Use the CLI mock runs in
+section 3 to verify the state changes in section 4.
 
 Start the appliance API (serves the operator web build and `/api/v1`;
 default `127.0.0.1:8742` — see `services/api/README.md` for full setup):
 
+From the repository root, copy the mock examples into a dedicated config
+directory. The API accepts bare filenames within `gantry/`, `deck/`, and
+`protocol/`; it does not accept repository-relative paths or recursively
+search protocol subdirectories.
+
 ```bash
 pip install -e "services/api[dev]"
 (cd apps/operator-web && npm ci && npm run build)
-python -m cubos_api
+PANDA_MOCK_CONFIG_DIR="$(mktemp -d)"
+mkdir -p "$PANDA_MOCK_CONFIG_DIR"/{gantry,deck,protocol}
+cp packages/core/configs/gantry/cub_xl_panda_pipetting_mock.yaml "$PANDA_MOCK_CONFIG_DIR/gantry/"
+cp packages/core/configs/deck/panda_imported_deck_pipetting_mock.yaml "$PANDA_MOCK_CONFIG_DIR/deck/"
+cp packages/core/configs/protocol/panda/vial_transfer_acceptance.yaml "$PANDA_MOCK_CONFIG_DIR/protocol/"
+CUBOS_CONFIG_DIR="$PANDA_MOCK_CONFIG_DIR" python -m cubos_api
 ```
 
-Create a fluid state from the seed, then submit the run against it:
+In another terminal, create a fluid state from the seed, then submit the run
+against it. Replace `1` in `fluid_state_id` and the inspection URLs below with
+the ID returned by the first request.
 
 ```bash
-# 1. Create the state (fluids payload = panda_initial_fluids.yaml's mapping)
+# 1. Create the state (relevant entries from panda_initial_fluids.yaml)
 curl -s -X POST http://127.0.0.1:8742/api/v1/fluid-states \
   -H 'content-type: application/json' \
   -d '{
-        "deck_file": "packages/core/configs/deck/panda_imported_deck_pipetting_mock.yaml",
+        "deck_file": "panda_imported_deck_pipetting_mock.yaml",
         "label": "panda acceptance",
         "fluids": {
           "s1": {"volume_ul": 6500, "composition": {"water": 6500}},
@@ -216,9 +233,9 @@ curl -s -X POST http://127.0.0.1:8742/api/v1/fluid-states \
 curl -s -X POST http://127.0.0.1:8742/api/v1/runs \
   -H 'content-type: application/json' \
   -d '{
-        "gantry_file": "packages/core/configs/gantry/cub_xl_panda_pipetting_mock.yaml",
-        "deck_file": "packages/core/configs/deck/panda_imported_deck_pipetting_mock.yaml",
-        "protocol_file": "packages/core/configs/protocol/panda/vial_transfer_acceptance.yaml",
+        "gantry_file": "cub_xl_panda_pipetting_mock.yaml",
+        "deck_file": "panda_imported_deck_pipetting_mock.yaml",
+        "protocol_file": "vial_transfer_acceptance.yaml",
         "mock_mode": true,
         "state": {"fluid_state_id": 1}
       }'
@@ -226,9 +243,11 @@ curl -s -X POST http://127.0.0.1:8742/api/v1/runs \
 
 (`state.initial_state` with an inline `fluids` mapping is the one-call
 alternative to the separate fluid-state POST.) Poll `GET /api/v1/runs/{id}`
-for status; inspect `GET /api/v1/fluid-states/1/containers`, `/tips`, and
-`/operations` for the same final-state tables as section 4. The operator web
-UI surfaces the identical state views.
+for status. A successful mock run returns six step results. Inspect
+`GET /api/v1/fluid-states/1/containers`, `/tips`, and `/operations` to see the
+linked state: with this API mock path, the seed volumes and available tips
+remain unchanged, and no transfer or tip operations are journaled. These
+responses do not establish the CLI acceptance results from section 4.
 
 ## 8. Test gates
 

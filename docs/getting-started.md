@@ -163,10 +163,13 @@ you actually use. The extras currently defined in
 
 | Extra | Installs | For |
 |---|---|---|
-| `dev` | `pytest` | Running the test suite |
+| `dev` | `pytest`, `pytest-cov`, `diff-cover` | Core tests and coverage checks |
 | `docs` | `mkdocs`, `mkdocs-gen-files`, `mkdocstrings[python]`, `pymdown-extensions` | Building this documentation site |
 | `asmi-vernier` (alias `asmi`) | `godirect` | Vernier Go Direct force sensor (ASMI instrument) |
-| `potentiostat-admiral` (alias `potentiostat`) | `SquidstatPyLibrary` | Admiral Instruments SquidStat potentiostat |
+| `potentiostat-admiral` | `SquidstatPyLibrary` | Admiral Instruments SquidStat potentiostat |
+| `potentiostat-emstat` | Pinned Git build of `hardpotato` | EmStat potentiostat; EmStat4 LR also needs the external patch described in `packages/core/pyproject.toml` |
+| `potentiostat` | Both potentiostat dependencies above | Install both vendor integrations |
+| `camera` | `opencv-python`, `numpy`, `harvesters` | OpenCV webcams and FLIR image saving/GenTL support |
 
 For example, to work on an ASMI setup:
 
@@ -174,9 +177,12 @@ For example, to work on an ASMI setup:
 python -m pip install -e "packages/core[asmi-vernier]"
 ```
 
-Instrument types without a dedicated extra (`filmetrics`, `pipette`,
-`uv_curing`, `uvvis_ccs`, `camera`) don't require an extra vendor SDK install
-beyond CubOS's base dependencies.
+An extra does not install every native vendor dependency. FLIR's PySpin
+backend needs the Spinnaker SDK, its GenTL backend needs a compatible GenTL
+producer, and the Thorlabs CCS driver needs the TLCCS library. Check the
+[instrument configuration guide](gantry-setup.md#define-instruments) and your chosen
+driver's requirements before a hardware run. Offline validation does not
+verify those dependencies or device connectivity.
 
 Customer/proprietary instruments ship as normal Python packages — install the
 package with `python -m pip install`, and its instruments become available in
