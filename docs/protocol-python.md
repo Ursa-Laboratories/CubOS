@@ -20,15 +20,16 @@ come later in [Builder method arguments](#builder-method-arguments).
 ## Build a protocol
 
 `with_setup(...)` records the gantry and deck the protocol belongs to, so the
-built `Protocol` can validate and run itself. Use file-relative paths so it works
-from any working directory, then add steps with explicit `add_*` methods:
+built `Protocol` can validate and run itself. Save this example as
+`protocol_example.py` in the repository root. Its file-relative config paths
+work from any working directory; add steps with explicit `add_*` methods:
 
 ```python
 from pathlib import Path
 
-from protocol_engine.builder import ProtocolBuilder
+from cubos.protocol_engine.builder import ProtocolBuilder
 
-CONFIG_DIR = Path(__file__).resolve().parent.parent / "configs"
+CONFIG_DIR = Path(__file__).resolve().parent / "packages" / "core" / "configs"
 
 
 def build_protocol():
@@ -196,11 +197,11 @@ Argument names and defaults match the
 
 ### `wells(plate, *, rows, columns)`
 
-Helper (also in `protocol_engine.builder`) that returns row-major well targets
+Helper (also in `cubos.protocol_engine.builder`) that returns row-major well targets
 such as `plate.A1` through `plate.D6` — handy for building scans in a loop:
 
 ```python
-from protocol_engine.builder import wells
+from cubos.protocol_engine.builder import wells
 
 for target in wells("plate", rows="A:D", columns=range(1, 7)):
     protocol_builder.add_measure(
