@@ -19,7 +19,9 @@ import pytest
 from cubos.data.data_store import DataStore
 from cubos.deck.loader import load_deck_from_yaml_safe
 from cubos.instruments.pipette.models import PIPETTE_MODELS
+from cubos.instruments.pipette.exceptions import PipetteCommandError
 from cubos.instruments.pipette.vendors.opentrons import OpentronsPipette
+from cubos.protocol_engine.builder import ProtocolBuilder
 from cubos.protocol_engine.commands.pipette import transfer
 from cubos.protocol_engine.errors import ProtocolExecutionError
 from cubos.protocol_engine.runtime import ProtocolContext
@@ -167,6 +169,67 @@ def _volumes(store, state_id) -> dict[str, float]:
 
 def _operations(store, state_id):
     return store.get_fluid_snapshot(state_id)["operations"]
+
+
+def test_loaded_pipette_overfill_stops_protocol_without_applying_transfer(tracked_env):
+    deck, store, state_id, campaign_id = tracked_env
+    pipette = RecordingPipette()
+    pipette.aspirate(150.0)
+    context = _make_context(deck, store, state_id, campaign_id, pipette)
+    before = _volumes(store, state_id)
+    builder = ProtocolBuilder()
+    for destination in ["dest", "plate.A1"]:
+        builder.add_command(
+            "transfer", source="source", destination=destination, volume_ul=100.0,
+            source_height=0.0, destination_height=0.0,
+        )
+
+    with pytest.raises(PipetteCommandError, match="already loaded"):
+        builder.build().execute(context)
+
+    assert pipette.loaded_volume_ul == 150.0
+    assert pipette.dispense_volumes == []
+    assert pipette.blowout_calls == []
+    assert _volumes(store, state_id) == before
+    operations = _operations(store, state_id)
+    assert len(operations) == 1
+    assert operations[0]["status"] == "reconciliation_required"
+
+
+def test_serial_dilution_conserves_volume_and_composition(tracked_env):
+    deck, store, state_id, campaign_id = tracked_env
+    store.seed_fluid(state_id, "source", 4000.0, composition={"dye": 4000.0})
+    destinations = ["plate.A1", "plate.A2", "dest"]
+    for destination in destinations:
+        store.seed_fluid(state_id, destination, 50.0, composition={"water": 50.0})
+    pipette = RecordingPipette()
+    context = _make_context(deck, store, state_id, campaign_id, pipette)
+    builder = ProtocolBuilder()
+    source = "source"
+    for destination in destinations:
+        builder.add_command(
+            "transfer", source=source, destination=destination, volume_ul=50.0,
+            source_height=0.0, destination_height=0.0,
+        )
+        builder.add_command("mix", position=destination, volume_ul=50.0, cycles=1)
+        source = destination
+    builder.build().execute(context)
+
+    snapshot = store.get_fluid_snapshot(state_id)
+    assert _volumes(store, state_id) == {
+        "source": 3950.0, "plate.A1": 50.0, "plate.A2": 50.0, "dest": 100.0,
+    }
+    assert sum(c["composition"].get("dye", 0.0) for c in snapshot["containers"]) == 4000.0
+    assert sum(c["composition"].get("water", 0.0) for c in snapshot["containers"]) == 150.0
+    for destination, fraction in zip(destinations, [0.5, 0.25, 0.125]):
+        labware, _, location = destination.partition(".")
+        container = store.get_fluid_container(state_id, labware, location)
+        assert container["composition"]["dye"] / container["current_volume_ul"] == fraction
+    assert [op["operation_type"] for op in snapshot["operations"]] == ["transfer", "mix"] * 3
+    assert all(op["status"] == "applied" for op in snapshot["operations"])
+    assert pipette.call_order == ["aspirate", "dispense", "blowout",
+                                  "aspirate", "dispense", "aspirate", "dispense", "blowout"] * 3
+    assert pipette.loaded_volume_ul == 0.0
 
 
 # ─── Stroke splitting + one consistent final state ───────────────────────────
