@@ -345,6 +345,62 @@ def test_resolve_applied(tmp_path):
     assert store.get_cap_state(state_id, "stock", "") == "uncapped"
 
 
+@pytest.mark.parametrize("operation_type,labware_key,final_status", [
+    ("decap", "stock", "uncapped"),
+    ("cap", "waste", "capped"),
+])
+@pytest.mark.parametrize("mark_uncertain", [False, True])
+def test_applied_cap_resolution_preserves_detail_after_restart(
+    tmp_path, operation_type, labware_key, final_status, mark_uncertain,
+):
+    deck_path, deck = _write_deck(tmp_path)
+    db_path = tmp_path / "state.db"
+    detail = "[operator] inspected the vial and confirmed the action completed"
+    with DataStore(db_path) as store:
+        state_id = _create_state(store, deck_path, deck)
+        campaign_id = _create_linked_campaign(store, state_id)
+        store.begin_cap_operation(
+            state_id, "resolve-cap", operation_type, labware_key, "",
+            campaign_id=campaign_id,
+        )
+        if mark_uncertain:
+            store.mark_cap_reconciliation_required("resolve-cap", "connection lost")
+
+        store.resolve_cap_operation("resolve-cap", "applied", detail=detail)
+        snapshot = store.get_cap_snapshot(state_id)
+        assert _container(snapshot, labware_key)["status"] == final_status
+        assert snapshot["operations"][0]["status"] == "applied"
+        assert snapshot["operations"][0]["detail"] == detail
+
+        store.resolve_cap_operation("resolve-cap", "applied", detail="retry note")
+        assert store.get_cap_snapshot(state_id) == snapshot
+
+    with DataStore(db_path) as reopened:
+        assert reopened.get_cap_snapshot(state_id) == snapshot
+
+
+def test_applied_cap_resolution_rolls_back_if_journal_write_fails(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)
+    with DataStore(":memory:") as store:
+        state_id = _create_state(store, deck_path, deck)
+        campaign_id = _create_linked_campaign(store, state_id)
+        store.begin_cap_operation(
+            state_id, "resolve-cap", "decap", "stock", "", campaign_id=campaign_id,
+        )
+        store.mark_cap_reconciliation_required("resolve-cap", "connection lost")
+        before = store.get_cap_snapshot(state_id)
+        store._conn.execute("""
+            CREATE TEMP TRIGGER fail_cap_journal BEFORE UPDATE ON cap_operations
+            WHEN NEW.status = 'applied'
+            BEGIN SELECT RAISE(ABORT, 'journal write failed'); END
+        """)
+
+        with pytest.raises(sqlite3.IntegrityError, match="journal write failed"):
+            store.resolve_cap_operation("resolve-cap", "applied", detail="confirmed")
+
+        assert store.get_cap_snapshot(state_id) == before
+
+
 def test_resolve_cancelled_reverts_to_previous_status(tmp_path):
     deck_path, deck = _write_deck(tmp_path)
     store = DataStore(":memory:")

@@ -396,6 +396,7 @@ class DataStore:
         )
         self._relax_asmi_metadata_columns()
         self._migrate_fluid_operations_schema()
+        self._add_column_if_missing("fluid_operations", "assumed_action", "TEXT")
         self._create_fluid_operation_indexes()
         self._conn.commit()
 
@@ -1211,6 +1212,27 @@ class DataStore:
 
         complete_fluid_mix(self._conn, operation_key)
 
+    def finish_interrupted_transfer(self, operation_key: str, action: str | None) -> None:
+        from .fluid_state import finish_interrupted_transfer
+
+        finish_interrupted_transfer(self._conn, operation_key, action)
+
+    def correct_fluid_volume(
+        self, fluid_state_id: int, labware_key: str, location_id: str,
+        volume_ul: float, expected_version: int,
+    ) -> None:
+        from .state_edits import correct_fluid_volume
+
+        correct_fluid_volume(
+            self._conn, fluid_state_id, labware_key, location_id,
+            volume_ul, expected_version,
+        )
+
+    def clear_operation_notes(self, fluid_state_id: int) -> None:
+        from .state_edits import clear_operation_notes
+
+        clear_operation_notes(self._conn, fluid_state_id)
+
     def mark_fluid_reconciliation_required(
         self,
         operation_key: str,
@@ -1226,7 +1248,7 @@ class DataStore:
         operation_key: str,
         resolution: str,
         *,
-        detail: str,
+        detail: str | None = None,
         source_volume_ul: float | None = None,
         source_composition: Mapping[str, float] | None = None,
         destination_volume_ul: float | None = None,
@@ -1332,7 +1354,7 @@ class DataStore:
         operation_key: str,
         resolution: str,
         *,
-        detail: str,
+        detail: str | None = None,
         final_slot_status: str | None = None,
     ) -> None:
         """Resolve an uncertain tip operation using an operator decision."""
@@ -1423,7 +1445,7 @@ class DataStore:
         operation_key: str,
         resolution: str,
         *,
-        detail: str,
+        detail: str | None = None,
         final_status: str | None = None,
     ) -> None:
         """Resolve an uncertain cap operation using an operator decision."""

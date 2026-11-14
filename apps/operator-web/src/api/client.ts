@@ -343,6 +343,12 @@ export const runsApi = {
 
 // Fluid/tip/cap state (Feature 07)
 export const fluidStateApi = {
+  clearNotes: (fluidStateId: number) =>
+    request<void>(`/fluid-states/${fluidStateId}/notes`, { method: "DELETE" }),
+  correctVolume: (fluidStateId: number, body: import("../types").CorrectFluidVolumeRequest) =>
+    request<void>(`/fluid-states/${fluidStateId}/volume`, {
+      method: "PATCH", body: JSON.stringify(body),
+    }),
   create: (body: import("../types").CreateFluidStateRequest) =>
     request<import("../types").FluidStateSummary>("/fluid-states", {
       method: "POST",

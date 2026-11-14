@@ -628,14 +628,21 @@ export interface ResolveReconciliationRequest {
   domain: StateDomain;
   operation_key: string;
   resolution: string;
-  operator: string;
-  reason: string;
+  operator?: string;
+  reason?: string;
   source_volume_ul?: number | null;
   source_composition?: Record<string, number> | null;
   destination_volume_ul?: number | null;
   destination_composition?: Record<string, number> | null;
   final_slot_status?: string | null;
   final_status?: string | null;
+}
+
+export interface CorrectFluidVolumeRequest {
+  labware_key: string;
+  location_id: string;
+  volume_ul: number;
+  expected_version: number;
 }
 
 export interface ResolveReconciliationResponse {

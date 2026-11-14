@@ -175,19 +175,13 @@ class ReconciliationResponse(BaseModel):
 
 
 class ResolveReconciliationRequest(BaseModel):
-    """An auditable operator decision resolving one pending operation.
-
-    ``operator``/``reason`` are recorded into the journal's existing
-    ``detail`` free-text field (there is no operator-identity column in
-    ``cubos.data`` to persist them separately) — this is the "who/what/why"
-    audit trail Feature 07 exposes over HTTP.
-    """
+    """Resolve a pending operation; names and notes are optional."""
 
     domain: StateDomain
     operation_key: str
     resolution: str
-    operator: str
-    reason: str
+    operator: str = ""
+    reason: str = ""
     source_volume_ul: Optional[float] = None
     source_composition: Optional[Dict[str, float]] = None
     destination_volume_ul: Optional[float] = None
@@ -195,17 +189,15 @@ class ResolveReconciliationRequest(BaseModel):
     final_slot_status: Optional[str] = None
     final_status: Optional[str] = None
 
-    @model_validator(mode="after")
-    def validate_identity(self) -> "ResolveReconciliationRequest":
-        if not self.operator.strip():
-            raise ValueError("operator is required")
-        if not self.reason.strip():
-            raise ValueError("reason is required")
-        return self
-
-
 class ResolveReconciliationResponse(BaseModel):
     domain: StateDomain
     operation_key: str
     status: str
     detail: Optional[str]
+
+
+class CorrectFluidVolumeRequest(BaseModel):
+    labware_key: str
+    location_id: str = ""
+    volume_ul: float = Field(ge=0, allow_inf_nan=False)
+    expected_version: int = Field(ge=0)

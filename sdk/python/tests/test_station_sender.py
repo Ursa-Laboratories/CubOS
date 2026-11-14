@@ -269,3 +269,17 @@ def test_resolve_reconciliation_sends_operator_and_reason():
     assert kwargs["json"]["operator"] == "alexc"
     assert kwargs["json"]["reason"] == "confirmed"
     assert kwargs["json"]["domain"] == "fluid"
+
+
+def test_state_correction_and_note_clearing_use_versioned_api_without_notes():
+    session = FakeSession(FakeResponse(200, {"status": "updated"}), FakeResponse(200, {"status": "cleared"}))
+    client = StationClient("http://example.test", session=session)
+    client.correct_fluid_volume(7, labware_key="source", volume_ul=95, expected_version=3)
+    client.clear_operation_notes(7)
+    assert [(method, url) for method, url, _ in session.requests] == [
+        ("PATCH", "http://example.test/api/v1/fluid-states/7/volume"),
+        ("DELETE", "http://example.test/api/v1/fluid-states/7/notes"),
+    ]
+    assert session.requests[0][2]["json"] == {
+        "labware_key": "source", "location_id": "", "volume_ul": 95, "expected_version": 3,
+    }
