@@ -479,7 +479,9 @@ def resolve_cap_operation(
         if normalized == "applied":
             if final_status is not None:
                 raise CapStateError("Applied resolution does not accept final_status.")
-            _apply_cap_operation(connection, operation, allowed_statuses=_PENDING_STATUSES)
+            _apply_cap_operation(
+                connection, operation, allowed_statuses=_PENDING_STATUSES, detail=detail,
+            )
             return
 
         if normalized == "cancelled":
@@ -524,6 +526,7 @@ def _apply_cap_operation(
     operation: dict[str, Any],
     *,
     allowed_statuses: tuple[str, ...],
+    detail: str | None = None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     _next_status = _TRANSITIONS[operation["operation_type"]][1]
@@ -547,7 +550,7 @@ def _apply_cap_operation(
             f"changed while applying operation {operation['operation_key']!r}."
         )
     _set_cap_operation_terminal(
-        connection, operation, status="applied", detail=None,
+        connection, operation, status="applied", detail=detail,
         allowed_statuses=allowed_statuses,
     )
 

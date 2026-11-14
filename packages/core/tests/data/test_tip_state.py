@@ -551,6 +551,65 @@ def test_operator_can_resolve_uncertain_pickup_as_applied(tmp_path):
     store.close()
 
 
+@pytest.mark.parametrize("operation_type", ["pick_up_tip", "drop_tip"])
+@pytest.mark.parametrize("mark_uncertain", [False, True])
+def test_applied_tip_resolution_preserves_detail_after_restart(
+    tmp_path, operation_type, mark_uncertain,
+):
+    deck_path, deck = _write_deck(tmp_path)
+    db_path = tmp_path / "state.db"
+    detail = "[operator] inspected the pipette and confirmed the action completed"
+    with DataStore(db_path) as store:
+        state_id = _create_state(store, deck_path, deck)
+        campaign_id = _create_linked_campaign(store, state_id)
+        store.begin_pick_up_tip(
+            state_id, "pick", "tip_rack", "A1", 59.3, campaign_id=campaign_id,
+        )
+        operation_key = "pick"
+        if operation_type == "drop_tip":
+            store.complete_pick_up_tip("pick")
+            store.begin_drop_tip(state_id, "drop", campaign_id=campaign_id)
+            operation_key = "drop"
+        if mark_uncertain:
+            store.mark_tip_reconciliation_required(operation_key, "connection lost")
+
+        store.resolve_tip_operation(operation_key, "applied", detail=detail)
+        snapshot = store.get_tip_snapshot(state_id)
+        expected_status = "attached" if operation_type == "pick_up_tip" else "consumed"
+        assert _slot(snapshot, "tip_rack", "A1")["status"] == expected_status
+        assert snapshot["pipette"]["attachment_uncertain"] is False
+        assert snapshot["operations"][-1]["status"] == "applied"
+        assert snapshot["operations"][-1]["detail"] == detail
+
+        store.resolve_tip_operation(operation_key, "applied", detail="retry note")
+        assert store.get_tip_snapshot(state_id) == snapshot
+
+    with DataStore(db_path) as reopened:
+        assert reopened.get_tip_snapshot(state_id) == snapshot
+
+
+def test_applied_tip_resolution_rolls_back_if_journal_write_fails(tmp_path):
+    deck_path, deck = _write_deck(tmp_path)
+    with DataStore(":memory:") as store:
+        state_id = _create_state(store, deck_path, deck)
+        campaign_id = _create_linked_campaign(store, state_id)
+        store.begin_pick_up_tip(
+            state_id, "pick", "tip_rack", "A1", 59.3, campaign_id=campaign_id,
+        )
+        store.mark_tip_reconciliation_required("pick", "connection lost")
+        before = store.get_tip_snapshot(state_id)
+        store._conn.execute("""
+            CREATE TEMP TRIGGER fail_tip_journal BEFORE UPDATE ON tip_operations
+            WHEN NEW.status = 'applied'
+            BEGIN SELECT RAISE(ABORT, 'journal write failed'); END
+        """)
+
+        with pytest.raises(sqlite3.IntegrityError, match="journal write failed"):
+            store.resolve_tip_operation("pick", "applied", detail="confirmed")
+
+        assert store.get_tip_snapshot(state_id) == before
+
+
 def test_operator_can_resolve_uncertain_drop_as_partial_available(tmp_path):
     deck_path, deck = _write_deck(tmp_path)
     store = DataStore(":memory:")

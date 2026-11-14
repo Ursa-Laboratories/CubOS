@@ -95,6 +95,12 @@ until the physical result is reconciled through the core `DataStore` fluid
 state API. CubOS does not guess whether liquid moved after an interrupted
 hardware action.
 
+Operator resolutions of fluid, tip, and cap operations save the supplied
+decision note in the operation journal's `detail` field, including resolutions
+marked `applied`. The HTTP reconciliation endpoint records this as
+`[operator] reason` and returns it in the response and subsequent operation
+history. Retrying the same terminal resolution preserves the original note.
+
 The repository's fluid-state YAML files under
 `tests/fixtures/configs/fluid_state_resume/` contain fake coordinates and an
 offline `/dev/null` gantry. They exist only for automated tests and are not
