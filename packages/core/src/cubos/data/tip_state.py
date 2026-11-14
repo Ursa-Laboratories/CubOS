@@ -565,7 +565,7 @@ def resolve_tip_operation(
     operation_key: str,
     resolution: str,
     *,
-    detail: str,
+    detail: str | None = None,
     final_slot_status: str | None = None,
 ) -> None:
     """Resolve an uncertain tip operation with an auditable operator decision.
@@ -576,8 +576,8 @@ def resolve_tip_operation(
     mirroring ``fluid_state.resolve_fluid_operation``'s exact-replacement
     contract.
     """
-    if not isinstance(detail, str) or not detail.strip():
-        raise TipStateError("Operator resolution detail must be a non-empty string.")
+    if detail is not None and not isinstance(detail, str):
+        raise TipStateError("Operator resolution detail must be text or null.")
     normalized = {
         "applied": "applied",
         "not_applied": "cancelled",
@@ -784,7 +784,7 @@ def _revert_tip_operation(
     connection: sqlite3.Connection,
     operation: dict[str, Any],
     *,
-    detail: str,
+    detail: str | None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     slot = _tip_container_row(
@@ -817,7 +817,7 @@ def _reconcile_tip_operation(
     operation: dict[str, Any],
     *,
     final_slot_status: str,
-    detail: str,
+    detail: str | None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     slot = _tip_container_row(

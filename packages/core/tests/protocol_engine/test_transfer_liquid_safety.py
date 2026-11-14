@@ -386,14 +386,13 @@ class TestPerStrokeRecovery:
         operations = _operations(store, state_id)
         assert len(operations) == 2  # stroke 3 never began
         assert operations[0]["status"] == "applied"
-        assert operations[1]["status"] == "reconciliation_required"
-        # Per-stroke detail identifies exactly which stroke is uncertain.
-        assert "stroke 2/3" in operations[1]["detail"]
+        assert operations[1]["status"] == "applied"
+        assert operations[1]["assumed_action"] == "dispense"
 
-        # Only stroke 1's liquid was committed to durable state.
+        # The attempted second dispense is included in the estimated balance.
         volumes = _volumes(store, state_id)
-        assert volumes["source"] == pytest.approx(3800.0)
-        assert volumes["dest"] == pytest.approx(200.0)
+        assert volumes["source"] == pytest.approx(3600.0)
+        assert volumes["dest"] == pytest.approx(400.0)
 
     def test_replay_after_failure_cannot_silently_reapply_liquid(self, tracked_env):
         deck, store, state_id, campaign_id = tracked_env
@@ -402,19 +401,13 @@ class TestPerStrokeRecovery:
         with pytest.raises(RuntimeError):
             transfer(context, source="source", destination="dest", volume_ul=600.0)
 
-        # Rerun the same step: the uncertain stroke blocks all liquid handling
-        # (reconciliation required), and stroke 1 is not re-executed.
         replay_pipette = RecordingPipette()
         replay_context = _make_context(
             deck, store, state_id, campaign_id, replay_pipette,
         )
-        with pytest.raises(ProtocolExecutionError, match="reconcil"):
-            transfer(
-                replay_context, source="source", destination="dest",
-                volume_ul=600.0,
-            )
-        assert replay_pipette.aspirate_volumes == []
-        assert _volumes(store, state_id)["source"] == pytest.approx(3800.0)
+        transfer(replay_context, source="source", destination="dest", volume_ul=600.0)
+        assert replay_pipette.aspirate_volumes == [pytest.approx(200.0)]
+        assert _volumes(store, state_id)["source"] == pytest.approx(3400.0)
 
     def test_replay_after_resolution_skips_applied_strokes_and_finishes(
         self, tracked_env,
@@ -678,3 +671,82 @@ class TestUntrackedTransfer:
         # Without tracked volume state there is nothing to derive from:
         # legacy behavior (engage at the vial rim reference) is preserved.
         assert _aspirate_engage_z(context) == pytest.approx(SOURCE_RIM_Z)
+
+
+@pytest.mark.parametrize("phase,source_delta,destination_delta", [
+    ("source_move", 0, 0),
+    ("aspirate", 10, 0),
+    ("destination_move", 10, 0),
+    ("dispense", 10, 10),
+    ("blowout", 10, 10),
+])
+def test_interruption_assumes_only_dispatched_liquid_actions(
+    tracked_env, monkeypatch, phase, source_delta, destination_delta,
+):
+    from cubos.gantry.gantry_driver.exceptions import MillConnectionError
+    from cubos.protocol_engine.commands import pipette as commands
+
+    deck, store, state_id, campaign_id = tracked_env
+    pipette = RecordingPipette(pipette_model="p20_single_gen2")
+    context = _make_context(deck, store, state_id, campaign_id, pipette)
+    failure = MillConnectionError("feed hold during action")
+
+    def fail(*args, **kwargs):
+        raise failure
+
+    if phase.endswith("move"):
+        original_engage = commands._engage
+        target = "source" if phase == "source_move" else "dest"
+
+        def engage(context, position, **kwargs):
+            if position == target:
+                raise failure
+            return original_engage(context, position, **kwargs)
+
+        monkeypatch.setattr(commands, "_engage", engage)
+    else:
+        monkeypatch.setattr(pipette, phase, fail)
+
+    with pytest.raises(MillConnectionError) as raised:
+        transfer(context, source="source", destination="dest", volume_ul=10)
+    assert raised.value is failure
+    assert _volumes(store, state_id)["source"] == 4000 - source_delta
+    assert _volumes(store, state_id)["dest"] == destination_delta
+    snapshot = store.get_fluid_snapshot(state_id)
+    operation = snapshot["operations"][0]
+    assert operation["detail"] is None
+    expected_action = "dispense" if destination_delta else "aspirate" if source_delta else None
+    assert operation["assumed_action"] == expected_action
+    store.finish_interrupted_transfer(operation["operation_key"], expected_action)
+    assert store.get_fluid_snapshot(state_id) == snapshot
+    if expected_action == "aspirate":
+        fresh_pipette = RecordingPipette(pipette_model="p20_single_gen2")
+        retry_context = _make_context(deck, store, state_id, campaign_id, fresh_pipette)
+        with pytest.raises(ProtocolExecutionError, match="new campaign"):
+            transfer(retry_context, source="source", destination="dest", volume_ul=10)
+        assert fresh_pipette.aspirate_volumes == []
+        retry_context.gantry.move_to_labware.assert_not_called()
+    source = store.get_fluid_container(state_id, "source", "")
+    store.correct_fluid_volume(state_id, "source", "", 3995, source["version"])
+    assert _volumes(store, state_id)["source"] == 3995
+
+
+def test_interrupted_transfer_estimate_failure_preserves_primary_exception(tracked_env, monkeypatch):
+    deck, store, state_id, campaign_id = tracked_env
+    pipette = RecordingPipette(pipette_model="p20_single_gen2")
+    context = _make_context(deck, store, state_id, campaign_id, pipette)
+    failure = KeyboardInterrupt()
+
+    def interrupt(*args, **kwargs):
+        raise failure
+
+    def cannot_write(*args, **kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(pipette, "aspirate", interrupt)
+    monkeypatch.setattr(store, "finish_interrupted_transfer", cannot_write)
+    with pytest.raises(KeyboardInterrupt) as raised:
+        transfer(context, source="source", destination="dest", volume_ul=10)
+    assert raised.value is failure
+    assert store.get_fluid_snapshot(state_id)["operations"][0]["status"] == "reconciliation_required"
+    assert _volumes(store, state_id)["source"] == 4000

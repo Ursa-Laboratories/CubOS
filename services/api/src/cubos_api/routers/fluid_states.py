@@ -28,6 +28,7 @@ from cubos_api.models.state import (
     CapContainerView,
     CapStateResponse,
     ContainerView,
+    CorrectFluidVolumeRequest,
     CreateFluidStateRequest,
     FluidStateDetailResponse,
     FluidStateSummaryResponse,
@@ -47,6 +48,33 @@ router = APIRouter(prefix="/api/v1/fluid-states", tags=["cubos-state-v1"])
 
 _PENDING_STATUSES = {"started", "reconciliation_required"}
 _STATE_EXCEPTIONS = (FluidStateError, TipStateError, CapStateError)
+
+
+@router.patch("/{fluid_state_id}/volume")
+def correct_volume(fluid_state_id: int, body: CorrectFluidVolumeRequest) -> dict[str, str]:
+    from cubos_api.routers.gantry import run_active
+
+    if run_active():
+        raise HTTPException(409, "Stop the protocol before correcting volumes.")
+    with _open_store() as store:
+        try:
+            store.correct_fluid_volume(
+                fluid_state_id, body.labware_key, body.location_id,
+                body.volume_ul, body.expected_version,
+            )
+        except _STATE_EXCEPTIONS as exc:
+            raise map_state_exception(exc) from exc
+    return {"status": "updated"}
+
+
+@router.delete("/{fluid_state_id}/notes")
+def clear_notes(fluid_state_id: int) -> dict[str, str]:
+    with _open_store() as store:
+        try:
+            store.clear_operation_notes(fluid_state_id)
+        except _STATE_EXCEPTIONS as exc:
+            raise map_state_exception(exc) from exc
+    return {"status": "cleared"}
 
 
 def _data_db_path() -> Path:
@@ -128,6 +156,7 @@ def _operation_views(
                     "volume_ul": op["volume_ul"],
                     "composition": op["composition"],
                     "parameters": op["parameters"],
+                    "assumed_action": op["assumed_action"],
                 },
             )
         )
@@ -327,7 +356,10 @@ def get_reconciliation(fluid_state_id: int) -> ReconciliationResponse:
 def resolve_reconciliation(
     fluid_state_id: int, body: ResolveReconciliationRequest
 ) -> ResolveReconciliationResponse:
-    detail = f"[{body.operator.strip()}] {body.reason.strip()}"
+    detail = " ".join(filter(None, (
+        f"[{body.operator.strip()}]" if body.operator.strip() else "",
+        body.reason.strip(),
+    ))) or None
     store = _open_store()
     try:
         try:

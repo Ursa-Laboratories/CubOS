@@ -81,6 +81,7 @@ class FluidOperationSnapshot(TypedDict):
     created_at: str
     updated_at: str
     applied_at: Optional[str]
+    assumed_action: str | None
 
 
 class FluidStateSnapshot(TypedDict):
@@ -545,6 +546,34 @@ def complete_fluid_mix(
     _complete_fluid_operation(connection, operation_key, expected_type="mix")
 
 
+def finish_interrupted_transfer(
+    connection: sqlite3.Connection, operation_key: str, action: str | None,
+) -> None:
+    """Assume the dispatched liquid action completed, without replaying it."""
+    if action not in (None, "aspirate", "dispense"):
+        raise FluidStateError("Interrupted action must be aspirate, dispense, or null.")
+    with _immediate_transaction(connection):
+        operation = _operation_row(connection, operation_key)
+        if operation["operation_type"] != "transfer":
+            raise FluidStateError("Interrupted transfer requires a transfer operation.")
+        if operation["status"] in _TERMINAL_OPERATION_STATUSES:
+            return
+        if action is None:
+            _set_operation_terminal(
+                connection, operation, status="cancelled", detail=None,
+                allowed_statuses=_PENDING_OPERATION_STATUSES,
+            )
+        else:
+            _apply_planned_operation(
+                connection, operation, allowed_statuses=_PENDING_OPERATION_STATUSES,
+                aspirated_only=action == "aspirate",
+            )
+        connection.execute(
+            "UPDATE fluid_operations SET assumed_action = ? WHERE id = ?",
+            (action, operation["id"]),
+        )
+
+
 def _complete_fluid_operation(
     connection: sqlite3.Connection,
     operation_key: str,
@@ -573,15 +602,15 @@ def resolve_fluid_operation(
     operation_key: str,
     resolution: str,
     *,
-    detail: str,
+    detail: str | None = None,
     source_volume_ul: float | None = None,
     source_composition: Mapping[str, float] | None = None,
     destination_volume_ul: float | None = None,
     destination_composition: Mapping[str, float] | None = None,
 ) -> None:
     """Resolve an uncertain operation with an auditable operator decision."""
-    if not isinstance(detail, str) or not detail.strip():
-        raise FluidStateError("Operator resolution detail must be a non-empty string.")
+    if detail is not None and not isinstance(detail, str):
+        raise FluidStateError("Operator resolution detail must be text or null.")
     normalized_resolution = {
         "applied": "applied",
         "not_applied": "cancelled",
@@ -772,7 +801,7 @@ def get_fluid_snapshot(
             "SELECT id, operation_key, operation_type, source_labware_key, "
             "source_location_id, destination_labware_key, destination_location_id, "
             "volume_ul, composition_json, parameters_json, status, campaign_id, "
-            "detail, created_at, updated_at, applied_at FROM fluid_operations "
+            "detail, created_at, updated_at, applied_at, assumed_action FROM fluid_operations "
             "WHERE fluid_state_id = ? ORDER BY id",
             (fluid_state_id,),
         ).fetchall()
@@ -812,6 +841,7 @@ def get_fluid_snapshot(
             "created_at": row[13],
             "updated_at": row[14],
             "applied_at": row[15],
+            "assumed_action": row[16],
         })
 
     return {
@@ -1562,6 +1592,7 @@ def _apply_planned_operation(
     *,
     allowed_statuses: tuple[str, ...],
     detail: str | None = None,
+    aspirated_only: bool = False,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     source_row = _container_row(
@@ -1622,13 +1653,14 @@ def _apply_planned_operation(
             new_source_composition,
             operation_key=operation["operation_key"],
         )
-        _update_container(
-            connection,
-            destination_row,
-            new_destination_volume,
-            new_destination_composition,
-            operation_key=operation["operation_key"],
-        )
+        if not aspirated_only:
+            _update_container(
+                connection,
+                destination_row,
+                new_destination_volume,
+                new_destination_composition,
+                operation_key=operation["operation_key"],
+            )
     elif operation["operation_type"] != "mix":
         raise FluidStateError(
             f"Unsupported fluid operation type {operation['operation_type']!r}."
@@ -1637,7 +1669,7 @@ def _apply_planned_operation(
     _set_operation_terminal(
         connection,
         operation,
-        status="applied",
+        status="reconciled" if aspirated_only else "applied",
         detail=detail,
         allowed_statuses=allowed_statuses,
     )

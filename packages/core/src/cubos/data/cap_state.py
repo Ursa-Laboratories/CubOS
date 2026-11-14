@@ -436,7 +436,7 @@ def resolve_cap_operation(
     operation_key: str,
     resolution: str,
     *,
-    detail: str,
+    detail: str | None = None,
     final_status: str | None = None,
 ) -> None:
     """Resolve an uncertain cap operation with an auditable operator decision.
@@ -445,8 +445,8 @@ def resolve_cap_operation(
     ``partial``/``reconciled``. ``reconciled`` requires an explicit
     *final_status* of ``capped`` or ``uncapped``.
     """
-    if not isinstance(detail, str) or not detail.strip():
-        raise CapStateError("Operator resolution detail must be a non-empty string.")
+    if detail is not None and not isinstance(detail, str):
+        raise CapStateError("Operator resolution detail must be text or null.")
     normalized = {
         "applied": "applied",
         "not_applied": "cancelled",
@@ -559,7 +559,7 @@ def _revert_cap_operation(
     connection: sqlite3.Connection,
     operation: dict[str, Any],
     *,
-    detail: str,
+    detail: str | None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     container = _cap_container_row(
@@ -586,7 +586,7 @@ def _reconcile_cap_operation(
     operation: dict[str, Any],
     *,
     final_status: str,
-    detail: str,
+    detail: str | None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     container = _cap_container_row(

@@ -36,7 +36,7 @@ class RecordingController:
         return dict(self.position)
 
     def move_to(self, x, y, z, travel_z=None):
-        after_blowout = self.events and self.events[-1][0] == "pipette" and (
+        after_blowout = bool(self.events) and self.events[-1][0] == "pipette" and (
             self.events[-1][1].startswith("BLOW_OUT")
         )
         self.events.append(("move", x, y, z, travel_z))
@@ -223,7 +223,7 @@ def test_clearance_must_also_be_above_positive_action_height():
 
 
 @pytest.mark.parametrize("failure", ["blowout", "retract", "home"])
-def test_transfer_reset_failure_requires_reconciliation(failure):
+def test_transfer_reset_failure_preserves_assumed_dispense(failure):
     context, _, events = _rig(fail=failure)
     context.campaign_id = 7
     context.fluid_state_id = 11
@@ -234,7 +234,10 @@ def test_transfer_reset_failure_requires_reconciliation(failure):
         transfer(context, "source", "destination", 50.0)
 
     context.data_store.complete_fluid_transfer.assert_not_called()
-    context.data_store.mark_fluid_reconciliation_required.assert_called_once()
+    context.data_store.mark_fluid_reconciliation_required.assert_not_called()
+    operation_key = context.data_store.begin_fluid_transfer.call_args.args[1]
+    context.data_store.finish_interrupted_transfer.assert_called_once_with(operation_key, "dispense")
+    assert any(event[0] == "pipette" and event[1].startswith("RUN_DISPENSE") for event in events)
     if failure != "home":
         assert ("pipette", "HOME") not in events
 
