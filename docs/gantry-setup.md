@@ -166,6 +166,12 @@ armed instead of releasing it, and refuses to home, until the liquid has been
 dispensed or blown out (a one-step `blowout` protocol at a vial or the tip
 disposal works). The warning is logged as `Pipette still holds N uL`.
 
+The held volume is an estimate from successful, quantized commands, not a
+liquid measurement. Fractional commands that exactly fill the configured
+capacity or empty the tip must not trigger overfill or liquid-hold warnings
+from floating-point rounding. A real residual, including one model increment,
+still keeps motor control active until it is dispensed or blown out.
+
 **`potentiostat` / `admiral`** — Admiral SquidStat, addressed by serial port and
 channel number:
 

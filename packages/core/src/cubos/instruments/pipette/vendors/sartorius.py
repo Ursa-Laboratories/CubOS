@@ -355,35 +355,38 @@ class SartoriusPicus2Pipette(PipetteInstrument):
 
     def aspirate(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
         commanded = self._quantize(volume_ul)
+        # Match _quantize's decimal precision so float dust cannot trip capacity/empty checks.
+        loaded = round(self._loaded_volume_ul + commanded, 6)
         # Successive aspirates can each be in range and still overfill the
         # tip. Hardware answers FULL; offline and mock runs need this check.
-        if self._loaded_volume_ul + commanded > self._config.max_volume:
+        if loaded > self._config.max_volume:
             raise PipetteCommandError(
                 f"Aspirating {commanded:g} uL would put "
-                f"{self._loaded_volume_ul + commanded:g} uL in a "
+                f"{loaded:g} uL in a "
                 f"{self._config.max_volume:g} uL pipette "
                 f"({self._loaded_volume_ul:g} uL already loaded)."
             )
         if self._offline:
-            self._loaded_volume_ul += commanded
+            self._loaded_volume_ul = loaded
             return self._result(commanded)
         self._send(
             f"RUN_ASPIRATE {self._format_volume(commanded)} {_speed_index(speed)}",
             timeout=_MOTION_TIMEOUT,
         )
-        self._loaded_volume_ul += commanded
+        self._loaded_volume_ul = loaded
         return self._result(commanded)
 
     def dispense(self, volume_ul: float, speed: float = 50.0) -> AspirateResult:
         commanded = self._quantize(volume_ul)
+        loaded = max(0.0, round(self._loaded_volume_ul - commanded, 6))
         if self._offline:
-            self._loaded_volume_ul = max(0.0, self._loaded_volume_ul - commanded)
+            self._loaded_volume_ul = loaded
             return self._result(commanded)
         self._send(
             f"RUN_DISPENSE {self._format_volume(commanded)} {_speed_index(speed)}",
             timeout=_MOTION_TIMEOUT,
         )
-        self._loaded_volume_ul = max(0.0, self._loaded_volume_ul - commanded)
+        self._loaded_volume_ul = loaded
         return self._result(commanded)
 
     def blowout(self, speed: float = 50.0) -> None:

@@ -973,3 +973,97 @@ class TestLiquidHold:
         pip.disconnect()
         assert fake.sent("ENABLE_MOTOR_CONTROL 0")
         assert not fake.is_open
+
+
+@pytest.mark.parametrize("offline", [True, False], ids=["offline", "fake-serial"])
+class TestFractionalBookkeeping:
+    @staticmethod
+    def make_pipette(model, offline):
+        if offline:
+            return SartoriusPicus2Pipette(pipette_model=model, offline=True), None
+        return connected(
+            pipette_model=model,
+            script={"GET_NOMINAL_VOLUME": ([str(PICUS2_MODELS[model].max_volume)], "OK")},
+        )
+
+    @pytest.mark.parametrize("model,portions", [
+        ("picus2_1ch_10", [1.62, 1.62, 1.62, 1.62, 1.62, 1.9]),
+        ("picus2_1ch_120", [21.6, 21.6, 21.6, 55.2]),
+    ])
+    def test_fractional_aspirations_can_fill_exact_capacity(self, offline, model, portions):
+        pip, fake = self.make_pipette(model, offline)
+        for volume in portions:
+            result = pip.aspirate(volume)
+            assert result.volume_ul == volume
+        assert result.loaded_volume_ul == pip.config.max_volume
+        assert pip.loaded_volume_ul == pip.config.max_volume
+        with pytest.raises(PipetteCommandError, match="already loaded"):
+            pip.aspirate(pip.config.min_volume)
+        if fake is not None:
+            assert fake.sent("RUN_ASPIRATE") == [
+                f"RUN_ASPIRATE {pip._format_volume(volume)} 5" for volume in portions
+            ]
+        pip.dispense(portions[-1])
+        assert pip.aspirate(portions[-1]).loaded_volume_ul == pip.config.max_volume
+
+    @pytest.mark.parametrize("model,portions", [
+        ("picus2_1ch_10", [1.13, 8.87]),
+        ("picus2_1ch_120", [5.1, 5.1, 109.8]),
+        ("picus2_8ch_300", [10.4, 10.4, 279.2]),
+    ])
+    def test_fractional_dispenses_empty_tip_and_allow_release(self, offline, model, portions):
+        pip, fake = self.make_pipette(model, offline)
+        pip.aspirate(pip.config.max_volume)
+        for volume in portions:
+            result = pip.dispense(volume)
+            assert result.volume_ul == volume
+        assert result.loaded_volume_ul == 0.0
+        assert pip.loaded_volume_ul == 0.0
+        pip.home()
+        pip.disconnect()
+        if fake is not None:
+            assert fake.sent("RUN_DISPENSE") == [
+                f"RUN_DISPENSE {pip._format_volume(volume)} 5" for volume in portions
+            ]
+            assert fake.sent("HOME") == ["HOME"]
+            assert fake.sent("ENABLE_MOTOR_CONTROL 0") == ["ENABLE_MOTOR_CONTROL 0"]
+            assert not fake.sent("BLOW_OUT")
+            assert not fake.is_open
+
+    def test_smallest_real_residual_is_preserved(self, offline):
+        pip, fake = self.make_pipette("picus2_1ch_120", offline)
+        pip.aspirate(100.0)
+        pip.dispense(99.9)
+        assert pip.loaded_volume_ul == pytest.approx(0.1)
+        pip.disconnect()
+        if fake is not None:
+            assert fake.is_open
+            assert not fake.sent("ENABLE_MOTOR_CONTROL 0")
+            with pytest.raises(PipetteCommandError, match="still holds"):
+                pip.home()
+
+
+@pytest.mark.parametrize("method,command", [
+    ("aspirate", "RUN_ASPIRATE"), ("dispense", "RUN_DISPENSE"),
+])
+@pytest.mark.parametrize("timeout", [False, True], ids=["error-reply", "timeout"])
+def test_failed_fractional_action_preserves_loaded_volume(monkeypatch, method, command, timeout):
+    pip, fake = connected(
+        pipette_model="picus2_1ch_120",
+        script={"GET_NOMINAL_VOLUME": (["120"], "OK")},
+    )
+    pip.aspirate(21.6)
+    if timeout:
+        monkeypatch.setattr("cubos.instruments.pipette.vendors.sartorius._MOTION_TIMEOUT", 0.01)
+        fake.no_reply.append(command)
+        error = PipetteTimeoutError
+    else:
+        fake._script[command] = ([], "ERR_RANGE_PARAMETERS")
+        error = PipetteCommandError
+    with pytest.raises(error):
+        getattr(pip, method)(5.1)
+    assert pip.loaded_volume_ul == 21.6
+    assert fake.sent(command)[-1] == f"{command} 5.1 5"
+    pip.disconnect()
+    assert fake.is_open
+    assert not fake.sent("ENABLE_MOTOR_CONTROL 0")
