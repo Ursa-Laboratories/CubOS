@@ -93,7 +93,7 @@ protocol.run(campaign="ASMI indentation run")
 | `data_store=DataStore("runs/my.db")` | Save to a specific store; caller owns its lifecycle. |
 | `protocol_config="..."` | Record the source that built the protocol on the campaign. |
 
-The default store path is `data/databases/panda_data.db`; override it with
+The default store path is `~/.cubos/panda_data.db`; override it with
 `CUBOS_DATA_DB_PATH`.
 
 ## Builder method arguments

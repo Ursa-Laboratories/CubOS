@@ -251,9 +251,13 @@ responses do not establish the CLI acceptance results from section 4.
 
 ## 8. Test gates
 
+Install the test dependencies into the same virtual environment created in
+section 1, then run each Python suite separately from the repository root:
+
 ```bash
+.venv/bin/python -m pip install -e "packages/core[dev]" -e "services/api[dev]" -e "sdk/python[dev]"
 .venv/bin/python -m pytest packages/core/tests -q
-.venv-api/bin/python -m pytest services/api/tests -q
+.venv/bin/python -m pytest services/api/tests -q
 .venv/bin/python -m pytest sdk/python/tests -q
 cd apps/operator-web && npm run lint && npm run test -- --run && npm run build
 ```

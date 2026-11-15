@@ -139,7 +139,9 @@ From the repository root, with a Python 3.11+ virtual environment active:
 ```bash
 python -m pip install -e "packages/core[dev,docs]"
 python -m pip install -e "services/api[dev]" -e "sdk/python[dev]"
-python -m pytest packages/core/tests services/api/tests sdk/python/tests -q
+python -m pytest packages/core/tests -q
+python -m pytest services/api/tests -q
+python -m pytest sdk/python/tests -q
 
 npm --prefix apps/operator-web ci
 npm --prefix apps/operator-web run lint

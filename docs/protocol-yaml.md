@@ -119,11 +119,12 @@ python -m cubos.tools.run_protocol \
 the gantry and instruments, health-checks them, runs the protocol steps, and
 disconnects when done. Measurement results are saved automatically.
 
-By default, measurement rows are written to `data/databases/panda_data.db`.
+By default, measurement rows are written to `~/.cubos/panda_data.db`.
 Set `CUBOS_DATA_DB_PATH` to choose a different SQLite file for a run.
-After a successful run, the CLI also writes analysis-friendly CSV exports under
-`data/results/`. Array-based instruments such as UV-Vis, ASMI, and potentiostat
-are flattened into one row per wavelength/sample point.
+After a successful run, the CLI also prints the paths of its analysis-friendly
+CSV exports. For an editable source install, these are under
+`packages/core/src/cubos/data/results/`. Array-based instruments such as UV-Vis,
+ASMI, and potentiostat are flattened into one row per wavelength/sample point.
 
 ## Instruments
 

@@ -11,10 +11,12 @@ monorepo, and its Git history includes the original PiCub sender and worker.
 
 ## Install
 
+From the monorepo root:
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
+python -m pip install -e "sdk/python[dev]"
 ```
 
 ## Submit a protocol
@@ -83,7 +85,7 @@ standard response.
 ## Test
 
 ```bash
-python -m pytest -q
+python -m pytest sdk/python/tests -q
 ```
 
 Tests are offline and do not connect to or move hardware.
