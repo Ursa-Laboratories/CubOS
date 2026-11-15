@@ -38,6 +38,7 @@ type FetchMockOptions = {
   runPlan?: (runId: string) => Response | Promise<Response>;
   runEvents?: (runId: string) => Response | Promise<Response>;
   browse?: () => Response | Promise<Response>;
+  settingsUpdate?: () => Response | Promise<Response>;
 };
 
 function createState(): ApiState {
@@ -209,6 +210,7 @@ function installFetchMock(state: ApiState, options: FetchMockOptions = {}) {
       return jsonResponse({ config_dir: "/mock/CubOS/selected-configs" });
     }
     if (path === "/api/v1/settings" && method === "PUT") {
+      if (options.settingsUpdate) return options.settingsUpdate();
       return jsonResponse({ config_dir: body?.config_dir ?? "/mock/CubOS/configs" });
     }
     if (path === "/api/v1/deck/configs") {
@@ -576,6 +578,77 @@ describe("CubOS editor interactions", () => {
 
     expect(screen.queryByRole("dialog", { name: "Select config directory" })).not.toBeInTheDocument();
     expect(screen.getByDisplayValue("/mock/CubOS/configs")).toBeInTheDocument();
+  });
+
+  it("submits a directory once, keeps it open while pending, and allows retry", async () => {
+    const user = userEvent.setup();
+    let finish!: (response: Response) => void;
+    const settingsUpdate = vi.fn(() => new Promise<Response>(resolve => { finish = resolve; }));
+    installFetchMock(createState(), {
+      browse: () => new Response(JSON.stringify({ detail: "No display" }), { status: 503 }),
+      settingsUpdate,
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    const browse = screen.getByRole("button", { name: "Browse" });
+    await user.click(browse);
+    const dialog = screen.getByRole("dialog", { name: "Select config directory" });
+    const input = within(dialog).getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "/missing");
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(settingsUpdate).toHaveBeenCalledTimes(1));
+    expect(input).toHaveAttribute("readonly");
+    expect(within(dialog).getByRole("button", { name: "Applying…" })).toBeDisabled();
+    expect(within(dialog).getByRole("button", { name: "Cancel" })).toBeDisabled();
+    await user.keyboard("{Escape}");
+    fireEvent.mouseDown(dialog.parentElement!);
+    expect(dialog).toBeInTheDocument();
+
+    finish(new Response(JSON.stringify({ detail: "Directory does not exist" }), { status: 400 }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("Directory does not exist");
+    expect(input).not.toHaveAttribute("readonly");
+    await user.clear(input);
+    await user.type(input, "/new-configs");
+    await user.click(within(dialog).getByRole("button", { name: "Use Directory" }));
+    await waitFor(() => expect(settingsUpdate).toHaveBeenCalledTimes(2));
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+    finish(jsonResponse({ config_dir: "/new-configs" }));
+    await waitFor(() => expect(dialog).not.toBeInTheDocument());
+    expect(screen.getByDisplayValue("/new-configs")).toBeInTheDocument();
+    expect(browse).toHaveFocus();
+  });
+
+  it("retains the directory dialog and local edits after declining discard", async () => {
+    const user = userEvent.setup();
+    const settingsUpdate = vi.fn(() => jsonResponse({ config_dir: "/new-configs" }));
+    installFetchMock(createState(), {
+      browse: () => new Response(JSON.stringify({ detail: "No display" }), { status: 503 }),
+      settingsUpdate,
+    });
+    renderApp();
+    await waitForSettingsLoad();
+    await importConfig(user, "Gantry config", "cubos.yaml");
+    const serialPort = await screen.findByLabelText("Serial port");
+    await user.type(serialPort, "/mock/edited-port");
+    await user.click(screen.getByRole("button", { name: "Browse" }));
+    const dialog = screen.getByRole("dialog", { name: "Select config directory" });
+    const input = within(dialog).getByRole("textbox");
+    await user.clear(input);
+    await user.type(input, "/new-configs");
+    await user.click(within(dialog).getByRole("button", { name: "Use Directory" }));
+    const confirmation = await screen.findByRole("alertdialog", { name: "Discard changes?" });
+    await user.click(within(confirmation).getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(confirmation).not.toBeInTheDocument());
+    expect(dialog).toBeInTheDocument();
+    expect(input).toHaveValue("/new-configs");
+    expect(input).toHaveFocus();
+    expect(serialPort).toHaveValue("/mock/edited-port");
+    expect(settingsUpdate).not.toHaveBeenCalled();
+    await user.keyboard("{Escape}");
+    expect(dialog).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Browse" })).toHaveFocus();
   });
 
   it("clears loaded config selections when the config directory changes", async () => {

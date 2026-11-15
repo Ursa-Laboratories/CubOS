@@ -13,6 +13,7 @@ import { useDialogFocus } from "../../hooks/useDialogFocus";
 interface ConfigDirDialogProps {
   initialPath: string;
   error: string | null;
+  isSubmitting?: boolean;
   onSubmit: (path: string) => void;
   onCancel: () => void;
   returnFocus?: React.RefObject<HTMLElement | null>;
@@ -21,6 +22,7 @@ interface ConfigDirDialogProps {
 export function ConfigDirDialog({
   initialPath,
   error,
+  isSubmitting = false,
   onSubmit,
   onCancel,
   returnFocus,
@@ -31,12 +33,18 @@ export function ConfigDirDialog({
   useEffect(() => {
     inputRef.current?.select();
   }, []);
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, [isSubmitting]);
 
   return (
     <div
       style={overlayStyle}
       onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onCancel();
+        if (event.target === event.currentTarget) {
+          event.preventDefault();
+          if (!isSubmitting) onCancel();
+        }
       }}
     >
       <div
@@ -49,7 +57,7 @@ export function ConfigDirDialog({
           // window-level handlers like the gantry keyboard-jog listener.
           event.stopPropagation();
           containFocus(event);
-          if (event.key === "Escape") onCancel();
+          if (event.key === "Escape" && !isSubmitting) onCancel();
         }}
       >
         <h3 style={titleStyle}>Select config directory</h3>
@@ -60,27 +68,32 @@ export function ConfigDirDialog({
           ref={inputRef}
           aria-label="Config directory path"
           value={path}
+          readOnly={isSubmitting}
           onChange={(event) => setPath(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && path.trim()) onSubmit(path.trim());
+            if (event.key === "Enter") {
+              event.preventDefault();
+              if (!isSubmitting && path.trim()) onSubmit(path.trim());
+            }
           }}
           style={inputStyle}
           spellCheck={false}
         />
+        {isSubmitting && <p role="status" style={messageStyle}>Applying directory…</p>}
         {error && (
           <p role="alert" style={errorStyle}>{error}</p>
         )}
         <div style={actionsStyle}>
-          <button type="button" onClick={onCancel} style={theme.btn.secondary}>
+          <button type="button" onClick={onCancel} disabled={isSubmitting} style={theme.btn.secondary}>
             Cancel
           </button>
           <button
             type="button"
             onClick={() => onSubmit(path.trim())}
-            disabled={!path.trim()}
+            disabled={isSubmitting || !path.trim()}
             style={theme.btn.primary}
           >
-            Use Directory
+            {isSubmitting ? "Applying…" : "Use Directory"}
           </button>
         </div>
       </div>

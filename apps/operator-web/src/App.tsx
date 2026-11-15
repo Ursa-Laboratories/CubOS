@@ -108,6 +108,8 @@ export default function App() {
   const [configDir, setConfigDir] = useState<string | null>(null);
   const browseButtonRef = React.useRef<HTMLButtonElement>(null);
   const [browseLoading, setBrowseLoading] = useState(false);
+  const [browseSubmitting, setBrowseSubmitting] = useState(false);
+  const browseSubmittingRef = useRef(false);
   const [browseDialog, setBrowseDialog] = useState<{ path: string; error: string | null } | null>(null);
 
   const [deckFile, setDeckFile] = useState<string | null>(null);
@@ -219,14 +221,20 @@ export default function App() {
   };
 
   const submitBrowseDialog = async (path: string) => {
+    if (browseSubmittingRef.current) return;
+    browseSubmittingRef.current = true;
+    setBrowseSubmitting(true);
+    setBrowseDialog({ path, error: null });
     try {
-      await applyConfigDir(path);
-      setBrowseDialog(null);
+      if (await applyConfigDir(path)) setBrowseDialog(null);
     } catch (err) {
       setBrowseDialog({
         path,
         error: err instanceof Error ? err.message : String(err),
       });
+    } finally {
+      browseSubmittingRef.current = false;
+      setBrowseSubmitting(false);
     }
   };
 
@@ -1069,6 +1077,7 @@ export default function App() {
           returnFocus={browseButtonRef}
           initialPath={browseDialog.path}
           error={browseDialog.error}
+          isSubmitting={browseSubmitting}
           onSubmit={submitBrowseDialog}
           onCancel={() => setBrowseDialog(null)}
         />
