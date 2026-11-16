@@ -127,6 +127,13 @@ instruments:
     depth: 0.0
 ```
 
+The Opentrons driver checks each aspiration against both the model's volume
+range and the liquid volume already loaded. A request that would exceed
+`max_volume` raises `PipetteCommandError` before sending a plunger command or
+changing offline state. Successful partial dispensing frees that capacity for
+later aspirations. Loaded volume is software bookkeeping, not a liquid sensor;
+an interrupted or unacknowledged operation still requires physical reconciliation.
+
 **`pipette` / `sartorius`** — Sartorius Picus 2 electronic pipette over USB
 serial. Unlike the Opentrons vendor (a CubOS-driven stepper on a bare pipette
 body), the Picus owns its own piston, so there is no plunger geometry to
