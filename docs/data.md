@@ -84,6 +84,11 @@ python -m cubos.data.export_helpers \
   --csv runs/experiment_42_measurements.csv
 ```
 
+The `data_json` column contains each measurement's payload. Stored measurement
+arrays become JSON arrays; text metadata such as device IDs, image paths, and
+stop reasons stays text, even when it looks like JSON (`"123"` or `"null"`).
+The same rule applies to `DataReader.get_experiment_measurements_dataframe()`.
+
 Export one supported instrument table for an experiment:
 
 ```bash

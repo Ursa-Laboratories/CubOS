@@ -291,6 +291,71 @@ class TestGetMeasurementsByCampaign:
 
 class TestDataFrameHelpers:
 
+    @pytest.mark.parametrize("text", [
+        "123", "1e6", "true", "null", '"serial-123"', "[123]", '{"code": 1}',
+    ])
+    def test_serialized_measurement_preserves_text_metadata(self, text):
+        with DataStore(db_path=":memory:") as store:
+            campaign_id = store.create_campaign(description="text metadata")
+            experiment_id = store.create_experiment(campaign_id, "plate", "A1")
+            store.log_measurement(
+                experiment_id,
+                InstrumentMeasurement(
+                    measurement_type=MeasurementType.POTENTIOSTAT_CA,
+                    payload={
+                        "time_s": [0.0, 1.0],
+                        "voltage_v": [0.5, 0.5],
+                        "current_a": [0.01, 0.02],
+                    },
+                    metadata={
+                        "technique": "ca",
+                        "device_id": text,
+                        "stop_reason": text,
+                        "channel": 1,
+                    },
+                ),
+            )
+            reader = DataReader(connection=store._conn)
+            row = reader.get_measurements(experiment_id, "potentiostat_measurements")[0]
+
+            payload = json.loads(reader._serialize_row_payload(row))
+
+            assert payload == {
+                key: json.loads(value) if key in {"time_s", "voltage_v", "current_a"} else value
+                for key, value in row.items()
+                if key not in {"id", "experiment_id", "timestamp"}
+            }
+            assert payload["device_id"] == text
+            assert payload["stop_reason"] == text
+
+    @pytest.mark.parametrize("column, value", [
+        ("image_path", "123"),
+        ("vendor", "null"),
+        ("technique", "true"),
+        ("started_at", "0"),
+        ("stopped_at", "null"),
+    ])
+    def test_serialize_row_payload_preserves_json_like_text(self, column, value):
+        payload = json.loads(DataReader._serialize_row_payload({column: value}))
+
+        assert payload == {column: value}
+
+    @pytest.mark.parametrize("column", [
+        "wavelengths", "intensities", "sample_timestamps", "z_positions",
+        "raw_forces", "corrected_forces", "directions", "time_s", "voltage_v", "current_a",
+    ])
+    def test_serialize_row_payload_decodes_measurement_arrays(self, column):
+        samples = ["down", "up"] if column == "directions" else [0.0, 1.5]
+
+        payload = json.loads(DataReader._serialize_row_payload({column: json.dumps(samples)}))
+
+        assert payload == {column: samples}
+
+    def test_serialize_row_payload_preserves_unreadable_array(self):
+        payload = json.loads(DataReader._serialize_row_payload({"wavelengths": "[400.0"}))
+
+        assert payload == {"wavelengths": "[400.0"}
+
     def test_get_experiment_ids_dataframe(self, seeded_reader: DataReader):
         pd = pytest.importorskip("pandas")
         df = seeded_reader.get_experiment_ids_dataframe(campaign_id=1)
