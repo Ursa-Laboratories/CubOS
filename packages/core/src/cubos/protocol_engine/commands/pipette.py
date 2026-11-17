@@ -46,6 +46,8 @@ from ._movement import _assert_finite_number, engage_at_labware
 
 logger = logging.getLogger(__name__)
 
+_VOLUME_TOLERANCE_UL = 1e-6
+
 # Reason text for steps the durable fluid/tip journal reports as already
 # applied on a resumed run. Deliberately distinct from "never reached": the
 # operator needs to read a resumed run as having done this work, just not in
@@ -690,6 +692,41 @@ def pick_up_tip(
             ) from exc
 
 
+def _applied_stroke_volume(
+    context: ProtocolContext, stroke_volumes: list[float],
+) -> float:
+    """Volume of this transfer's strokes already durably applied on a rerun.
+
+    Preflight must size only what is left to move: the container state it reads
+    already includes every applied stroke, which the rerun will skip.
+    """
+    if context.active_step_index is None:
+        return 0.0
+    try:
+        operations = context.data_store.get_fluid_snapshot(
+            context.fluid_state_id,
+        )["operations"]
+        applied = {
+            operation["operation_key"]
+            for operation in operations
+            if operation["status"] == "applied"
+        }
+    except Exception:
+        return 0.0
+    previous = context.active_substep
+    total = 0.0
+    try:
+        for index, stroke_volume in enumerate(stroke_volumes):
+            if len(stroke_volumes) > 1:
+                suffix = f"stroke{index}"
+                context.active_substep = f"{previous}:{suffix}" if previous else suffix
+            if context.fluid_operation_key("transfer") in applied:
+                total += stroke_volume
+    finally:
+        context.active_substep = previous
+    return total
+
+
 @protocol_command("transfer", summary=_summaries.transfer)
 def transfer(
     context: ProtocolContext,
@@ -848,19 +885,25 @@ def transfer(
                 float(getattr(source_vial, "dead_volume_ul", 0.0) or 0.0)
                 if source_vial is not None else 0.0
             )
+            preflight_volume_ul = volume_ul - _applied_stroke_volume(
+                context, stroke_volumes,
+            )
             try:
-                validate_dead_volume(
-                    source_current_volume_ul=source_container["current_volume_ul"],
-                    dead_volume_ul=dead_volume_ul,
-                    requested_volume_ul=volume_ul,
-                    source_label=source,
-                )
-                validate_destination_overflow(
-                    destination_current_volume_ul=destination_container["current_volume_ul"],
-                    working_volume_ul=destination_container["working_volume_ul"],
-                    requested_volume_ul=volume_ul,
-                    destination_label=destination,
-                )
+                if preflight_volume_ul > _VOLUME_TOLERANCE_UL:
+                    validate_dead_volume(
+                        source_current_volume_ul=source_container["current_volume_ul"],
+                        dead_volume_ul=dead_volume_ul,
+                        requested_volume_ul=preflight_volume_ul,
+                        source_label=source,
+                    )
+                    validate_destination_overflow(
+                        destination_current_volume_ul=destination_container[
+                            "current_volume_ul"
+                        ],
+                        working_volume_ul=destination_container["working_volume_ul"],
+                        requested_volume_ul=preflight_volume_ul,
+                        destination_label=destination,
+                    )
             except LiquidTransferPreflightError as exc:
                 raise ProtocolExecutionError(
                     f"transfer preflight failed: {exc}"
