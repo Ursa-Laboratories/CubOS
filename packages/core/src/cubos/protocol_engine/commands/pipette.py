@@ -20,6 +20,7 @@ from cubos.deck.labware.tip_rack import (
 from cubos.deck.labware.well_plate import WellPlate
 from cubos.instruments.pipette.liquid_class import IDENTITY_CORRECTION
 
+from ..engage import EngagePositionError, resolve_engage_height, resolve_step_args
 from ..errors import ProtocolExecutionError
 from ..pipette_routing import (
     PipetteTravelClearance,
@@ -364,6 +365,38 @@ def _planned_tip_position(context: ProtocolContext, plan: Any) -> tuple[float, f
     )
 
 
+def _engaged(
+    context: ProtocolContext, target: str, height: Any,
+    from_bottom_mm: Any, from_top_mm: Any, field: str = "height",
+) -> Any:
+    if from_bottom_mm is None and from_top_mm is None:
+        return height
+    _refuse_unplanned_engage(context)
+    try:
+        return resolve_engage_height(
+            context.deck, target, height=height, from_bottom_mm=from_bottom_mm,
+            from_top_mm=from_top_mm, height_field=field,
+        )
+    except EngagePositionError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
+
+
+def _refuse_unplanned_engage(context: ProtocolContext) -> None:
+    if getattr(context.deck, "planning_enabled", False) is True:
+        raise ProtocolExecutionError(
+            "from_bottom_mm/from_top_mm must be resolved before motion planning "
+            "(Protocol.execute does this); refusing to execute with a stale plan."
+        )
+
+
+def _engaged_args(context: ProtocolContext, command: str, **args: Any) -> dict[str, Any]:
+    _refuse_unplanned_engage(context)
+    try:
+        return resolve_step_args(command, args, context.deck)
+    except EngagePositionError as exc:
+        raise ProtocolExecutionError(str(exc)) from exc
+
+
 def _engage_standalone(
     context: ProtocolContext, position: str, *, command: str, height: float,
     x_offset_mm: float = 0.0, y_offset_mm: float = 0.0,
@@ -390,8 +423,11 @@ def aspirate(
     travel_clearance: PipetteTravelClearance = 3.0,
     x_offset_mm: float = 0.0,
     y_offset_mm: float = 0.0,
+    from_bottom_mm: Optional[float] = None,
+    from_top_mm: Optional[float] = None,
 ) -> Any:
     """Move pipette to *position*, then aspirate."""
+    height = _engaged(context, position, height, from_bottom_mm, from_top_mm)
     try:
         validate_pipette_travel_clearance(travel_clearance)
     except ValueError as exc:
@@ -420,8 +456,11 @@ def dispense(
     travel_clearance: PipetteTravelClearance = 3.0,
     x_offset_mm: float = 0.0,
     y_offset_mm: float = 0.0,
+    from_bottom_mm: Optional[float] = None,
+    from_top_mm: Optional[float] = None,
 ) -> Any:
     """Move pipette to *position*, then dispense without durable fluid tracking."""
+    height = _engaged(context, position, height, from_bottom_mm, from_top_mm)
     try:
         validate_pipette_travel_clearance(travel_clearance)
     except ValueError as exc:
@@ -448,8 +487,11 @@ def blowout(
     travel_clearance: PipetteTravelClearance = 3.0,
     x_offset_mm: float = 0.0,
     y_offset_mm: float = 0.0,
+    from_bottom_mm: Optional[float] = None,
+    from_top_mm: Optional[float] = None,
 ) -> None:
     """Blow out at *position*, retracting before any required piston reset."""
+    height = _engaged(context, position, height, from_bottom_mm, from_top_mm)
     try:
         validate_pipette_travel_clearance(travel_clearance)
     except ValueError as exc:
@@ -494,8 +536,11 @@ def mix(
     x_offset_mm: float = 0.0,
     y_offset_mm: float = 0.0,
     blowout_height: float = 0.0,
+    from_bottom_mm: Optional[float] = None,
+    from_top_mm: Optional[float] = None,
 ) -> Any:
     """Mix at *height*, then blow out at *blowout_height* and reset safely."""
+    height = _engaged(context, position, height, from_bottom_mm, from_top_mm)
     try:
         validate_pipette_travel_clearance(travel_clearance)
         _assert_finite_number(
@@ -770,6 +815,10 @@ def transfer(
     source_y_offset_mm: float = 0.0,
     destination_x_offset_mm: float = 0.0,
     destination_y_offset_mm: float = 0.0,
+    source_from_bottom_mm: Optional[float] = None,
+    source_from_top_mm: Optional[float] = None,
+    destination_from_bottom_mm: Optional[float] = None,
+    destination_from_top_mm: Optional[float] = None,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*.
 
@@ -832,6 +881,14 @@ def transfer(
     to ``safe_z`` first, then home. Blow-out, retract, and home failures
     require reconciliation before the final stroke can be considered complete.
     """
+    source_height = _engaged(
+        context, source, source_height, source_from_bottom_mm, source_from_top_mm,
+        "source_height",
+    )
+    destination_height = _engaged(
+        context, destination, destination_height, destination_from_bottom_mm,
+        destination_from_top_mm, "destination_height",
+    )
     try:
         validate_pipette_travel_clearance(travel_clearance)
     except ValueError as exc:
@@ -1223,8 +1280,26 @@ def multi_dispense(
     speed: StrictFloat = 50.0,
     source_height: StrictFloat = 0.0,
     destination_height: StrictFloat = 0.0,
+    source_from_bottom_mm: Optional[StrictFloat] = None,
+    source_from_top_mm: Optional[StrictFloat] = None,
+    destination_from_bottom_mm: Optional[StrictFloat] = None,
+    destination_from_top_mm: Optional[StrictFloat] = None,
 ) -> None:
     """Aspirate the sum once, then dispense each portion in destination order."""
+    if any(v is not None for v in (
+        source_from_bottom_mm, source_from_top_mm,
+        destination_from_bottom_mm, destination_from_top_mm,
+    )):
+        _resolved = _engaged_args(
+            context, "multi_dispense", source=source, destinations=destinations,
+            source_height=source_height, destination_height=destination_height,
+            source_from_bottom_mm=source_from_bottom_mm,
+            source_from_top_mm=source_from_top_mm,
+            destination_from_bottom_mm=destination_from_bottom_mm,
+            destination_from_top_mm=destination_from_top_mm,
+        )
+        source_height = _resolved["source_height"]
+        destination_height = _resolved["destination_height"]
     planned = None
     if getattr(context.deck, "planning_enabled", False) is True:
         from ..routing import prepared_step
@@ -1308,12 +1383,30 @@ def serial_transfer(
     source_y_offset_mm: float = 0.0,
     destination_x_offset_mm: float = 0.0,
     destination_y_offset_mm: float = 0.0,
+    source_from_bottom_mm: Optional[float] = None,
+    source_from_top_mm: Optional[float] = None,
+    destination_from_bottom_mm: Optional[float] = None,
+    destination_from_top_mm: Optional[float] = None,
 ) -> None:
     """Transfer from *source* to each well along a row or column.
 
     Provide exactly one of *volumes* (explicit list) or *volume_range*
     ([min, max] linearly spaced across the axis).
     """
+    if any(v is not None for v in (
+        source_from_bottom_mm, source_from_top_mm,
+        destination_from_bottom_mm, destination_from_top_mm,
+    )):
+        _resolved = _engaged_args(
+            context, "serial_transfer", source=source, plate=plate,
+            source_height=source_height, destination_height=destination_height,
+            source_from_bottom_mm=source_from_bottom_mm,
+            source_from_top_mm=source_from_top_mm,
+            destination_from_bottom_mm=destination_from_bottom_mm,
+            destination_from_top_mm=destination_from_top_mm,
+        )
+        source_height = _resolved["source_height"]
+        destination_height = _resolved["destination_height"]
     _get_pipette(context)
 
     try:

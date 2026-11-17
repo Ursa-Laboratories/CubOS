@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -70,12 +70,27 @@ class Protocol:
     def __len__(self) -> int:
         return len(self._steps)
 
+    def with_resolved_engage_positions(self, deck: Any) -> "Protocol":
+        """Return a protocol whose ``from_bottom_mm``/``from_top_mm`` opt-ins are
+        replaced by equivalent rim-relative heights; ``self`` when none are used."""
+        from .engage import ENGAGE_FIELDS, resolve_step_args
+
+        if not any(ENGAGE_FIELDS & step.args.keys() for step in self._steps):
+            return self
+        steps = [
+            replace(step, args=resolve_step_args(step.command_name, step.args, deck))
+            for step in self._steps
+        ]
+        return Protocol(steps, self.source_path, self.positions, self.setup)
+
     def execute(self, context: ProtocolContext) -> List[Any]:
         """Execute all steps sequentially against a prepared context.
 
         Low-level primitive: the caller owns the gantry connection and
         instrument lifecycle. Returns the list of step results.
         """
+        if context.deck is not None:
+            self._steps = list(self.with_resolved_engage_positions(context.deck)._steps)
         if getattr(context.deck, "planning_enabled", False) is True:
             from .routing import prepare_planning_context
 

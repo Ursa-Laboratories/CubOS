@@ -241,6 +241,15 @@ dimensions:
   height. If `well_attributes` is omitted it defaults to empty: the plate
   remains fully addressable, and existing deck files load unchanged. Consumers
   that need a particular attribute must handle its absence.
+- Optional well geometry for plates: `well_depth` (rim to inside floor),
+  `well_shape` (`circular` or `rectangular`), and the matching `well_diameter`
+  or `well_x_dimension` + `well_y_dimension`, all in mm and uniform across the
+  plate. Vials take optional `inner_depth` (rim to inside floor, at most
+  `height`); vial grids take `vial_inner_depth`. Shape and diameter are
+  descriptive. `well_depth` and `inner_depth` are what bottom-relative pipette
+  engage positions (`from_bottom_mm`) use. There is no separate reservoir
+  type: model a reservoir as a well plate whose wells carry a rectangular
+  cross-section.
 - Vial `height` and `diameter` are optional physical metadata. If they are
   omitted, the vial remains fully addressable and its outer bounding-box fields
   remain unset. Existing direct and holder-nested vials that specify these

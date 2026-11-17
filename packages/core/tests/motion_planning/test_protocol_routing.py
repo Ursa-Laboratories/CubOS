@@ -1300,3 +1300,39 @@ def test_routed_multi_dispense_requires_tip_and_rejects_durable_tracking(multi_r
         _multi_protocol().execute(context)
     assert controller.moves == []
     assert events == []
+
+
+
+def _engage_protocol(source_args, destination_args):
+    return compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall("transfer", {
+            "source": "source", "destination": "destination", "volume_ul": 100,
+            **source_args, **destination_args,
+        }),
+        CommandCall("drop_tip", {"position": "waste"}),
+    ])
+
+
+def _run_engage(protocol):
+    context, controller, pipette = _context()
+    context.deck["source"].inner_depth = 15.0
+    context.deck["destination"].inner_depth = 12.0
+    protocol.execute(context)
+    return controller.moves, pipette.actions
+
+
+def test_planned_motion_uses_the_resolved_engage_heights():
+    opt_in = _engage_protocol(
+        {"source_from_bottom_mm": 2.0}, {"destination_from_top_mm": -1.0},
+    )
+    explicit = _engage_protocol({"source_height": -13.0}, {"destination_height": -1.0})
+    moves, actions = _run_engage(opt_in)
+    assert (moves, actions) == _run_engage(explicit)
+    assert "aspirate:100.0" in actions
+
+
+def test_bottom_offset_changes_planned_motion_versus_default_height():
+    moves_default, _ = _run_engage(_engage_protocol({}, {}))
+    moves_bottom, _ = _run_engage(_engage_protocol({"source_from_bottom_mm": 2.0}, {}))
+    assert moves_default != moves_bottom
