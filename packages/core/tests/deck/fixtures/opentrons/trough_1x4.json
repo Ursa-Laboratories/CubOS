@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "version": 1,
+  "namespace": "fixture",
+  "metadata": {
+    "displayName": "Hand-authored 4-well trough"
+  },
+  "parameters": {
+    "format": "trough",
+    "isTiprack": false,
+    "loadName": "fixture_4_reservoir_22ml"
+  },
+  "dimensions": {
+    "xDimension": 90.0,
+    "yDimension": 75.0,
+    "zDimension": 42.0
+  },
+  "ordering": [
+    [
+      "A1"
+    ],
+    [
+      "A2"
+    ],
+    [
+      "A3"
+    ],
+    [
+      "A4"
+    ]
+  ],
+  "wells": {
+    "A1": {
+      "x": 14.38,
+      "y": 35.0,
+      "depth": 40.0,
+      "totalLiquidVolume": 22000,
+      "shape": "rectangular",
+      "xDimension": 8.0,
+      "yDimension": 70.0,
+      "z": 2.0
+    },
+    "A2": {
+      "x": 32.38,
+      "y": 35.0,
+      "depth": 40.0,
+      "totalLiquidVolume": 22000,
+      "shape": "rectangular",
+      "xDimension": 8.0,
+      "yDimension": 70.0,
+      "z": 2.0
+    },
+    "A3": {
+      "x": 50.38,
+      "y": 35.0,
+      "depth": 40.0,
+      "totalLiquidVolume": 22000,
+      "shape": "rectangular",
+      "xDimension": 8.0,
+      "yDimension": 70.0,
+      "z": 2.0
+    },
+    "A4": {
+      "x": 68.38,
+      "y": 35.0,
+      "depth": 40.0,
+      "totalLiquidVolume": 22000,
+      "shape": "rectangular",
+      "xDimension": 8.0,
+      "yDimension": 70.0,
+      "z": 2.0
+    }
+  },
+  "groups": []
+}
