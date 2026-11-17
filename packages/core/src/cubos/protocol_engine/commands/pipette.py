@@ -645,6 +645,17 @@ def pick_up_tip(
         tip_id = resolved_tip_id
         position = f"{rack_key}.{tip_id}"
     else:
+        attached_mm = getattr(pipette, "attached_tip_extension", 0.0)
+        if (
+            isinstance(attached_mm, (int, float))
+            and not isinstance(attached_mm, bool)
+            and attached_mm > 0
+        ):
+            raise ProtocolExecutionError(
+                f"pick_up_tip {position!r} refused: the pipette already has a "
+                f"{attached_mm:g} mm tip attached. Drop it first. No motion "
+                "was attempted."
+            )
         if tip_id is None:
             tip_id = rack.next_available_tip()
             if tip_id is None:
