@@ -480,6 +480,16 @@ applied and a rerun never re-applies committed liquid.
   (`{multiplier, offset_ul}` per class). The correction adjusts only the
   driver-commanded stroke volume; tracked fluid state always moves the
   requested volume. Disabled (identity) when omitted.
+- `prewet_cycles` *(int 0-5, default `0`)* — before each stroke's aspirate,
+  aspirate and dispense the stroke volume this many times in the source (net
+  zero liquid; tracked state is unchanged). Runs inside the stroke's journaled
+  window, so a failure mid-prewet requires the same reconciliation as any
+  other stroke failure.
+- `aspirate_dwell_s` / `dispense_dwell_s` *(float seconds 0-600, default
+  `0.0`)* — hold the tip in place after the aspirate / after the dispense
+  (before blow-out). Applied on every stroke. With motion planning enabled
+  these add no motion, so planned routes are identical to the same transfer
+  without them.
 - `require_uncapped` *(list of str, default `null`)* — deck targets
   (typically `source`/`destination` themselves) that must be durably
   tracked `uncapped` (see [Capper commands](#capper-commands) and [Deck:

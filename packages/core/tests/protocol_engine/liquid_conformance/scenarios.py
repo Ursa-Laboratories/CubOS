@@ -55,6 +55,16 @@ def scenarios(kind: str) -> list[Scenario]:
         Scenario("transfer", (PICK,), (_transfer(30.0),)),
         Scenario("transfer_multi_stroke", (PICK,), (_transfer(multi_volume(kind)),)),
         Scenario(
+            "transfer_prewet_dwell", (PICK,),
+            ((
+                "transfer",
+                {
+                    "source": "stock", "destination": "dest", "volume_ul": 30.0,
+                    "prewet_cycles": 2, "aspirate_dwell_s": 0.001, "dispense_dwell_s": 0.001,
+                },
+            ),),
+        ),
+        Scenario(
             "serial_transfer", (PICK,),
             (("serial_transfer", {
                 "source": "stock", "plate": "plate", "axis": "A",

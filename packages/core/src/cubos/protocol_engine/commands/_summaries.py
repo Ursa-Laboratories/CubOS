@@ -151,6 +151,9 @@ def transfer(args: Dict[str, Any]) -> str:
         f"{args['source']} {ARROW} {args['destination']}",
         _volume(args["volume_ul"]),
         f"({liquid_class})" if liquid_class else "",
+        f"prewet x{args['prewet_cycles']}" if args.get("prewet_cycles") else "",
+        f"dwell {args['aspirate_dwell_s']:g}s/{args.get('dispense_dwell_s', 0):g}s"
+        if args.get("aspirate_dwell_s") or args.get("dispense_dwell_s") else "",
     )
 
 

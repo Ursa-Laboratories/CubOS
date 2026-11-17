@@ -1336,3 +1336,28 @@ def test_bottom_offset_changes_planned_motion_versus_default_height():
     moves_default, _ = _run_engage(_engage_protocol({}, {}))
     moves_bottom, _ = _run_engage(_engage_protocol({"source_from_bottom_mm": 2.0}, {}))
     assert moves_default != moves_bottom
+
+
+def test_planned_transfer_runs_prewet_and_dwell_without_extra_motion(monkeypatch):
+    from cubos.protocol_engine.commands import pipette as pipette_commands
+
+    slept = []
+    monkeypatch.setattr(pipette_commands, "_sleep", slept.append)
+    args = {"source": "source", "destination": "destination", "volume_ul": 100}
+    context, plain_controller, _ = _context()
+    compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall("transfer", args),
+        CommandCall("drop_tip", {"position": "waste"}),
+    ]).execute(context)
+    context, controller, pipette = _context()
+    compile_protocol([
+        CommandCall("pick_up_tip", {"position": "tips.A1"}),
+        CommandCall("transfer", {**args, "prewet_cycles": 1, "aspirate_dwell_s": 2.0}),
+        CommandCall("drop_tip", {"position": "waste"}),
+    ]).execute(context)
+    assert controller.moves == plain_controller.moves
+    assert pipette.actions[:5] == [
+        "pick_up_tip", "aspirate:100.0", "dispense:100.0", "aspirate:100.0", "dispense:100.0",
+    ]
+    assert slept == [2.0]

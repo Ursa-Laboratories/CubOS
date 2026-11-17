@@ -8,9 +8,9 @@ import sqlite3
 import time
 from collections.abc import Mapping
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Any, Iterator, List, Optional
+from typing import TYPE_CHECKING, Annotated, Any, Iterator, List, Optional
 
-from pydantic import StrictFloat
+from pydantic import Field, StrictFloat
 
 from cubos.data.fluid_state import FluidStateError
 from cubos.deck.labware.tip_rack import (
@@ -48,6 +48,13 @@ from ._liquid_transfer import (
 from ._movement import _assert_finite_number, engage_at_labware
 
 logger = logging.getLogger(__name__)
+
+PrewetCycles = Annotated[
+    int, Field(ge=0, le=5, strict=True, description="Aspirate/dispense cycles in the source before each aspirate."),
+]
+DwellSeconds = Annotated[
+    float, Field(ge=0, le=600, allow_inf_nan=False, description="Seconds to hold the tip in place."),
+]
 
 _VOLUME_TOLERANCE_UL = 1e-6
 
@@ -819,6 +826,9 @@ def transfer(
     source_from_top_mm: Optional[float] = None,
     destination_from_bottom_mm: Optional[float] = None,
     destination_from_top_mm: Optional[float] = None,
+    prewet_cycles: PrewetCycles = 0,
+    aspirate_dwell_s: DwellSeconds = 0.0,
+    dispense_dwell_s: DwellSeconds = 0.0,
 ) -> None:
     """Aspirate from *source* and dispense into *destination*.
 
@@ -1055,9 +1065,20 @@ def transfer(
                 source_y_offset_mm=source_y_offset_mm,
                 destination_x_offset_mm=destination_x_offset_mm,
                 destination_y_offset_mm=destination_y_offset_mm,
+                prewet_cycles=prewet_cycles,
+                aspirate_dwell_s=aspirate_dwell_s,
+                dispense_dwell_s=dispense_dwell_s,
             )
     finally:
         context.active_substep = previous_substep
+
+
+_sleep = time.sleep
+
+
+def _dwell(seconds: float) -> None:
+    if seconds > 0:
+        _sleep(seconds)
 
 
 def _execute_transfer_stroke(
@@ -1085,8 +1106,16 @@ def _execute_transfer_stroke(
     source_y_offset_mm: float = 0.0,
     destination_x_offset_mm: float = 0.0,
     destination_y_offset_mm: float = 0.0,
+    prewet_cycles: int = 0,
+    aspirate_dwell_s: float = 0.0,
+    dispense_dwell_s: float = 0.0,
 ) -> None:
     """Journal, actuate, and commit exactly one transfer stroke.
+
+    ``prewet_cycles`` aspirates and dispenses the stroke volume back into the
+    source that many times before the real aspirate (net zero liquid, so the
+    durable update is unchanged); the dwell options hold the tip in place after
+    the aspirate and the dispense. All three default to off.
 
     One durable fluid operation per stroke (see ``transfer``'s docstring for
     the resumability rationale). ``correction`` is applied only to the
@@ -1131,7 +1160,11 @@ def _execute_transfer_stroke(
             )
         else:
             context.routing_session.execute(planned_source)
+        for _ in range(prewet_cycles):
+            pipette.aspirate(commanded_volume_ul, speed)
+            pipette.dispense(commanded_volume_ul, speed)
         pipette.aspirate(commanded_volume_ul, speed)
+        _dwell(aspirate_dwell_s)
         if planned_destination is None:
             destination_tip = _engage(
                 context, destination, command_label="transfer.dispense",
@@ -1142,6 +1175,7 @@ def _execute_transfer_stroke(
             context.routing_session.execute(planned_destination)
             destination_tip = _planned_tip_position(context, planned_destination)
         pipette.dispense(commanded_volume_ul, speed)
+        _dwell(dispense_dwell_s)
         if blow_out:
             _blowout_and_retract(
                 context, pipette, destination_tip, speed, blowout_retract_z,

@@ -261,3 +261,17 @@ def test_pipette_home_duration():
     protocol = _protocol(("pick_up_tip", {"position": "source"}), ("pipette_home", {}))
     tl = simulate_protocol(protocol, _deck(), pipette_config=P300)
     assert tl.steps[1].duration_s == TimingModel().pipette_home_s
+
+
+def test_transfer_prewet_and_dwell_lengthen_the_estimate():
+    plain = _protocol(*_steps(
+        ("transfer", {"source": "source", "destination": "dest", "volume_ul": 100.0}),
+    ))
+    extra = _protocol(*_steps((
+        "transfer",
+        {"source": "source", "destination": "dest", "volume_ul": 100.0,
+         "prewet_cycles": 2, "aspirate_dwell_s": 3.0, "dispense_dwell_s": 2.0},
+    )))
+    base = simulate_protocol(plain, _deck(), pipette_config=P300).steps[1].duration_s
+    longer = simulate_protocol(extra, _deck(), pipette_config=P300).steps[1].duration_s
+    assert longer == pytest.approx(base + 5.0 + 4 * TimingModel().plunger_s(100.0, 50.0, 200.0))

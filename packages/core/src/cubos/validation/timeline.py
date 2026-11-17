@@ -215,6 +215,12 @@ def _step_legs(step: Any, deck: Deck) -> list[tuple[str, Any, Any, float]]:
     return []
 
 
+def _transfer_extras(args: Any, strokes: list[float], plunger: Any) -> float:
+    prewet = args.get("prewet_cycles", 0)
+    dwell = float(args.get("aspirate_dwell_s", 0)) + float(args.get("dispense_dwell_s", 0))
+    return sum(2 * prewet * plunger(stroke) + dwell for stroke in strokes)
+
+
 def _duration(
     step: Any,
     deck: Deck,
@@ -272,6 +278,8 @@ def _duration(
                 seconds += clock.visit(source) + plunger(stroke)
                 seconds += clock.visit(destination) + plunger(stroke)
             seconds += model.blowout_s
+            if name == "transfer":
+                seconds += _transfer_extras(args, strokes, plunger)
         return seconds
     unmodeled.add(name)
     return 0.0

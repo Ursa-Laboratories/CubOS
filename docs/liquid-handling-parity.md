@@ -28,8 +28,8 @@ exercised by the tests named below.
 | `touch_tip` | None | No | |
 | `mix(repetitions, volume, location, rate)` | `mix` with `cycles`; fixed asp/disp pattern with a 1 mm lift, `blowout_height` | Partial | `instruments/pipette/interface.py` (`mix`), `commands/pipette.py` |
 | `prepare_to_aspirate` | Picus `prime`; not a protocol command | Different | `vendors/opentrons.py` (`prime`) |
-| Pre-wet (aspirate/dispense before transfer) | None | No | |
-| In-liquid delay / `delay()` | `pause` (seconds) between steps only; no dwell inside an aspirate or dispense | Partial | `commands/pause.py` |
+| Pre-wet (aspirate/dispense before transfer) | `transfer.prewet_cycles` (opt-in) | Yes (transfer only) | `commands/pipette.py` (`_execute_transfer_stroke`) |
+| In-liquid delay / `delay()` | `transfer.aspirate_dwell_s` / `dispense_dwell_s` (opt-in) hold the tip after each action; `pause` between steps | Partial (transfer only) | `commands/pipette.py`, `commands/pause.py` |
 | `flow_rate.aspirate/dispense` (uL/s) | Only normalized `speed`; the Opentrons-firmware driver ignores `speed` | No | `vendors/opentrons.py` (note on speed semantics) |
 | `well.top(z)` / `well.bottom(z)` | `height` is an offset from the well reference (rim). Opt-in `from_top_mm`/`from_bottom_mm` resolve to it; bottom needs `well_depth`/`inner_depth` | Yes (opt-in) | `protocol_engine/engage.py` |
 | `well.center()`, x/y offsets | `x_offset_mm`, `y_offset_mm` on aspirate, dispense, blowout, mix, tip commands, transfer | Yes | `commands/pipette.py` |
