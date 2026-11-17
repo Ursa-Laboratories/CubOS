@@ -111,6 +111,10 @@ class WellPlateYamlEntry(BaseModel):
     # geometry and skirt thickness. External analysis consumers compute the
     # sample-floor Z as the deck-frame rim Z minus this depth.
     well_depth: Optional[float] = Field(default=None, gt=0)
+    well_shape: Optional[Literal["circular", "rectangular"]] = None
+    well_diameter: Optional[float] = Field(default=None, gt=0)
+    well_x_dimension: Optional[float] = Field(default=None, gt=0)
+    well_y_dimension: Optional[float] = Field(default=None, gt=0)
     # Optional per-well lateral geometry; omitting it leaves the well
     # cross-section unspecified and the plate fully addressable.
     well_attributes: Dict[str, WellAttributeValue] = Field(default_factory=dict)
@@ -177,6 +181,7 @@ class VialGridYamlEntry(BaseModel):
     vial_model_name: str = ""
     vial_height: Optional[float] = Field(default=None, gt=0)
     vial_diameter: Optional[float] = Field(default=None, gt=0)
+    vial_inner_depth: Optional[float] = Field(default=None, gt=0)
     capacity_ul: float = Field(..., gt=0)
     working_volume_ul: float = Field(..., gt=0)
     vial_dead_volume_ul: float = Field(default=0.0, ge=0)
@@ -251,6 +256,7 @@ class VialYamlEntry(BaseModel):
     model_name: str = ""
     height: float
     diameter: float
+    inner_depth: Optional[float] = Field(default=None, gt=0)
     location: _YamlPoint3D
     capacity_ul: float
     working_volume_ul: float
@@ -285,6 +291,7 @@ class NestedVialYamlEntry(BaseModel):
     model_name: str = ""
     height: float
     diameter: float
+    inner_depth: Optional[float] = Field(default=None, gt=0)
     location: _YamlPoint3D
     capacity_ul: float
     working_volume_ul: float
@@ -324,6 +331,10 @@ class NestedWellPlateYamlEntry(BaseModel):
     width: Optional[float] = Field(default=None, gt=0)
     height: Optional[float] = Field(default=None, gt=0)
     well_depth: Optional[float] = Field(default=None, gt=0)
+    well_shape: Optional[Literal["circular", "rectangular"]] = None
+    well_diameter: Optional[float] = Field(default=None, gt=0)
+    well_x_dimension: Optional[float] = Field(default=None, gt=0)
+    well_y_dimension: Optional[float] = Field(default=None, gt=0)
     # Mirrors WellPlateYamlEntry — this model sets `extra="forbid"`
     # independently, so a plate nested inside a holder would otherwise be
     # unable to declare `well_attributes` at all.
