@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import sqlite3
 import time
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Iterator, List, Optional
 
 from pydantic import StrictFloat
 
+from cubos.data.fluid_state import FluidStateError
 from cubos.deck.labware.tip_rack import (
     TipRackResolutionError,
     resolve_tip_rack_slot,
@@ -19,11 +21,11 @@ from cubos.deck.labware.well_plate import WellPlate
 from cubos.instruments.pipette.liquid_class import IDENTITY_CORRECTION
 
 from ..errors import ProtocolExecutionError
-from ..registry import protocol_command
 from ..pipette_routing import (
     PipetteTravelClearance,
     validate_pipette_travel_clearance,
 )
+from ..registry import protocol_command
 from . import _summaries
 from ._cap_preflight import require_uncapped as _require_uncapped
 from ._liquid_selection import (
@@ -703,6 +705,18 @@ def pick_up_tip(
             ) from exc
 
 
+def _stroke_substep(previous: str | None, index: int, count: int) -> str | None:
+    """Substep naming a stroke; single-stroke transfers keep the bare substep.
+
+    The only producer of stroke operation-key suffixes: executing strokes and
+    detecting applied ones on resume both call it, so the keys cannot drift.
+    """
+    if count <= 1:
+        return previous
+    suffix = f"stroke{index}"
+    return f"{previous}:{suffix}" if previous else suffix
+
+
 def _applied_stroke_volume(
     context: ProtocolContext, stroke_volumes: list[float],
 ) -> float:
@@ -722,15 +736,17 @@ def _applied_stroke_volume(
             for operation in operations
             if operation["status"] == "applied"
         }
-    except Exception:
+    except (sqlite3.Error, FluidStateError) as exc:
+        logger.debug(
+            "Could not read applied stroke operations (%s); preflighting the "
+            "full volume.", type(exc).__name__, exc_info=True,
+        )
         return 0.0
     previous = context.active_substep
     total = 0.0
     try:
         for index, stroke_volume in enumerate(stroke_volumes):
-            if len(stroke_volumes) > 1:
-                suffix = f"stroke{index}"
-                context.active_substep = f"{previous}:{suffix}" if previous else suffix
+            context.active_substep = _stroke_substep(previous, index, len(stroke_volumes))
             if context.fluid_operation_key("transfer") in applied:
                 total += stroke_volume
     finally:
@@ -952,15 +968,12 @@ def transfer(
         planned = prepared_step(context, "transfer")
 
     stroke_count = len(stroke_volumes)
-    multi_stroke = stroke_count > 1
     previous_substep = context.active_substep
     try:
         for stroke_index, stroke_volume in enumerate(stroke_volumes):
-            if multi_stroke:
-                suffix = f"stroke{stroke_index}"
-                context.active_substep = (
-                    f"{previous_substep}:{suffix}" if previous_substep else suffix
-                )
+            context.active_substep = _stroke_substep(
+                previous_substep, stroke_index, stroke_count,
+            )
             _execute_transfer_stroke(
                 context,
                 pipette,

@@ -69,3 +69,65 @@ def test_replaying_a_fully_applied_transfer_is_a_no_op(tmp_path):
     assert env.run(PICK, transfer) is None
     assert env.durable_volumes()["dest"] == pytest.approx(1400.0)
     assert env.pipette.ledger == []
+
+
+def _fail_applied_lookup(env, monkeypatch, exc):
+    import sys
+
+    original = env.store.get_fluid_snapshot
+
+    def snapshot(*args, **kwargs):
+        if sys._getframe(1).f_code.co_name == "_applied_stroke_volume":
+            raise exc
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(env.store, "get_fluid_snapshot", snapshot)
+
+
+def test_unreadable_applied_strokes_fall_back_to_preflighting_the_full_volume(
+    tmp_path, monkeypatch, caplog,
+):
+    import logging
+    import sqlite3
+
+    env, transfer = _crash_midway(tmp_path, 1400.0)
+    applied = env.durable_volumes()["dest"]
+    assert 0 < applied < 1400.0
+    _fail_applied_lookup(env, monkeypatch, sqlite3.OperationalError("database is locked"))
+    ledger_before = len(env.pipette.ledger)
+
+    with caplog.at_level(logging.DEBUG, logger="cubos.protocol_engine.commands.pipette"):
+        error = env.run(PICK, transfer)
+
+    assert error is not None and "exceeds its 1500 uL working volume" in str(error)
+    assert len(env.pipette.ledger) == ledger_before
+    records = [r for r in caplog.records if "full volume" in r.getMessage()]
+    assert records and records[0].exc_info and "OperationalError" in records[0].getMessage()
+
+
+def test_unexpected_errors_reading_applied_strokes_are_not_swallowed(
+    tmp_path, monkeypatch,
+):
+    env, transfer = _crash_midway(tmp_path, 1400.0)
+    _fail_applied_lookup(env, monkeypatch, RuntimeError("unexpected"))
+
+    error = env.run(PICK, transfer)
+
+    assert isinstance(error, RuntimeError) and str(error) == "unexpected"
+
+
+def test_stroke_keys_checked_on_resume_are_the_keys_strokes_execute_under(tmp_path):
+    env, transfer = _crash_midway(tmp_path, 1400.0)
+    operations = env.store.get_fluid_snapshot(env.state_id)["operations"]
+    applied = sorted(
+        op["operation_key"] for op in operations
+        if op["status"] == "applied" and ":stroke" in op["operation_key"]
+    )
+    from cubos.protocol_engine.commands.pipette import _stroke_substep
+
+    assert applied
+    substeps = {key.split(":substep:", 1)[1].rsplit(":transfer", 1)[0] for key in applied}
+    assert substeps <= {_stroke_substep(None, i, 20) for i in range(20)}
+    assert _stroke_substep(None, 3, 5) == "stroke3"
+    assert _stroke_substep("outer", 3, 5) == "outer:stroke3"
+    assert _stroke_substep("outer", 0, 1) == "outer"
