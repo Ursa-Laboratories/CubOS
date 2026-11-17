@@ -31,7 +31,7 @@ exercised by the tests named below.
 | Pre-wet (aspirate/dispense before transfer) | None | No | |
 | In-liquid delay / `delay()` | `pause` (seconds) between steps only; no dwell inside an aspirate or dispense | Partial | `commands/pause.py` |
 | `flow_rate.aspirate/dispense` (uL/s) | Only normalized `speed`; the Opentrons-firmware driver ignores `speed` | No | `vendors/opentrons.py` (note on speed semantics) |
-| `well.top(z)` / `well.bottom(z)` | `height` is an offset from the well reference (rim). No bottom-relative form | Partial | `commands/pipette.py` |
+| `well.top(z)` / `well.bottom(z)` | `height` is an offset from the well reference (rim). Opt-in `from_top_mm`/`from_bottom_mm` resolve to it; bottom needs `well_depth`/`inner_depth` | Yes (opt-in) | `protocol_engine/engage.py` |
 | `well.center()`, x/y offsets | `x_offset_mm`, `y_offset_mm` on aspirate, dispense, blowout, mix, tip commands, transfer | Yes | `commands/pipette.py` |
 | `transfer` | `transfer` with automatic stroke splitting, dead-volume and overflow preflight, liquid-class correction, durable per-stroke journaling | Partial | `commands/_liquid_transfer.py` (`plan_strokes`, `validate_dead_volume`, `validate_destination_overflow`) |
 | `transfer(new_tip=...)` | Tip handling is explicit steps; no policy argument | No | |

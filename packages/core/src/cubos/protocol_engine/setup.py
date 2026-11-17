@@ -22,7 +22,7 @@ from cubos.gantry.instrument_loader import load_instrumented_gantry_from_config
 from cubos.gantry.instrument_mount import InstrumentedGantry
 from cubos.gantry.loader import load_gantry_from_yaml_safe
 from cubos.gantry.origin import validate_working_volume_origin
-from cubos.protocol_engine.errors import GantryHealthCheckError
+from cubos.protocol_engine.errors import GantryHealthCheckError, ProtocolLoaderError
 from cubos.protocol_engine.loader import load_protocol_from_yaml_safe
 from cubos.protocol_engine.protocol import Protocol
 from cubos.protocol_engine.runtime import ProtocolContext
@@ -125,6 +125,11 @@ def setup_protocol(
 
     if protocol is None:
         protocol = load_protocol_from_yaml_safe(protocol_path, deck=deck)
+
+    try:
+        protocol = protocol.with_resolved_engage_positions(deck)
+    except ValueError as exc:
+        raise ProtocolLoaderError(f"Engage position error: {exc}") from exc
 
     violations = validate_protocol_motion_bounds(
         gantry_config, protocol, deck, instrumented_gantry,

@@ -30,6 +30,15 @@ class Vial(Labware):
         None,
         description="Optional vial outer diameter in millimeters.",
     )
+    inner_depth: float | None = Field(
+        None,
+        gt=0,
+        description=(
+            "Optional inside depth in millimeters from the rim "
+            "(``location.z``) to the inside floor. Enables bottom-relative "
+            "pipette engage positions. Must not exceed ``height``."
+        ),
+    )
     location: Coordinate3D = Field(
         ...,
         description=(
@@ -91,6 +100,18 @@ class Vial(Labware):
             "False) to opt a vial into durable cap-state tracking."
         ),
     )
+
+    @model_validator(mode="after")
+    def _validate_inner_depth_le_height(self) -> "Vial":
+        if (
+            self.inner_depth is not None
+            and self.height is not None
+            and self.inner_depth > self.height
+        ):
+            raise ValueError(
+                f"inner_depth ({self.inner_depth}) must be <= height ({self.height})."
+            )
+        return self
 
     @field_validator("name")
     def _validate_non_empty_text(cls, value: str) -> str:

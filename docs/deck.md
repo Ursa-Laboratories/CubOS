@@ -241,6 +241,15 @@ dimensions:
   height. If `well_attributes` is omitted it defaults to empty: the plate
   remains fully addressable, and existing deck files load unchanged. Consumers
   that need a particular attribute must handle its absence.
+- Optional well geometry for plates: `well_depth` (rim to inside floor),
+  `well_shape` (`circular` or `rectangular`), and the matching `well_diameter`
+  or `well_x_dimension` + `well_y_dimension`, all in mm and uniform across the
+  plate. Vials take optional `inner_depth` (rim to inside floor, at most
+  `height`); vial grids take `vial_inner_depth`. Shape and diameter are
+  descriptive. `well_depth` and `inner_depth` are what bottom-relative pipette
+  engage positions (`from_bottom_mm`) use. There is no separate reservoir
+  type: model a reservoir as a well plate whose wells carry a rectangular
+  cross-section.
 - Vial `height` and `diameter` are optional physical metadata. If they are
   omitted, the vial remains fully addressable and its outer bounding-box fields
   remain unset. Existing direct and holder-nested vials that specify these
@@ -248,6 +257,26 @@ dimensions:
 - Legacy holder definitions retain their fixture geometry and seat/surface
   offsets. Those offsets continue to determine nested labware Z for existing
   deck files.
+
+### Importing Opentrons labware definitions
+
+`python -m cubos.tools.import_opentrons_labware <definition.json> [-o out.yaml]`
+converts an Opentrons labware definition (JSON schema v2) into a CubOS
+`well_plate` entry: grid position and pitch, `well_depth`, `well_shape` with
+`well_diameter` or `well_x_dimension`/`well_y_dimension`, `capacity_ul`, and a
+`well_attributes.source` provenance string. Troughs and reservoirs convert as
+one-row plates. It refuses tip racks, non-uniform wells, irregular grids, and
+anything it would have to approximate. Warnings are printed for what it had to
+assume: `working_volume_ul` is set equal to the capacity (lower it), the
+`calibration` points are labware-frame placeholders (replace them from the deck
+calibration), and a single row or column gets a 9 mm placeholder pitch.
+
+CubOS is MIT-licensed (see `LICENSE`) and does not bundle the Opentrons labware
+library; the importer only reads files you supply. Opentrons' definitions are
+Apache-2.0 licensed, so a converted definition is a derivative of an
+Apache-2.0 work: if you redistribute one, keep the `source` attribute and
+Opentrons' license notice with it, and do not commit Opentrons definitions to
+this repository.
 
 ### Per-Well Attributes
 

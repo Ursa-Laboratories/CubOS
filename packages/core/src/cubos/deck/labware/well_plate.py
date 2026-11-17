@@ -7,6 +7,31 @@ from pydantic import ConfigDict, Field, field_validator, model_validator
 from .labware import BoundingBoxGeometry, Coordinate3D, Labware, WellAttributeValue
 
 
+def validate_well_cross_section(
+    shape: Optional[str],
+    diameter: Optional[float],
+    x_dimension: Optional[float],
+    y_dimension: Optional[float],
+) -> None:
+    """Reject inconsistent well cross-section fields."""
+    round_given = diameter is not None
+    rect_given = x_dimension is not None or y_dimension is not None
+    if round_given and rect_given:
+        raise ValueError(
+            "well_diameter cannot be combined with well_x_dimension/well_y_dimension."
+        )
+    if rect_given and (x_dimension is None or y_dimension is None):
+        raise ValueError("well_x_dimension and well_y_dimension must be set together.")
+    if shape == "circular" and rect_given:
+        raise ValueError("well_shape 'circular' takes well_diameter, not x/y dimensions.")
+    if shape == "rectangular" and round_given:
+        raise ValueError("well_shape 'rectangular' takes x/y dimensions, not well_diameter.")
+    if shape == "circular" and not round_given:
+        raise ValueError("well_shape 'circular' requires well_diameter.")
+    if shape == "rectangular" and not rect_given:
+        raise ValueError("well_shape 'rectangular' requires well_x_dimension and well_y_dimension.")
+
+
 class WellPlate(Labware):
     """
     Labware representing a multi-well plate (e.g. SBS 96-well).
@@ -43,6 +68,23 @@ class WellPlate(Labware):
             "External analysis consumers use it to compute the sample-floor Z "
             "from the deck-frame rim Z."
         ),
+    )
+    well_shape: Optional[Literal["circular", "rectangular"]] = Field(
+        None,
+        description=(
+            "Optional well cross-section. 'circular' pairs with "
+            "``well_diameter``; 'rectangular' with ``well_x_dimension`` and "
+            "``well_y_dimension``. Uniform across the plate."
+        ),
+    )
+    well_diameter: Optional[float] = Field(
+        None, description="Inside well diameter in millimeters (circular wells)."
+    )
+    well_x_dimension: Optional[float] = Field(
+        None, description="Inside well X extent in millimeters (rectangular wells)."
+    )
+    well_y_dimension: Optional[float] = Field(
+        None, description="Inside well Y extent in millimeters (rectangular wells)."
     )
     well_attributes: Dict[str, WellAttributeValue] = Field(
         default_factory=dict,
@@ -111,7 +153,16 @@ class WellPlate(Labware):
             )
         return self
 
-    @field_validator("length", "width", "well_depth")
+    @model_validator(mode="after")
+    def _validate_well_cross_section(self) -> "WellPlate":
+        validate_well_cross_section(
+            self.well_shape, self.well_diameter, self.well_x_dimension, self.well_y_dimension,
+        )
+        return self
+
+    @field_validator(
+        "length", "width", "well_depth", "well_diameter", "well_x_dimension", "well_y_dimension",
+    )
     def _validate_positive_dimension(cls, value: Optional[float], info):  # type: ignore[override]
         if value is not None and value <= 0:
             raise ValueError(f"{info.field_name} must be positive.")

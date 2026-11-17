@@ -297,6 +297,23 @@ All pipette commands require an instrument registered under the name `pipette`.
 The `height`/`source_height`/`destination_height` args follow the labware-relative
 height convention.
 
+**Bottom- and top-relative engage positions (opt-in).** `height` keeps its
+meaning: an offset from the well reference Z (the rim). `aspirate`, `dispense`,
+`blowout`, and `mix` also accept `from_bottom_mm` (distance above the inside
+floor, `>= 0`) or `from_top_mm` (offset from the rim; the explicit spelling of
+`height`, negative goes into the well). `transfer`, `serial_transfer`, and
+`multi_dispense` take `source_from_bottom_mm`, `source_from_top_mm`,
+`destination_from_bottom_mm`, and `destination_from_top_mm`. Give at most one
+of the pair, and do not combine it with a non-zero `height` for the same
+target. `from_bottom_mm` needs `well_depth` (plates) or `inner_depth` (vials)
+in the deck; setup fails naming the missing field. The offset is converted to
+the equivalent rim-relative `height` before bounds, semantic, and routing
+checks run, so a bottom-relative position is validated exactly like the
+`height` it equals and planned motion uses the same value. `multi_dispense`
+destinations that differ in depth must be split into separate commands. The
+`rinse_well`, `flush_pipette`, `purge_pipette`, and `clear_well` commands do
+not accept these fields.
+
 `aspirate`, `dispense`, `blowout`, `mix`, and `transfer` accept
 `travel_clearance` (default `3.0` mm): a requested travel clearance above the
 registered plate top for consecutive operations on that same plate. Use a
@@ -351,6 +368,8 @@ Move to a position and aspirate.
 - `volume_ul` *(float, required)* — volume to aspirate (µL).
 - `speed` *(float, default `50.0`)* — aspirate speed.
 - `height` *(float, default `0.0`)* — engage offset.
+- `from_bottom_mm` / `from_top_mm` *(float, optional)* — alternative engage
+  position; see above.
 
 #### `dispense`
 
