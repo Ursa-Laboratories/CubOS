@@ -16,9 +16,10 @@
 .operator-workspace {
   flex: 1 1 auto;
   min-height: 0;
+  overflow: auto;
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(265px, 1fr) auto;
   gap: 14px;
   padding: 14px;
 }
@@ -44,7 +45,21 @@
   grid-row: 2;
   grid-column: 2;
   padding: 16px;
-  overflow: hidden;
+  overflow: auto;
+}
+
+.operator-workspace--visualize {
+  grid-template-columns: minmax(0, 3fr) minmax(350px, 1fr);
+  grid-template-rows: minmax(300px, 1fr);
+}
+
+.operator-workspace--visualize .operator-editor,
+.operator-workspace--visualize .operator-controls {
+  grid-row: 1;
+}
+
+.operator-workspace--visualize .operator-controls {
+  align-self: start;
 }
 
 @media (max-width: 1100px) {
@@ -68,7 +83,8 @@
   .operator-workspace {
     flex: 0 0 auto;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto auto;
+    grid-template-rows: none;
+    overflow: visible;
   }
 
   .operator-editor,
@@ -79,11 +95,13 @@
     min-width: 0;
   }
 
-  .operator-preview {
+  .operator-preview,
+  .operator-workspace--visualize .operator-editor {
     height: clamp(280px, 60vw, 480px);
   }
 
-  .operator-controls {
-    overflow-x: auto;
+  .operator-workspace--visualize .operator-editor,
+  .operator-workspace--visualize .operator-controls {
+    grid-row: auto;
   }
 }

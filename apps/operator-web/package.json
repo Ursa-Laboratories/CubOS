@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
+    "@ursa-labs/polar-bear-twin": "file:vendor/ursa-labs-polar-bear-twin-0.1.1.tgz",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
+    "three": "0.178.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
@@ -26,6 +28,7 @@
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
+    "@types/three": "0.178.1",
     "@vitejs/plugin-react": "^5.1.1",
     "eslint": "^9.39.1",
     "eslint-plugin-react-hooks": "^7.0.1",

@@ -68,10 +68,10 @@ what each resolution records.
 
 ## Visualize the Deck
 
-The **Visualize** view shows the same deck map as the right-hand panel,
-scaled up to the full left panel. Labware is drawn at its calibrated
-position, instruments are drawn around the head, and the **HEAD** crosshair
-follows the live gantry position. It is useful on a small screen, or when
-you want to watch a run without the editors in the way.
+Use **2D** or **3D** in the **Deck Visualization** header. **Visualize** gives the selected view more room and keeps Gantry Control beside it on a wide screen. Both views use the current deck, including previewed edits.
+
+In **3D**, drag to orbit and scroll or pinch to zoom. **Fit** restores the full assembly, **Tool** frames the mount and pipette, and **Top** looks down on the deck. Green markers indicate configured instrument positions when CubOS reports valid work coordinates. A saved 4040-PRO MAX head-moving Sartorius setup also moves the reference carriage. A disconnected station shows the CAD rest pose.
+
+The hardware model combines the Polar Bear 4040 gantry, Cubware Rev. 0 mount and Picus 2 5 mL STEP. The model’s registration and finishes are approximate. Use the station’s calibration for physical clearance and tip heights.
 
 ![The Visualize view, showing the full-size deck map](../images/operator-ui/visualize.webp)
