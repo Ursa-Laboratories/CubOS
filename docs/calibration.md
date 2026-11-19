@@ -93,14 +93,12 @@ changed frame. Activate the successfully saved configuration before protocols.
 
 ## Pipette calibration with a tip attached
 
-In the Operator UI, choose **Calibrate → Full calibration**, then select
-**Calibrating with a tip attached** when recording
-a pipette contact and enter the measured extension below the bare nozzle.
-For a leftmost pipette, set this option once in **Prepare** so you can align
-with the block using a tip. **Set XY Origin** shows a reminder of the saved
-choice without repeating the inputs. Its choice and length
-carry forward to that same pipette in **Set Z Reference** or **Record
-Instruments**. XY origin recording changes X/Y only.
+Full gantry calibration starts each pipette with **Tip attached** selected.
+With the tip seated, measure from the bottom edge of the black nozzle to the
+bottom of the disposable tip. Enter that length in millimeters. For bare-nozzle
+calibration, clear the checkbox. The wizard keeps the choice for each pipette
+throughout the calibration.
+
 Home-to-contact travel uses the raw carriage positions. Tip length affects
 the saved bare-nozzle depth, not mechanical Z travel. For example, a 46 mm
 carriage move with a 50 mm tip remains 46 mm of travel, so it fits an 80 mm

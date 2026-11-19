@@ -1,8 +1,11 @@
+import type { XYJogStep, ZJogStep } from "./JogStepPresets";
+import JogPanel from "./JogPanel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, TouchEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { gantryApi } from "../../api/client";
 import * as theme from "../../theme";
 import CameraPreview from "./CameraPreview";
+import CalibrationTipControls from "./CalibrationTipControls";
 import LimitRecoveryControls from "./LimitRecoveryControls";
 import type { FinalizeOriginResponse, GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import {
@@ -50,7 +53,6 @@ type PendingZReference = {
   lowestInstrument: string;
 };
 
-const MIN_STEP = 0.001;
 const NON_CONTACT_TYPES = new Set(["camera"]);
 const FOLLOW_CAMERA_TYPES = new Set(["lighting"]);
 
@@ -71,8 +73,8 @@ export default function CalibrationWizard({
 }: Props) {
   const autoRecovery = useCalibrationAutoRecovery(open, position?.connected ?? false);
   const [step, setStep] = useState(0);
-  const [xyStep, setXyStep] = useState("0.5");
-  const [zStep, setZStep] = useState("0.5");
+  const [xyStep, setXyStep] = useState<XYJogStep>(0.5);
+  const [zStep, setZStep] = useState<ZJogStep>(0.5);
   const [blockHeight, setBlockHeight] = useState("10");
   const [busy, setBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
@@ -127,6 +129,9 @@ export default function CalibrationWizard({
     () => calibratableInstruments.filter((name) => !nonContactInstruments.includes(name)),
     [calibratableInstruments, nonContactInstruments],
   );
+  const defaultTipAttached = useMemo(() => Object.fromEntries(
+    instruments.filter((name) => config?.instruments[name]?.type === "pipette").map((name) => [name, true]),
+  ), [config, instruments]);
   const isMulti = calibratableInstruments.length > 1;
   const connected = position?.connected ?? false;
   const status = position?.status ?? "";
@@ -206,6 +211,8 @@ export default function CalibrationWizard({
     setXyBounds(null);
     setInstrumentPositions({});
     setCameraBlockDistances({});
+    setTipAttached(defaultTipAttached);
+    setTipLengths({});
     setOutputFile(defaultOutputFilename(filename));
     setReferenceInstrument(contactInstruments[0] ?? "");
     setLowestInstrument(contactInstruments[0] ?? "");
@@ -215,7 +222,7 @@ export default function CalibrationWizard({
     pendingZReference.current = null;
     finalizedOrigin.current = null;
     finalizedConfig.current = null;
-  }, [config?.cnc.calibration_block_height_mm, contactInstruments, filename, open]);
+  }, [config?.cnc.calibration_block_height_mm, contactInstruments, defaultTipAttached, filename, open]);
 
   useEffect(() => {
     if (!open || statusNote !== "Homed.") return;
@@ -343,6 +350,8 @@ export default function CalibrationWizard({
     setXyBounds(null);
     setInstrumentPositions({});
     setCameraBlockDistances({});
+    setTipAttached(defaultTipAttached);
+    setTipLengths({});
     setOutputFile(defaultOutputFilename(filename));
     setReferenceInstrument(contactInstruments[0] ?? "");
     setLowestInstrument(contactInstruments[0] ?? "");
@@ -811,54 +820,13 @@ export default function CalibrationWizard({
     void pump();
   };
 
-  const parsedXyStep = parsePositiveStep(xyStep);
-  const parsedZStep = parsePositiveStep(zStep);
-  const xy = parsedXyStep == null ? MIN_STEP : Math.max(MIN_STEP, parsedXyStep);
-  const z = parsedZStep == null ? MIN_STEP : Math.max(MIN_STEP, parsedZStep);
-  const stepInvalid = parsedXyStep == null || parsedZStep == null;
-  const xyBelowMin = parsedXyStep != null && parsedXyStep < MIN_STEP;
-  const zBelowMin = parsedZStep != null && parsedZStep < MIN_STEP;
-
   if (!open) return null;
 
   const referenceTipControls = isMulti && referenceInstrumentIsPipette ? (
-    <div style={{ margin: "12px 0" }}>
-      <p style={instructionStyle}>
-        If the leftmost pipette cannot reach the block bare, attach a tip and align
-        its end with the mark. This step sets X/Y only. The tip length carries
-        forward to this pipette's Z reference or instrument-offset measurement.
-      </p>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-        <input
-          type="checkbox"
-          aria-label="Calibrating with a tip attached"
-          checked={referenceTipAttached}
-          onChange={(event) => setTipAttached((prev) => ({
-            ...prev, [selectedReference]: event.target.checked,
-          }))}
-          disabled={controlsLocked}
-        />
-        <span style={labelStyle}>Calibrating with a tip attached</span>
-      </label>
-      {referenceTipAttached && (
-        <label style={{ ...fieldStyle, marginTop: 8 }}>
-          <span style={labelStyle}>Tip length (mm)</span>
-          <input
-            aria-label="Tip length (mm)"
-            value={tipLengths[selectedReference] ?? ""}
-            onChange={(event) => setTipLengths((prev) => ({
-              ...prev, [selectedReference]: event.target.value,
-            }))}
-            disabled={controlsLocked}
-            inputMode="decimal"
-            style={buttonStateStyle(inputStyle, controlsLocked)}
-          />
-          {referenceTipLengthError && (
-            <span style={{ color: theme.color.danger, fontSize: 12 }}>{referenceTipLengthError}</span>
-          )}
-        </label>
-      )}
-    </div>
+    <CalibrationTipControls attached={referenceTipAttached} length={tipLengths[selectedReference] ?? ""}
+      disabled={controlsLocked} error={referenceTipLengthError}
+      onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [selectedReference]: attached }))}
+      onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [selectedReference]: length }))} />
   ) : null;
 
   return (
@@ -1053,50 +1021,13 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Set Origin</h3>
                 <p style={instructionStyle}>
-                  Put the calibration block at the front-left corner of the deck. Jog the tool until it just touches the top of the block, then continue.
+                  Place the block at the front-left corner of the deck. Jog {soleTipAttached ? "the tip" : "the tool"} to touch its top, then set origin.
                 </p>
                 {soleInstrumentIsPipette && (
-                  <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
-                    If this pipette can't reach the block bare, attach a tip and touch the block with the tip
-                    instead. Enter the tip length below to save the bare-nozzle offset. Z travel is
-                    measured from the carriage positions.
-                  </p>
-                )}
-                {soleInstrumentIsPipette && (
-                  <div style={{ margin: "12px 0" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        aria-label="Calibrating with a tip attached"
-                        checked={soleTipAttached}
-                        onChange={(event) => setTipAttached((prev) => ({
-                          ...prev,
-                          [soleInstrument]: event.target.checked,
-                        }))}
-                        disabled={controlsLocked}
-                      />
-                      <span style={labelStyle}>Calibrating with a tip attached</span>
-                    </label>
-                    {soleTipAttached && (
-                      <label style={{ ...fieldStyle, marginTop: 8 }}>
-                        <span style={labelStyle}>Tip length (mm)</span>
-                        <input
-                          aria-label="Tip length (mm)"
-                          value={tipLengths[soleInstrument] ?? ""}
-                          onChange={(event) => setTipLengths((prev) => ({
-                            ...prev,
-                            [soleInstrument]: event.target.value,
-                          }))}
-                          disabled={controlsLocked}
-                          inputMode="decimal"
-                          style={buttonStateStyle(inputStyle, controlsLocked)}
-                        />
-                        {soleTipLengthError && (
-                          <span style={{ color: theme.color.danger, fontSize: 12 }}>{soleTipLengthError}</span>
-                        )}
-                      </label>
-                    )}
-                  </div>
+                  <CalibrationTipControls attached={soleTipAttached} length={tipLengths[soleInstrument] ?? ""}
+                    disabled={controlsLocked} error={soleTipLengthError}
+                    onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [soleInstrument]: attached }))}
+                    onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [soleInstrument]: length }))} />
                 )}
                 <JogPanel
                   xyStep={xyStep}
@@ -1107,13 +1038,6 @@ export default function CalibrationWizard({
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
                   onStopJog={releaseJog}
-                  xy={xy}
-                  z={z}
-                  stepInvalid={stepInvalid}
-                  xyStepInvalid={parsedXyStep == null}
-                  zStepInvalid={parsedZStep == null}
-                  xyBelowMin={xyBelowMin}
-                  zBelowMin={zBelowMin}
                 />
                 <div style={actionRowStyle}>
                   <button
@@ -1121,7 +1045,7 @@ export default function CalibrationWizard({
                     disabled={controlsLocked || !connected || !!soleTipLengthError}
                     style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !!soleTipLengthError)}
                   >
-                    Set origin and continue
+                    Set origin
                   </button>
                 </div>
               </div>
@@ -1149,13 +1073,6 @@ export default function CalibrationWizard({
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
                   onStopJog={releaseJog}
-                  xy={xy}
-                  z={z}
-                  stepInvalid={stepInvalid}
-                  xyStepInvalid={parsedXyStep == null}
-                  zStepInvalid={parsedZStep == null}
-                  xyBelowMin={xyBelowMin}
-                  zBelowMin={zBelowMin}
                 />
                 <div style={actionRowStyle}>
                   <button onClick={setXY} disabled={controlsLocked || !connected || !!referenceTipLengthError} style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !!referenceTipLengthError)}>Set XY origin and continue</button>
@@ -1194,47 +1111,10 @@ export default function CalibrationWizard({
                   Keep the block where it is. Jog {selectedLowest || "the lowest instrument"} until it just touches the top of the block, then continue.
                 </p>
                 {lowestInstrumentIsPipette && (
-                  <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
-                    If this pipette can't reach the block bare, attach a tip and touch the block with the tip
-                    instead. Enter the tip length below to save the bare-nozzle offset. Z travel is
-                    measured from the carriage positions.
-                  </p>
-                )}
-                {lowestInstrumentIsPipette && (
-                  <div style={{ margin: "12px 0" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        aria-label="Calibrating with a tip attached"
-                        checked={lowestTipAttached}
-                        onChange={(event) => setTipAttached((prev) => ({
-                          ...prev,
-                          [selectedLowest]: event.target.checked,
-                        }))}
-                        disabled={controlsLocked}
-                      />
-                      <span style={labelStyle}>Calibrating with a tip attached</span>
-                    </label>
-                    {lowestTipAttached && (
-                      <label style={{ ...fieldStyle, marginTop: 8 }}>
-                        <span style={labelStyle}>Tip length (mm)</span>
-                        <input
-                          aria-label="Tip length (mm)"
-                          value={tipLengths[selectedLowest] ?? ""}
-                          onChange={(event) => setTipLengths((prev) => ({
-                            ...prev,
-                            [selectedLowest]: event.target.value,
-                          }))}
-                          disabled={controlsLocked}
-                          inputMode="decimal"
-                          style={buttonStateStyle(inputStyle, controlsLocked)}
-                        />
-                        {lowestTipLengthError && (
-                          <span style={{ color: theme.color.danger, fontSize: 12 }}>{lowestTipLengthError}</span>
-                        )}
-                      </label>
-                    )}
-                  </div>
+                  <CalibrationTipControls attached={lowestTipAttached} length={tipLengths[selectedLowest] ?? ""}
+                    disabled={controlsLocked} error={lowestTipLengthError}
+                    onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [selectedLowest]: attached }))}
+                    onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [selectedLowest]: length }))} />
                 )}
                 <JogPanel
                   xyStep={xyStep}
@@ -1245,13 +1125,6 @@ export default function CalibrationWizard({
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
                   onStopJog={releaseJog}
-                  xy={xy}
-                  z={z}
-                  stepInvalid={stepInvalid}
-                  xyStepInvalid={parsedXyStep == null}
-                  zStepInvalid={parsedZStep == null}
-                  xyBelowMin={xyBelowMin}
-                  zBelowMin={zBelowMin}
                 />
                 <div style={actionRowStyle}>
                   <button
@@ -1300,13 +1173,6 @@ export default function CalibrationWizard({
                           Center the camera over the calibration block mark, then enter the distance from the camera to the top of the block.
                         </p>
                       )}
-                      {nextInstrumentIsPipette && (
-                        <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
-                          If this pipette can't reach the block bare, attach a tip and touch the block with the tip
-                          instead. Enter the tip length below and it's subtracted so the saved depth still reflects
-                          the bare-nozzle position.
-                        </p>
-                      )}
                     </div>
                     {nextInstrumentIsCamera && (
                       <CameraPreview key={nextInstrumentToRecord} instrument={nextInstrumentToRecord} />
@@ -1331,40 +1197,10 @@ export default function CalibrationWizard({
                       </label>
                     )}
                     {nextInstrumentIsPipette && (
-                      <div style={{ marginBottom: 12 }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                          <input
-                            type="checkbox"
-                            aria-label="Calibrating with a tip attached"
-                            checked={nextInstrumentTipAttached}
-                            onChange={(event) => setTipAttached((prev) => ({
-                              ...prev,
-                              [nextInstrumentToRecord]: event.target.checked,
-                            }))}
-                            disabled={controlsLocked}
-                          />
-                          <span style={labelStyle}>Calibrating with a tip attached</span>
-                        </label>
-                        {nextInstrumentTipAttached && (
-                          <label style={{ ...fieldStyle, marginTop: 8 }}>
-                            <span style={labelStyle}>Tip length (mm)</span>
-                            <input
-                              aria-label="Tip length (mm)"
-                              value={tipLengths[nextInstrumentToRecord] ?? ""}
-                              onChange={(event) => setTipLengths((prev) => ({
-                                ...prev,
-                                [nextInstrumentToRecord]: event.target.value,
-                              }))}
-                              disabled={controlsLocked}
-                              inputMode="decimal"
-                              style={buttonStateStyle(inputStyle, controlsLocked)}
-                            />
-                            {nextTipLengthError && (
-                              <span style={{ color: theme.color.danger, fontSize: 12 }}>{nextTipLengthError}</span>
-                            )}
-                          </label>
-                        )}
-                      </div>
+                      <CalibrationTipControls attached={nextInstrumentTipAttached} length={tipLengths[nextInstrumentToRecord] ?? ""}
+                        disabled={controlsLocked} error={nextTipLengthError}
+                        onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [nextInstrumentToRecord]: attached }))}
+                        onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [nextInstrumentToRecord]: length }))} />
                     )}
                     <JogPanel
                       xyStep={xyStep}
@@ -1375,13 +1211,6 @@ export default function CalibrationWizard({
                       alarmed={!!alarmRecoveryMessage}
                       onStartJog={startJog}
                       onStopJog={releaseJog}
-                      xy={xy}
-                      z={z}
-                      stepInvalid={stepInvalid}
-                      xyStepInvalid={parsedXyStep == null}
-                      zStepInvalid={parsedZStep == null}
-                      xyBelowMin={xyBelowMin}
-                      zBelowMin={zBelowMin}
                     />
                     <div style={actionRowStyle}>
                       <button
@@ -1414,101 +1243,6 @@ export default function CalibrationWizard({
             )}
           </section>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function JogPanel({
-  xyStep,
-  zStep,
-  setXyStep,
-  setZStep,
-  disabled,
-  alarmed,
-  onStartJog,
-  onStopJog,
-  xy,
-  z,
-  stepInvalid,
-  xyStepInvalid,
-  zStepInvalid,
-  xyBelowMin,
-  zBelowMin,
-}: {
-  xyStep: string;
-  zStep: string;
-  setXyStep: (value: string) => void;
-  setZStep: (value: string) => void;
-  disabled: boolean;
-  alarmed: boolean;
-  onStartJog: (x: number, y: number, z: number) => void;
-  onStopJog: () => void;
-  xy: number;
-  z: number;
-  stepInvalid: boolean;
-  xyStepInvalid: boolean;
-  zStepInvalid: boolean;
-  xyBelowMin: boolean;
-  zBelowMin: boolean;
-}) {
-  const jogLocked = disabled || alarmed || stepInvalid;
-  const props = (x: number, y: number, dz: number) => ({
-    onMouseDown: () => !jogLocked && onStartJog(x, y, dz),
-    onMouseUp: onStopJog,
-    onMouseLeave: onStopJog,
-    onTouchStart: (event: TouchEvent) => {
-      event.preventDefault();
-      if (!jogLocked) onStartJog(x, y, dz);
-    },
-    onTouchEnd: onStopJog,
-    onTouchCancel: onStopJog,
-  });
-
-  return (
-    <div style={jogPanelStyle}>
-      <div style={dpadStyle}>
-        <div />
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(0, xy, 0)} title="Y+">↑</button>
-        <div />
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(-xy, 0, 0)} title="X-">←</button>
-        <div style={padCenterStyle}>XY</div>
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(xy, 0, 0)} title="X+">→</button>
-        <div />
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(0, -xy, 0)} title="Y-">↓</button>
-        <div />
-      </div>
-      <div style={zPadStyle}>
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(0, 0, z)} title="Z+">Z+</button>
-        <div style={padCenterStyle}>Z</div>
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(0, 0, -z)} title="Z-">Z-</button>
-      </div>
-      <div style={stepFieldsStyle}>
-        <label style={stepFieldStyle}>
-          <span style={labelStyle}>XY mm</span>
-          <input
-            value={xyStep}
-            onChange={(event) => setXyStep(event.target.value)}
-            disabled={disabled || alarmed}
-            inputMode="decimal"
-            style={buttonStateStyle({ ...smallInputStyle, borderColor: xyStepInvalid || xyBelowMin ? theme.color.danger : undefined }, disabled || alarmed)}
-          />
-        </label>
-        <label style={stepFieldStyle}>
-          <span style={labelStyle}>Z mm</span>
-          <input
-            value={zStep}
-            onChange={(event) => setZStep(event.target.value)}
-            disabled={disabled || alarmed}
-            inputMode="decimal"
-            style={buttonStateStyle({ ...smallInputStyle, borderColor: zStepInvalid || zBelowMin ? theme.color.danger : undefined }, disabled || alarmed)}
-          />
-        </label>
-        {(stepInvalid || xyBelowMin || zBelowMin) && (
-          <div style={stepHintStyle}>
-            {stepInvalid ? "Enter step sizes greater than 0." : `Minimum jog step is ${MIN_STEP} mm.`}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1555,11 +1289,6 @@ function capturedFromPlain(position: { x: number; y: number; z: number }): Captu
 
 function formatOptionalNumber(value: number | null | undefined): string {
   return value == null ? "" : String(value);
-}
-
-function parsePositiveStep(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function parseBlockHeight(value: string): number {
@@ -1835,14 +1564,6 @@ const inputStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const smallInputStyle: React.CSSProperties = {
-  ...inputStyle,
-  ...theme.mono,
-  width: 58,
-  padding: "4px 6px",
-  fontSize: 12,
-};
-
 const actionRowStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -1912,70 +1633,6 @@ const noInstrumentsStyle: React.CSSProperties = {
 const busyStyle: React.CSSProperties = {
   ...theme.notice.warning,
   marginBottom: 10,
-};
-
-const jogPanelStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 18,
-  border: `1px solid ${theme.color.border}`,
-  borderRadius: theme.radius.md,
-  padding: 12,
-  width: "fit-content",
-  maxWidth: "100%",
-  flexWrap: "wrap",
-};
-
-const dpadStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, 40px)",
-  gridTemplateRows: "repeat(3, 40px)",
-  gap: 2,
-};
-
-const zPadStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 2,
-};
-
-const jogButtonStyle: React.CSSProperties = {
-  width: 40,
-  height: 40,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: theme.color.surface,
-  border: `1px solid ${theme.color.borderStrong}`,
-  borderRadius: theme.radius.md,
-  color: theme.color.text,
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const padCenterStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: theme.color.textFaint,
-  fontSize: 10,
-};
-
-const stepFieldsStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-};
-
-const stepFieldStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-};
-
-const stepHintStyle: React.CSSProperties = {
-  color: theme.color.danger,
-  fontSize: 11,
 };
 
 const instrumentListStyle: React.CSSProperties = {

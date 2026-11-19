@@ -1,3 +1,4 @@
+import type { XYJogStep, ZJogStep } from "../gantry/JogStepPresets";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { gantryApi } from "../../api/client";
@@ -11,7 +12,7 @@ import type {
   InstrumentConfig,
   LabwareConfig,
 } from "../../types";
-import JogPanel, { MIN_JOG_STEP } from "../gantry/JogPanel";
+import JogPanel from "../gantry/JogPanel";
 import CameraPreview from "../gantry/CameraPreview";
 import LimitRecoveryControls from "../gantry/LimitRecoveryControls";
 import { createJogPacer, jogPaceMs } from "../gantry/jogPacing";
@@ -202,8 +203,8 @@ export default function LabwareCalibrationModal({
   const [withTip, setWithTip] = useState(false);
   const [tipLength, setTipLength] = useState("");
   const [captured, setCaptured] = useState<Record<string, CapturedEntry>>({});
-  const [xyStep, setXyStep] = useState("0.5");
-  const [zStep, setZStep] = useState("0.1");
+  const [xyStep, setXyStep] = useState<XYJogStep>(0.5);
+  const [zStep, setZStep] = useState<ZJogStep>(0.1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [statusNote, setStatusNote] = useState<string | null>(null);
@@ -683,12 +684,6 @@ export default function LabwareCalibrationModal({
 
   if (!open) return null;
 
-  const parsedXyStep = parsePositiveStep(xyStep);
-  const parsedZStep = parsePositiveStep(zStep);
-  const xy = parsedXyStep == null ? MIN_JOG_STEP : Math.max(MIN_JOG_STEP, parsedXyStep);
-  const z = parsedZStep == null ? MIN_JOG_STEP : Math.max(MIN_JOG_STEP, parsedZStep);
-  const stepInvalid = parsedXyStep == null || parsedZStep == null;
-
   const compensationSummary = [
     `XY offset +(${formatMm(offsetX)}, ${formatMm(offsetY)})`,
     `depth −${formatMm(depth)}`,
@@ -1007,13 +1002,6 @@ export default function LabwareCalibrationModal({
                       alarmed={alarmed}
                       onStartJog={startJog}
                       onStopJog={stopJog}
-                      xy={xy}
-                      z={z}
-                      stepInvalid={stepInvalid}
-                      xyStepInvalid={parsedXyStep == null}
-                      zStepInvalid={parsedZStep == null}
-                      xyBelowMin={parsedXyStep != null && parsedXyStep < MIN_JOG_STEP}
-                      zBelowMin={parsedZStep != null && parsedZStep < MIN_JOG_STEP}
                     />
                     <div style={actionRowStyle}>
                       <button
@@ -1314,11 +1302,6 @@ function requireWorkPosition(position: GantryPosition): Coordinate3D {
     y: Number(position.work_y),
     z: Number(position.work_z),
   };
-}
-
-function parsePositiveStep(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function isPositiveInteger(value: number): boolean {

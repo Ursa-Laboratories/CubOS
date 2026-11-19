@@ -268,13 +268,13 @@ describe("CalibrationWizard multi-instrument block height step", () => {
 
     expect(await screen.findByText("Record Instruments")).toBeInTheDocument();
     const recordButton = screen.getByRole("button", { name: "Record pipette" });
-    expect(recordButton).toBeEnabled(); // no tip requested yet — bare-nozzle touch is valid as-is.
-
-    const tipCheckbox = screen.getByLabelText("Calibrating with a tip attached");
-    await user.click(tipCheckbox);
     expect(recordButton).toBeDisabled();
 
-    const tipLength = screen.getByLabelText("Tip length (mm)");
+    const tipCheckbox = screen.getByLabelText("Tip attached");
+    expect(tipCheckbox).toBeChecked();
+    expect(recordButton).toBeDisabled();
+
+    const tipLength = screen.getByLabelText("Measured length (mm)");
     await user.type(tipLength, "-5");
     expect(await screen.findByText(/Tip length must be greater than 0/i)).toBeInTheDocument();
     expect(recordButton).toBeDisabled();
@@ -346,12 +346,12 @@ describe("CalibrationWizard multi-instrument block height step", () => {
     await advanceToBlockHeightStep(user);
     await user.click(screen.getByRole("button", { name: "Continue" })); // -> Z reference
 
-    const tipCheckbox = screen.getByLabelText("Calibrating with a tip attached");
-    await user.click(tipCheckbox);
+    const tipCheckbox = screen.getByLabelText("Tip attached");
+    expect(tipCheckbox).toBeChecked();
     const setZButton = screen.getByRole("button", { name: "Set Z reference with pipette and continue" });
     expect(setZButton).toBeDisabled();
 
-    const tipLength = screen.getByLabelText("Tip length (mm)");
+    const tipLength = screen.getByLabelText("Measured length (mm)");
     await user.type(tipLength, "70");
     expect(setZButton).toBeEnabled();
     await user.click(setZButton);
@@ -527,29 +527,30 @@ describe("CalibrationWizard leftmost pipette tip controls", () => {
   async function prepareLeftmostTip(user: ReturnType<typeof userEvent.setup>, lowest: "asmi" | "pipette") {
     await user.selectOptions(screen.getByLabelText("Leftmost instrument"), "pipette");
     await user.selectOptions(screen.getByLabelText("Lowest instrument"), lowest);
-    const attached = screen.getByLabelText("Calibrating with a tip attached");
-    expect(attached).not.toBeChecked();
-    await user.click(attached);
-    await user.type(screen.getByLabelText("Tip length (mm)"), "70");
+    const attached = screen.getByLabelText("Tip attached");
+    expect(attached).toBeChecked();
+    expect(screen.getByLabelText("Measured length (mm)")).toHaveValue("");
+    expect(screen.queryByText(/Enter the tip length/)).not.toBeInTheDocument();
+    await user.type(screen.getByLabelText("Measured length (mm)"), "70");
   }
 
   it("offers tip calibration in Prepare and retains it in XY and Z when pipette is also lowest", async () => {
     const user = userEvent.setup();
     const fetchMock = installFetch();
     renderLeftmostWizard();
-    expect(screen.queryByLabelText("Calibrating with a tip attached")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Tip attached")).not.toBeInTheDocument();
     await prepareLeftmostTip(user, "pipette");
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(await screen.findByRole("button", { name: "Home gantry" }));
     expect(await screen.findByText("Set XY Origin")).toBeInTheDocument();
     expect(screen.getByText("Using pipette with a 70 mm tip (set in Prepare).")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Calibrating with a tip attached")).not.toBeInTheDocument();
-    expect(screen.queryByLabelText("Tip length (mm)")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Tip attached")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Measured length (mm)")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Set XY origin and continue" }));
     await user.click(await screen.findByRole("button", { name: "Continue" }));
     expect(await screen.findByText("Set Z Reference")).toBeInTheDocument();
-    expect(screen.getByLabelText("Calibrating with a tip attached")).toBeChecked();
-    expect(screen.getByLabelText("Tip length (mm)")).toHaveValue("70");
+    expect(screen.getByLabelText("Tip attached")).toBeChecked();
+    expect(screen.getByLabelText("Measured length (mm)")).toHaveValue("70");
     const xyWrites = fetchMock.mock.calls.filter(([input]) => new URL(String(input), "http://localhost").pathname === "/api/v1/gantry/work-coordinates");
     expect(xyWrites).toHaveLength(1);
     expect(JSON.parse(String(xyWrites[0][1]?.body))).toEqual({ x: 0, y: 0 });
@@ -563,11 +564,11 @@ describe("CalibrationWizard leftmost pipette tip controls", () => {
     await advanceToBlockHeightStep(user);
     await user.click(screen.getByRole("button", { name: "Continue" }));
     expect(await screen.findByText("Set Z Reference")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Calibrating with a tip attached")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Tip attached")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Set Z reference with asmi and continue" }));
     expect(await screen.findByText("Record Instruments")).toBeInTheDocument();
-    expect(screen.getByLabelText("Calibrating with a tip attached")).toBeChecked();
-    const length = screen.getByLabelText("Tip length (mm)");
+    expect(screen.getByLabelText("Tip attached")).toBeChecked();
+    const length = screen.getByLabelText("Measured length (mm)");
     expect(length).toHaveValue("70");
     await user.clear(length);
     await user.type(length, "0");
@@ -582,7 +583,7 @@ describe("CalibrationWizard leftmost pipette tip controls", () => {
     const fetchMock = installFetch();
     renderLeftmostWizard();
     await prepareLeftmostTip(user, "asmi");
-    const length = screen.getByLabelText("Tip length (mm)");
+    const length = screen.getByLabelText("Measured length (mm)");
     await user.clear(length);
     await user.type(length, "-1");
     const continueButton = screen.getByRole("button", { name: "Continue" });
@@ -593,5 +594,24 @@ describe("CalibrationWizard leftmost pipette tip controls", () => {
     await user.clear(length);
     await user.type(length, "42");
     expect(continueButton).toBeEnabled();
+  });
+
+  it.each(["pipette", "asmi"] as const)("preserves explicit bare-nozzle choice through later %s steps", async (lowest) => {
+    const user = userEvent.setup();
+    installFetch();
+    renderLeftmostWizard();
+    await user.selectOptions(screen.getByLabelText("Leftmost instrument"), "pipette");
+    await user.selectOptions(screen.getByLabelText("Lowest instrument"), lowest);
+    expect(screen.getByLabelText("Tip attached")).toBeChecked();
+    await user.click(screen.getByLabelText("Tip attached"));
+    await user.selectOptions(screen.getByLabelText("Leftmost instrument"), "asmi");
+    await user.selectOptions(screen.getByLabelText("Leftmost instrument"), "pipette");
+    expect(screen.getByLabelText("Tip attached")).not.toBeChecked();
+    await advanceToBlockHeightStep(user);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    if (lowest === "asmi") await user.click(screen.getByRole("button", { name: "Set Z reference with asmi and continue" }));
+    expect(screen.getByLabelText("Tip attached")).not.toBeChecked();
+    expect(screen.queryByLabelText("Measured length (mm)")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: lowest === "pipette" ? "Set Z reference with pipette and continue" : "Record pipette" })).toBeEnabled();
   });
 });

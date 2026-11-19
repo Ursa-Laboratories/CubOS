@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { gantryApi } from "../../api/client";
 import type { GantryConfig, GantryPosition, GantryResponse, WorkingVolume } from "../../types";
 import * as theme from "../../theme";
+import JogStepPresets, { type XYJogStep, type ZJogStep } from "./JogStepPresets";
 import CalibrationWizard from "./CalibrationWizard";
 import CalibrationModeChooser from "./CalibrationModeChooser";
 import InstrumentOffsetCalibrationModal from "./InstrumentOffsetCalibrationModal";
@@ -19,8 +20,6 @@ interface Props {
   onSaveCalibrated: (filename: string, config: GantryConfig) => Promise<void>;
   onSaveInstrumentOffsets?: (filename: string, config: GantryConfig) => Promise<void>;
 }
-
-const MIN_STEP = 0.001;
 
 type AxisPosition = {
   x: number;
@@ -45,8 +44,8 @@ export default function GantryPositionWidget({
   const [offsetCalibrationOpen, setOffsetCalibrationOpen] = useState(false);
   const [calibrationModeOpen, setCalibrationModeOpen] = useState(false);
   const anyCalibrationOpen = calibrationModeOpen || calibrationOpen || offsetCalibrationOpen;
-  const [stepXY, setStepXY] = useState("0.5");
-  const [stepZ, setStepZ] = useState("0.5");
+  const [xyStep, setXyStep] = useState<XYJogStep>(0.5);
+  const [zStep, setZStep] = useState<ZJogStep>(0.5);
   const [moveX, setMoveX] = useState("0");
   const [moveY, setMoveY] = useState("0");
   const [moveZ, setMoveZ] = useState("0");
@@ -231,21 +230,15 @@ export default function GantryPositionWidget({
       const key = e.key;
       if (held.has(key)) return; // already held
 
-      const parsedXY = parsePositiveStep(stepXY);
-      const parsedZ = parsePositiveStep(stepZ);
-      if (parsedXY == null || parsedZ == null) return;
       held.add(key);
 
-      const xy = Math.max(MIN_STEP, parsedXY);
-      const z = Math.max(MIN_STEP, parsedZ);
-
       switch (key) {
-        case "ArrowLeft":  e.preventDefault(); startJog(-xy, 0, 0); break;
-        case "ArrowRight": e.preventDefault(); startJog(xy, 0, 0); break;
-        case "ArrowUp":    e.preventDefault(); startJog(0, xy, 0); break;
-        case "ArrowDown":  e.preventDefault(); startJog(0, -xy, 0); break;
-        case "x": case "X": startJog(0, 0, z); break;
-        case "z": case "Z": startJog(0, 0, -z); break;
+        case "ArrowLeft":  e.preventDefault(); startJog(-xyStep, 0, 0); break;
+        case "ArrowRight": e.preventDefault(); startJog(xyStep, 0, 0); break;
+        case "ArrowUp":    e.preventDefault(); startJog(0, xyStep, 0); break;
+        case "ArrowDown":  e.preventDefault(); startJog(0, -xyStep, 0); break;
+        case "x": case "X": startJog(0, 0, zStep); break;
+        case "z": case "Z": startJog(0, 0, -zStep); break;
       }
     };
 
@@ -272,7 +265,7 @@ export default function GantryPositionWidget({
       window.removeEventListener("blur", releaseHeldJog);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [anyCalibrationOpen, connected, homeBusy, homing, isAlarm, isRunning, jogBusy, pullOffBusy, stepXY, stepZ, startJog, stopJog]);
+  }, [anyCalibrationOpen, connected, homeBusy, homing, isAlarm, isRunning, jogBusy, pullOffBusy, xyStep, zStep, startJog, stopJog]);
 
   const handleConnect = async () => {
     if (!gantryFile) return;
@@ -432,16 +425,8 @@ export default function GantryPositionWidget({
       .catch((e) => setLastCommandError(errorMessage(e)));
   };
 
-  // 800 steps/mm → min 0.00125mm; clamp to 0.001mm floor
-  const parsedXYStep = parsePositiveStep(stepXY);
-  const parsedZStep = parsePositiveStep(stepZ);
-  const xyStep = parsedXYStep == null ? MIN_STEP : Math.max(MIN_STEP, parsedXYStep);
-  const zStep = parsedZStep == null ? MIN_STEP : Math.max(MIN_STEP, parsedZStep);
-  const xyBelowMin = parsedXYStep != null && parsedXYStep < MIN_STEP;
-  const zBelowMin = parsedZStep != null && parsedZStep < MIN_STEP;
-  const stepInvalid = parsedXYStep == null || parsedZStep == null;
   const homeDisabled = !connected || isHold || jogBusy || homeBusy || homing || pullOffBusy || isRunning;
-  const jogDisabled = homeDisabled || stepInvalid || isAlarm || !visiblePosition;
+  const jogDisabled = homeDisabled || isAlarm || !visiblePosition;
   const moveDisabled = !connected || isHold || isMoving || homing || isRunning || isAlarm || pullOffBusy || !visiblePosition;
   const advancedDisabled = !connected || advancedBusy || isRunning;
   const canCalibrate = !!gantry;
@@ -599,9 +584,9 @@ export default function GantryPositionWidget({
       {limitHint && <div style={limitHintStyle}>{limitHint}</div>}
 
       {/* Top row: D-pad + Z on left, XYZ readout on right */}
-      <div style={{ display: "flex", gap: 24, marginBottom: 12 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
         {/* Jog controls */}
-        <div>
+        <div style={{ minWidth: 0, maxWidth: "100%" }}>
           <div style={{ display: "flex", gap: 24, alignItems: "center", marginBottom: 8 }}>
             {/* XY D-pad */}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 40px)", gridTemplateRows: "repeat(3, 40px)", gap: 2 }}>
@@ -638,34 +623,7 @@ export default function GantryPositionWidget({
             </div>
           </div>
 
-          {/* Step size inputs */}
-          <div style={{ display: "flex", gap: 12, fontSize: 11 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ color: theme.color.textMuted }}>XY mm</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={stepXY}
-                onChange={(e) => setStepXY(e.target.value)}
-                style={{ ...inputStyle, ...theme.mono, width: 48, fontSize: 11, padding: "2px 4px", borderColor: parsedXYStep == null || xyBelowMin ? theme.color.danger : theme.color.borderStrong }}
-              />
-            </label>
-            <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <span style={{ color: theme.color.textMuted }}>Z mm</span>
-              <input
-                type="text"
-                inputMode="decimal"
-                value={stepZ}
-                onChange={(e) => setStepZ(e.target.value)}
-                style={{ ...inputStyle, ...theme.mono, width: 48, fontSize: 11, padding: "2px 4px", borderColor: parsedZStep == null || zBelowMin ? theme.color.danger : theme.color.borderStrong }}
-              />
-            </label>
-            {(stepInvalid || xyBelowMin || zBelowMin) && (
-              <span style={{ color: theme.color.danger, fontSize: 10, alignSelf: "center" }}>
-                {stepInvalid ? "Enter step sizes greater than 0" : `min ${MIN_STEP}mm`}
-              </span>
-            )}
-          </div>
+          <JogStepPresets xyStep={xyStep} zStep={zStep} setXyStep={setXyStep} setZStep={setZStep} />
         </div>
 
         {/* XYZ Readout */}
@@ -915,11 +873,6 @@ function isInsideWorkingVolume(position: AxisPosition, volume: WorkingVolume): b
     && position.z >= volume.z_min
     && position.z <= volume.z_max
   );
-}
-
-function parsePositiveStep(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function parseAxisTarget(value: string): number | null {

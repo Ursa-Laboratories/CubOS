@@ -55,13 +55,14 @@ async function setup(policy: "deck_origin" | "home_origin", multi: boolean, chan
   vi.stubGlobal("fetch",fetch);
   render(<CalibrationWizard open gantry={{filename:"hein.yaml",config}} position={position} onClose={() => undefined} onSaveCalibrated={save} />);
   expect(screen.queryByLabelText("Coordinate origin")).not.toBeInTheDocument();
+  if (multi) await user.type(screen.getByLabelText("Measured length (mm)"),"40");
   await user.click(screen.getByRole("button",{name:"Continue"}));
   await user.click(screen.getByRole("button",{name:"Home gantry"}));
   if (multi) await user.click(await screen.findByRole("button",{name:"Set XY origin and continue"}));
   await user.click(await screen.findByRole("button",{name:"Continue"}));
-  await user.click(screen.getByLabelText("Calibrating with a tip attached"));
-  await user.type(screen.getByLabelText("Tip length (mm)"),"40");
-  await user.click(screen.getByRole("button",{name:multi ? "Set Z reference with pipette and continue" : "Set origin and continue"}));
+  expect(screen.getByLabelText("Tip attached")).toBeChecked();
+  if (!multi) await user.type(screen.getByLabelText("Measured length (mm)"),"40");
+  await user.click(screen.getByRole("button",{name:multi ? "Set Z reference with pipette and continue" : "Set origin"}));
   if (multi) {
     await user.type(await screen.findByLabelText("Distance from calibration block (mm)"),"20");
     await user.click(screen.getByRole("button",{name:"Record camera"}));

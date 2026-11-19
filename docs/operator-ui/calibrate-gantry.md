@@ -48,10 +48,10 @@ Place the block at the front-left deck reference.
 1. **Jog controls.** Align the tool with the reference mark and lower it
    until it just touches the block. Use about 0.1 mm steps for the final
    approach; never force a tool into the surface.
-2. **Calibrating with a tip attached.** For a pipette, tick this if using a
-   tip and enter its length. CubOS accounts for it when recording the bare
-   nozzle's position.
-3. **Set origin and continue.** Records the position, then goes to
+2. **Tip attached.** Measure from the bottom edge of the black nozzle to the
+   bottom of the fitted tip. Enter the length in millimeters. Clear the checkbox
+   if using the bare nozzle.
+3. **Set origin.** Records the position and continues to
    [Save](#save).
 
 ## Multiple Instruments
@@ -83,8 +83,7 @@ Keep the block in place.
    block. Use about 0.1 mm steps for the final approach.
 2. **Set Z reference … and continue.** Records the touch position. The
    head must have moved below its homed height.
-3. **Calibrating with a tip attached.** If touching with a pipette tip,
-   tick this and enter the tip length.
+3. **Tip attached.** Enter the measured length if this pipette’s tip has not yet been measured.
 
 ### Record the other instruments
 

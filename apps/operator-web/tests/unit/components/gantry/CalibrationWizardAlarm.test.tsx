@@ -123,7 +123,7 @@ describe("CalibrationWizard alarm recovery", () => {
     expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Unlock alarm" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Set origin and continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Set origin" })).toBeDisabled();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
   });
 
@@ -216,7 +216,7 @@ describe("CalibrationWizard alarm recovery", () => {
     await user.click(await advanceToOriginJog(user));
     expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Z-" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Set origin and continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Set origin" })).toBeDisabled();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
   });
 

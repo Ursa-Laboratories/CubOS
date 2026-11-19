@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import CalibrationWizard from "../../../../src/components/gantry/CalibrationWizard";
@@ -340,7 +340,7 @@ describe("full gantry wizard recovery restart", () => {
     expect(screen.queryByText("ALARM:1 hard limit")).not.toBeInTheDocument();
     expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Unlock alarm" })).not.toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Set origin and continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Set origin" })).toBeDisabled();
     expect(state.posts.filter((entry) => entry.path.endsWith("/prepare-origin"))).toHaveLength(1);
     await user.click(home);
     expect(await screen.findByText("Homed.")).toBeInTheDocument();
@@ -389,13 +389,14 @@ describe("full gantry wizard recovery restart", () => {
     const user = userEvent.setup();
     render(view("gantry", "Idle", true, slow));
     await enter("gantry", user);
-    fireEvent.change(screen.getByLabelText("XY mm"), { target: { value: "25" } });
+    await user.click(within(screen.getByRole("group", { name: "XY jog step (mm)" })).getByRole("button", { name: "50" }));
+    expect(jogs(state)).toHaveLength(0);
     await user.click(screen.getByTitle("Y+"));
     await user.click(screen.getByTitle("X+"));
     expect(jogs(state)).toHaveLength(1);
-    expect(screen.getByRole("button", { name: "Set origin and continue" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Set origin" })).toBeDisabled();
     expect(jogs(state)[0].path).toMatch(/\/jog-blocking$/);
-    expect(jogs(state)[0].body.timeout_s).toBe(20);
+    expect(jogs(state)[0].body.timeout_s).toBe(35);
     await act(async () => pending.resolve(json(position())));
     state.pendingJog = null; state.jogStatus = 200;
     await user.click(screen.getByTitle("X+"));

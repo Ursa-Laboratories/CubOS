@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import GantryPositionWidget from "../../../../src/components/gantry/GantryPositionWidget";
@@ -426,10 +426,10 @@ describe("GantryPositionWidget manual move safety", () => {
         .map(([, init]) => JSON.parse(String(init?.body)));
 
     // Hold Z at the default 0.5 mm step (150 ms pace), then press X with a
-    // 20 mm step (480 ms pace) without releasing. The repeats must follow
-    // the 20 mm segment's pace — 20 mm jogs fired at the 0.5 mm cadence is
+    // 50 mm step (1200 ms pace) without releasing. The repeats must follow
+    // the 50 mm segment's pace — 50 mm jogs fired at the 0.5 mm cadence is
     // exactly the backlog overrun this pacing exists to prevent.
-    fireEvent.change(screen.getByLabelText("XY mm"), { target: { value: "20" } });
+    fireEvent.click(within(screen.getByRole("group", { name: "XY jog step (mm)" })).getByRole("button", { name: "50" }));
     fireEvent.mouseDown(screen.getByTitle("Z+"));
 
     await vi.advanceTimersByTimeAsync(100);
@@ -439,15 +439,15 @@ describe("GantryPositionWidget manual move safety", () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(jogBodies()).toEqual([
       { x: 0, y: 0, z: 0.5 },
-      { x: 20, y: 0, z: 0 },
+      { x: 50, y: 0, z: 0 },
     ]);
 
-    // Well past the old 150 ms cadence but before the 20 mm pace elapses:
+    // Well past the old 150 ms cadence but before the 50 mm pace elapses:
     // no further sends.
-    await vi.advanceTimersByTimeAsync(440);
+    await vi.advanceTimersByTimeAsync(1140);
     expect(jogBodies()).toHaveLength(2);
 
-    // After the 20 mm pace (480 ms from its send) the next repeat fires.
+    // After the 50 mm pace (1200 ms from its send) the next repeat fires.
     await vi.advanceTimersByTimeAsync(100);
     expect(jogBodies()).toHaveLength(3);
 
@@ -482,13 +482,13 @@ describe("GantryPositionWidget manual move safety", () => {
     const jogCalls = () =>
       fetchMock.mock.calls.filter(([input]) => requestPath(input) === "/api/v1/gantry/jog");
 
-    // A 20 mm step at the 2000 mm/min jog feed takes 600 ms to execute, so
-    // held repeats pace to 0.8x that (480 ms), not the 150 ms UI tick —
+    // A 50 mm step at the 2000 mm/min jog feed takes 1500 ms to execute, so
+    // held repeats pace to 0.8x that (1200 ms), not the 150 ms UI tick —
     // otherwise GRBL queues a backlog that keeps moving after release.
-    fireEvent.change(screen.getByLabelText("XY mm"), { target: { value: "20" } });
+    fireEvent.click(within(screen.getByRole("group", { name: "XY jog step (mm)" })).getByRole("button", { name: "50" }));
     fireEvent.mouseDown(screen.getByTitle("X+"));
 
-    await vi.advanceTimersByTimeAsync(400);
+    await vi.advanceTimersByTimeAsync(1100);
     expect(jogCalls()).toHaveLength(1);
 
     await vi.advanceTimersByTimeAsync(200);
@@ -931,7 +931,7 @@ describe("GantryPositionWidget manual move safety", () => {
     ]);
   });
 
-  it("uses typed jog distances", async () => {
+  it("uses independent jog presets without jogging on selection", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(
       async () => jsonResponse({ status: "ok" }),
@@ -948,13 +948,23 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
-    await user.clear(screen.getByLabelText("XY mm"));
-    await user.type(screen.getByLabelText("XY mm"), "1");
+    const xy = within(screen.getByRole("group", { name: "XY jog step (mm)" }));
+    const z = within(screen.getByRole("group", { name: "Z jog step (mm)" }));
+    expect(xy.getAllByRole("button").map((button) => button.textContent)).toEqual(["0.1", "0.5", "1", "5", "10", "50", "100"]);
+    expect(z.getAllByRole("button").map((button) => button.textContent)).toEqual(["0.1", "0.5", "1", "5", "10", "50"]);
+    expect(xy.getByRole("button", { name: "0.5", pressed: true })).toBeInTheDocument();
+    expect(z.getByRole("button", { name: "0.5", pressed: true })).toBeInTheDocument();
+    await user.click(xy.getByRole("button", { name: "1" }));
+    expect(xy.getByRole("button", { name: "1", pressed: true })).toBeInTheDocument();
+    expect(z.getByRole("button", { name: "0.5", pressed: true })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => requestPath(input) === "/api/v1/gantry/jog")).toBe(false);
     fireEvent.mouseDown(screen.getByTitle("X+"));
     fireEvent.mouseUp(screen.getByTitle("X+"));
 
-    await user.clear(screen.getByLabelText("Z mm"));
-    await user.type(screen.getByLabelText("Z mm"), "10");
+    z.getByRole("button", { name: "10" }).focus();
+    await user.keyboard("{Enter}");
+    expect(z.getByRole("button", { name: "10", pressed: true })).toBeInTheDocument();
+    expect(xy.getByRole("button", { name: "1", pressed: true })).toBeInTheDocument();
     fireEvent.mouseDown(screen.getByTitle("Z+"));
     fireEvent.mouseUp(screen.getByTitle("Z+"));
 

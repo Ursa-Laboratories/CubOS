@@ -101,13 +101,16 @@ describe("CalibrationWizard single-instrument tip compensation", () => {
     await user.click(await screen.findByRole("button", { name: "Continue" })); // -> Set Origin
 
     expect(await screen.findByText("Set Origin")).toBeInTheDocument();
-    const setOriginButton = screen.getByRole("button", { name: "Set origin and continue" });
+    const setOriginButton = screen.getByRole("button", { name: "Set origin" });
 
-    const tipCheckbox = screen.getByLabelText("Calibrating with a tip attached");
-    await user.click(tipCheckbox);
+    const tipCheckbox = screen.getByLabelText("Tip attached");
+    expect(tipCheckbox).toBeChecked();
     expect(setOriginButton).toBeDisabled();
 
-    const tipLength = screen.getByLabelText("Tip length (mm)");
+    const tipLength = screen.getByLabelText("Measured length (mm)");
+    expect(tipLength).toHaveValue("");
+    expect(screen.queryByText(/Enter the tip length/)).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: /attached tip/i })).toBeInTheDocument();
     await user.type(tipLength, "70");
     expect(setOriginButton).toBeEnabled();
     await user.click(setOriginButton);
@@ -121,5 +124,37 @@ describe("CalibrationWizard single-instrument tip compensation", () => {
     expect(finalizeCalls[0].factory_z_travel).toBe(56);
     expect(onSaveCalibrated.mock.calls[0][1].instruments.pipette.depth).toBe(-70);
     expect(onSaveCalibrated.mock.calls[0][1].cnc.factory_z_travel_mm).toBe(56);
+  });
+
+  it.each(["reset", "reopen"])("starts a fresh measured-tip choice after %s without guessing from saved depth", async (action) => {
+    const user = userEvent.setup();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(position())));
+    const config = singlePipetteConfig();
+    config.instruments.pipette.depth = -70;
+    const wizard = (open: boolean) => <CalibrationWizard open={open} onClose={() => undefined}
+      gantry={{ filename: "cubos.yaml", config }} position={position()} onSaveCalibrated={async () => undefined} />;
+    const { rerender } = render(wizard(true));
+    const advance = async () => {
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      await user.click(screen.getByRole("button", { name: "Home gantry" }));
+      await user.click(await screen.findByRole("button", { name: "Continue" }));
+    };
+    await advance();
+    expect(screen.getByLabelText("Tip attached")).toBeChecked();
+    expect(screen.getByLabelText("Measured length (mm)")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Set origin" })).toBeDisabled();
+    await user.click(screen.getByLabelText("Tip attached"));
+    expect(screen.queryByLabelText("Measured length (mm)")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: /attached tip/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set origin" })).toBeEnabled();
+    if (action === "reset") await user.click(screen.getByRole("button", { name: "Reset wizard" }));
+    else {
+      rerender(wizard(false));
+      rerender(wizard(true));
+    }
+    await advance();
+    expect(screen.getByLabelText("Tip attached")).toBeChecked();
+    expect(screen.getByLabelText("Measured length (mm)")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Set origin" })).toBeDisabled();
   });
 });
