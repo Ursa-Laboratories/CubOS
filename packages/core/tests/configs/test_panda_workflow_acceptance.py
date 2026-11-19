@@ -6,16 +6,8 @@ through the real protocol engine + a real ``DataStore`` (SQLite in
 the EXACT final fluid/tip state -- volumes, compositions, consumed tip
 slots, no attached tip, campaign completion.
 
-Uses the ``*_pipetting_mock`` gantry/deck pair, not the generated
-``cub_xl_panda_home_origin_full.yaml`` + ``panda_imported_deck.yaml`` trio:
-those imported configs cannot pass bounds validation for any real
-``pipette``-instrument motion (safe_z -5.0 + pipette depth 100.0 already
-exceeds working_volume z_max=0.0 before any deck coordinate is involved).
-See ``configs/gantry/cub_xl_panda_pipetting_mock.yaml``'s header for the
-full documented blocker. The mock pair keeps the imported labware
-identities, roles, solutions, and capacities byte-identical, so fluid/tip
-tracking below exercises the real production-imported data; only motion
-coordinates differ.
+Uses the deck-frame simulation pair. It preserves the imported labware
+identities, roles, solutions and capacities with synthetic motion coordinates.
 """
 
 from __future__ import annotations

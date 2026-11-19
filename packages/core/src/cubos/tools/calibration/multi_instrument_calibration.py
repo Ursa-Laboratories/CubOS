@@ -19,7 +19,7 @@ sys.path.insert(0, str(project_root))
 sys.path.insert(0, str(project_root / "src"))
 
 from cubos.gantry import Gantry, load_gantry_from_yaml  # noqa: E402
-from cubos.gantry.gantry_config import OriginPolicy  # noqa: E402
+from cubos.gantry.gantry_config import OriginPolicy, validate_deck_origin_frame  # noqa: E402
 from cubos.gantry.origin import validate_working_volume_origin  # noqa: E402
 from cubos.instruments.registry import get_calibration_mode  # noqa: E402
 from cubos.tools.calibration.single_instrument_calibration import (  # noqa: E402
@@ -197,26 +197,17 @@ def _updated_yaml_text(
     homing_pull_off_mm: float | None = None,
     origin_policy: str = "deck_origin",
 ) -> str:
+    OriginPolicy(origin_policy)
+    validate_deck_origin_frame(raw_config.get("origin_policy", "deck_origin"), raw_config.get("working_volume"))
     updated = copy.deepcopy(raw_config)
-    if origin_policy == OriginPolicy.HOME_ORIGIN.value:
-        updated["origin_policy"] = OriginPolicy.HOME_ORIGIN.value
-        updated["working_volume"] = {
-            "x_min": _round_mm(-measured_coords["x"]),
-            "x_max": 0.0,
-            "y_min": _round_mm(-measured_coords["y"]),
-            "y_max": 0.0,
-            "z_min": _round_mm(z_min_mm - z_max_mm),
-            "z_max": 0.0,
-        }
-    else:
-        updated["working_volume"] = {
-            "x_min": 0.0,
-            "x_max": _round_mm(measured_coords["x"]),
-            "y_min": 0.0,
-            "y_max": _round_mm(measured_coords["y"]),
-            "z_min": _round_mm(z_min_mm),
-            "z_max": _round_mm(z_max_mm),
-        }
+    updated["working_volume"] = {
+        "x_min": 0.0,
+        "x_max": _round_mm(measured_coords["x"]),
+        "y_min": 0.0,
+        "y_max": _round_mm(measured_coords["y"]),
+        "z_min": _round_mm(z_min_mm),
+        "z_max": _round_mm(z_max_mm),
+    }
     updated["grbl_settings"] = _build_grbl_settings(
         raw_config,
         max_travel,
@@ -458,9 +449,7 @@ def run_multi_instrument_calibration(
     gantry_config = load_gantry_from_yaml(gantry_path)
     validate_working_volume_origin(gantry_config)
     origin_policy = OriginPolicy(gantry_config.origin_policy)
-    origin_corner = (
-        "back-right-top" if origin_policy is OriginPolicy.HOME_ORIGIN else "front-left"
-    )
+    origin_corner = "front-left"
     raw_config = _load_raw_config(gantry_path)
     factory_z_travel_mm = _factory_z_travel_mm(raw_config)
     if output_gantry_path is not None:

@@ -7,28 +7,26 @@ import { validateFinalizedOrigin } from "../../../../src/components/gantry/calib
 
 vi.mock("../../../../src/components/gantry/CameraPreview", () => ({ default: () => <div>Camera preview</div> }));
 const position: GantryPosition = {x:50,y:40,z:0,work_x:50,work_y:40,work_z:0,status:"Idle",connected:true,calibration_active:false};
-function fixture(policy: "deck_origin" | "home_origin", multi: boolean) {
+function fixture(policy: "deck_origin" | undefined, multi: boolean) {
   const config: GantryConfig = {
     serial_port:"/dev/offline",gantry_type:"cub_xl",origin_policy:policy,
-    cnc:{factory_z_travel_mm:80,calibration_block_height_mm:35,safe_z:policy === "home_origin" ? -5 : 76},
+    cnc:{factory_z_travel_mm:80,calibration_block_height_mm:35,safe_z:76},
     working_volume:{x_min:0,x_max:258,y_min:0,y_max:145,z_min:0,z_max:80},
     instruments:{pipette:{type:"pipette",vendor:"sartorius",offset_x:0,offset_y:0,depth:0},
       ...(multi ? {camera:{type:"camera",vendor:"usb",offset_x:0,offset_y:0,depth:0}} : {})},
   };
   const result: FinalizeOriginResponse = {
-    origin_policy:policy,
-    safe_z:policy === "home_origin" ? -5 : 76,
-    working_volume:policy === "home_origin"
-      ? {x_min:-258,x_max:0,y_min:-145,y_max:0,z_min:-80,z_max:0}
-      : {x_min:0,x_max:258,y_min:0,y_max:145,z_min:1,z_max:81},
+    origin_policy:"deck_origin",
+    safe_z:76,
+    working_volume:{x_min:0,x_max:258,y_min:0,y_max:145,z_min:1,z_max:81},
     measured_volume:{x:258,y:145,z:81},max_travel:{x:259,y:146,z:81},
-    position:policy === "home_origin" ? {x:0,y:0,z:0} : {x:258,y:145,z:81},
+    position:{x:258,y:145,z:81},
     z_calibration:{block_height:35,total_z_range:80,home_z:0,block_touch_z:-46,home_to_block_travel:46,
       remaining_below_block:34,can_reach_deck_bottom:false,z_min:1,z_max:81,max_travel_z:80},homing_pull_off_mm:1,
   };
   return {config,result};
 }
-async function setup(policy: "deck_origin" | "home_origin", multi: boolean, change?: (result: FinalizeOriginResponse) => void) {
+async function setup(policy: "deck_origin" | undefined, multi: boolean, change?: (result: FinalizeOriginResponse) => void) {
   const user = userEvent.setup();
   const {config} = fixture(policy,multi);
   const {result} = fixture("deck_origin",multi);
@@ -72,7 +70,7 @@ async function setup(policy: "deck_origin" | "home_origin", multi: boolean, chan
 }
 afterEach(() => vi.unstubAllGlobals());
 describe("verified frame finalization",() => {
-  it.each([["deck_origin",false],["home_origin",false],["deck_origin",true],["home_origin",true]] as const)("saves verified deck bounds from %s configs for multi=%s",async (policy,multi) => {
+  it.each([["deck_origin",false],[undefined,false],["deck_origin",true],[undefined,true]] as const)("saves verified deck bounds from %s configs for multi=%s",async (policy,multi) => {
     const {user,save,fetch,result} = await setup(policy,multi);
     await user.click(screen.getByRole("button",{name:"Save"}));
     await waitFor(() => expect(save).toHaveBeenCalledTimes(1));
@@ -87,18 +85,18 @@ describe("verified frame finalization",() => {
     expect(calls.some(path => path.endsWith("/home") || path.endsWith("/soft-limits"))).toBe(false);
   });
   it.each(["wrong policy","missing frame","wrong readback","out of bounds within tolerance"])("does not save %s",async mode => {
-    const {user,save} = await setup("home_origin",true,result => {
-      if (mode === "wrong policy") result.origin_policy = "home_origin";
+    const {user,save} = await setup("deck_origin",true,result => {
+      if (mode === "wrong policy") (result as { origin_policy: string }).origin_policy = "home_origin";
       if (mode === "missing frame") delete (result as Partial<FinalizeOriginResponse>).working_volume;
       if (mode === "wrong readback") result.position = {x:0,y:0,z:0};
       if (mode === "out of bounds within tolerance") result.position.x = 258.1;
     });
     await user.click(screen.getByRole("button",{name:"Save"}));
-    await screen.findByText(/controller|bounds and controller position/i);
+    await screen.findByText(mode === "wrong policy" ? /Unsupported coordinate origin/ : /controller|bounds and controller position/i);
     expect(save).not.toHaveBeenCalled();
   });
   it("retries a failed file save without repeating frame finalization",async () => {
-    const {user,save,fetch} = await setup("home_origin",true);
+    const {user,save,fetch} = await setup("deck_origin",true);
     save.mockRejectedValueOnce(new Error("Disk full"));
     await user.click(screen.getByRole("button",{name:"Save"}));
     await screen.findByText(/Disk full/);
@@ -108,13 +106,13 @@ describe("verified frame finalization",() => {
     expect(save.mock.calls[0][1]).toEqual(save.mock.calls[1][1]);
   });
   it.each(["missing position","nonfinite position","wrong bounds","nonfinite limits","missing safe height","wrong safe height"])("rejects %s",mode => {
-    const {config,result} = fixture("home_origin",true);
+    const {config,result} = fixture("deck_origin",true);
     if (mode === "missing position") delete (result as Partial<FinalizeOriginResponse>).position;
     if (mode === "nonfinite position") result.position.z = NaN;
     if (mode === "wrong bounds") result.working_volume.z_min = -81;
     if (mode === "nonfinite limits") result.max_travel.z = Infinity;
     if (mode === "missing safe height") delete (result as Partial<FinalizeOriginResponse>).safe_z;
-    if (mode === "wrong safe height") result.safe_z = 76;
+    if (mode === "wrong safe height") result.safe_z = 100;
     expect(() => validateFinalizedOrigin(config,result)).toThrow();
   });
 });

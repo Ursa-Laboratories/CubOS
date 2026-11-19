@@ -513,9 +513,9 @@ describe("GantryEditor external calibration updates", () => {
   function fixtures() {
     const original = gantryFixture();
     const calibrated = gantryFixture({
-      origin_policy: "home_origin",
-      cnc: { factory_z_travel_mm: 80, safe_z: 0 },
-      working_volume: { x_min: -258, x_max: 0, y_min: -145, y_max: 0, z_min: -80, z_max: 0 },
+      origin_policy: "deck_origin",
+      cnc: { factory_z_travel_mm: 80, safe_z: 76 },
+      working_volume: { x_min: 0, x_max: 258, y_min: 0, y_max: 145, z_min: 1, z_max: 81 },
       grbl_settings: { soft_limits: true, homing_pull_off: 1, max_travel_x: 259, max_travel_y: 146, max_travel_z: 81 },
       instruments: {
         pipette_1: { ...original.config.instruments.pipette_1, depth: -42 },
@@ -529,6 +529,17 @@ describe("GantryEditor external calibration updates", () => {
     };
     return { original, calibrated, props };
   }
+
+  it("does not save legacy raw input as a deck configuration", async () => {
+    const user = userEvent.setup();
+    const { original, props } = fixtures();
+    const legacy = { ...original, config: Object.assign(structuredClone(original.config), { origin_policy: "home_origin" }) } as unknown as typeof original;
+    render(<GantryEditor {...props} gantry={legacy} baseline={legacy} />);
+    await user.type(screen.getByLabelText("Save as filename"), "legacy_copy");
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(props.onSave).not.toHaveBeenCalled();
+  });
 
   it("saves every same-file calibration value when a clean editor receives an external update", async () => {
     const user = userEvent.setup();

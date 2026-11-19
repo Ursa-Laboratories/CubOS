@@ -200,7 +200,7 @@ class FinalizeOriginRequest(BaseModel):
     block_height: float
     factory_z_travel: float
     tolerance_mm: float = 0.25
-    origin_policy: Literal["deck_origin", "home_origin"] | None = None
+    origin_policy: Literal["deck_origin"] | None = None
 
 
 class FinalizeOriginResponse(BaseModel):
@@ -209,7 +209,7 @@ class FinalizeOriginResponse(BaseModel):
     max_travel: Dict[str, float]
     position: Dict[str, float]
     homing_pull_off_mm: Optional[float] = None
-    origin_policy: str = "deck_origin"
+    origin_policy: Literal["deck_origin"]
     working_volume: Optional[Dict[str, float]] = None
     safe_z: Optional[float] = None
 
@@ -593,11 +593,14 @@ def finalize_calibration_origin(req: FinalizeOriginRequest) -> FinalizeOriginRes
         "max_travel": result.max_travel,
         "position": result.position,
         "homing_pull_off_mm": result.homing_pull_off_mm,
-        "origin_policy": getattr(result, "origin_policy", "deck_origin"),
+        "origin_policy": getattr(result, "origin_policy", None),
         "working_volume": getattr(result, "working_volume", None),
         "safe_z": getattr(result, "safe_z", None),
     }
-    return FinalizeOriginResponse(**payload)
+    try:
+        return FinalizeOriginResponse(**payload)
+    except ValidationError as exc:
+        raise HTTPException(500, f"Invalid calibration finalization result: {exc}") from exc
 
 
 def _limit_recovery_exception(exc: Exception) -> HTTPException:
@@ -745,9 +748,11 @@ def connect(body: Optional[ConnectRequest] = None) -> GantryPosition:
     # import is deferred to avoid a circular import at module load.
     from cubos_api.routers.instruments import reset_manual_instruments
 
-    reset_manual_instruments()
     try:
         filename, path = _selected_gantry_path(body.filename if body else None)
+        if path is not None:
+            _validated_gantry_config(read_yaml(path))
+        reset_manual_instruments()
         snapshot = session.connect(path, filename=filename)
     except HTTPException:
         raise

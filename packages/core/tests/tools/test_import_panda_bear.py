@@ -7,6 +7,7 @@ committed here or read by these tests).
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -16,7 +17,7 @@ from cubos.deck.loader import load_deck_from_yaml
 from cubos.protocol_engine.setup_validator import run_setup_validation
 from cubos.tools.import_panda_bear import main
 from cubos.tools.panda_bear_import import db_reader as db_reader_module
-from cubos.tools.panda_bear_import.build import build_import
+from cubos.tools.panda_bear_import.build import build_import as _build_import
 from cubos.tools.panda_bear_import.conversion import Point, ToolOffset, WorkingVolume, to_gantry
 from cubos.tools.panda_bear_import.db_reader import SourceChangedError, read_snapshot
 from cubos.tools.panda_bear_import.resolutions import (
@@ -50,21 +51,29 @@ ZERO_OFFSETS = {
 }
 WIDE_OPEN_VOLUME = WorkingVolume(x_min=-1e6, x_max=1e6, y_min=-1e6, y_max=1e6, z_min=-1e6, z_max=1e6)
 REAL_WORKING_VOLUME = WorkingVolume(x_min=-401.0, x_max=0.0, y_min=-301.0, y_max=0.0, z_min=-85.0, z_max=0.0)
+# Keep the row-selection unit tests in source-space. CLI and setup tests use
+# a synthetic measured deck reference.
+build_import = partial(_build_import, deck_home=Point(0.0, 0.0, 0.0))
+DECK_HOME = Point(400.0, 300.0, 90.0)
 MIN_GANTRY_RAW = {
     "serial_port": "/dev/ttyUSB0",
     "gantry_type": "cub_xl",
-    "origin_policy": "home_origin",
-    "cnc": {"factory_z_travel_mm": 100.0, "y_axis_motion": "head", "safe_z": -5.0},
-    "working_volume": {
-        "x_min": -401.0, "x_max": 0.0,
-        "y_min": -301.0, "y_max": 0.0,
-        "z_min": -85.0, "z_max": 0.0,
+    "origin_policy": "deck_origin",
+    "cnc": {
+        "factory_z_travel_mm": 100.0,
+        "calibration_block_height_mm": 35.0,
+        "y_axis_motion": "head",
+        "safe_z": 85.0,
     },
-    # max_travel_* must match the working volume span, or the built-in Cub XL
-    # rail-avoidance geometry falls back to its reference (540, 300, 100)
-    # span and the translated rail box overlaps the entire reachable
-    # home-frame envelope. Mirrors cub_xl_panda_home_origin.yaml.
-    "grbl_settings": {"max_travel_x": 401.0, "max_travel_y": 301.0, "max_travel_z": 85.0},
+    "working_volume": {
+        "x_min": -1.0, "x_max": 400.0,
+        "y_min": -2.0, "y_max": 300.0,
+        "z_min": 5.0, "z_max": 90.0,
+    },
+    "grbl_settings": {
+        "max_travel_x": 402.0, "max_travel_y": 303.0, "max_travel_z": 86.0,
+        "homing_pull_off": 1.0,
+    },
     "instruments": {
         "camera": {
             "type": "camera", "vendor": "mount_only", "offline": True,
@@ -143,7 +152,7 @@ def test_deterministic_double_run(tmp_path):
     files = [
         "deck/panda_imported_deck.yaml",
         "deck/panda_initial_fluids.yaml",
-        "gantry/cub_xl_panda_home_origin_full.yaml",
+        "gantry/cub_xl_panda_imported.yaml",
         "protocol/panda/position_tour.yaml",
         "panda_import_report.json",
     ]
@@ -377,11 +386,64 @@ def test_cli_succeeds_and_writes_all_outputs_when_resolved(tmp_path):
     for rel in (
         "deck/panda_imported_deck.yaml",
         "deck/panda_initial_fluids.yaml",
-        "gantry/cub_xl_panda_home_origin_full.yaml",
+        "gantry/cub_xl_panda_imported.yaml",
         "protocol/panda/position_tour.yaml",
         "panda_import_report.json",
     ):
         assert (out_dir / rel).exists()
+
+
+def test_cli_refuses_legacy_and_uncalibrated_sources(tmp_path, capsys):
+    import yaml
+
+    db_path = build_happy_path_db(tmp_path / "panda.db")
+    out_dir = tmp_path / "out"
+    gantry_path = tmp_path / "gantry.yaml"
+    for source, message in [
+        ({**MIN_GANTRY_RAW, "origin_policy": "home_origin"}, "calibrated deck-origin"),
+        ({**MIN_GANTRY_RAW, "grbl_settings": {}}, "measuring the deck reference"),
+        ({**MIN_GANTRY_RAW, "grbl_settings": {**MIN_GANTRY_RAW["grbl_settings"], "max_travel_z": 98.0}},
+         "match the working span plus homing pull-off"),
+    ]:
+        gantry_path.write_text(yaml.safe_dump(source), encoding="utf-8")
+        assert main([str(db_path), "--out-dir", str(out_dir), "--gantry-source",
+                     str(gantry_path)]) == 1
+        assert message in capsys.readouterr().err
+        assert not out_dir.exists()
+
+
+def test_import_translates_absolute_coordinates_but_not_mounting_offsets(tmp_path):
+    from cubos.yaml_utils import load_yaml_file
+
+    db_path = build_happy_path_db(tmp_path / "panda.db")
+    gantry_path = write_min_gantry_yaml(tmp_path)
+    out_dir = tmp_path / "out"
+    assert main([str(db_path), "--no-resolutions", "--out-dir", str(out_dir),
+                 "--gantry-source", str(gantry_path)]) == 0
+    translated = load_yaml_file(out_dir / "deck" / "panda_imported_deck.yaml")["labware"]
+    from cubos.tools.panda_bear_import.constants import DEFAULT_TOOL_OFFSETS
+    legacy = build_import(read_snapshot(db_path), empty_resolutions(), DEFAULT_TOOL_OFFSETS,
+                          REAL_WORKING_VOLUME, MIN_GANTRY_RAW).deck["labware"]
+    assert translated["s1"]["location"] == {
+        axis: round(legacy["s1"]["location"][axis] + getattr(DECK_HOME, axis), 3)
+        for axis in ("x", "y", "z")
+    }
+    assert translated["tip_rack"]["pickup_z"] == pytest.approx(legacy["tip_rack"]["pickup_z"] + DECK_HOME.z)
+    assert translated["tip_rack"]["drop_z"] == pytest.approx(legacy["tip_rack"]["drop_z"] + DECK_HOME.z)
+    gantry = load_yaml_file(out_dir / "gantry" / "cub_xl_panda_imported.yaml")
+    assert gantry["origin_policy"] == "deck_origin"
+    assert gantry["instruments"]["pipette"]["offset_x"] == 115.9
+    assert gantry["instruments"]["pipette"]["depth"] == 100.0
+
+
+def test_import_preserves_existing_calibrated_pipette():
+    from cubos.tools.panda_bear_import.build import _build_gantry_full
+
+    pipette = {"type": "pipette", "vendor": "sartorius", "pipette_model": "picus2_1ch_300",
+               "offset_x": 12.0, "offset_y": -7.0, "depth": 24.0}
+    source = {**MIN_GANTRY_RAW, "instruments": {**MIN_GANTRY_RAW["instruments"], "pipette": pipette}}
+    result = _build_gantry_full(source, ToolOffset(x=-115.9, y=-6.1, z=100.0))
+    assert result["instruments"]["pipette"] == pipette
 
 
 # ---------------------------------------------------------------------------
@@ -501,7 +563,8 @@ def test_generated_deck_determinism_covers_role_and_solution_fields(tmp_path):
 
 def test_generated_configs_pass_run_setup_validation_end_to_end(tmp_path):
     snapshot = read_snapshot(build_happy_path_db(tmp_path / "panda.db"))
-    result = build_import(snapshot, empty_resolutions(), ZERO_OFFSETS, REAL_WORKING_VOLUME, MIN_GANTRY_RAW)
+    volume = WorkingVolume(**MIN_GANTRY_RAW["working_volume"])
+    result = build_import(snapshot, empty_resolutions(), ZERO_OFFSETS, volume, MIN_GANTRY_RAW, deck_home=DECK_HOME)
 
     deck_path = tmp_path / "deck.yaml"
     gantry_path = tmp_path / "gantry_full.yaml"
@@ -658,31 +721,6 @@ def test_capper_registry_accepts_the_generated_pawduino_entry(tmp_path):
     )
     entry = result.gantry_full["instruments"]["vial_capper_decapper"]
     registry.validate_instrument(entry["type"], entry["vendor"])
-
-
-def test_committed_home_origin_full_yaml_matches_current_upgrade_logic():
-    """Regression: the checked-in generated config must match what the
-    importer would produce today from the real source gantry YAML -- a
-    drifted committed artifact would otherwise go unnoticed.
-    """
-    import yaml as yaml_module
-
-    from cubos.tools.panda_bear_import.build import _build_gantry_full
-
-    configs_dir = Path(__file__).resolve().parents[2] / "configs" / "gantry"
-    raw = yaml_module.safe_load(
-        (configs_dir / "cub_xl_panda_home_origin.yaml").read_text(encoding="utf-8")
-    )
-    committed = yaml_module.safe_load(
-        (configs_dir / "cub_xl_panda_home_origin_full.yaml").read_text(encoding="utf-8")
-    )
-    pipette_offset = ToolOffset(x=-115.9, y=-6.1, z=100.0)
-    produced = _build_gantry_full(raw, pipette_offset)
-
-    assert (
-        produced["instruments"]["vial_capper_decapper"]
-        == committed["instruments"]["vial_capper_decapper"]
-    )
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,3 @@
-# Empty PANDA bring-up deck for signed-frame motion checks.
-#
-# Intentionally has no labware: Feature 01 hardware validation is motion-only
-# (home + conservative signed jogs). The calibrated PANDA deck arrives with
-# the production configuration import (Feature 02).
+# Empty PANDA deck for motion-only bring-up after gantry calibration.
 
 labware: {}

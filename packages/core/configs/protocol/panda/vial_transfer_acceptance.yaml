@@ -21,11 +21,7 @@
 # is otherwise identical (role: waste). See docs/panda-cub-quickstart.md for
 # the full expected-final-state table.
 #
-# Run in mock mode (uses the *_pipetting_mock gantry/deck pair -- the
-# generated cub_xl_panda_home_origin_full.yaml + panda_imported_deck.yaml
-# trio cannot pass bounds validation for any real `pipette` motion; see
-# gantry/cub_xl_panda_pipetting_mock.yaml's header for the documented
-# blocker):
+# Run in mock mode with the *_pipetting_mock gantry and deck.
 #   PYTHONPATH=packages/core/src .venv/bin/python -m cubos.tools.run_protocol \
 #     --mock \
 #     --database /tmp/panda-acceptance.db \

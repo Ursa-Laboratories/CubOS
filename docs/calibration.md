@@ -73,19 +73,15 @@ Two things must hold for this to be reliable:
 
 ## Origin Policy
 
-Full calibration in the Operator uses the front-left deck reference for X/Y
-zero and the measured reference height for Z. It saves
-`origin_policy: deck_origin` even when the input file uses `home_origin`. Use a new output
-filename to keep the original calibration. See [Gantry: Origin Policy](gantry.md#origin-policy)
-for the coordinate conventions used by existing YAML files.
+Use the front-left deck reference for X/Y zero and measure the block height
+above the deck surface for Z. See [Gantry coordinates](gantry.md#origin-policy)
+when replacing an older machine configuration.
 
 ## Verify the controller and saved origin
 
 Before saving, the wizard applies the deck reference to the controller's G54
 work coordinates and verifies the homed position against the measured travel
-bounds. If verification fails, restart full calibration. When converting a
-home-origin config, the wizard translates safe Z into deck coordinates to
-preserve its physical travel height.
+bounds. If verification fails, restart full calibration.
 
 If writing the file fails after verified finalization, retry Save; the verified
 result is retained so the retry does not home again or reuse measurements in a
@@ -149,7 +145,7 @@ values; changing its filename does not reset calibration or reconnect hardware.
 Unsaved editor changes remain intact when saved configuration data refreshes.
 
 The controller verification described above applies to the Operator wizard.
-Command-line calibration follows the input YAML’s origin policy.
+Command-line calibration also uses the deck reference.
 
 ## Run Calibration
 

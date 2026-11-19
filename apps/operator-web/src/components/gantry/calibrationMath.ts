@@ -1,4 +1,5 @@
 import type { FinalizeOriginResponse, GantryConfig, WorkingVolume } from "../../types";
+import { requireDeckOrigin } from "../../utils/gantryOrigin";
 
 type CapturedPosition = {
   x: number;
@@ -20,6 +21,7 @@ export type ZCalibrationResult = {
 };
 
 export function getFactoryZTravel(config: GantryConfig): number {
+  requireDeckOrigin(config);
   const value = Number(config.cnc.factory_z_travel_mm ?? config.cnc.total_z_range ?? config.cnc.total_z_height);
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error("Gantry config must seed cnc.factory_z_travel_mm before calibration.");
@@ -28,6 +30,7 @@ export function getFactoryZTravel(config: GantryConfig): number {
 }
 
 export function getCalibrationBlockHeight(config: GantryConfig): number {
+  requireDeckOrigin(config);
   const value = Number(config.cnc.calibration_block_height_mm);
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error("Gantry config must define cnc.calibration_block_height_mm before block calibration.");
@@ -45,6 +48,7 @@ export function getCalculatedZRange(config: GantryConfig): number {
 export const DEFAULT_HOMING_PULL_OFF_MM = 1;
 
 export function getConfiguredHomingPullOff(config: GantryConfig): number {
+  requireDeckOrigin(config);
   const raw = config.grbl_settings?.homing_pull_off;
   if (raw == null) {
     return DEFAULT_HOMING_PULL_OFF_MM;
@@ -161,34 +165,17 @@ export function buildCalibratedConfig({
   // effective_depth = depth + attached_tip_extension at protocol runtime.
   tipLengths?: Record<string, number>;
 }): GantryConfig {
+  requireDeckOrigin(config);
   const next = structuredClone(config);
-  const originPolicy = config.origin_policy ?? "deck_origin";
-  next.origin_policy = originPolicy;
-
-  if (originPolicy === "home_origin") {
-    // home_origin: WPos zero is the homed back-right-top corner, so the
-    // whole reachable volume is non-positive. The physical span per axis
-    // is unchanged from deck_origin — X: measuredVolume.x, Y: measuredVolume.y,
-    // Z: (zMax - zMin) — only the reference corner flips, remapping
-    // [0, span] -> [-span, 0] instead of scaling or re-measuring anything.
-    next.working_volume = {
-      x_min: -roundMm(measuredVolume.x),
-      x_max: 0,
-      y_min: -roundMm(measuredVolume.y),
-      y_max: 0,
-      z_min: -roundMm(zMax - zMin),
-      z_max: 0,
-    };
-  } else {
-    next.working_volume = {
-      x_min: 0,
-      x_max: roundMm(measuredVolume.x),
-      y_min: 0,
-      y_max: roundMm(measuredVolume.y),
-      z_min: roundMm(zMin),
-      z_max: roundMm(zMax),
-    };
-  }
+  next.origin_policy = "deck_origin";
+  next.working_volume = {
+    x_min: 0,
+    x_max: roundMm(measuredVolume.x),
+    y_min: 0,
+    y_max: roundMm(measuredVolume.y),
+    z_min: roundMm(zMin),
+    z_max: roundMm(zMax),
+  };
   if (next.cnc.safe_z != null) {
     next.cnc.safe_z = Math.min(
       Math.max(roundMm(next.cnc.safe_z), next.working_volume.z_min),
@@ -282,8 +269,8 @@ function requireFinite(value: number, label: string): number {
 
 
 export function validateFinalizedOrigin(config: GantryConfig, result: FinalizeOriginResponse): WorkingVolume {
-  const policy = config.origin_policy ?? "deck_origin";
-  if (result.origin_policy !== policy) {
+  requireDeckOrigin(config);
+  if (result.origin_policy !== "deck_origin") {
     throw new Error("The controller did not verify the selected coordinate origin. Update CubOS before saving.");
   }
   const measured = result.measured_volume;
@@ -303,11 +290,8 @@ export function validateFinalizedOrigin(config: GantryConfig, result: FinalizeOr
     Math.abs(measured.z - calibration.z_max) > 0.25) {
     throw new Error("The controller returned invalid calibration measurements.");
   }
-  const expected: WorkingVolume = policy === "home_origin"
-    ? { x_min: -measured.x, x_max: 0, y_min: -measured.y, y_max: 0,
-      z_min: calibration.z_min - calibration.z_max, z_max: 0 }
-    : { x_min: 0, x_max: measured.x, y_min: 0, y_max: measured.y,
-      z_min: calibration.z_min, z_max: calibration.z_max };
+  const expected: WorkingVolume = { x_min: 0, x_max: measured.x, y_min: 0, y_max: measured.y,
+    z_min: calibration.z_min, z_max: calibration.z_max };
   for (const key of Object.keys(expected) as (keyof WorkingVolume)[]) {
     if (!finite(volume[key]) || Math.abs(volume[key] - expected[key]) > 0.25) {
       throw new Error("Verified controller bounds do not match the selected coordinate origin.");

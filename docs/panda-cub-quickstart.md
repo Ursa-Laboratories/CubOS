@@ -5,8 +5,8 @@ pick up a tip from the rack, aspirate water from one vial, dispense into
 another vial, and drop the tip in the disposal — with fluid and tip state
 durably tracked and verifiably correct throughout.
 
-Everything below runs offline in mock mode. The hardware path and its one
-known blocker are documented at the end.
+The acceptance workflow runs offline in mock mode. Section 6 covers importing
+legacy positions after calibrating the physical station.
 
 ## 1. Setup from a fresh clone
 
@@ -23,25 +23,15 @@ No hardware, serial device, or external service is required for mock mode.
 
 | File | What it is |
 | --- | --- |
-| `packages/core/configs/gantry/cub_xl_panda_home_origin_full.yaml` | GENERATED. Real PANDA machine envelope + calibrated instrument offsets (pipette/potentiostat/capper/camera), produced by the PANDA-BEAR importer. |
-| `packages/core/configs/deck/panda_imported_deck.yaml` | GENERATED. Real production labware (6 stock vials, 3 waste vials, e-bath vial, ITO-PAMA 3x4 plate, 2x12 tip rack, disposal) with `role:`/`solution:` identity from the production DB. |
 | `packages/core/configs/deck/panda_initial_fluids.yaml` | GENERATED. Fluid seed from the surviving production vials (s1 = 6500 uL water, etc.). |
 | `packages/core/configs/gantry/cub_xl_panda_pipetting_mock.yaml` | MOCK-ONLY gantry variant used by the runnable protocols below (see section 6 for why). |
-| `packages/core/configs/deck/panda_imported_deck_pipetting_mock.yaml` | MOCK-ONLY deck variant: identical labware identities/roles/solutions/capacities, placeholder motion Z values. |
+| `packages/core/configs/deck/panda_imported_deck_pipetting_mock.yaml` | MOCK-ONLY deck variant: PANDA labware identities, roles, solutions, and capacities with simulated deck-frame coordinates. |
 | `packages/core/configs/protocol/panda/vial_transfer_acceptance.yaml` | The acceptance harness: tip -> 200 uL s1->w1 -> 400 uL s1->w3 (auto-split into 2 strokes) -> drop tip. |
 | `packages/core/configs/protocol/panda/well_rinse_water.yaml` | Production-shaped well-rinse port (water substitution) using automatic stock/waste selection. See section 5. |
 
-Regenerate the three GENERATED files (plus `protocol/panda/position_tour.yaml`
-and `panda_import_report.json`) from the read-only production snapshot with:
-
-```bash
-PYTHONPATH=packages/core/src .venv/bin/python -m cubos.tools.import_panda_bear \
-  /Users/alexchan/Documents/Ursa/PANDA-CUB/panda_prod_db.db
-```
-
-The import is deterministic (double-run produces byte-identical files) and
-never writes to the source DB (sha256 `209d085b…f811ab21f` must be unchanged
-after).
+The original PANDA import records are preserved as reference data in
+`packages/core/configs/legacy/panda/`. The runnable mock files use the
+calibrated deck coordinate convention with a synthetic working volume.
 
 ## 3. Validate, then run (mock mode)
 
@@ -159,29 +149,37 @@ reconstructed from their names. The locally-available
 well_rinse` are the production-shaped behavior evidence this port is built
 from.
 
-## 6. Hardware mode and the pipetting-bounds blocker
+## 6. Import a legacy PANDA snapshot
 
-For any real hardware run, first complete the PANDA bring-up gates
-(`docs/gantry-setup.md`, `AGENTS.md` hardware-safety order), set
-`serial_port` in the gantry YAML to the real device (e.g. `/dev/ttyUSB0` or
-`/dev/tty.usbserial-*` on macOS), and drop `--mock`.
+Calibrate the PANDA station with the same homing corner, axis directions,
+and physical reference tool that produced the legacy coordinates. Save the
+gantry YAML from calibration. Its working-volume maxima give the homed
+position in deck coordinates. Controller travel limits alone do not locate
+the physical deck plane or establish the usable volume after pull-off.
 
-**Blocker — real-pipette motion against the imported configs:** the
-generated `cub_xl_panda_home_origin_full.yaml` + `panda_imported_deck.yaml`
-pair passes validation only for zero-offset (`camera`) hover protocols like
-`position_tour.yaml`. Any protocol using the real `pipette` instrument fails
-bounds validation, because CubOS composes `gantry_z = target_z +
-instrument.depth (+ tip_length)` while the imported deck stores
-already-converted gantry-frame coordinates (PANDA-BEAR's
-`gantry = tool_point + tool_offset` is baked in by the importer, by tested
-design). `cnc.safe_z (-5.0) + pipette depth (100.0)` alone exceeds
-`working_volume.z_max (0.0)` before any deck coordinate is involved; the
-plate X additionally exceeds `x_min` once the pipette X offset is applied.
-Resolving this for hardware requires either changing the importer's
-coordinate convention or re-measuring safe_z/tool depths on the machine —
-tracked as an open hardware bring-up task. The `*_pipetting_mock` pair
-exists solely so the state-tracking acceptance bar is runnable today; do
-not point it at hardware.
+Once you have verified that correspondence, import a read-only SQLite snapshot
+into a staging directory:
+
+```bash
+python -m cubos.tools.import_panda_bear /path/to/panda_prod_db.db \
+  --gantry-source /path/to/calibrated-panda.yaml \
+  --out-dir /tmp/panda-import
+```
+
+The importer checks the calibration metadata and controller spans, and requires a zero-offset
+reference camera for the generated hover tour. It applies the translation to
+absolute positions, preserves the relative tool offsets, records the gantry
+source and home position in the report, and leaves the source database intact.
+It emits `gantry/cub_xl_panda_imported.yaml`, `deck/panda_imported_deck.yaml`,
+`deck/panda_initial_fluids.yaml`, `protocol/panda/position_tour.yaml`,
+and `panda_import_report.json`.
+
+Review all coordinate warnings and run offline setup validation before any
+station trial. The imported deck represents gantry-reference positions for
+the zero-offset camera tour. For real pipetting, verify or remeasure the
+labware targets and mounted-tool offsets in the deck frame before running a
+protocol. Applying nonzero tool offsets to these imported gantry-reference
+targets can move outside the working volume.
 
 ## 7. API mock submission
 

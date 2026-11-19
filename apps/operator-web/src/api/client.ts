@@ -1,3 +1,5 @@
+import { requireDeckOrigin } from "../utils/gantryOrigin";
+
 const BASE = "/api/v1";
 
 export type RecoveryAxis = "x" | "y" | "z";
@@ -136,13 +138,20 @@ export const gantryApi = {
     request<import("../types").InstrumentMeasurementMethods>("/gantry/instrument-methods"),
   getInstrumentMethodParams: () =>
     request<import("../types").InstrumentMethodParams>("/gantry/instrument-method-params"),
-  get: (filename: string) =>
-    request<import("../types").GantryResponse>(`/gantry/${filename}`),
-  put: (filename: string, body: import("../types").GantryConfig) =>
-    request<import("../types").GantryResponse>(`/gantry/${filename}`, {
+  get: async (filename: string) => {
+    const result = await request<import("../types").GantryResponse>(`/gantry/${filename}`);
+    requireDeckOrigin(result.config);
+    return result;
+  },
+  put: async (filename: string, body: import("../types").GantryConfig) => {
+    requireDeckOrigin(body);
+    const result = await request<import("../types").GantryResponse>(`/gantry/${filename}`, {
       method: "PUT",
       body: JSON.stringify(body),
-    }),
+    });
+    requireDeckOrigin(result.config);
+    return result;
+  },
   delete: (filename: string) =>
     request<{ status: string; filename: string }>(`/gantry/${filename}`, { method: "DELETE" }),
   getPosition: readGantryPosition,
@@ -182,14 +191,18 @@ export const gantryApi = {
       method: "POST",
       body: JSON.stringify(body),
     }),
-  previewInstrumentOffsets: (body: {
+  previewInstrumentOffsets: async (body: {
     config: import("../types").GantryConfig;
     reference_instrument: string;
     captures: Record<string, { x: number; y: number; z: number; tip_length_mm: number; stand_off_mm?: number }>;
-  }) => request<import("../types").GantryConfig>("/gantry/calibration/instrument-offsets", {
-    method: "POST",
-    body: JSON.stringify(body),
-  }),
+  }) => {
+    requireDeckOrigin(body.config);
+    const result = await request<import("../types").GantryConfig>("/gantry/calibration/instrument-offsets", {
+      method: "POST", body: JSON.stringify(body),
+    });
+    requireDeckOrigin(result);
+    return result;
+  },
   prepareCalibrationOrigin: () =>
     homingRequest<import("../types").GantryPosition>("/gantry/calibration/prepare-origin"),
   homeAndCenterForCalibration: () =>
@@ -201,18 +214,22 @@ export const gantryApi = {
     request<import("../types").GantryPosition>("/gantry/calibration/restore-soft-limits", {
       method: "POST",
     }),
-  finalizeCalibrationOrigin: (body: {
-    origin_policy?: "deck_origin" | "home_origin";
+  finalizeCalibrationOrigin: async (body: {
+    origin_policy?: "deck_origin";
     home_z: number;
     block_touch_z: number;
     block_height: number;
     factory_z_travel: number;
     tolerance_mm?: number;
-  }) =>
-    request<import("../types").FinalizeOriginResponse>("/gantry/calibration/finalize-origin", {
+  }) => {
+    requireDeckOrigin(body);
+    const result = await request<import("../types").FinalizeOriginResponse>("/gantry/calibration/finalize-origin", {
       method: "POST",
       body: JSON.stringify(body),
-    }),
+    });
+    requireDeckOrigin(result);
+    return result;
+  },
   getLimitRecoveryContext: () => request<LimitRecoveryContext>("/gantry/calibration/recovery-context"),
   recoverCalibrationLimit: (body: {
     x: number;

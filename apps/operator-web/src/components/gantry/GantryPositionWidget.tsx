@@ -10,6 +10,7 @@ import { createJogPacer, jogPaceMs } from "./jogPacing";
 import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "./gantryAlarm";
 import { useConfirm } from "../common/useConfirm";
 import LimitRecoveryControls from "./LimitRecoveryControls";
+import { isDeckOrigin, UNSUPPORTED_GANTRY_ORIGIN } from "../../utils/gantryOrigin";
 
 interface Props {
   position: GantryPosition | null;
@@ -69,7 +70,8 @@ export default function GantryPositionWidget({
   const predictedJogPosition = useRef<AxisPosition | null>(null);
   const limitHintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const configSelected = !!gantryFile;
+  const unsupportedOrigin = !isDeckOrigin(gantry?.config ?? { working_volume: workingVolume });
+  const configSelected = !!gantryFile && !unsupportedOrigin;
   const connected = configSelected && (position?.connected ?? false);
   const controllerStatus = position?.status ?? "Not connected";
   const homing = isGantryHoming(controllerStatus);
@@ -268,7 +270,7 @@ export default function GantryPositionWidget({
   }, [anyCalibrationOpen, connected, homeBusy, homing, isAlarm, isRunning, jogBusy, pullOffBusy, xyStep, zStep, startJog, stopJog]);
 
   const handleConnect = async () => {
-    if (!gantryFile) return;
+    if (!gantryFile || unsupportedOrigin) return;
     setLoading(true);
     setConnectionError(null);
     let connectSucceeded = false;
@@ -460,6 +462,7 @@ export default function GantryPositionWidget({
 
   return (
     <div>
+      {unsupportedOrigin && <div role="alert" style={theme.notice.error}>{UNSUPPORTED_GANTRY_ORIGIN}</div>}
       <div style={controlHeaderStyle}>
         <div>
           <h3 style={theme.panelTitle}>Gantry Control</h3>
@@ -746,7 +749,7 @@ export default function GantryPositionWidget({
         </span>
         {!connected ? (
           <button onClick={handleConnect} disabled={loading || !configSelected} style={buttonStateStyle(btnStyle, loading || !configSelected)}>
-            {!configSelected ? "Select config first" : loading ? "Connecting..." : "Connect"}
+            {unsupportedOrigin ? "Unsupported origin" : !configSelected ? "Select config first" : loading ? "Connecting..." : "Connect"}
           </button>
         ) : (
           <button onClick={handleDisconnect} disabled={loading} style={buttonStateStyle(btnStyle, loading)}>

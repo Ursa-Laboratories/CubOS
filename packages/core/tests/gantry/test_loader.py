@@ -100,11 +100,11 @@ class TestLoadGantryFromYaml:
         finally:
             os.unlink(path)
 
-    def test_loaded_gantry_threads_home_origin_policy(self):
+    def test_loaded_gantry_rejects_explicit_legacy_origin_policy(self):
         path = _write_temp_yaml(VALID_GANTRY_YAML + "origin_policy: home_origin\n")
         try:
-            config = load_gantry_from_yaml(path)
-            assert config.origin_policy == OriginPolicy.HOME_ORIGIN
+            with pytest.raises(ValueError, match="origin_policy"):
+                load_gantry_from_yaml(path)
         finally:
             os.unlink(path)
 

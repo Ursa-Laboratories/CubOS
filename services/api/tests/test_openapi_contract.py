@@ -24,3 +24,10 @@ def test_openapi_contains_versioned_discovery_and_run_resources():
 
     assert "202" in paths["/api/v1/runs"]["post"]["responses"]
     assert "202" in paths["/api/v1/runs/{run_id}/cancel"]["post"]["responses"]
+
+
+def test_finalization_response_requires_the_verified_deck_frame():
+    schema = create_app().openapi()["components"]["schemas"]["FinalizeOriginResponse"]
+
+    assert "origin_policy" in schema["required"]
+    assert schema["properties"]["origin_policy"]["const"] == "deck_origin"

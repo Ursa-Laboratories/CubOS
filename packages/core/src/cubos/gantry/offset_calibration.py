@@ -6,6 +6,8 @@ from copy import deepcopy
 from math import isfinite
 from typing import Any, Mapping
 
+from .gantry_config import validate_deck_origin_frame
+
 
 def _finite(value: Any, label: str) -> float:
     if isinstance(value, bool):
@@ -31,6 +33,7 @@ def calibrate_instrument_offsets(
     camera-to-mark distance. The reference's mounting values anchor the
     existing deck frame and remain unchanged. No controller is accessed.
     """
+    validate_deck_origin_frame(config.get("origin_policy", "deck_origin"), config.get("working_volume"))
     next_config = deepcopy(dict(config))
     instruments = next_config.get("instruments", {})
     reference = instruments.get(reference_instrument)

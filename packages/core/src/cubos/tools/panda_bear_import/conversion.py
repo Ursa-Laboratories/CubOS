@@ -1,13 +1,8 @@
-"""Coordinate conversion from PANDA-BEAR tool-point DB coordinates to the
-CubOS home-origin gantry frame, plus rounding/envelope helpers.
+"""Convert legacy PANDA-BEAR tool-point coordinates to gantry coordinates.
 
-PANDA-BEAR stores DB coordinates as *tool-point* targets: where the operator
-wanted the mounted tool's tip to be. PANDA-BEAR's own driver converts that to
-a gantry command with ``gantry = tool_target + tool_offset`` (per axis). The
-generated CubOS deck stores that same gantry-frame value directly (see
-``protocol/panda/position_tour.yaml``, which hovers a zero-offset ``camera``
-instrument over each stored point) -- so importing one DB coordinate is
-exactly this addition.
+The importer combines each tool offset with the calibrated deck-frame home
+position before translating labware coordinates. Mounting offsets remain
+relative to the carriage and do not include the absolute frame translation.
 """
 
 from __future__ import annotations

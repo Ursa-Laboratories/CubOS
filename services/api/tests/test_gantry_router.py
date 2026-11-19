@@ -155,6 +155,7 @@ class FakeSession:
                 "max_travel": {"x": 310.0, "y": 210.0, "z": 90.0},
                 "position": {"x": 300.0, "y": 200.0, "z": 80.0},
                 "homing_pull_off_mm": 10.0,
+                "origin_policy": "deck_origin",
             },
         )()
 
@@ -921,6 +922,7 @@ def test_finalize_origin_accepts_dataclass_result(monkeypatch):
             max_travel={"x": 1.0, "y": 2.0, "z": 4.0},
             position={"x": 0.0, "y": 0.0, "z": 3.0},
             homing_pull_off_mm=1.0,
+            origin_policy="deck_origin",
         )
 
     session.finalize_calibration_origin = finalize
@@ -940,6 +942,38 @@ def test_finalize_origin_accepts_dataclass_result(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["homing_pull_off_mm"] == 1.0
+    assert response.json()["origin_policy"] == "deck_origin"
+
+
+@pytest.mark.parametrize("dataclass_result", [False, True])
+@pytest.mark.parametrize("policy", ["missing", "home_origin", None])
+def test_finalize_origin_rejects_missing_or_unsupported_result_frame(monkeypatch, dataclass_result, policy):
+    from dataclasses import make_dataclass
+
+    payload = {
+        "measured_volume": {"x": 1.0, "y": 2.0, "z": 3.0},
+        "z_calibration": {"z_max": 3.0},
+        "max_travel": {"x": 1.0, "y": 2.0, "z": 4.0},
+        "position": {"x": 0.0, "y": 0.0, "z": 3.0},
+        "homing_pull_off_mm": 1.0,
+    }
+    if policy != "missing":
+        payload["origin_policy"] = policy
+    result = (
+        make_dataclass("UnverifiedResult", [(name, object) for name in payload])(**payload)
+        if dataclass_result else SimpleNamespace(**payload)
+    )
+    session = FakeSession()
+    session.finalize_calibration_origin = MagicMock(return_value=result)
+    monkeypatch.setattr(gantry_router, "_session", session)
+
+    response = api_request(create_app(), "POST", "/api/v1/gantry/calibration/finalize-origin", json={
+        "home_z": 3, "block_touch_z": 1, "block_height": 1, "factory_z_travel": 4,
+    })
+
+    assert response.status_code == 500
+    assert "origin_policy" in response.json()["detail"]
+    assert "origin_policy" not in response.json()
 
 
 def test_finalize_origin_calibration_blocked_maps_to_400(monkeypatch):
