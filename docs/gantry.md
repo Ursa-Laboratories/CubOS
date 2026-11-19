@@ -5,13 +5,9 @@ CubOS communicates with GRBL-based controllers over serial.
 
 ## Coordinate Convention
 
-The high-level gantry boundary uses the CubOS deck frame. Gantry YAML's
-`origin_policy` picks which corner is zero (see [Origin
-Policy](#origin-policy)); axis directions are fixed regardless of policy:
+CubOS work coordinates use the calibrated deck frame:
 
-- origin `(0, 0, 0)` is the front-left-bottom reachable work volume under the
-  default `deck_origin` policy — the homed back-right-top corner under
-  `home_origin` instead
+- X and Y are zero at the front-left reference mark. Z is zero at the deck surface.
 - `+X` moves right from the operator perspective
 - `+Y` moves away from the operator, toward the back of the deck
 - `+Z` moves up, away from the deck
@@ -26,52 +22,15 @@ does not apply `G92` or redefine work coordinates after homing.
 
 ## Origin Policy
 
-Gantry YAML's top-level `origin_policy: deck_origin | home_origin` (default
-`deck_origin`) selects the coordinate frame's zero point. This is a generic
-policy any machine config may select — there are no machine-specific branches
-for it.
+Gantry YAML accepts `origin_policy: deck_origin` or an omitted field.
+Older files using `home_origin` must be replaced by a deck-referenced calibration.
+Changing the field alone leaves the old coordinates in place. Calibrate the gantry
+against the physical deck reference and verify labware positions, absolute protocol
+targets, and safe Z in that frame before using the station.
 
-- **`deck_origin`** (default) — the [Coordinate Convention](#coordinate-convention)
-  above: work-position zero sits at the front-left-bottom deck corner.
-  `working_volume` normally starts at `x_min: 0.0`, `y_min: 0.0`, and a
-  non-negative `z_min`. A negative X/Y minimum is allowed when the machine
-  has verified clear travel beyond the deck corner;
-  homing drives to the back-right-top corner, whose work position equals the
-  `working_volume` maxima.
-- **`home_origin`** — work-position zero sits at the homed back-right-top
-  corner instead. The entire reachable workspace is expressed in negative
-  coordinates: `working_volume` has `x_max: 0.0`, `y_max: 0.0`, and a
-  non-positive `z_max`, with negative minima. After homing, WPos reads
-  `(0, 0, 0)`.
-
-Example `home_origin` working volume for a Cub XL-class machine:
-
-```yaml
-origin_policy: home_origin
-working_volume:
-  x_min: -400.0
-  x_max: 0.0
-  y_min: -300.0
-  y_max: 0.0
-  z_min: -100.0
-  z_max: 0.0
-cnc:
-  safe_z: -5.0
-```
-
-`safe_z` is always an absolute ceiling constrained to `[working_volume.z_min,
-working_volume.z_max]` — under `home_origin` it is typically a small negative
-value (`-5.0` above); under `deck_origin` it defaults to
-`working_volume.z_max` as described in [CNC Fields](#cnc-fields). Bounds
-validation everywhere compares against the configured `working_volume`
-min/max, never against literal zero, so a target outside the volume is
-rejected before any motion under either policy.
-
-Labware-relative height semantics (`measurement_height`,
-`interwell_scan_height`, pipette `height`, …) are unchanged by policy, and
-physical dimensions (`tip_length`, `calibration_block_height_mm`, …) are
-always positive. Absolute Z targets derived from them — including tip-rack
-`pickup_z`/`drop_z` — may be negative under `home_origin`.
+Homing establishes the machine reference at the back-right-top corner. Its
+reported work position is the calibrated maximum on each axis. Measured travel
+can extend to negative X or Y beyond the deck reference.
 
 ## Config
 
@@ -158,12 +117,7 @@ above the deck.
 
 ## Working Volume
 
-Working volume bounds are inclusive and use the CubOS deck frame. The
-requirements below describe the default `deck_origin` policy; under
-`home_origin` the maxima are `0.0` instead, with negative minima — see
-[Origin Policy](#origin-policy).
-
-Protocol setup requires (`deck_origin`, the default):
+Working volume bounds are inclusive. Protocol setup requires:
 
 - `x_min <= 0.0`
 - `y_min <= 0.0`

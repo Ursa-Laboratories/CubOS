@@ -9,19 +9,19 @@ Usage:
     python -m cubos.tools.import_panda_bear <db_path> \\
         [--resolutions <resolutions.yaml>] \\
         [--out-dir <dir>] \\
-        [--gantry-source <gantry.yaml>] \\
+        --gantry-source <calibrated-gantry.yaml> \\
         [--tools-json <tools.json>] \\
         [--no-resolutions]
 
 Example:
     python -m cubos.tools.import_panda_bear \\
         /path/to/panda_prod_db.db \\
-        --out-dir /tmp/panda_import_out
+        --gantry-source /path/to/calibrated-gantry.yaml --out-dir /tmp/panda_import_out
 
 Outputs (relative to --out-dir, default packages/core/configs):
     deck/panda_imported_deck.yaml
     deck/panda_initial_fluids.yaml
-    gantry/cub_xl_panda_home_origin_full.yaml
+    gantry/cub_xl_panda_imported.yaml
     protocol/panda/position_tour.yaml
     panda_import_report.json   -- machine-readable conflict report
 
@@ -36,15 +36,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
+from cubos.gantry.yaml_schema import GantryYamlSchema
 from cubos.yaml_utils import load_yaml_file
 
 from .panda_bear_import.build import ImportResult, build_import
 from .panda_bear_import.conflicts import Conflict, sort_key as conflict_sort_key
 from .panda_bear_import.constants import DEFAULT_TOOL_OFFSETS
-from .panda_bear_import.conversion import WorkingVolume
+from .panda_bear_import.conversion import Point, WorkingVolume
 from .panda_bear_import.db_reader import PandaBearSnapshot, SourceChangedError, read_snapshot
 from .panda_bear_import.resolutions import Resolutions, empty_resolutions, load_resolutions
 from .panda_bear_import.tools_json import load_tool_offsets
@@ -54,23 +56,19 @@ _HERE = Path(__file__).resolve()
 _CORE_ROOT = _HERE.parents[3]  # packages/core
 DEFAULT_OUT_DIR = _CORE_ROOT / "configs"
 DEFAULT_RESOLUTIONS = DEFAULT_OUT_DIR / "deck" / "panda_import_resolutions.yaml"
-DEFAULT_GANTRY_SOURCE = DEFAULT_OUT_DIR / "gantry" / "cub_xl_panda_home_origin.yaml"
 
 _DECK_HEADER = [
     "GENERATED FILE -- do not hand-edit. Regenerate with:",
     "  python -m cubos.tools.import_panda_bear <db_path> "
-    "[--resolutions ...] [--out-dir ...]",
+    "--gantry-source <calibrated-gantry.yaml>",
     "",
     "Imported from a PANDA-BEAR production SQLite snapshot (read-only; see",
     "panda_import_report.json next to this file for the source DB path/hash",
     "and the full conflict report).",
     "",
-    "Coordinates are CubOS home-origin GANTRY-frame values, not instrument-",
-    "frame: gantry = panda_bear_tool_point + panda_bear_tool_offset (pipette",
-    "frame for wells/tips/stock/waste vials, electrode frame for e1). See",
-    "cubos.tools.panda_bear_import.conversion for the exact formula and",
-    "protocol/panda/position_tour.yaml's header for why the tour hovers with",
-    "a zero-offset instrument.",
+    "Coordinates use the calibrated CubOS deck frame. The importer adds the",
+    "PANDA-BEAR tool offset and the calibrated home XYZ to each legacy point.",
+    "Use a zero-offset camera to inspect these gantry-reference positions.",
     "",
     "Vial location.z / well-plate calibration.a1.z are the converted mouth",
     "(DB 'top' generated column), matching CubOS's vial/well-plate Z",
@@ -96,7 +94,7 @@ _FLUIDS_HEADER = [
 _GANTRY_HEADER = [
     "GENERATED FILE -- do not hand-edit. See panda_imported_deck.yaml's header.",
     "",
-    "This is gantry/cub_xl_panda_home_origin.yaml plus a `pipette` instrument",
+    "Keeps existing calibrated instruments and fills in a missing `pipette`",
     "entry derived from PANDA-BEAR's tools.json. CubOS instrument offsets are",
     "the NEGATION of the PANDA-BEAR tool offset for x/y; depth is the +z",
     "offset unchanged (instrument_mount.py: gantry_x = target_x - offset_x,",
@@ -122,16 +120,33 @@ _TOUR_HEADER = [
 ]
 
 
-def _load_working_volume(gantry_raw: dict) -> WorkingVolume:
-    working_volume = gantry_raw["working_volume"]
-    return WorkingVolume(
-        x_min=float(working_volume["x_min"]),
-        x_max=float(working_volume["x_max"]),
-        y_min=float(working_volume["y_min"]),
-        y_max=float(working_volume["y_max"]),
-        z_min=float(working_volume["z_min"]),
-        z_max=float(working_volume["z_max"]),
-    )
+def _load_calibrated_gantry(path: Path) -> tuple[dict, WorkingVolume, Point]:
+    raw = load_yaml_file(path)
+    if not isinstance(raw, dict) or raw.get("origin_policy", "deck_origin") != "deck_origin":
+        raise ValueError("PANDA import requires a calibrated deck-origin gantry YAML.")
+    schema = GantryYamlSchema.model_validate(raw)
+    volume = WorkingVolume(**schema.working_volume.model_dump())
+    if (
+        not all(math.isfinite(value) for value in schema.working_volume.model_dump().values())
+        or not (volume.x_min <= 0.0 < volume.x_max and volume.y_min <= 0.0 < volume.y_max)
+        or volume.z_min < 0.0
+    ):
+        raise ValueError("PANDA import requires finite deck-origin working-volume bounds.")
+    settings = schema.grbl_settings
+    block_height = schema.cnc.calibration_block_height_mm
+    if block_height is None or not math.isfinite(block_height) or settings is None or settings.homing_pull_off is None:
+        raise ValueError("PANDA import requires a gantry YAML saved after measuring the deck reference and homing pull-off.")
+    if not math.isfinite(settings.homing_pull_off) or settings.homing_pull_off < 0.0:
+        raise ValueError("The calibrated homing pull-off must be finite and nonnegative.")
+    for axis in ("x", "y", "z"):
+        travel = getattr(settings, f"max_travel_{axis}")
+        span = getattr(volume, f"{axis}_max") - getattr(volume, f"{axis}_min")
+        if travel is None or not math.isfinite(travel) or abs(travel - span - settings.homing_pull_off) > 0.25:
+            raise ValueError(f"Calibrated {axis.upper()} limits must match the working span plus homing pull-off.")
+    camera = raw.get("instruments", {}).get("camera", {})
+    if camera.get("type") != "camera" or any(camera.get(key, 0.0) != 0.0 for key in ("offset_x", "offset_y", "depth")):
+        raise ValueError("PANDA import requires the zero-offset reference camera used for the position tour.")
+    return raw, volume, Point(volume.x_max, volume.y_max, volume.z_max)
 
 
 def run_import(
@@ -142,6 +157,7 @@ def run_import(
     tools_json_path: Path | None = None,
 ) -> tuple[ImportResult, PandaBearSnapshot, Resolutions]:
     """Read the snapshot and build all four outputs; raises on hash mismatch."""
+    gantry_raw, working_volume, deck_home = _load_calibrated_gantry(gantry_source)
     snapshot = read_snapshot(db_path)
     resolutions = load_resolutions(resolutions_path) if resolutions_path else empty_resolutions()
 
@@ -149,10 +165,7 @@ def run_import(
     if tools_json_path is not None:
         tool_offsets.update(load_tool_offsets(tools_json_path))
 
-    gantry_raw = load_yaml_file(gantry_source)
-    working_volume = _load_working_volume(gantry_raw)
-
-    result = build_import(snapshot, resolutions, tool_offsets, working_volume, gantry_raw)
+    result = build_import(snapshot, resolutions, tool_offsets, working_volume, gantry_raw, deck_home=deck_home)
     return result, snapshot, resolutions
 
 
@@ -160,11 +173,17 @@ def _build_report(
     result: ImportResult,
     snapshot: PandaBearSnapshot,
     resolutions_path: Path | None,
+    gantry_source: Path,
 ) -> dict:
     conflicts = sorted(result.conflicts, key=conflict_sort_key)
     return {
         "source_db": snapshot.db_path,
         "source_sha256": snapshot.sha256,
+        "gantry_source": str(gantry_source),
+        "deck_home_mm": {
+            axis: result.gantry_full["working_volume"][f"{axis}_max"]
+            for axis in ("x", "y", "z")
+        },
         "resolutions_path": str(resolutions_path) if resolutions_path else None,
         "conflicts": [c.to_dict() for c in conflicts],
         "conflict_count": len(conflicts),
@@ -196,9 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         help="Output configs root (default: packages/core/configs).",
     )
     parser.add_argument(
-        "--gantry-source", type=Path, default=DEFAULT_GANTRY_SOURCE,
-        help="Base gantry YAML to extend with the pipette instrument "
-        "(default: packages/core/configs/gantry/cub_xl_panda_home_origin.yaml).",
+        "--gantry-source", type=Path, required=True,
+        help="Calibrated deck-origin gantry YAML from the PANDA that produced the snapshot.",
     )
     parser.add_argument(
         "--tools-json", type=Path, default=None,
@@ -215,11 +233,11 @@ def main(argv: list[str] | None = None) -> int:
             gantry_source=args.gantry_source,
             tools_json_path=args.tools_json,
         )
-    except SourceChangedError as exc:
+    except (OSError, SourceChangedError, ValueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    report = _build_report(result, snapshot, resolutions_path)
+    report = _build_report(result, snapshot, resolutions_path, args.gantry_source)
     report_json = json.dumps(report, indent=2, sort_keys=True) + "\n"
     report_path = args.out_dir / "panda_import_report.json"
 
@@ -235,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
 
     deck_path = args.out_dir / "deck" / "panda_imported_deck.yaml"
     fluids_path = args.out_dir / "deck" / "panda_initial_fluids.yaml"
-    gantry_full_path = args.out_dir / "gantry" / "cub_xl_panda_home_origin_full.yaml"
+    gantry_full_path = args.out_dir / "gantry" / "cub_xl_panda_imported.yaml"
     tour_path = args.out_dir / "protocol" / "panda" / "position_tour.yaml"
 
     write_yaml_with_header(deck_path, _DECK_HEADER, result.deck)

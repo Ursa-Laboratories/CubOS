@@ -341,7 +341,7 @@ def default_vials() -> list[dict]:
 def build_happy_path_db(path: Path) -> Path:
     """A minimal, internally-consistent snapshot with no conflicts at all.
 
-    All coordinates land within the real cub_xl_panda_home_origin.yaml
+    All coordinates land within the legacy PANDA source
     working volume (x[-401,0] y[-301,0] z[-85,0]) under the zero-offset
     identity conversion used by most tests, so it also exercises
     ``run_setup_validation`` cleanly end-to-end.

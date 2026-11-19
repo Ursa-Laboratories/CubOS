@@ -6,8 +6,8 @@ import {
   getCalibrationBlockHeight,
   getConfiguredHomingPullOff,
   getFactoryZTravel,
-} from "./calibrationMath";
-import type { GantryConfig } from "../../types";
+} from "../../../../src/components/gantry/calibrationMath";
+import type { GantryConfig } from "../../../../src/types";
 
 function gantryConfig(): GantryConfig {
   return {
@@ -305,56 +305,17 @@ describe("buildCalibratedConfig", () => {
     expect(calibrated.origin_policy).toBe("deck_origin");
   });
 
-  it("emits a negative working volume and clamps safe_z to the ceiling for home_origin configs", () => {
-    const config = gantryConfig();
-    config.origin_policy = "home_origin";
-
-    const calibrated = buildCalibratedConfig({
-      config,
-      measuredVolume: { x: 398.5, y: 299.25, z: 96.75 },
-      zMin: 0,
-      zMax: 110,
-      maxTravel: { x: 398.5, y: 299.25, z: 110 },
-      isMulti: false,
-      instruments: ["asmi"],
-      instrumentPositions: {},
-      referenceInstrument: "asmi",
-      lowestInstrument: "asmi",
-    });
-
-    expect(calibrated.origin_policy).toBe("home_origin");
-    expect(calibrated.working_volume).toEqual({
-      x_min: -398.5,
-      x_max: 0,
-      y_min: -299.25,
-      y_max: 0,
-      z_min: -110,
-      z_max: 0,
-    });
-    // safe_z (120 in the seed config) is above the home_origin ceiling
-    // (z_max=0), so it clamps down to the ceiling.
-    expect(calibrated.cnc.safe_z).toBe(0);
-  });
-
-  it("keeps a home_origin safe_z that already sits within [z_min, z_max]", () => {
-    const config = gantryConfig();
-    config.origin_policy = "home_origin";
-    config.cnc.safe_z = -20;
-
-    const calibrated = buildCalibratedConfig({
-      config,
-      measuredVolume: { x: 398.5, y: 299.25, z: 96.75 },
-      zMin: 0,
-      zMax: 110,
-      maxTravel: { x: 398.5, y: 299.25, z: 110 },
-      isMulti: false,
-      instruments: ["asmi"],
-      instrumentPositions: {},
-      referenceInstrument: "asmi",
-      lowestInstrument: "asmi",
-    });
-
-    expect(calibrated.cnc.safe_z).toBe(-20);
+  it.each(["home_origin", "unknown"])("rejects unsupported %s configs without rewriting their frame", (policy) => {
+    const config = Object.assign(gantryConfig(), { origin_policy: policy }) as unknown as GantryConfig;
+    const before = structuredClone(config);
+    expect(() => buildCalibratedConfig({
+      config, measuredVolume: { x: 398.5, y: 299.25, z: 96.75 }, zMin: 0, zMax: 110,
+      maxTravel: { x: 398.5, y: 299.25, z: 110 }, isMulti: false, instruments: ["asmi"],
+      instrumentPositions: {}, referenceInstrument: "asmi", lowestInstrument: "asmi",
+    })).toThrow("Unsupported coordinate origin");
+    expect(config).toEqual(before);
+    expect(() => getFactoryZTravel(config)).toThrow("Unsupported coordinate origin");
+    expect(() => getConfiguredHomingPullOff(config)).toThrow("Unsupported coordinate origin");
   });
 
   it("calibrates a camera from centered block position and measured block distance", () => {

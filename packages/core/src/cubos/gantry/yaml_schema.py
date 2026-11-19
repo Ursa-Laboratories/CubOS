@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from cubos.instruments.yaml_schema import InstrumentYamlEntry
 
 from .grbl_settings import GrblSettingsYaml
+from .gantry_config import validate_deck_origin_frame
 
 
 class WorkingVolumeYaml(BaseModel):
@@ -71,12 +72,13 @@ class GantryYamlSchema(BaseModel):
     gantry_type: Literal["cub", "cub_xl", "genmitsu_4040_pro_max"]
     cnc: CncYaml
     working_volume: WorkingVolumeYaml
-    origin_policy: Literal["deck_origin", "home_origin"] = "deck_origin"
+    origin_policy: Literal["deck_origin"] = "deck_origin"
     grbl_settings: Optional[GrblSettingsYaml] = None
     instruments: Dict[str, InstrumentYamlEntry] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_factory_z_travel_covers_working_z_span(self) -> "GantryYamlSchema":
+        validate_deck_origin_frame(self.origin_policy, self.working_volume)
         z_span = self.working_volume.z_max - self.working_volume.z_min
         if self.cnc.factory_z_travel_mm < z_span:
             raise ValueError(

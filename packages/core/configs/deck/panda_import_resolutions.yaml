@@ -50,6 +50,6 @@ wellplate_height_overrides:
   # Note (reported, not resolved here): converted tip-rack pickup_z lands
   # ~3.8mm below the gantry's working-volume z_min, consistent with an
   # unverified ~4mm homing pull-off / Z-datum offset between the production
-  # DB's frame and the current home_origin config. See the
+  # DB's frame and the legacy home-corner gantry config. See the
   # `position_out_of_envelope` warnings in the conflict report; pending live
   # controller $#/WPos confirmation before physical use.

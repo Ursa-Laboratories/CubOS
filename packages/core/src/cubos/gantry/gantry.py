@@ -14,7 +14,7 @@ from .coordinate_translator import (
     to_machine_coordinates,
     translate_status_string,
 )
-from .gantry_config import OriginPolicy
+from .gantry_config import OriginPolicy, validate_deck_origin_frame
 from .grbl_settings import format_setting_value, normalize_expected_grbl_settings
 from .gantry_driver.driver import DEFAULT_FEED_RATE, Mill
 from .errors import (
@@ -35,15 +35,10 @@ logger = logging.getLogger(__name__)
 
 
 class Gantry:
-    """High-level gantry wrapper around the low-level Mill driver.
+    """Gantry boundary in the front-left-bottom deck frame.
 
-    CubOS coordinates use a signed frame at this boundary, selected per
-    gantry config by ``origin_policy`` (see ``cubos.gantry.origin``):
-    ``deck_origin`` (default) puts WPos zero at the front-left-bottom deck
-    corner with a non-negative working volume; ``home_origin`` puts WPos
-    zero at the homed back-right-top corner with a non-positive working
-    volume. Both use +X operator-right, +Y back, +Z up. Controller GRBL
-    settings are expected to make WPos match the configured frame.
+    +X is operator-right, +Y is back, and +Z is up. Controller settings
+    must make WPos match this frame; no hidden sign flips are applied.
     """
 
     def __init__(
@@ -52,6 +47,7 @@ class Gantry:
         offline: bool = False,
     ) -> None:
         self.config = config or {}
+        validate_deck_origin_frame(self.config.get("origin_policy", "deck_origin"), self.config.get("working_volume"))
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self._offline = offline
         self._offline_coords = {"x": 0.0, "y": 0.0, "z": 0.0}
@@ -90,6 +86,7 @@ class Gantry:
         Setup scripts use this public override instead of reaching into the
         driver instance.
         """
+        validate_deck_origin_frame(self.config.get("origin_policy", "deck_origin"), self.config.get("working_volume"))
         if self._offline:
             return
         assert self._mill is not None
@@ -815,6 +812,7 @@ class Gantry:
         Persist the selected frame at that known corner and verify WPos before
         returning bounds that may be saved.
         """
+        validate_deck_origin_frame(self.config.get("origin_policy", "deck_origin"), self.config.get("working_volume"))
         origin_policy = OriginPolicy(
             self.config.get("origin_policy", "deck_origin") if origin_policy is None else origin_policy
         ).value

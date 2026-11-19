@@ -29,7 +29,7 @@ def test_tip_rack_exposes_shared_bounding_box_geometry():
 
 
 def test_tip_rack_accepts_signed_pickup_and_drop_z():
-    """home_origin decks need negative pickup_z/drop_z targets."""
+    """The labware model preserves signed coordinates for bounds validation."""
     rack = TipRack(
         name="tip_rack_signed",
         model_name="test_tip_rack",

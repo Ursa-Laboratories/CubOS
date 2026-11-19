@@ -18,6 +18,7 @@ import LimitRecoveryControls from "../gantry/LimitRecoveryControls";
 import { createJogPacer, jogPaceMs } from "../gantry/jogPacing";
 import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "../gantry/gantryAlarm";
 import { useCalibrationAutoRecovery } from "../../hooks/useCalibrationAutoRecovery";
+import { isDeckOrigin, UNSUPPORTED_GANTRY_ORIGIN } from "../../utils/gantryOrigin";
 
 interface Props {
   open: boolean;
@@ -289,7 +290,8 @@ export default function LabwareCalibrationModal({
     return Number.isFinite(length) && length > 0 ? length : null;
   }, [activeConfig, labwareEntries]);
 
-  const connected = position?.connected ?? false;
+  const unsupportedOrigin = !!gantry && !isDeckOrigin(gantry.config);
+  const connected = !unsupportedOrigin && (position?.connected ?? false);
   const homing = isGantryHoming(position?.status);
   const controllerFault = hasGantryAlarm(position?.status) ? position?.status ?? null : null;
   const alarmed = !!alarmMessage || !!controllerFault;
@@ -751,6 +753,7 @@ export default function LabwareCalibrationModal({
                 </button>}
               </div>
             )}
+            {unsupportedOrigin && <div role="alert" style={errorStyle}>{UNSUPPORTED_GANTRY_ORIGIN}</div>}
             {error && error !== alarmMessage && <div style={errorStyle}>{error}</div>}
             {statusNote && <div style={noteStyle}>{statusNote}</div>}
 

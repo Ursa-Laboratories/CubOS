@@ -1,11 +1,8 @@
 /**
  * User-space coord -> SVG coord transform.
  *
- * User-space coordinates use whatever [min, max] range the loaded gantry's
- * working_volume defines for each axis — deck_origin configs have a
- * nonnegative range with a bottom-left machine origin, while home_origin
- * configs have an entirely negative range with a top-right machine origin.
- * The math below only depends on the supplied ranges, not their sign.
+ * Coordinates use the deck frame and the loaded gantry's working-volume
+ * ranges, including physical travel beyond the deck corner when configured.
  * SVG origin (0,0) is top-left, so Y must be inverted for display.
  */
 

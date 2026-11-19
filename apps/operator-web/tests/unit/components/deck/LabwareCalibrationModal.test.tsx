@@ -23,8 +23,8 @@ function wellPlate(): WellPlateConfig {
     rows: 3,
     columns: 4,
     calibration: {
-      a1: { x: 10, y: 20, z: -50 },
-      a2: { x: 10, y: 35, z: -50 },
+      a1: { x: 10, y: 20, z: 150 },
+      a2: { x: 10, y: 35, z: 150 },
     },
     x_offset: 15,
     y_offset: 15,
@@ -47,7 +47,7 @@ function vial(): VialConfig {
     model_name: "demo_vial",
     height: 80,
     diameter: 20,
-    location: { x: 100, y: 100, z: -40 },
+    location: { x: 100, y: 100, z: 160 },
     capacity_ul: 20000,
     working_volume_ul: 15000,
   };
@@ -61,11 +61,11 @@ function tipRack(): TipRackConfig {
     rows: 2,
     columns: 12,
     calibration: {
-      a1: { x: -229, y: -12.4, z: -180 },
-      a2: { x: -229, y: -21.4, z: -180 },
+      a1: { x: -229, y: -12.4, z: 20 },
+      a2: { x: -229, y: -21.4, z: 20 },
     },
-    pickup_z: -180,
-    drop_z: -175,
+    pickup_z: 20,
+    drop_z: 25,
     tip_length: 59.3,
     x_offset: 9,
     y_offset: 9,
@@ -102,8 +102,8 @@ function gantryResponse(multi = true): GantryResponse {
     config: {
       serial_port: "/dev/ttyUSB0",
       gantry_type: "cub_xl",
-      cnc: { factory_z_travel_mm: 110 },
-      working_volume: { x_min: -400, x_max: 0, y_min: -300, y_max: 0, z_min: -110, z_max: 0 },
+      cnc: { factory_z_travel_mm: 300 },
+      working_volume: { x_min: -400, x_max: 400, y_min: -300, y_max: 300, z_min: 0, z_max: 300 },
       instruments,
     },
   };
@@ -250,6 +250,21 @@ describe("labware calibration alarm recovery", () => {
 });
 
 describe("LabwareCalibrationModal", () => {
+  it.each(["legacy policy", "legacy bounds"])("blocks %s before labware capture or motion", async (mode) => {
+    const user = userEvent.setup();
+    const gantry = gantryResponse();
+    if (mode === "legacy policy") Object.assign(gantry.config, { origin_policy: "home_origin" });
+    else gantry.config.working_volume = { x_min: -400, x_max: 0, y_min: -300, y_max: 0, z_min: -110, z_max: 0 };
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    render(<LabwareCalibrationModal open onClose={() => undefined} gantry={gantry} deck={deckResponse()}
+      position={position()} onSaveDeck={async () => undefined} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Unsupported coordinate origin");
+    await user.selectOptions(screen.getByLabelText("Labware type"), "well_plate");
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    expect(screen.getByRole("button", { name: "Record A1" })).toBeDisabled();
+    expect(screen.getByTitle("X+")).toBeDisabled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("lists labware types from the deck and filters items by type", async () => {
     const user = userEvent.setup();
     render(
@@ -352,8 +367,8 @@ describe("LabwareCalibrationModal", () => {
   it("records positions, applies instrument and tip compensation, and snaps A2 on save", async () => {
     const user = userEvent.setup();
     stubPositions([
-      { x: 100, y: 50, z: -30 },
-      { x: 109.9, y: 50.2, z: -29 },
+      { x: 100, y: 50, z: 170 },
+      { x: 109.9, y: 50.2, z: 171 },
     ]);
     const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
     render(
@@ -378,9 +393,9 @@ describe("LabwareCalibrationModal", () => {
     await user.click(screen.getByRole("button", { name: "Record A1" }));
     // Deck frame inverts InstrumentedGantry.move (gantry = deck − offset,
     // deck z = raw − depth − tip):
-    // raw (100, 50, -30) + offsets (10, 5) on XY, − depth 20 − tip 60 on Z
-    // = (110, 55, -110)
-    await waitFor(() => expect(screen.getByText(/110\.000, 55\.000, -110\.000/)).toBeInTheDocument());
+    // raw (100, 50, 170) + offsets (10, 5) on XY, − depth 20 − tip 60 on Z
+    // = (110, 55, 90)
+    await waitFor(() => expect(screen.getByText(/110\.000, 55\.000, 90\.000/)).toBeInTheDocument());
     await user.click(screen.getByRole("button", { name: "Record A2" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled());
     await user.click(screen.getByRole("button", { name: "Continue" }));
@@ -391,7 +406,7 @@ describe("LabwareCalibrationModal", () => {
     const [filename, config] = onSaveDeck.mock.calls[0];
     expect(filename).toBe("demo_deck.yaml");
     const plate = config.labware.plate as WellPlateConfig;
-    expect(plate.calibration?.a1).toEqual({ x: 110, y: 55, z: -110 });
+    expect(plate.calibration?.a1).toEqual({ x: 110, y: 55, z: 90 });
     // A2's raw delta is dominated by +X, so it snaps to exactly one x_offset
     // pitch from A1 (the loader requires the step to equal the pitch).
     expect(plate.calibration?.a2).toEqual({ x: 125, y: 55 });
@@ -404,7 +419,7 @@ describe("LabwareCalibrationModal", () => {
 
   it("updates a vial location and keeps saved values when requested", async () => {
     const user = userEvent.setup();
-    stubPositions([{ x: 90, y: 80, z: -35 }]);
+    stubPositions([{ x: 90, y: 80, z: 165 }]);
     const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
     render(
       <LabwareCalibrationModal
@@ -427,12 +442,12 @@ describe("LabwareCalibrationModal", () => {
 
     // Default reference is the camera (zero offsets), so raw values persist.
     const saved = onSaveDeck.mock.calls[0][1].labware.s1 as VialConfig;
-    expect(saved.location).toEqual({ x: 90, y: 80, z: -35 });
+    expect(saved.location).toEqual({ x: 90, y: 80, z: 165 });
   });
 
   it("shifts tip rack pickup and drop heights with a re-recorded A1", async () => {
     const user = userEvent.setup();
-    stubPositions([{ x: -230, y: -12, z: -178 }]);
+    stubPositions([{ x: -230, y: -12, z: 22 }]);
     const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
     render(
       <LabwareCalibrationModal
@@ -456,19 +471,19 @@ describe("LabwareCalibrationModal", () => {
 
     const saved = onSaveDeck.mock.calls[0][1].labware.tips as LabwareConfig;
     const calibration = (saved as Record<string, unknown>).calibration as Record<string, unknown>;
-    expect(calibration.a1).toEqual({ x: -230, y: -12, z: -178 });
+    expect(calibration.a1).toEqual({ x: -230, y: -12, z: 22 });
     // A2 kept its saved value untouched.
-    expect(calibration.a2).toEqual({ x: -229, y: -21.4, z: -180 });
+    expect(calibration.a2).toEqual({ x: -229, y: -21.4, z: 20 });
     // pickup_z follows the new A1 Z; drop_z shifts by the same +2mm delta.
-    expect((saved as Record<string, unknown>).pickup_z).toBe(-178);
-    expect((saved as Record<string, unknown>).drop_z).toBe(-173);
+    expect((saved as Record<string, unknown>).pickup_z).toBe(22);
+    expect((saved as Record<string, unknown>).drop_z).toBe(27);
   });
 
   it("adds new labware from a template under a chosen name", async () => {
     const user = userEvent.setup();
     stubPositions([
-      { x: 100, y: 50, z: -30 },
-      { x: 109.5, y: 50.1, z: -30 },
+      { x: 100, y: 50, z: 170 },
+      { x: 109.5, y: 50.1, z: 170 },
     ]);
     const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
     render(
@@ -504,7 +519,7 @@ describe("LabwareCalibrationModal", () => {
     expect(added.name).toBe("Plate 2");
     expect(added.rows).toBe(8);
     expect(added.columns).toBe(12);
-    expect(added.calibration?.a1).toEqual({ x: 100, y: 50, z: -30 });
+    expect(added.calibration?.a1).toEqual({ x: 100, y: 50, z: 170 });
     // Snapped to one 9 mm SBS pitch along the dominant +X jog.
     expect(added.calibration?.a2).toEqual({ x: 109, y: 50 });
     // Existing labware rides along untouched.
@@ -535,7 +550,7 @@ describe("LabwareCalibrationModal", () => {
 
   it("renames existing labware on save", async () => {
     const user = userEvent.setup();
-    stubPositions([{ x: 90, y: 80, z: -35 }]);
+    stubPositions([{ x: 90, y: 80, z: 165 }]);
     const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
     render(
       <LabwareCalibrationModal
@@ -563,7 +578,7 @@ describe("LabwareCalibrationModal", () => {
     // The key is stable; only the display name changes.
     const saved = onSaveDeck.mock.calls[0][1].labware.s1 as VialConfig;
     expect(saved.name).toBe("Sample 1");
-    expect(saved.location).toEqual({ x: 90, y: 80, z: -35 });
+    expect(saved.location).toEqual({ x: 90, y: 80, z: 165 });
   });
 
   it("blocks recording while disconnected", async () => {
@@ -593,7 +608,7 @@ describe("LabwareCalibrationModal", () => {
     // reinterpreted the already-recorded raw position with the NEW
     // instrument's offset instead of the one active when it was captured.
     const user = userEvent.setup();
-    stubPositions([{ x: 90, y: 80, z: -35 }]);
+    stubPositions([{ x: 90, y: 80, z: 165 }]);
     const onSaveDeck = vi.fn<(filename: string, config: DeckConfig) => Promise<undefined>>(async () => undefined);
     render(
       <LabwareCalibrationModal
@@ -626,9 +641,9 @@ describe("LabwareCalibrationModal", () => {
     // Must still reflect the pipette's offset (10, 5) and depth (20) that
     // were active when the raw position was actually captured, not the
     // camera's zero offset that's live at save time:
-    // raw (90, 80, -35) + XY offsets − depth = (100, 85, -55).
+    // raw (90, 80, 165) + XY offsets − depth = (100, 85, 145).
     const saved = onSaveDeck.mock.calls[0][1].labware.s1 as VialConfig;
-    expect(saved.location).toEqual({ x: 100, y: 85, z: -55 });
+    expect(saved.location).toEqual({ x: 100, y: 85, z: 145 });
   });
 });
 

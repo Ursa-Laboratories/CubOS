@@ -5,7 +5,7 @@ Tool offsets are copied verbatim from PANDA-BEAR's own tool table
 PANDA-BEAR's driver computes ``gantry = tool_target + tool_offset`` per axis
 (``grbl_cnc_mill/driver.py:_calculate_target_coordinates``, PANDA-BEAR repo);
 :mod:`.conversion` mirrors that exact formula to turn a PANDA-BEAR DB
-tool-point coordinate into a CubOS home-origin gantry-frame coordinate.
+tool-point coordinate into a gantry-frame coordinate before deck translation.
 
 Override the defaults at the CLI with ``--tools-json`` if the physical tool
 mounts change; see :mod:`.tools_json`.

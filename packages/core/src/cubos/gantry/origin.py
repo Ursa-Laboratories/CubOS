@@ -1,21 +1,4 @@
-"""Helpers for signed work-coordinate calibration.
-
-CubOS gantry configs select one of two coordinate frames via
-``GantryConfig.origin_policy``:
-
-* ``deck_origin`` (default): WPos zero at the front-left-bottom deck
-  corner; +X operator-right, +Y back, +Z up. X/Y minima may be negative
-  when the machine can safely travel beyond the deck corner, while the
-  deck origin itself must remain reachable (``x_min <= 0``,
-  ``y_min <= 0``, ``z_min >= 0``).
-* ``home_origin``: WPos zero at the homed back-right-top corner. The
-  reachable working volume is non-positive (``x_max == 0``, ``y_max == 0``,
-  ``z_max <= 0``), mirror-symmetric with ``deck_origin``.
-
-``validate_working_volume_origin`` dispatches to the policy-appropriate
-shape validator; use it instead of calling ``validate_deck_origin_minima``
-directly unless a caller is intentionally deck-origin-only.
-"""
+"""Helpers for front-left-bottom deck-coordinate calibration."""
 
 from __future__ import annotations
 
@@ -149,6 +132,8 @@ def format_set_work_position_command(
 
 def validate_deck_origin_minima(config: GantryConfig) -> None:
     """Validate that a gantry config is in the deck-origin frame shape."""
+    OriginPolicy(config.origin_policy)
+    OriginPolicy(config.origin_policy)
     volume = config.working_volume
     positive_xy_mins = [
         (axis, value)
@@ -172,57 +157,11 @@ def validate_deck_origin_minima(config: GantryConfig) -> None:
         )
 
 
-def validate_home_origin_maxima(config: GantryConfig) -> None:
-    """Validate that a gantry config is in the home-origin frame shape.
-
-    Mirror of :func:`validate_deck_origin_minima`: WPos zero sits at the
-    homed back-right-top corner, so the working volume must have X/Y maxima
-    at 0.0 and a non-positive Z maximum.
-    """
-    volume = config.working_volume
-    non_zero_xy_maxes = [
-        (axis, value)
-        for axis, value in (
-            ("x_max", volume.x_max),
-            ("y_max", volume.y_max),
-        )
-        if abs(value) > _ZERO_TOLERANCE
-    ]
-    if non_zero_xy_maxes:
-        formatted = ", ".join(f"{axis}={value}" for axis, value in non_zero_xy_maxes)
-        raise ValueError(
-            "Home-origin calibration requires working_volume X/Y maxima at 0.0; "
-            f"got {formatted}. Use a home-origin gantry config before setting "
-            "back-right-top origin."
-        )
-    if volume.z_max > _ZERO_TOLERANCE:
-        raise ValueError(
-            "Home-origin calibration requires working_volume.z_max <= 0.0; "
-            f"got z_max={volume.z_max}. Use a home-origin gantry config before "
-            "setting back-right-top origin."
-        )
-
-
 def validate_working_volume_origin(config: GantryConfig) -> None:
-    """Validate a gantry config's working volume against its origin_policy.
-
-    Dispatches to :func:`validate_deck_origin_minima` for ``deck_origin``
-    configs (the default) or :func:`validate_home_origin_maxima` for
-    ``home_origin`` configs. Prefer this over calling either validator
-    directly so callers stay policy-agnostic.
-    """
-    if OriginPolicy(config.origin_policy) is OriginPolicy.HOME_ORIGIN:
-        validate_home_origin_maxima(config)
-    else:
-        validate_deck_origin_minima(config)
+    """Validate the supported deck-origin working volume."""
+    validate_deck_origin_minima(config)
 
 
-# Generic GRBL command skeleton shared by both origin policies: jog to the
-# reference corner, zero WPos there, home, then program soft-limit travel
-# spans from the measured WPos. Reused as-is for home_origin calibration
-# (see ``cubos.tools.calibration.single_instrument_calibration``); the
-# reference-corner placeholder text is deck_origin-flavored but the GRBL
-# command sequence itself is policy-agnostic.
 _CALIBRATION_COMMAND_SKELETON: tuple[str, ...] = (
     "$H",
     "$10=0",
@@ -274,20 +213,16 @@ def calibrated_origin_frame(
     z_min: float,
     z_max: float,
 ) -> tuple[dict[str, float], dict[str, float]]:
-    """Return signed bounds and homed WPos from positive calibration measurements."""
-    policy = OriginPolicy(origin_policy)
+    """Return deck bounds and homed WPos from positive calibration measurements."""
+    OriginPolicy(origin_policy)
     x, y = float(measured_volume["x"]), float(measured_volume["y"])
     z_min, z_max = float(z_min), float(z_max)
     if not all(math.isfinite(value) for value in (x, y, z_min, z_max)):
         raise ValueError("Calibrated origin measurements must be finite.")
     if x <= 0 or y <= 0 or z_min < 0 or z_max <= z_min:
         raise ValueError("Calibrated origin measurements require positive usable spans.")
-    if policy is OriginPolicy.HOME_ORIGIN:
-        volume = {"x_min": -_round_mm(x), "x_max": 0.0, "y_min": -_round_mm(y), "y_max": 0.0, "z_min": -_round_mm(z_max - z_min), "z_max": 0.0}
-        position = {"x": 0.0, "y": 0.0, "z": 0.0}
-    else:
-        volume = {"x_min": 0.0, "x_max": _round_mm(x), "y_min": 0.0, "y_max": _round_mm(y), "z_min": _round_mm(z_min), "z_max": _round_mm(z_max)}
-        position = {"x": _round_mm(x), "y": _round_mm(y), "z": _round_mm(z_max)}
+    volume = {"x_min": 0.0, "x_max": _round_mm(x), "y_min": 0.0, "y_max": _round_mm(y), "z_min": _round_mm(z_min), "z_max": _round_mm(z_max)}
+    position = {"x": _round_mm(x), "y": _round_mm(y), "z": _round_mm(z_max)}
     return volume, position
 
 
@@ -298,11 +233,10 @@ def translate_calibrated_safe_z(
     homed_z: float,
     working_volume: dict[str, float],
 ) -> float:
-    """Keep the same physical travel plane when changing the origin policy."""
-    previous, selected = OriginPolicy(previous_policy), OriginPolicy(selected_policy)
+    """Clamp the existing deck-frame travel plane to calibrated bounds."""
+    OriginPolicy(previous_policy)
+    OriginPolicy(selected_policy)
     value = working_volume["z_max"] if safe_z is None else float(safe_z)
     if not all(math.isfinite(float(number)) for number in (value, homed_z)):
         raise ValueError("Safe travel Z and homed Z must be finite.")
-    if safe_z is not None and previous is not selected:
-        value += homed_z if selected is OriginPolicy.DECK_ORIGIN else -homed_z
     return _round_mm(min(max(value, working_volume["z_min"]), working_volume["z_max"]))

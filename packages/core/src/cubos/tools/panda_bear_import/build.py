@@ -74,21 +74,27 @@ def build_import(
     tool_offsets: Mapping[str, ToolOffset],
     working_volume: WorkingVolume,
     gantry_raw: dict,
+    *,
+    deck_home: Point,
 ) -> ImportResult:
     conflicts: list[Conflict] = []
+    deck_tool_offsets = {
+        tool: ToolOffset(offset.x + deck_home.x, offset.y + deck_home.y, offset.z + deck_home.z)
+        for tool, offset in tool_offsets.items()
+    }
 
     vial_labware, fluids, vial_conflicts = _build_vials(
-        snapshot.vials, resolutions, tool_offsets, working_volume,
+        snapshot.vials, resolutions, deck_tool_offsets, working_volume,
     )
     conflicts.extend(vial_conflicts)
 
     plate_dict, plate_conflicts = _build_wellplate(
-        snapshot, resolutions, tool_offsets[PIPETTE_FRAME_TOOL], working_volume,
+        snapshot, resolutions, deck_tool_offsets[PIPETTE_FRAME_TOOL], working_volume,
     )
     conflicts.extend(plate_conflicts)
 
     (tiprack_dict, disposal_dict), tiprack_conflicts = _build_tiprack(
-        snapshot, resolutions, tool_offsets[PIPETTE_FRAME_TOOL], working_volume,
+        snapshot, resolutions, deck_tool_offsets[PIPETTE_FRAME_TOOL], working_volume,
     )
     conflicts.extend(tiprack_conflicts)
 
@@ -605,7 +611,7 @@ def _build_tiprack(
 def _build_gantry_full(gantry_raw: dict, pipette_offset: ToolOffset) -> dict:
     merged = copy.deepcopy(gantry_raw)
     instruments = dict(merged.get("instruments", {}))
-    instruments["pipette"] = {
+    instruments.setdefault("pipette", {
         "type": "pipette",
         "vendor": "opentrons",
         "pipette_model": "p300_single_gen2",
@@ -619,7 +625,7 @@ def _build_gantry_full(gantry_raw: dict, pipette_offset: ToolOffset) -> dict:
         "offset_x": round_mm(-pipette_offset.x),
         "offset_y": round_mm(-pipette_offset.y),
         "depth": round_mm(pipette_offset.z),
-    }
+    })
     _upgrade_capper_entry(instruments)
     merged["instruments"] = instruments
     return merged

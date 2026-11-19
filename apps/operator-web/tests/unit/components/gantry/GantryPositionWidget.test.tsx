@@ -28,15 +28,14 @@ const workingVolume: WorkingVolume = {
   z_max: 80,
 };
 
-// home_origin fixture: WPos zero at the homed back-right-top corner, so the
-// entire reachable volume is negative (see calibrationMath.buildCalibratedConfig).
+// Configured physical overtravel can extend beyond the deck corner.
 const negativeWorkingVolume: WorkingVolume = {
   x_min: -400,
-  x_max: 0,
+  x_max: 100,
   y_min: -300,
-  y_max: 0,
-  z_min: -100,
-  z_max: 0,
+  y_max: 100,
+  z_min: 0,
+  z_max: 100,
 };
 
 function gantryConfig(): GantryConfig {
@@ -78,6 +77,20 @@ function requestPath(input: string | URL | Request): string {
 }
 
 describe("GantryPositionWidget manual move safety", () => {
+  it.each(["legacy policy", "legacy bounds"])("blocks direct runtime %s input before connect or motion", (mode) => {
+    const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const config = gantryConfig();
+    if (mode === "legacy policy") Object.assign(config, { origin_policy: "home_origin" });
+    else config.working_volume = { x_min: -400, x_max: 0, y_min: -300, y_max: 0, z_min: -80, z_max: 0 };
+    render(<GantryPositionWidget position={position()} workingVolume={config.working_volume}
+      gantryFile="legacy.yaml" gantry={{ filename: "legacy.yaml", config }} onSaveCalibrated={async () => undefined} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Unsupported coordinate origin");
+    expect(screen.getByRole("button", { name: "Unsupported origin" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Home" })).toBeDisabled();
+    expect(screen.getByTitle("X+")).toBeDisabled();
+    fireEvent.mouseDown(screen.getByTitle("X+"));
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -729,13 +742,13 @@ describe("GantryPositionWidget manual move safety", () => {
 
     // -1 is outside this fixture's (nonnegative) working volume, so it's
     // rejected by the generic range check rather than a sign check — there
-    // is no standalone "must be 0 or greater" rule anymore (home_origin
+    // is no standalone "must be 0 or greater" rule anymore (configured overtravel
     // configs have an entirely negative working volume).
     expect(await screen.findByText(/Move target outside working volume/)).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
-  it("accepts a manual move to negative coordinates inside a home_origin (negative) working volume", async () => {
+  it("accepts a manual move to negative coordinates inside a configured negative working volume", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -755,20 +768,20 @@ describe("GantryPositionWidget manual move safety", () => {
     await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "-150");
     await user.clear(screen.getByLabelText("Z (mm)"));
-    await user.type(screen.getByLabelText("Z (mm)"), "-50");
+    await user.type(screen.getByLabelText("Z (mm)"), "50");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/gantry/move-to",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ x: -200, y: -150, z: -50 }),
+        body: JSON.stringify({ x: -200, y: -150, z: 50 }),
       }),
     );
     expect(screen.queryByText(/Move target outside working volume/)).not.toBeInTheDocument();
   });
 
-  it("rejects a positive move target outside a home_origin (negative) working volume", async () => {
+  it("rejects a positive move target outside a configured negative working volume", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
@@ -784,24 +797,24 @@ describe("GantryPositionWidget manual move safety", () => {
     );
 
     await user.clear(screen.getByLabelText("X (mm)"));
-    await user.type(screen.getByLabelText("X (mm)"), "10");
+    await user.type(screen.getByLabelText("X (mm)"), "110");
     await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "-150");
     await user.clear(screen.getByLabelText("Z (mm)"));
-    await user.type(screen.getByLabelText("Z (mm)"), "-50");
+    await user.type(screen.getByLabelText("Z (mm)"), "50");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     expect(await screen.findByText(/Move target outside working volume/)).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
-  it("allows a jog that stays inside a negative (home_origin) working volume", () => {
+  it("allows a jog that stays inside a configured negative working volume", () => {
     const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
     vi.stubGlobal("fetch", fetchMock);
 
     render(
       <GantryPositionWidget
-        position={position({ x: -5, y: -5, z: -5, work_x: -5, work_y: -5, work_z: -5 })}
+        position={position({ x: -5, y: -5, z: 5, work_x: -5, work_y: -5, work_z: 5 })}
         workingVolume={negativeWorkingVolume}
         gantryFile="cubos.yaml"
         gantry={null}
@@ -818,14 +831,14 @@ describe("GantryPositionWidget manual move safety", () => {
     );
   });
 
-  it("rejects a jog that would push past a negative (home_origin) working-volume bound", () => {
+  it("rejects a jog that would push past a configured negative working-volume bound", () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
 
     render(
       <GantryPositionWidget
         // x_min=-400; already within 0.5mm of it, so an X- jog would cross the bound.
-        position={position({ x: -399.7, y: -5, z: -5, work_x: -399.7, work_y: -5, work_z: -5 })}
+        position={position({ x: -399.7, y: -5, z: 5, work_x: -399.7, work_y: -5, work_z: 5 })}
         workingVolume={negativeWorkingVolume}
         gantryFile="cubos.yaml"
         gantry={null}

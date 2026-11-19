@@ -66,6 +66,17 @@ include:
 User state defaults under `~/.cubos/`. Appliance images override these paths to
 `/var/lib/cub/`. The API never caches a separate copy of CubOS runtime state.
 
+Gantry profiles use `origin_policy: deck_origin`, the front-left-bottom deck
+origin (+X right, +Y back, +Z up). Omitting the field uses the same default.
+Other origin values are rejected when loading, saving through the structured
+API, connecting, or finalizing calibration. Recalibrate an older profile
+against the deck reference before using it; changing only its origin label or
+coordinate signs does not establish a valid calibration.
+
+The raw YAML editor can save incomplete or legacy text for correction. Such a
+draft cannot refresh the connected gantry or pass normal config loading until
+it validates against CubOS's supported schema.
+
 ## Repository map
 
 | Path | Purpose |
