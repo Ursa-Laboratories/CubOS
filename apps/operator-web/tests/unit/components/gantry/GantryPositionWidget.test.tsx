@@ -83,7 +83,7 @@ describe("GantryPositionWidget manual move safety", () => {
     vi.unstubAllGlobals();
   });
 
-  it("sends the move when workingVolume is absent (backend is the guard)", async () => {
+  it("blocks a move without a working volume", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ x: 0, y: 0, z: 0, status: "Idle", connected: true, calibration_active: false }), {
@@ -103,18 +103,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
-    await user.type(screen.getByLabelText("X (mm)"), "999");
-    await user.type(screen.getByLabelText("Y (mm)"), "999");
-    await user.type(screen.getByLabelText("Z (mm)"), "999");
-    await user.click(screen.getByRole("button", { name: "Go" }));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/move-to",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ x: 999, y: 999, z: 999 }),
-      }),
-    );
+    const go = screen.getByRole("button", { name: "Go" });
+    expect(go).toBeDisabled();
+    await user.click(go);
+    expect(screen.getByText(/Load a gantry config with a working volume/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("shows connection failures and returns the Connect button to ready state", async () => {
@@ -693,8 +686,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "301");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "100");
+    await user.clear(screen.getByLabelText("Z (mm)"));
     await user.type(screen.getByLabelText("Z (mm)"), "40");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -717,8 +713,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "abc");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "10");
+    await user.clear(screen.getByLabelText("Z (mm)"));
     await user.type(screen.getByLabelText("Z (mm)"), "10");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -751,8 +750,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "-200");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "-150");
+    await user.clear(screen.getByLabelText("Z (mm)"));
     await user.type(screen.getByLabelText("Z (mm)"), "-50");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -781,8 +783,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "10");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "-150");
+    await user.clear(screen.getByLabelText("Z (mm)"));
     await user.type(screen.getByLabelText("Z (mm)"), "-50");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -1193,6 +1198,9 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    for (const axis of ["X", "Y", "Z"]) {
+      await user.clear(screen.getByLabelText(axis + " (mm)"));
+    }
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
@@ -1214,15 +1222,18 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "100");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "100");
-    await user.click(screen.getByRole("button", { name: "Go" }));
+    await user.clear(screen.getByLabelText("Z (mm)"));
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
-  it("still sends an explicit all-zero move", async () => {
+  it("starts at zero and sends an all-zero move when in bounds", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -1237,9 +1248,12 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
-    await user.type(screen.getByLabelText("X (mm)"), "0");
-    await user.type(screen.getByLabelText("Y (mm)"), "0");
-    await user.type(screen.getByLabelText("Z (mm)"), "0");
+    for (const axis of ["X", "Y", "Z"]) {
+      const input = screen.getByLabelText(axis + " (mm)");
+      expect(input).toHaveValue("0");
+      expect(input).not.toHaveAttribute("placeholder");
+    }
+    expect(screen.queryByText(/^Vol:/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -1250,4 +1264,37 @@ describe("GantryPositionWidget manual move safety", () => {
       }),
     ));
   });
+  it("rejects default Z below the calibrated minimum and accepts the boundary on Enter", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={{ ...workingVolume, z_min: 3.25 }}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Go" }));
+    expect(screen.getByRole("button", { name: "Go" })).toBeDisabled();
+    expect(screen.getByLabelText("Z (mm)")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByText(/Move target outside working volume/)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/move-to"))).toHaveLength(0);
+
+    const z = screen.getByLabelText("Z (mm)");
+    await user.clear(z);
+    await user.type(z, "3.25{Enter}");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/move-to",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ x: 0, y: 0, z: 3.25 }),
+      }),
+    );
+  });
+
 });

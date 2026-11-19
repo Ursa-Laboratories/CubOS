@@ -47,10 +47,10 @@ export default function GantryPositionWidget({
   const anyCalibrationOpen = calibrationModeOpen || calibrationOpen || offsetCalibrationOpen;
   const [stepXY, setStepXY] = useState("0.5");
   const [stepZ, setStepZ] = useState("0.5");
-  const [moveX, setMoveX] = useState("");
-  const [moveY, setMoveY] = useState("");
-  const [moveZ, setMoveZ] = useState("");
-  const [moveError, setMoveError] = useState<string | null>(null);
+  const [moveX, setMoveX] = useState("0");
+  const [moveY, setMoveY] = useState("0");
+  const [moveZ, setMoveZ] = useState("0");
+  const [moveEdited, setMoveEdited] = useState(false);
   const [lastCommandError, setLastCommandError] = useState<string | null>(null);
   const [limitHint, setLimitHint] = useState<string | null>(null);
   const [savedCalibrationMessage, setSavedCalibrationMessage] = useState<string | null>(null);
@@ -409,41 +409,26 @@ export default function GantryPositionWidget({
     await sendHome();
   };
 
-  const handleMoveTo = () => {
-    if (!connected || isRunning || homing || isAlarm || pullOffBusy || !currentWorkPosition(position)) return;
-    setMoveError(null);
-    // Blank fields must not silently mean 0 — Number("") is 0, and a
-    // half-filled form would command an unintended move on the blank axes.
-    const x = parseAxisTarget(moveX);
-    const y = parseAxisTarget(moveY);
-    const z = parseAxisTarget(moveZ);
-    if (x === null || y === null || z === null) {
-      setMoveError("Enter valid X, Y, and Z coordinates.");
-      return;
-    }
-    if (workingVolume) {
-      const axisChecks: Array<[string, number, number, number]> = [
-        ["X", x, workingVolume.x_min, workingVolume.x_max],
-        ["Y", y, workingVolume.y_min, workingVolume.y_max],
-        ["Z", z, workingVolume.z_min, workingVolume.z_max],
-      ];
-      const violations = axisChecks.filter(([, value, min, max]) => (
-        value < min || value > max
-      ));
-      if (violations.length > 0) {
-        setMoveError(
-          `Move target outside working volume: ${violations
-            .map(([axis, value, min, max]) => `${axis}=${Number(value).toFixed(3)} outside [${Number(min).toFixed(3)}, ${Number(max).toFixed(3)}]`)
-            .join("; ")}`,
-        );
-        return;
-      }
-    }
-    gantryApi.moveTo(x, y, z)
-      .then(() => {
-        setMoveError(null);
-        setLastCommandError(null);
-      })
+  const xTarget = parseAxisTarget(moveX);
+  const yTarget = parseAxisTarget(moveY);
+  const zTarget = parseAxisTarget(moveZ);
+  const moveAxes = [
+    { label: "X", value: moveX, setValue: setMoveX, target: xTarget, min: workingVolume?.x_min, max: workingVolume?.x_max },
+    { label: "Y", value: moveY, setValue: setMoveY, target: yTarget, min: workingVolume?.y_min, max: workingVolume?.y_max },
+    { label: "Z", value: moveZ, setValue: setMoveZ, target: zTarget, min: workingVolume?.z_min, max: workingVolume?.z_max },
+  ];
+  const invalidAxes = moveAxes.filter(({ target, min, max }) =>
+    target === null || !isAxisTargetInRange(target, min, max));
+  const moveError = !workingVolume ? "Load a gantry config with a working volume before moving."
+    : xTarget === null || yTarget === null || zTarget === null ? "Enter valid X, Y, and Z coordinates."
+    : invalidAxes.length ? `Move target outside working volume on ${invalidAxes.map(({ label }) => label).join(", ")}.`
+    : null;
+
+  const handleMoveTo = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (moveDisabled || moveError || xTarget === null || yTarget === null || zTarget === null) return;
+    gantryApi.moveTo(xTarget, yTarget, zTarget)
+      .then(() => setLastCommandError(null))
       .catch((e) => setLastCommandError(errorMessage(e)));
   };
 
@@ -742,50 +727,53 @@ export default function GantryPositionWidget({
         </button>
       </div>
 
-      {workingVolume && (
-        <div style={{ ...theme.mono, fontSize: 10, color: theme.color.textFaint, marginBottom: 8 }}>
-          Vol: X[{workingVolume.x_min}, {workingVolume.x_max}] Y[{workingVolume.y_min},{" "}
-          {workingVolume.y_max}] Z[{workingVolume.z_min}, {workingVolume.z_max}]
-        </div>
-      )}
-
       {/* Move To */}
       {connected && (
-        <div style={{ marginBottom: 10, borderTop: `1px solid ${theme.color.border}`, paddingTop: 10 }}>
+        <form onSubmit={handleMoveTo} style={{ marginBottom: 10, borderTop: `1px solid ${theme.color.border}`, paddingTop: 10 }}>
           <div style={{ ...theme.sectionLabel, marginBottom: 6 }}>Move To</div>
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            {(["X", "Y", "Z"] as const).map((axis) => {
-              const setter = axis === "X" ? setMoveX : axis === "Y" ? setMoveY : setMoveZ;
-              const value = axis === "X" ? moveX : axis === "Y" ? moveY : moveZ;
+            {moveAxes.map((axis) => {
+              const invalid = !!workingVolume && invalidAxes.includes(axis);
               return (
-                <label key={axis} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 11 }}>
-                  <span style={{ color: theme.color.textMuted }}>{axis} (mm)</span>
+                <label key={axis.label} style={{ display: "flex", alignItems: "center", gap: 2, fontSize: 11 }}>
+                  <span style={{ color: theme.color.textMuted }}>{axis.label}</span>
                   <input
                     type="text"
                     inputMode="decimal"
-                    value={value}
-                    onChange={(e) => setter(e.target.value)}
-                    placeholder={workingVolume ? axisRangePlaceholder(axis, workingVolume) : "mm"}
+                    value={axis.value}
+                    onChange={(e) => {
+                      axis.setValue(e.target.value);
+                      setMoveEdited(true);
+                    }}
+                    aria-label={axis.label + " (mm)"}
+                    aria-invalid={invalid}
                     disabled={moveDisabled}
-                    style={buttonStateStyle({ ...inputStyle, ...theme.mono, width: 70, fontSize: 11, padding: "3px 4px" }, moveDisabled)}
+                    style={buttonStateStyle({
+                      ...inputStyle,
+                      ...theme.mono,
+                      width: 70,
+                      fontSize: 11,
+                      padding: "3px 4px",
+                      borderColor: invalid ? theme.color.danger : undefined,
+                    }, moveDisabled)}
                   />
                 </label>
               );
             })}
             <button
-              onClick={handleMoveTo}
-              disabled={moveDisabled}
+              type="submit"
+              disabled={moveDisabled || !!moveError}
               style={{
                 ...theme.btn.primary,
                 ...theme.btnSmall,
-                opacity: moveDisabled ? 0.6 : 1,
+                opacity: moveDisabled || moveError ? 0.6 : 1,
               }}
             >
               {isMoving ? "Moving..." : "Go"}
             </button>
           </div>
-          {moveError && <div style={moveErrorStyle}>{moveError}</div>}
-        </div>
+          {moveError && (moveEdited || !workingVolume) && <div role="status" style={moveErrorStyle}>{moveError}</div>}
+        </form>
       )}
 
       {/* Connection controls — bottom */}
@@ -942,6 +930,11 @@ function parseAxisTarget(value: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function isAxisTargetInRange(target: number, min: number | undefined, max: number | undefined): boolean {
+  return min !== undefined && max !== undefined && Number.isFinite(min) && Number.isFinite(max) &&
+    min <= target && target <= max;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -958,12 +951,6 @@ function formatRange(min: number, max: number): string {
 
 function formatMm(value: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "");
-}
-
-function axisRangePlaceholder(axis: "X" | "Y" | "Z", volume: WorkingVolume): string {
-  if (axis === "X") return formatRange(volume.x_min, volume.x_max);
-  if (axis === "Y") return formatRange(volume.y_min, volume.y_max);
-  return formatRange(volume.z_min, volume.z_max);
 }
 
 const coordStyle: React.CSSProperties = {
