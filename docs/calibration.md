@@ -73,43 +73,19 @@ Two things must hold for this to be reliable:
 
 ## Origin Policy
 
-Gantry YAML's top-level `origin_policy` (`deck_origin` default, or
-`home_origin`) decides which corner calibration assigns as zero — see
-[Gantry: Origin Policy](gantry.md#origin-policy) for the YAML field and
-working-volume invariants.
-
-- **`deck_origin`** (default, described above) — calibration assigns zero at
-  the front-left origin point you touch and writes `working_volume` minima of
-  `0.0`; verified travel beyond that corner may use negative `x_min` or
-  `y_min`, while `z_min` remains non-negative. The Z reference height and
-  homed readback set the maxima.
-- **`home_origin`** — calibration instead assigns zero at the homed
-  back-right-top corner. `working_volume` maxima come out `0.0` (`x_max`,
-  `y_max`, `z_max`) with negative minima describing the reachable workspace.
-
-Both flows still need a physical XY/Z reference point to size the volume;
-only which corner receives value `0` changes. GRBL soft-limit travel settings
-(`max_travel_x/y/z`) are span-based and unaffected by the policy.
+Full calibration in the Operator uses the front-left deck reference for X/Y
+zero and the measured reference height for Z. It saves
+`origin_policy: deck_origin` even when the input file uses `home_origin`. Use a new output
+filename to keep the original calibration. See [Gantry: Origin Policy](gantry.md#origin-policy)
+for the coordinate conventions used by existing YAML files.
 
 ## Verify the controller and saved origin
 
-Choose **Coordinate origin** in Prepare. **Calibrated deck reference** keeps
-X/Y zero at the marked point you calibrate; home reads the measured maxima.
-**Home corner** puts zero at the homed back-right-top corner and uses negative
-coordinates inside the workspace. Use the calibrated deck reference when that
-is the zero point you want for your plate and other labware.
-
-Both choices measure travel from a provisional front-left deck reference.
-Finalization then applies the selected persistent G54 origin and checks the
-controller's actual work-coordinate readback before saving the file. The file
-uses those verified working bounds. A failed origin write or readback must not
-be treated as completed calibration. Keep the tools still and restart full
-calibration if the origin cannot be verified.
-
-Safe Z belongs to the selected coordinate frame. For example, a home position
-of Z=81 with a travel height 5 mm below home is safe Z=76 in the calibrated deck
-frame, or safe Z=-5 in the home frame. Changing the selected origin translates
-safe Z so the physical travel height is preserved.
+Before saving, the wizard applies the deck reference to the controller's G54
+work coordinates and verifies the homed position against the measured travel
+bounds. If verification fails, restart full calibration. When converting a
+home-origin config, the wizard translates safe Z into deck coordinates to
+preserve its physical travel height.
 
 If writing the file fails after verified finalization, retry Save; the verified
 result is retained so the retry does not home again or reuse measurements in a
@@ -174,9 +150,8 @@ enter a new **Save as filename** and press **Save**. The copy retains those
 values; changing its filename does not reset calibration or reconnect hardware.
 Unsaved editor changes remain intact when saved configuration data refreshes.
 
-The verified finalization described above applies to the Operator UI. The
-command-line home-origin calibration path uses a separate implementation and
-has not received these checks; use the Operator UI for home-origin calibration.
+The controller verification described above applies to the Operator wizard.
+Command-line calibration follows the input YAML’s origin policy.
 
 ## Run Calibration
 

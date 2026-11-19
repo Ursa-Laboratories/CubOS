@@ -106,7 +106,6 @@ export default function CalibrationWizard({
 
   const filename = gantry?.filename ?? "";
   const config = gantry?.config ?? null;
-  const [originPolicy, setOriginPolicy] = useState<"deck_origin" | "home_origin">("deck_origin");
   const instruments = useMemo(() => Object.keys(config?.instruments ?? {}), [config]);
   const followCameraInstruments = useMemo(
     () => instruments.filter((name) => isFollowCameraInstrument(config?.instruments[name]?.type)),
@@ -182,7 +181,6 @@ export default function CalibrationWizard({
     previousOpen.current = open;
     if (!open || wasOpen) return;
     setStep(0);
-    setOriginPolicy(config?.origin_policy ?? "deck_origin");
     setBusy(false);
     setRecoveryBusy(false);
     setOperation(null);
@@ -206,7 +204,15 @@ export default function CalibrationWizard({
     pendingZReference.current = null;
     finalizedOrigin.current = null;
     finalizedConfig.current = null;
-  }, [config?.cnc.calibration_block_height_mm, config?.origin_policy, contactInstruments, filename, open]);
+  }, [config?.cnc.calibration_block_height_mm, contactInstruments, filename, open]);
+
+  useEffect(() => {
+    if (!open || statusNote !== "Homed.") return;
+    const timer = window.setTimeout(() => {
+      setStatusNote((current) => current === "Homed." ? null : current);
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [open, statusNote]);
 
   useEffect(() => {
     const priorStep = previousStep.current;
@@ -641,6 +647,7 @@ export default function CalibrationWizard({
     if (!config) throw new Error("No gantry config is loaded.");
     if (!readyForSave) throw new Error("Complete the calibration positions before saving.");
     if (!finalizedConfig.current) {
+      const deckConfig: GantryConfig = { ...config, origin_policy: "deck_origin" };
       const initial = isMulti ? requireZCalibration(zCalibration) : null;
       if (!finalizedOrigin.current) {
         finalizedOrigin.current = await gantryApi.finalizeCalibrationOrigin({
@@ -648,16 +655,15 @@ export default function CalibrationWizard({
           block_touch_z: initial?.blockTouchZ ?? requireCaptured(blockTouch, "Block touch position"),
           block_height: initial?.blockHeight ?? parseBlockHeight(blockHeight),
           factory_z_travel: initial?.factoryZTravel ?? getFactoryZTravel(config),
-          origin_policy: originPolicy,
+          origin_policy: deckConfig.origin_policy,
         });
         assertGeneration(generation);
       }
       const finalized = finalizedOrigin.current;
-      const verifiedVolume = validateFinalizedOrigin({ ...config, origin_policy: originPolicy }, finalized);
+      const verifiedVolume = validateFinalizedOrigin(deckConfig, finalized);
       const calibrated = buildCalibratedConfig({
         config: {
-          ...config,
-          origin_policy: originPolicy,
+          ...deckConfig,
           cnc: {
             ...config.cnc,
             calibration_block_height_mm: finalized.z_calibration.block_height,
@@ -886,12 +892,6 @@ export default function CalibrationWizard({
                 </button>}
               </div>
             )}
-            {!alarmRecoveryMessage && connected && (
-              <div style={softLimitNoticeStyle}>
-                Jog in small steps near the edges of travel. Eligible limit faults back off once automatically.
-              </div>
-            )}
-            <div style={noteStyle}>Configured Z travel: {config?.cnc.factory_z_travel_mm ?? "unset"} mm</div>
             {error && <div style={errorStyle}>{error}</div>}
             {operation && <div style={busyStyle}>{operation}… Please wait.</div>}
             {statusNote && <div style={noteStyle}>{statusNote}</div>}
@@ -903,21 +903,6 @@ export default function CalibrationWizard({
                   {isMulti
                     ? "Choose a file name for the calibrated config, pick the leftmost and lowest instruments, then continue."
                     : "Choose a file name for the calibrated config, then continue."}
-                </p>
-                <label style={fieldStyle}>
-                  <span style={labelStyle}>Coordinate origin</span>
-                  <select aria-label="Coordinate origin" value={originPolicy} disabled={controlsLocked}
-                    onChange={event => setOriginPolicy(event.target.value as "deck_origin" | "home_origin")}
-                    style={buttonStateStyle(inputStyle, controlsLocked)}>
-                    <option value="deck_origin">Calibrated deck reference (0, 0)</option>
-                    <option value="home_origin">Home corner (0, 0, 0)</option>
-                  </select>
-                </label>
-                <p style={instructionStyle}>
-                  {originPolicy === "deck_origin"
-                    ? "The calibrated front-left reference stays at X=0, Y=0. Homed coordinates remain positive."
-                    : "The homed back-right-top corner becomes X=0, Y=0, Z=0. Coordinates toward the deck are negative."}
-                  {" Measure from the front-left reference for either choice. The selected origin is applied only when calibration is finalized."}
                 </p>
                 {isMulti && (
                   <p style={instructionStyle}>
@@ -1016,7 +1001,6 @@ export default function CalibrationWizard({
                 <h3 style={sectionTitleStyle}>Set Origin</h3>
                 <p style={instructionStyle}>
                   Put the calibration block at the front-left corner of the deck. Jog the tool until it just touches the top of the block, then continue.
-                  {originPolicy === "home_origin" && " The homed back-right-top corner becomes zero only when you finish and save calibration."}
                 </p>
                 {soleInstrumentIsPipette && (
                   <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
@@ -1095,7 +1079,6 @@ export default function CalibrationWizard({
                 <h3 style={sectionTitleStyle}>Set XY Origin</h3>
                 <p style={instructionStyle}>
                   Put the calibration block at the front-left corner of the deck. Jog the selected leftmost instrument until it is directly over the mark on the block, then continue.
-                  {originPolicy === "home_origin" && " The homed back-right-top corner becomes zero only when you finish and save calibration."}
                 </p>
                 {referenceInstrumentIsPipette && (
                   <div style={noteStyle}>
@@ -1848,12 +1831,6 @@ const alarmStyle: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
   flexWrap: "wrap",
-};
-
-const softLimitNoticeStyle: React.CSSProperties = {
-  ...theme.notice.warning,
-  fontSize: 11,
-  marginBottom: 10,
 };
 
 const alarmTitleStyle: React.CSSProperties = {

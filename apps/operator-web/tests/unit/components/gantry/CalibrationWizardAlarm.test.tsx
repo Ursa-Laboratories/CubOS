@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import CalibrationWizard from "../../../../src/components/gantry/CalibrationWizard";
@@ -203,7 +203,7 @@ describe("CalibrationWizard alarm recovery", () => {
     expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Prepare");
   });
 
-  it("tells the operator to jog in small steps near the edges of travel", () => {
+  it("omits permanent jogging and configured Z travel reminders", () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(position())));
 
     render(
@@ -216,7 +216,8 @@ describe("CalibrationWizard alarm recovery", () => {
       />,
     );
 
-    expect(screen.getByText(/Jog in small steps near the edges of travel/)).toBeInTheDocument();
+    expect(screen.queryByText(/Jog in small steps/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Configured Z travel/)).not.toBeInTheDocument();
   });
 
   it.each(["ALARM:1 hard limit", "ALARM:3", "error:9 Reset to continue", "[MSG:Check Limits]"])("locks controls without automatic recovery after %s", async (message) => {
@@ -273,5 +274,50 @@ describe("CalibrationWizard alarm recovery", () => {
     expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
     expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Z reference");
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
+  });
+});
+
+describe("CalibrationWizard homing notice", () => {
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  async function homeWizard() {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(position())));
+    const view = (status = "Idle") => <CalibrationWizard open onClose={() => undefined}
+      gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position(status)}
+      onSaveCalibrated={async () => undefined} />;
+    const result = render(view());
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Home gantry" })));
+    expect(screen.getByText("Homed.")).toBeInTheDocument();
+    return { view, ...result };
+  }
+
+  it("expires verified Homed after five seconds", async () => {
+    await homeWizard();
+    act(() => vi.advanceTimersByTime(4999));
+    expect(screen.getByText("Homed.")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.queryByText("Homed.")).not.toBeInTheDocument();
+  });
+
+  it("preserves replacement messages and new faults past the old notice deadline", async () => {
+    const { view, rerender } = await homeWizard();
+    act(() => vi.advanceTimersByTime(1000));
+    rerender(view("ALARM:3; Pn:Y"));
+    expect(screen.queryByText("Homed.")).not.toBeInTheDocument();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Unlock alarm" })));
+    rerender(view());
+    expect(screen.getByText("Alarm cleared.")).toBeInTheDocument();
+    act(() => vi.advanceTimersByTime(4000));
+    expect(screen.getByText("Alarm cleared.")).toBeInTheDocument();
+    rerender(view("ALARM:3; Pn:Z"));
+    act(() => vi.advanceTimersByTime(5000));
+    expect(screen.getByText("GANTRY ALARM")).toBeInTheDocument();
+    expect(screen.getByText("ALARM:3; Pn:Z")).toBeInTheDocument();
   });
 });

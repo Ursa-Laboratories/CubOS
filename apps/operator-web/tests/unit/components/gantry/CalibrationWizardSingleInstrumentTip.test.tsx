@@ -1,8 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import CalibrationWizard from "./CalibrationWizard";
-import type { GantryConfig, GantryPosition } from "../../types";
+import CalibrationWizard from "../../../../src/components/gantry/CalibrationWizard";
+import type { GantryConfig, GantryPosition } from "../../../../src/types";
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } });
@@ -95,7 +95,7 @@ describe("CalibrationWizard single-instrument tip compensation", () => {
       />,
     );
 
-    expect(screen.getByText("Configured Z travel: 56 mm")).toBeInTheDocument();
+    expect(screen.queryByText(/Configured Z travel/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Continue" })); // Prepare -> Home
     await user.click(await screen.findByRole("button", { name: "Home gantry" })); // -> Reference height
     await user.click(await screen.findByRole("button", { name: "Continue" })); // -> Set Origin

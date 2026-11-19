@@ -43,8 +43,7 @@ The wizard follows **Prepare → Home → Reference height → Set origin → Sa
 
 ![Single-instrument calibration: jog down, attached-tip option, and Set origin](../images/operator-ui/wizard-single-origin.png)
 
-Place the block at the corner named in the wizard: **front-left** for
-`deck_origin` (the default), **back-right** for `home_origin`.
+Place the block at the front-left deck reference.
 
 1. **Jog controls.** Align the tool with the reference mark and lower it
    until it just touches the block. Use about 0.1 mm steps for the final
@@ -61,8 +60,7 @@ Place the block at the corner named in the wizard: **front-left** for
 
 ![Multi-instrument calibration: XY jog, Z jog, and Set XY origin](../images/operator-ui/wizard-xy-current.png)
 
-Place the block at the corner named in the wizard: **front-left** for
-`deck_origin`, **back-right** for `home_origin`.
+Place the block at the front-left deck reference.
 
 1. **XY jog pad.** Align the selected **leftmost instrument** over the mark.
 2. **Z jog.** Lower enough to check alignment, keeping clear of the block.
