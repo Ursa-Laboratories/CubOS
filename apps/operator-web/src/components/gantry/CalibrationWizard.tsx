@@ -16,6 +16,7 @@ import {
 import { createJogPacer, jogPaceMs } from "./jogPacing";
 import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "./gantryAlarm";
 import { useCalibrationAutoRecovery } from "../../hooks/useCalibrationAutoRecovery";
+import { useLimitRecoveryContext } from "../../hooks/useLimitRecoveryContext";
 
 interface Props {
   open: boolean;
@@ -75,6 +76,8 @@ export default function CalibrationWizard({
   const [blockHeight, setBlockHeight] = useState("10");
   const [busy, setBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [jogInFlight, setJogInFlight] = useState(false);
+  const [recoveryHomeAvailable, setRecoveryHomeAvailable] = useState(false);
   const [operation, setOperation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [alarmPrompt, setAlarmPrompt] = useState<string | null>(null);
@@ -95,6 +98,7 @@ export default function CalibrationWizard({
   const jogHeld = useRef<JogDelta | null>(null);
   const jogPumpActive = useRef(false);
   const jogRequestCount = useRef(0);
+  const pendingJog = useRef<{ cancelled: boolean } | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previousOpen = useRef(false);
@@ -130,10 +134,16 @@ export default function CalibrationWizard({
   const homing = isGantryHoming(status);
   const alarmRecoveryMessage = alarmPrompt ?? (
     isAlarm
-      ? `${status} - controls are locked until limit recovery or manual reset clears the controller.`
+      ? status
       : null
   );
   const homeRequired = /home required/i.test(alarmRecoveryMessage ?? "");
+  const { context: homeRecoveryContext, error: homeRecoveryError } = useLimitRecoveryContext(open && connected && homeRequired);
+  const externallyRecovered = status === "Home required" && !homeRecoveryError
+    && homeRecoveryContext?.active_limit_axes?.length === 0
+    && /^<?Idle(?:\||>|$)/i.test(homeRecoveryContext.raw_status)
+    && !hasGantryAlarm(homeRecoveryContext.raw_status);
+  const canHomeAfterRecovery = externallyRecovered || (recoveryHomeAvailable && !!position && isVerifiedIdle(position));
   const normalizedOutput = outputFile.trim() || defaultOutputFilename(filename);
   const selectedReference = referenceInstrument || contactInstruments[0] || "";
   const selectedLowest = lowestInstrument || contactInstruments[0] || "";
@@ -174,7 +184,7 @@ export default function CalibrationWizard({
   const readyForSave = isMulti
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
-  const controlsLocked = busy || homing || !!alarmRecoveryMessage;
+  const controlsLocked = busy || jogInFlight || homing || !!alarmRecoveryMessage;
 
   useEffect(() => {
     const wasOpen = previousOpen.current;
@@ -183,6 +193,7 @@ export default function CalibrationWizard({
     setStep(0);
     setBusy(false);
     setRecoveryBusy(false);
+    setRecoveryHomeAvailable(false);
     setOperation(null);
     setError(null);
     setAlarmPrompt(null);
@@ -234,19 +245,42 @@ export default function CalibrationWizard({
     jogPacer.wake();
   }, [jogPacer]);
 
-  const stopJog = useCallback(() => {
-    if (jogHeld.current === null) return;
+  const stopJog = useCallback((force = false) => {
+    if (jogHeld.current === null && !force) return;
     jogHeld.current = null;
-    // A single click lets its full step finish (predictable stepping); a
-    // held jog cancels so motion stops at release instead of running out
-    // whatever GRBL has queued.
-    if (jogRequestCount.current > 1) {
+    if ((force || jogRequestCount.current > 1) && pendingJog.current && !pendingJog.current.cancelled) {
+      pendingJog.current.cancelled = true;
       autoRecovery.cancel();
       gantryApi.jogCancel().catch(() => undefined);
     }
     jogRequestCount.current = 0;
     jogPacer.wake();
   }, [autoRecovery, jogPacer]);
+
+  const releaseJog = useCallback(() => {
+    if (alarmRecoveryMessage) haltJogLocally();
+    else stopJog();
+  }, [alarmRecoveryMessage, haltJogLocally, stopJog]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") releaseJog();
+    };
+    window.addEventListener("mouseup", releaseJog);
+    window.addEventListener("blur", releaseJog);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("mouseup", releaseJog);
+      window.removeEventListener("blur", releaseJog);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [open, releaseJog]);
+
+  useEffect(() => {
+    if (!open) return;
+    return () => stopJog(true);
+  }, [open, stopJog]);
 
   const invalidateCaptures = useCallback(() => {
     setXyOrigin(null);
@@ -268,6 +302,7 @@ export default function CalibrationWizard({
     invalidateCaptures();
     setAlarmPrompt(status);
     setStatusNote(null);
+    if (!/home required/i.test(status)) setRecoveryHomeAvailable(false);
   }, [connected, haltJogLocally, invalidateCaptures, isAlarm, open, status]);
 
   const reportError = useCallback((err: unknown) => {
@@ -276,6 +311,7 @@ export default function CalibrationWizard({
       haltJogLocally();
       invalidateCaptures();
       setStatusNote(null);
+      setRecoveryHomeAvailable(false);
       setAlarmPrompt(
         "The gantry is in an alarm state. Clear it before continuing.",
       );
@@ -293,6 +329,7 @@ export default function CalibrationWizard({
   const resetFlow = () => {
     autoRecovery.begin();
     setRecoveryBusy(false);
+    setRecoveryHomeAvailable(false);
     setStep(0);
     setOperation(null);
     setError(null);
@@ -316,7 +353,7 @@ export default function CalibrationWizard({
   const reset = async () => {
     if (busy) return;
     autoRecovery.end();
-    stopJog();
+    stopJog(true);
     let restoreError: string | null = null;
     if (connected) {
       try {
@@ -338,7 +375,7 @@ export default function CalibrationWizard({
 
   const close = async () => {
     autoRecovery.end();
-    stopJog();
+    stopJog(!recoveryBusy);
     if (recoveryBusy) {
       try {
         await gantryApi.jogCancel();
@@ -441,21 +478,12 @@ export default function CalibrationWizard({
     if (!autoRecovery.active || autoRecovery.generation !== generation) throw new Error("Calibration closed.");
   };
 
-  const unlockAlarm = () => runAction("Clearing alarm", async (generation) => {
-    const result = await gantryApi.unlock();
-    assertGeneration(generation);
-    if (/home required/i.test(result.status)) {
-      setAlarmPrompt("Home required. Close calibration, clear the gantry path, then Home before continuing.");
-      return;
-    }
-    if (!isVerifiedIdle(result)) throw new Error(`Controller is still blocked: ${result.status}`);
-    setAlarmPrompt(null);
-    setStatusNote("Alarm cleared.");
-  });
-
   const jogBlocking = async (delta: JogDelta, timeout_s: number, generation: number) => {
     const id = autoRecovery.issueJogId(generation);
     if (!id) throw new Error("Calibration closed.");
+    const request = { cancelled: false };
+    pendingJog.current = request;
+    setJogInFlight(true);
     try {
       await gantryApi.jogBlocking(delta.x, delta.y, delta.z, timeout_s, id);
       assertGeneration(generation);
@@ -465,6 +493,11 @@ export default function CalibrationWizard({
         if (!looksLikeAlarm(errorMessage(failure))) autoRecovery.cancel();
       }
       throw failure;
+    } finally {
+      if (pendingJog.current === request) {
+        pendingJog.current = null;
+        setJogInFlight(false);
+      }
     }
   };
 
@@ -504,6 +537,7 @@ export default function CalibrationWizard({
     if (!isVerifiedIdle(result)) throw new Error(`Homing is unverified: ${result.status}`);
     const homed = requirePosition(result);
     setAlarmPrompt(null);
+    setRecoveryHomeAvailable(false);
     setCalibrationHome(homed);
     setStatusNote("Homed.");
     setStep(2);
@@ -699,9 +733,17 @@ export default function CalibrationWizard({
     if (!open || !connected || busy || homing || alarmRecoveryMessage) return false;
     const id = autoRecovery.issueJogId(generation);
     if (!id) return false;
+    const request = { cancelled: false };
+    pendingJog.current = request;
+    setJogInFlight(true);
     jogRequestCount.current += 1;
     try {
-      await gantryApi.jog(x, y, z, id);
+      const configuredRates = (["x", "y", "z"] as const).filter((axis) => ({ x, y, z })[axis] !== 0)
+        .map((axis) => config?.grbl_settings?.[`max_rate_${axis}`])
+        .filter((rate): rate is number => typeof rate === "number" && Number.isFinite(rate) && rate > 0);
+      const rate = Math.min(2000, ...configuredRates);
+      const timeout = Math.max(15, Math.hypot(x, y, z) * 60 / rate + 5);
+      await gantryApi.jogBlocking(x, y, z, timeout, id);
       return autoRecovery.active && autoRecovery.generation === generation;
     } catch (err) {
       if (!autoRecovery.active || autoRecovery.generation !== generation) return false;
@@ -709,8 +751,13 @@ export default function CalibrationWizard({
       if (!looksLikeAlarm(errorMessage(err))) autoRecovery.cancel();
       reportError(err);
       return false;
+    } finally {
+      if (pendingJog.current === request) {
+        pendingJog.current = null;
+        setJogInFlight(false);
+      }
     }
-  }, [alarmRecoveryMessage, autoRecovery, busy, connected, homing, invalidateCaptures, open, reportError]);
+  }, [alarmRecoveryMessage, autoRecovery, busy, config?.grbl_settings, connected, homing, invalidateCaptures, open, reportError]);
 
   // The held-jog pump reads jog through a ref so an in-flight hold always
   // uses the latest guards (alarm/busy state) instead of a stale closure.
@@ -723,8 +770,9 @@ export default function CalibrationWizard({
     if (busy || homing || alarmRecoveryMessage) return;
     const generation = autoRecovery.generation;
     const heldBefore = jogHeld.current !== null;
-    jogHeld.current = { x, y, z };
-    if (heldBefore && jogPumpActive.current) {
+    if (jogPumpActive.current) {
+      if (!heldBefore) return;
+      jogHeld.current = { x, y, z };
       // Direction change mid-hold: hand the new delta to the pump instead
       // of firing immediately — an immediate send would repeat at the
       // previous segment's pace, and with soft limits off during
@@ -734,13 +782,9 @@ export default function CalibrationWizard({
       jogPacer.wake();
       return;
     }
-    if (!jogPumpActive.current) {
-      jogRequestCount.current = 0;
-    }
-    // The first jog of a distinct press always sends immediately — a click
-    // must never wait behind a previous press's pacing.
+    jogHeld.current = { x, y, z };
+    jogRequestCount.current = 0;
     const first = jogRef.current(x, y, z, generation);
-    if (jogPumpActive.current) return;
     jogPumpActive.current = true;
     const pump = async () => {
       try {
@@ -873,22 +917,31 @@ export default function CalibrationWizard({
                 <span style={alarmTitleStyle}>GANTRY ALARM</span>
                 <span>{alarmRecoveryMessage}</span>
                 {(!homeRequired || recoveryBusy) && <LimitRecoveryControls
+                  automaticOnly
                   connected={connected} disabled={busy || homing}
-                  onStart={haltJogLocally}
+                  onStart={() => {
+                    haltJogLocally();
+                    if (pendingJog.current) pendingJog.current.cancelled = true;
+                    setError(null);
+                  }}
                   autoRecovery={autoRecovery}
                   onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value); }}
-                  onRecovered={(result) => {
-                    setAlarmPrompt("Home required. Close calibration, clear the gantry path, then Home before continuing.");
-                    setStatusNote(result.mode === "manual" ? "Manual pull-off complete." : "Pull-off complete.");
+                  onRecovered={() => {
+                    autoRecovery.cancel();
+                    invalidateCaptures();
+                    setError(null);
+                    setRecoveryHomeAvailable(true);
+                    setAlarmPrompt("Home required. Clear the gantry path before homing.");
+                    setStatusNote("Pull-off complete.");
                   }}
-                  onError={setError}
+                  onError={(message) => { autoRecovery.cancel(); setError(message); }}
                 />}
-                {!homeRequired && <button
-                  onClick={unlockAlarm}
-                  disabled={busy}
-                  style={buttonStateStyle(alarmButtonStyle, busy)}
+                {canHomeAfterRecovery && <button
+                  onClick={homeForCalibration}
+                  disabled={busy || homing || !connected || (isAlarm && !/home required/i.test(status))}
+                  style={buttonStateStyle(alarmButtonStyle, busy || homing || !connected || (isAlarm && !/home required/i.test(status)))}
                 >
-                  Unlock alarm
+                  Home and restart calibration
                 </button>}
               </div>
             )}
@@ -1050,10 +1103,10 @@ export default function CalibrationWizard({
                   zStep={zStep}
                   setXyStep={setXyStep}
                   setZStep={setZStep}
-                  disabled={!connected || controlsLocked}
+                  disabled={!connected || busy || homing || !!alarmRecoveryMessage}
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
-                  onStopJog={stopJog}
+                  onStopJog={releaseJog}
                   xy={xy}
                   z={z}
                   stepInvalid={stepInvalid}
@@ -1092,10 +1145,10 @@ export default function CalibrationWizard({
                   zStep={zStep}
                   setXyStep={setXyStep}
                   setZStep={setZStep}
-                  disabled={!connected || controlsLocked}
+                  disabled={!connected || busy || homing || !!alarmRecoveryMessage}
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
-                  onStopJog={stopJog}
+                  onStopJog={releaseJog}
                   xy={xy}
                   z={z}
                   stepInvalid={stepInvalid}
@@ -1188,10 +1241,10 @@ export default function CalibrationWizard({
                   zStep={zStep}
                   setXyStep={setXyStep}
                   setZStep={setZStep}
-                  disabled={!connected || controlsLocked}
+                  disabled={!connected || busy || homing || !!alarmRecoveryMessage}
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
-                  onStopJog={stopJog}
+                  onStopJog={releaseJog}
                   xy={xy}
                   z={z}
                   stepInvalid={stepInvalid}
@@ -1318,10 +1371,10 @@ export default function CalibrationWizard({
                       zStep={zStep}
                       setXyStep={setXyStep}
                       setZStep={setZStep}
-                      disabled={!connected || controlsLocked}
+                      disabled={!connected || busy || homing || !!alarmRecoveryMessage}
                       alarmed={!!alarmRecoveryMessage}
                       onStartJog={startJog}
-                      onStopJog={stopJog}
+                      onStopJog={releaseJog}
                       xy={xy}
                       z={z}
                       stepInvalid={stepInvalid}
@@ -1409,6 +1462,7 @@ function JogPanel({
       if (!jogLocked) onStartJog(x, y, dz);
     },
     onTouchEnd: onStopJog,
+    onTouchCancel: onStopJog,
   });
 
   return (

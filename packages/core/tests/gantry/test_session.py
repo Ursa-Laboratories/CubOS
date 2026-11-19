@@ -2440,3 +2440,41 @@ def test_active_limit_before_any_healthy_idle_keeps_accepted_auto_ownership(tmp_
     context = session.limit_recovery_context()
     assert context.failed_jog_id == "active-step"
     assert context.eligible
+
+
+def test_z_pull_off_then_prepare_origin_rehomes_and_restores_usable_calibration(tmp_path):
+    class RecoverableZGantry(FakeGantry):
+        def reset_and_unlock(self):
+            super().reset_and_unlock()
+            self.status = "<Idle|Pn:Z>"
+
+        def jog_for_limit_recovery(self, *, check_cancelled=None, **kwargs):
+            super().jog_for_limit_recovery(check_cancelled=check_cancelled, **kwargs)
+            self.status = "Idle"
+
+        def home(self):
+            super().home()
+            self.status = "Idle"
+            self.coords = {"x": 300.0, "y": 200.0, "z": 80.0}
+
+    session = GantrySession(gantry_factory=RecoverableZGantry, sleep=lambda _: None)
+    session.connect(_write_gantry(tmp_path), filename="gantry.yaml")
+    fake = FakeGantry.instances[-1]
+    session.jog(z=-1, jog_id="down-to-z-limit")
+    fake.status = "<Alarm|Pn:Z>"
+    session.position()
+    result, _ = session.recover_calibration_limit(z=-1, jog_id="down-to-z-limit")
+    assert result.final_status == "Idle"
+    assert session.position().status == "Home required"
+    with pytest.raises(CalibrationBlockedError):
+        session.jog(z=1)
+    session._calibration_frame_unverified = True
+    snapshot = session.prepare_calibration_origin()
+    assert snapshot.status == "Idle"
+    assert snapshot.work_z == 80.0
+    assert not session._position_reference_untrusted
+    assert session.calibration_active
+    assert session._calibration_jog_bypass_working_volume
+    assert sum(name == "home" for name, _ in fake.calls) == 1
+    assert sum(name == "reset_and_unlock" for name, _ in fake.calls) == 1
+    session.jog(z=-1)

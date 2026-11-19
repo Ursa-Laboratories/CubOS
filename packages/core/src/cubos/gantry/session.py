@@ -85,6 +85,10 @@ class GantrySessionError(Exception):
     """Base class for persistent gantry-session failures."""
 
 
+class GantryJogCancelledError(GantrySessionError):
+    """A jog was cancelled without completing its requested displacement."""
+
+
 class GantryNotConnectedError(GantrySessionError):
     """Raised when a session operation requires a connected gantry."""
 
@@ -505,7 +509,14 @@ class GantrySession:
         generation = self._jog_cancel_generation
         with self._lock:
             if generation != self._jog_cancel_generation:
+                if jog_id is not None and self._calibration_jog_bypass_working_volume:
+                    raise GantryJogCancelledError("Calibration jog was cancelled before it started.")
                 return self._position_from_cache_with_status(self._extract_status())
+            if jog_id is not None and self._calibration_jog_bypass_working_volume:
+                return self._calibration_jog_blocking_locked(
+                    x=x, y=y, z=z, feed_rate=feed_rate, timeout_s=timeout_s,
+                    jog_id=jog_id, generation=generation,
+                )
             self._validate_jog_target_locked(x=x, y=y, z=z)
             accepted = False
             try:
@@ -531,6 +542,107 @@ class GantrySession:
                     ) from exc
                 raise
         return self.position()
+
+    def _calibration_jog_blocking_locked(
+        self, *, x: float, y: float, z: float, feed_rate: float,
+        timeout_s: float, jog_id: str, generation: int,
+    ) -> GantryPositionSnapshot:
+        self._validate_jog_target_locked(x=x, y=y, z=z)
+        if not math.isfinite(timeout_s) or timeout_s <= 0:
+            raise ValueError("Calibration jog timeout must be finite and positive.")
+        if not math.isfinite(feed_rate) or feed_rate <= 0:
+            raise ValueError("Calibration jog feed rate must be finite and positive.")
+        delta = {axis: round(float(value), 3) for axis, value in (("x", x), ("y", y), ("z", z))}
+        if not any(delta.values()):
+            raise ValueError("Calibration jog must move at least 0.001 mm.")
+        gantry = self._require_connected()
+        accepted = False
+        attempted = False
+
+        def check_cancelled() -> None:
+            if generation != self._jog_cancel_generation:
+                raise GantryJogCancelledError("Calibration jog was cancelled before completion.")
+
+        def read_position() -> tuple[dict[str, Any], str, dict[str, float]]:
+            check_cancelled()
+            info = gantry.get_calibration_position_info()
+            status = str(info.get("raw_status", info.get("status", "Unknown")))
+            if looks_like_limit_alarm(status):
+                raise GantryAlarmError(f"Calibration jog controller fault: {status}")
+            check_cancelled()
+            work_pos = info.get("work_pos")
+            if not isinstance(work_pos, dict) or not all(
+                axis in work_pos and math.isfinite(float(work_pos[axis]))
+                for axis in ("x", "y", "z")
+            ):
+                raise GantrySessionError("Calibration jog requires fresh finite work coordinates.")
+            return info, status, work_pos
+
+        try:
+            initial_info, status, start = read_position()
+            if not re.match(r"^<?idle(?:[|>]|$)", status, re.IGNORECASE):
+                raise GantrySessionError("Calibration jog requires verified Idle before the next step.")
+            self._clear_jog_history_locked()
+            target = {axis: start[axis] + delta[axis] for axis in delta}
+            steps = initial_info.get("step_mm", {})
+            if any(delta[axis] and abs(delta[axis]) < steps.get(axis, 0) / 2 for axis in delta):
+                raise ValueError("Calibration jog is smaller than the controller's step resolution.")
+            tolerance = {axis: 0.00101 + steps.get(axis, 0) / 2 for axis in delta}
+            check_cancelled()
+            attempted = True
+            observed_fault = gantry.jog_for_calibration(
+                **delta, feed_rate=feed_rate, check_cancelled=check_cancelled,
+            )
+            self._record_accepted_jog_locked(delta, jog_id, generation)
+            accepted = True
+            if observed_fault:
+                raise GantryAlarmError(f"Acknowledged calibration jog reported {observed_fault}")
+            deadline = time.monotonic() + timeout_s
+            while time.monotonic() < deadline:
+                info, status, work_pos = read_position()
+                endpoint_reached = all(
+                    abs(float(work_pos[axis]) - target[axis]) <= tolerance[axis] for axis in target
+                ) and all(
+                    (float(work_pos[axis]) - start[axis]) * delta[axis] > 0
+                    for axis in delta if delta[axis]
+                )
+                if re.match(r"^<?idle(?:[|>]|$)", status, re.IGNORECASE) and endpoint_reached:
+                    return self._read_position_locked(info=info)
+                if not re.match(r"^<?(?:idle|jog|run)(?:[|>]|$)", status, re.IGNORECASE):
+                    raise GantrySessionError(f"Calibration jog completion is unverified: {status}")
+                self._sleep(0.1)
+            raise GantrySessionError("Timed out verifying calibration jog completion; Home required.")
+        except Exception as exc:
+            if generation != self._jog_cancel_generation and not self._looks_like_alarm_error(exc):
+                try:
+                    info = gantry.get_calibration_position_info()
+                    status = str(info.get("raw_status", info.get("status", "Unknown")))
+                    pos = info.get("work_pos")
+                    if re.match(r"^<?idle(?:[|>]|$)", status, re.IGNORECASE) and not looks_like_limit_alarm(status) and isinstance(pos, dict) and all(
+                        axis in pos and math.isfinite(float(pos[axis])) for axis in delta
+                    ):
+                        self._clear_jog_history_locked()
+                        self._read_position_locked(info=info)
+                        raise GantryJogCancelledError("Calibration jog was cancelled before completion.") from exc
+                except GantryJogCancelledError:
+                    raise
+                except MillConnectionError:
+                    self._invalidate_jog_reference_locked()
+                    raise
+                except Exception:
+                    self.logger.debug("Cancelled calibration jog position could not be verified", exc_info=True)
+                self._invalidate_jog_reference_locked()
+            if self._looks_like_alarm_error(exc):
+                if not accepted:
+                    self._invalidate_jog_reference_locked()
+                self._latch_alarm_locked(self._alarm_status_from_error(exc))
+                raise GantryAlarmError(f"Calibration jog stopped at a controller fault: {exc}") from exc
+            if not attempted and isinstance(exc, (ValueError, GantrySessionError)):
+                raise
+            self._invalidate_jog_reference_locked()
+            if (accepted or isinstance(exc, JogAcceptanceUnknownError)) and not isinstance(exc, MillConnectionError):
+                gantry.jog_cancel()
+            raise
 
     def set_work_coordinates(
         self,

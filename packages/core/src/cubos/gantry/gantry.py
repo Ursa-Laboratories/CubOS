@@ -286,6 +286,41 @@ class Gantry:
             self.logger.error("Jog error: %s", exc)
             raise
 
+    def jog_for_calibration(
+        self, *, x: float = 0, y: float = 0, z: float = 0, feed_rate: float = 2000,
+        check_cancelled: Callable[[], None],
+    ) -> str | None:
+        """Await this calibration step's ACK before monitoring completion."""
+        if self._offline:
+            check_cancelled()
+            self.jog(x=x, y=y, z=z, feed_rate=feed_rate)
+            return
+        assert self._mill is not None
+        return self._mill.jog(x=x, y=y, z=z, feed_rate=feed_rate, calibration=True, check_cancelled=check_cancelled)
+
+    def get_calibration_position_info(self) -> Dict[str, Any]:
+        """Read one fresh WPos frame, preserving any queued fault."""
+        if self._offline:
+            return self.get_position_info()
+        assert self._mill is not None
+        raw_status = self._mill.current_status(calibration=True)
+        match = re.search(r"(?:^|\|)WPos:([^|>]+)", raw_status)
+        work_pos = None
+        if match:
+            values = [float(value) for value in match.group(1).split(",")[:3]]
+            if len(values) == 3 and all(math.isfinite(value) for value in values):
+                work_pos = dict(zip(("x", "y", "z"), values))
+        step_mm = {}
+        for axis, code in (("x", "$100"), ("y", "$101"), ("z", "$102")):
+            try:
+                steps = float(self._mill.config[code])
+            except (KeyError, TypeError, ValueError):
+                continue
+            if math.isfinite(steps) and steps > 0:
+                step_mm[axis] = 1.0 / steps
+        return {"coords": work_pos, "work_pos": work_pos, "raw_status": raw_status, "step_mm": step_mm,
+                "status": (_STATUS_RE.search(raw_status).group(1) if _STATUS_RE.search(raw_status) else raw_status)}
+
     def jog_for_limit_recovery(
         self, x: float = 0, y: float = 0, z: float = 0, feed_rate: float = 100,
         check_cancelled: Callable[[], None] | None = None,

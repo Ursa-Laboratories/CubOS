@@ -102,44 +102,29 @@ describe("CalibrationWizard alarm recovery", () => {
     expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Home");
   });
 
-  it("shows the power-cycle instruction when recovery reports connection loss", async () => {
+  it("keeps an unknown hard-limit direction blocked without manual recovery or unlock", async () => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
-      const url = new URL(typeof input === "string" ? input : (input as Request).url, "http://localhost");
-      if (url.pathname === "/api/v1/gantry/jog" && init?.method === "POST") {
-        return new Response(JSON.stringify({ detail: "ALARM:1" }), {
-          status: 409,
-          headers: { "Content-Type": "application/json" },
-        });
-      }
-      if (url.pathname === "/api/v1/gantry/unlock" && init?.method === "POST") {
-        return new Response(
-          JSON.stringify({
-            detail:
-              "Controller connection lost during limit recovery. Power-cycle the controller, re-seat the USB cable, then Disconnect and Connect again before continuing.",
-          }),
-          { status: 503, headers: { "Content-Type": "application/json" } },
-        );
-      }
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input);
+      if (path.endsWith("/jog-blocking")) return new Response("ALARM:1", { status: 409 });
+      if (path.endsWith("/recovery-context")) return jsonResponse({
+        raw_status: "ALARM:1; Pn:Z", active_limit_axes: ["z"], eligible: false,
+        blocked_reason: "Original jog unknown.", failed_jog_delta: null,
+        pull_off_delta: null, manual_available: true,
+      });
       return jsonResponse(position());
     });
     vi.stubGlobal("fetch", fetchMock);
-
-    render(
-      <CalibrationWizard
-        open
-        onClose={() => undefined}
-        gantry={{ filename: "cubos.yaml", config: gantryConfig() }}
-        position={position()}
-        onSaveCalibrated={async () => undefined}
-      />,
-    );
-
-    const zDown = await advanceToOriginJog(user);
-    await user.click(zDown);
-
-    await user.click(await screen.findByRole("button", { name: "Unlock alarm" }));
-    expect(await screen.findByText(/Power-cycle the controller, re-seat the USB cable/)).toBeInTheDocument();
+    render(<CalibrationWizard open onClose={() => undefined}
+      gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position()}
+      onSaveCalibrated={async () => undefined} />);
+    await user.click(await advanceToOriginJog(user));
+    expect(await screen.findByText("Original jog unknown.")).toBeInTheDocument();
+    expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Unlock alarm" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set origin and continue" })).toBeDisabled();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
   });
 
   it("closes even when restoring soft limits fails (dead controller link)", async () => {
@@ -222,7 +207,7 @@ describe("CalibrationWizard alarm recovery", () => {
 
   it.each(["ALARM:1 hard limit", "ALARM:3", "error:9 Reset to continue", "[MSG:Check Limits]"])("locks controls without automatic recovery after %s", async (message) => {
     const user = userEvent.setup();
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/jog")
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/jog-blocking")
       ? new Response(message, { status: 409 }) : jsonResponse(position()));
     vi.stubGlobal("fetch", fetchMock);
     render(<CalibrationWizard open onClose={() => undefined}
@@ -284,11 +269,14 @@ describe("CalibrationWizard homing notice", () => {
     vi.unstubAllGlobals();
   });
 
-  async function homeWizard() {
+  async function homeWizard(multi = false) {
     vi.useFakeTimers();
-    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(position())));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).endsWith("/home-and-center")
+      ? jsonResponse({ xy_bounds: { x: 100, y: 100, z: 20 }, position: { x: 50, y: 50, z: 20 } }) : jsonResponse(position())));
+    const config = gantryConfig();
+    if (multi) config.instruments.camera = { type: "camera", vendor: "usb", offset_x: 0, offset_y: 0, depth: 0 };
     const view = (status = "Idle") => <CalibrationWizard open onClose={() => undefined}
-      gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position(status)}
+      gantry={{ filename: "cubos.yaml", config }} position={position(status)}
       onSaveCalibrated={async () => undefined} />;
     const result = render(view());
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
@@ -306,15 +294,13 @@ describe("CalibrationWizard homing notice", () => {
   });
 
   it("preserves replacement messages and new faults past the old notice deadline", async () => {
-    const { view, rerender } = await homeWizard();
+    const { view, rerender } = await homeWizard(true);
     act(() => vi.advanceTimersByTime(1000));
-    rerender(view("ALARM:3; Pn:Y"));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Set XY origin and continue" })));
     expect(screen.queryByText("Homed.")).not.toBeInTheDocument();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Unlock alarm" })));
-    rerender(view());
-    expect(screen.getByText("Alarm cleared.")).toBeInTheDocument();
+    expect(screen.getByText("XY origin set.")).toBeInTheDocument();
     act(() => vi.advanceTimersByTime(4000));
-    expect(screen.getByText("Alarm cleared.")).toBeInTheDocument();
+    expect(screen.getByText("XY origin set.")).toBeInTheDocument();
     rerender(view("ALARM:3; Pn:Z"));
     act(() => vi.advanceTimersByTime(5000));
     expect(screen.getByText("GANTRY ALARM")).toBeInTheDocument();

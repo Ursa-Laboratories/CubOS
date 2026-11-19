@@ -218,10 +218,13 @@ cached coordinates are not a valid calibration reference.
 An eligible fault from an accepted jog in the open calibration wizard triggers
 one automatic backoff. CubOS verifies the wizard's jog ID and fresh matching
 limit pin before moving. Old alarms, other-client jogs, uncertain acceptance,
-and missing or conflicting pin reports require explicit recovery. Stop or
-closing calibration cancels the attempt; failed attempts never retry on a poll.
-Captured calibration points are discarded after a fault. Successful backoff
-still requires Home and new captures; it does not resume the held jog.
+and missing or conflicting pin reports leave the gantry stopped. Check the
+machine if CubOS cannot verify which direction will release the switch.
+Stopping recovery or closing calibration cancels the attempt.
+
+In full gantry calibration, CubOS discards the interrupted captures. After it
+verifies that the switch has released, clear the motion path and select
+**Home and restart calibration** in the wizard. Record the references again after homing.
 
 When reconnecting with a switch pressed, CubOS can stay connected in a faulted
 recovery-only state if it verifies a controller fault report. Work coordinates
@@ -245,7 +248,7 @@ It attempts one 5 mm reverse jog at 100 mm/min after one reset/unlock sequence,
 then verifies Idle, no active limit pins, and fresh finite work coordinates.
 Later rejected jogs cannot change the recovery direction.
 
-If the original direction is unknown, **Manual recovery** shows the verified
+In standalone Gantry Control, if the original direction is unknown, **Manual recovery** shows the verified
 active axis. Explicitly choose the direction away from the switch and confirm
 the path is clear. It performs exactly one 1 mm jog at 100 mm/min. It
 does not infer the direction or pretend that an original failed jog was known.

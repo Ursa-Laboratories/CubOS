@@ -499,7 +499,8 @@ class Mill:
 
     def jog(self, x: float = 0, y: float = 0, z: float = 0,
             feed_rate: float = DEFAULT_FEED_RATE, *, recovery_axis: str | None = None,
-            check_cancelled: Callable[[], None] | None = None) -> None:
+            check_cancelled: Callable[[], None] | None = None,
+            calibration: bool = False) -> str | None:
         """Send a GRBL jog command ($J=) for immediate, cancellable movement.
 
         Unlike G-code moves, jog commands are non-blocking and can be
@@ -521,6 +522,12 @@ class Mill:
             parts.append(f"Z{z:.3f}")
         if not parts:
             return
+        confirmed_ack = recovery_axis is not None or calibration
+        courtesy_seen = False
+        if calibration:
+            if check_cancelled is not None:
+                check_cancelled()
+            self._drain_calibration_jog_input()
         if recovery_axis is not None:
             delta = {"x": x, "y": y, "z": z}
             if (
@@ -535,18 +542,19 @@ class Mill:
             self._drain_recovery_jog_input(recovery_axis)
         cmd = f"$J=G91 {' '.join(parts)} F{feed_rate}"
         self.logger.debug("Jog command: %s", cmd)
-        if recovery_axis is not None and check_cancelled is not None:
+        if confirmed_ack and check_cancelled is not None:
             check_cancelled()
         self._write_serial((cmd + "\n").encode("ascii"))
-        deadline = time.monotonic() + 2.0 if recovery_axis is not None else None
-        for _ in range(32 if recovery_axis is not None else 1):
-            if recovery_axis is not None and check_cancelled is not None:
+        deadline = time.monotonic() + 2.0 if confirmed_ack else None
+        for _ in range(32 if confirmed_ack else 1):
+            if confirmed_ack and check_cancelled is not None:
                 check_cancelled()
             if deadline is not None and time.monotonic() >= deadline:
                 break
             response = self._read_serial().strip().lower()
-            if recovery_axis is not None and response == "[msg:check limits]":
-                self.logger.info("Guarded recovery jog courtesy: %s", response)
+            if confirmed_ack and response == "[msg:check limits]":
+                courtesy_seen = True
+                self.logger.info("Confirmed jog courtesy: %s", response)
                 continue
             if "error" in response or "alarm" in response or "check limits" in response:
                 self.logger.error("Jog error: %s", response)
@@ -554,11 +562,40 @@ class Mill:
             if response == "ok":
                 if recovery_axis is not None:
                     self.logger.info("Guarded recovery jog acknowledged with ok")
-                return
+                return "[MSG:Check Limits]" if calibration and courtesy_seen else None
             raise JogAcceptanceUnknownError(
                 f"Jog acceptance is unknown; expected ok, received {response!r}."
             )
-        raise JogAcceptanceUnknownError("Guarded recovery jog did not receive its own ok within the response limits.")
+        raise JogAcceptanceUnknownError("Confirmed jog did not receive its own ok within the response limits.")
+
+    def _drain_calibration_jog_input(self) -> None:
+        """Fence old ACKs/status without discarding queued controller faults."""
+        self._require_open_serial()
+        try:
+            waiting = int(self.ser_mill.in_waiting)
+            if waiting < 0 or waiting > 4096:
+                raise CommandExecutionError("Calibration input exceeds the validation byte limit.")
+            consumed = 0
+            deadline = time.monotonic() + 2.0
+            for _ in range(128):
+                if consumed >= waiting:
+                    return
+                if time.monotonic() >= deadline:
+                    break
+                raw = self.ser_mill.readline()
+                consumed += len(raw)
+                if not raw.endswith(b"\n") or consumed > 4096:
+                    raise CommandExecutionError("Calibration input is incomplete or exceeds the byte limit.")
+                line = raw.decode("ascii", errors="replace").strip()
+                if not line or line.lower() == "ok":
+                    continue
+                if re.match(r"^<(?:idle|jog)(?:\||>)", line, re.IGNORECASE) and line.endswith(">") and not re.search(r"Pn:[^|>]*[XYZ]", line, re.IGNORECASE):
+                    continue
+                self.last_status = line
+                raise StatusReturnError(f"Unresolved calibration input: {line}")
+            raise CommandExecutionError("Calibration input could not be validated within the response limits.")
+        except (serial.SerialException, OSError) as exc:
+            raise MillConnectionError(f"Calibration input validation failed: {exc}") from exc
 
     def _drain_recovery_jog_input(self, axis: str) -> None:
         """Validate buffered notices before the recovery command acknowledgement boundary."""
@@ -761,7 +798,7 @@ class Mill:
             status = self.current_status()
         return status
 
-    def current_status(self, *, recovery: bool = False) -> str:
+    def current_status(self, *, recovery: bool = False, calibration: bool = False) -> str:
         """Request a controller report, spacing repeated queries at 5 Hz."""
         self._require_open_serial()
         guarded_reset_context = None
@@ -770,6 +807,8 @@ class Mill:
                 delay = STATUS_POLL_INTERVAL - (time.monotonic() - self._last_status_query_at)
                 if delay > 0:
                     time.sleep(delay)
+            if calibration:
+                self._drain_calibration_jog_input()
             if recovery:
                 guarded_reset_context = self._discard_preexisting_input(guarded_reset_context=guarded_reset_context)
             startup_complete_at_query = bool(
@@ -799,6 +838,8 @@ class Mill:
                     return status
                 if guarded_reset_context is not None:
                     self._record_guarded_reset_notice(status, *guarded_reset_context)
+                elif calibration and status.lower() != "ok":
+                    raise StatusReturnError(f"Unexpected calibration status response: {status}")
                 # Acknowledgments and informational messages are not motion completion.
         self.logger.error("Failed to get status from the mill")
         raise StatusResponseTimeoutError("Failed to get status from the mill")

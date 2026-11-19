@@ -37,6 +37,7 @@ function network() {
     pendingRecovery: null as Promise<Response> | null,
     pendingHome: null as Promise<Response> | null,
     pendingPosition: null as Promise<Response> | null,
+    pendingJog: null as Promise<Response> | null,
     readPosition: position(),
     contextOverrides: {} as Partial<LimitRecoveryContext>,
     contextReads: 0,
@@ -50,6 +51,7 @@ function network() {
       state.posts.push({ path, body });
       if (path.endsWith("/jog") || path.endsWith("/jog-blocking")) {
         state.id = typeof body.jog_id === "string" ? body.jog_id : null;
+        if (state.pendingJog) return state.pendingJog;
         return state.jogStatus === 200 ? json(position()) : json({ detail: state.jogMessage }, state.jogStatus);
       }
       if (path.endsWith("/recover-limit")) return state.pendingRecovery ?? json(state.recoveryStatus === 200 ? recoveryResult() : { detail: "Recovery failed." }, state.recoveryStatus);
@@ -86,6 +88,14 @@ async function enter(mode: Mode, user: ReturnType<typeof userEvent.setup>) {
     await user.click(screen.getByRole("button", { name: "Continue" }));
   }
 }
+const jogs = (state: ReturnType<typeof network>) => state.posts.filter((entry) => /\/jog(?:-blocking)?$/.test(entry.path));
+const recoveryFallback = async (mode: Mode) => {
+  await screen.findByText(mode === "gantry" ? "Automatic recovery unavailable." : "Manual recovery", {}, { timeout: 2000 });
+  if (mode === "gantry") {
+    expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pull off|Unlock alarm|Home and restart/ })).not.toBeInTheDocument();
+  }
+};
 const recoveries = (state: ReturnType<typeof network>) => state.posts.filter((entry) => entry.path.endsWith("/recover-limit"));
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
@@ -115,7 +125,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     rerender(view(mode, "ALARM:1; Pn:Y"));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1100)); });
     expect(recoveries(state)).toHaveLength(1);
-    expect(state.posts.filter((entry) => entry.path.endsWith("/jog"))).toHaveLength(1);
+    expect(jogs(state)).toHaveLength(1);
   });
 
   it("halts a repeated held jog locally before automatic recovery without revoking its ID", async () => {
@@ -124,12 +134,12 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     const { rerender } = render(view(mode, "Idle"));
     await enter(mode, user);
     fireEvent.mouseDown(screen.getByTitle("Y+"));
-    await waitFor(() => expect(state.posts.filter((entry) => entry.path.endsWith("/jog")).length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(jogs(state).length).toBeGreaterThanOrEqual(2));
     rerender(view(mode, "ALARM:1; Pn:Y"));
     await waitFor(() => expect(recoveries(state)).toHaveLength(1));
-    const count = state.posts.filter((entry) => entry.path.endsWith("/jog")).length;
+    const count = jogs(state).length;
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 350)); });
-    expect(state.posts.filter((entry) => entry.path.endsWith("/jog"))).toHaveLength(count);
+    expect(jogs(state)).toHaveLength(count);
     expect(state.posts.some((entry) => entry.path.endsWith("/jog-cancel"))).toBe(false);
   });
 
@@ -152,7 +162,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
   it("does not recover an alarm already present when opening", async () => {
     const state = network(); state.idOverride = "old-wizard-jog";
     render(view(mode, "ALARM:1; Pn:Y"));
-    await screen.findByText("Manual recovery");
+    await recoveryFallback(mode);
     expect(recoveries(state)).toHaveLength(0);
   });
 
@@ -165,7 +175,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     await screen.findByText("Recovery failed.");
     rerender(view(mode, "Home required"));
     rerender(view(mode, "ALARM:1; Pn:Y"));
-    await screen.findByText("Manual recovery");
+    await recoveryFallback(mode);
     expect(recoveries(state)).toHaveLength(1);
   });
 
@@ -193,7 +203,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     expect(state.id).toBeTruthy();
     rerender(view(mode, "Idle", false));
     rerender(view(mode, "ALARM:1; Pn:Y", true));
-    await screen.findByText("Manual recovery");
+    await recoveryFallback(mode);
     expect(recoveries(state)).toHaveLength(0);
   });
 
@@ -243,7 +253,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     await enter(mode, user);
     await user.click(screen.getByTitle("Y+"));
     rerender(view(mode, "ALARM:1; Pn:Y"));
-    await screen.findByText("Manual recovery");
+    await recoveryFallback(mode);
     expect(recoveries(state)).toHaveLength(0);
   });
 
@@ -255,7 +265,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     await user.click(screen.getByTitle("Y+"));
     rerender(view(mode, "ALARM:1; Pn:Y"));
     await screen.findByText("context unavailable");
-    await screen.findByText("Manual recovery", {}, { timeout: 2000 });
+    await recoveryFallback(mode);
     expect(recoveries(state)).toHaveLength(0);
   });
 
@@ -267,7 +277,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     await user.click(screen.getByTitle("Y+"));
     rerender(view(mode, "Not connected", true, gantry, false));
     rerender(view(mode, "ALARM:1; Pn:Y"));
-    await screen.findByText("Manual recovery");
+    await recoveryFallback(mode);
     expect(recoveries(state)).toHaveLength(0);
   });
 });
@@ -317,4 +327,136 @@ it("invalidates labware captures when its own jog hits a limit", async () => {
   await waitFor(() => expect(recoveries(state)).toHaveLength(1));
   expect(screen.getByRole("button", { name: "Record A1" })).toBeDisabled();
   expect(screen.queryByRole("button", { name: "Record A2" })).not.toBeInTheDocument();
+});
+
+describe("full gantry wizard recovery restart", () => {
+  it("clears the original jog error and requires explicit Home before restarting captures", async () => {
+    const state = network();
+    const user = userEvent.setup();
+    render(view("gantry", "Idle"));
+    await enter("gantry", user);
+    await user.click(screen.getByTitle("Y+"));
+    const home = await screen.findByRole("button", { name: "Home and restart calibration" });
+    expect(screen.queryByText("ALARM:1 hard limit")).not.toBeInTheDocument();
+    expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Unlock alarm" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set origin and continue" })).toBeDisabled();
+    expect(state.posts.filter((entry) => entry.path.endsWith("/prepare-origin"))).toHaveLength(1);
+    await user.click(home);
+    expect(await screen.findByText("Homed.")).toBeInTheDocument();
+    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Reference height");
+    expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument();
+    expect(state.posts.filter((entry) => entry.path.endsWith("/prepare-origin"))).toHaveLength(2);
+  });
+
+  it("ignores a late failed jog response after verified pull-off", async () => {
+    const state = network();
+    const pending = deferred(); state.pendingJog = pending.promise;
+    const user = userEvent.setup();
+    const { rerender } = render(view("gantry", "Idle"));
+    await enter("gantry", user);
+    await user.click(screen.getByTitle("Y+"));
+    rerender(view("gantry", "ALARM:1; Pn:Y"));
+    await screen.findByText("Pull-off complete.");
+    await act(async () => pending.resolve(json({ detail: "Old jog fault." }, 409)));
+    state.contextOverrides = { raw_status: "Idle", active_limit_axes: [], eligible: false, pull_off_delta: null };
+    rerender(view("gantry", "Home required"));
+    expect(screen.queryByText("Old jog fault.")).not.toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: "Home and restart calibration" }, { timeout: 2000 })).toBeEnabled();
+    expect(recoveries(state)).toHaveLength(1);
+  });
+
+  it("blocks Home if a poll becomes unverified or moving after local recovery success", async () => {
+    network();
+    const user = userEvent.setup();
+    const { rerender } = render(view("gantry", "Idle"));
+    await enter("gantry", user);
+    await user.click(screen.getByTitle("Y+"));
+    expect(await screen.findByRole("button", { name: "Home and restart calibration" })).toBeEnabled();
+    for (const status of ["Query failed", "Unknown", "Run"]) {
+      rerender(view("gantry", status));
+      expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+    }
+    rerender(<CalibrationWizard open onClose={() => undefined} gantry={gantry}
+      position={{ ...position(), work_z: null }} onSaveCalibrated={async () => undefined} />);
+    expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+  });
+
+  it("keeps rapid presses single-flight and budgets time for a configured slow axis", async () => {
+    const state = network();
+    const pending = deferred(); state.pendingJog = pending.promise;
+    const slow = { ...gantry, config: { ...gantry.config, grbl_settings: { max_rate_y: 100 } } };
+    const user = userEvent.setup();
+    render(view("gantry", "Idle", true, slow));
+    await enter("gantry", user);
+    fireEvent.change(screen.getByLabelText("XY mm"), { target: { value: "25" } });
+    await user.click(screen.getByTitle("Y+"));
+    await user.click(screen.getByTitle("X+"));
+    expect(jogs(state)).toHaveLength(1);
+    expect(screen.getByRole("button", { name: "Set origin and continue" })).toBeDisabled();
+    expect(jogs(state)[0].path).toMatch(/\/jog-blocking$/);
+    expect(jogs(state)[0].body.timeout_s).toBe(20);
+    await act(async () => pending.resolve(json(position())));
+    state.pendingJog = null; state.jogStatus = 200;
+    await user.click(screen.getByTitle("X+"));
+    expect(jogs(state)).toHaveLength(2);
+  });
+
+  it.each(["close", "reset", "unmount"])("cancels one in-flight click on %s without a duplicate cancel", async (action) => {
+    const state = network();
+    const pending = deferred(); state.pendingJog = pending.promise;
+    const user = userEvent.setup();
+    const { unmount } = render(view("gantry", "Idle"));
+    await enter("gantry", user);
+    await user.click(screen.getByTitle("Y+"));
+    expect(state.posts.some((entry) => entry.path.endsWith("/jog-cancel"))).toBe(false);
+    if (action === "unmount") unmount();
+    else await user.click(screen.getByRole("button", { name: action === "close" ? "Close calibration" : "Reset wizard" }));
+    unmount();
+    expect(state.posts.filter((entry) => entry.path.endsWith("/jog-cancel"))).toHaveLength(1);
+    await act(async () => pending.resolve(json({ detail: "Stopped old jog." }, 409)));
+    expect(recoveries(state)).toHaveLength(0);
+  });
+
+  it("does not let release or key-up cancel automatic recovery, but accepts keyboard Stop", async () => {
+    const state = network(); state.jogStatus = 200;
+    const pending = deferred(); state.pendingRecovery = pending.promise;
+    const user = userEvent.setup();
+    const { rerender } = render(view("gantry", "Idle"));
+    await enter("gantry", user);
+    fireEvent.mouseDown(screen.getByTitle("Y+"));
+    await waitFor(() => expect(jogs(state).length).toBeGreaterThanOrEqual(2));
+    rerender(view("gantry", "ALARM:1; Pn:Y"));
+    const stop = await screen.findByRole("button", { name: "Stop recovery" });
+    fireEvent.mouseUp(window);
+    fireEvent.keyUp(window, { key: "ArrowUp" });
+    expect(state.posts.some((entry) => entry.path.endsWith("/jog-cancel"))).toBe(false);
+    stop.focus();
+    await user.keyboard("{Enter}");
+    expect(state.posts.filter((entry) => entry.path.endsWith("/jog-cancel"))).toHaveLength(1);
+    await act(async () => pending.resolve(json(recoveryResult())));
+    expect(await screen.findByText(/Recovery stopped/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+  });
+
+  it("offers Home for standalone Home required only after fresh clear-pin Idle verification", async () => {
+    const state = network();
+    state.contextOverrides = { raw_status: "<Idle|WPos:0,0,20>", active_limit_axes: [], eligible: false, failed_jog_delta: null, pull_off_delta: null };
+    const user = userEvent.setup();
+    render(view("gantry", "Home required"));
+    await user.click(await screen.findByRole("button", { name: "Home and restart calibration" }));
+    expect(await screen.findByText("Homed.")).toBeInTheDocument();
+    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Reference height");
+    expect(recoveries(state)).toHaveLength(0);
+  });
+
+  it.each(["live-pin", "transport"])("does not offer Home for unverified %s state", async (kind) => {
+    const state = network();
+    if (kind === "transport") state.contextFailures = 1;
+    render(view("gantry", "Home required"));
+    await waitFor(() => expect(state.contextReads).toBe(1));
+    await act(async () => undefined);
+    expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+    expect(state.posts).toHaveLength(0);
+  });
 });
