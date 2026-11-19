@@ -240,6 +240,15 @@ PICUS2_MODELS: dict[str, PipetteConfig] = {
         min_volume=5.0,
         volume_increment_ul=0.1,
     ),
+    # LH-747061
+    "picus2_1ch_300": PipetteConfig(
+        name="picus2_1ch_300",
+        family=PipetteFamily.PICUS2,
+        channels=1,
+        max_volume=300.0,
+        min_volume=10.0,
+        volume_increment_ul=0.2,
+    ),
     # LH-747081
     "picus2_1ch_1000": PipetteConfig(
         name="picus2_1ch_1000",

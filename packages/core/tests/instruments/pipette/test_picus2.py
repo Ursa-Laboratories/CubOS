@@ -140,6 +140,7 @@ class TestPicusModels:
             "picus2_1ch_10",
             "picus2_1ch_1000",
             "picus2_1ch_120",
+            "picus2_1ch_300",
             "picus2_1ch_5000",
             "picus2_8ch_300",
         ]
@@ -164,8 +165,9 @@ class TestPicusModels:
     def test_channel_count(self, model):
         assert PICUS2_MODELS[model].channels == (8 if "8ch" in model else 1)
 
-    def test_8ch_300_model(self):
-        config = PICUS2_MODELS["picus2_8ch_300"]
+    @pytest.mark.parametrize("model", ["picus2_1ch_300", "picus2_8ch_300"])
+    def test_300_ul_model(self, model):
+        config = PICUS2_MODELS[model]
         assert (config.min_volume, config.max_volume) == (10.0, 300.0)
         assert config.volume_increment_ul == 0.2
         assert config.name in SartoriusPicus2Pipette.CONFIG_FIELD_CHOICES["pipette_model"]
@@ -213,8 +215,9 @@ class TestSpeedMapping:
 
 class TestVolumeQuantization:
 
-    def test_8ch_300_bounds_and_increment(self):
-        pip = SartoriusPicus2Pipette(pipette_model="picus2_8ch_300", offline=True)
+    @pytest.mark.parametrize("model", ["picus2_1ch_300", "picus2_8ch_300"])
+    def test_300_ul_bounds_and_increment(self, model):
+        pip = SartoriusPicus2Pipette(pipette_model=model, offline=True)
         assert pip._quantize(10.0) == 10.0
         assert pip._quantize(300.0) == 300.0
         assert pip._quantize(100.09) == 100.0
