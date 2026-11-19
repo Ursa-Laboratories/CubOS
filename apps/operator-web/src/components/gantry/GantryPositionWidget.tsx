@@ -754,7 +754,6 @@ export default function GantryPositionWidget({
                       width: 70,
                       fontSize: 11,
                       padding: "3px 4px",
-                      borderColor: invalid ? theme.color.danger : undefined,
                     }, moveDisabled)}
                   />
                 </label>
