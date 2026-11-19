@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 from cubos.gantry.session import (
     CalibrationBlockedError,
     GantryAlarmError,
+    GantryJogCancelledError,
     GantryNotConnectedError,
     GantryPositionSnapshot,
     GantrySession,
@@ -307,7 +308,7 @@ def _session_http_exception(exc: Exception, *, default_action: str) -> HTTPExcep
     if isinstance(exc, MovementOutOfBoundsError):
         status_code = 409 if _movement_requires_operator_reconnect(exc) else 400
         return HTTPException(status_code, str(exc))
-    if isinstance(exc, GantryAlarmError):
+    if isinstance(exc, (GantryAlarmError, GantryJogCancelledError)):
         return HTTPException(409, str(exc))
     if isinstance(exc, ValueError):
         return HTTPException(400, str(exc))

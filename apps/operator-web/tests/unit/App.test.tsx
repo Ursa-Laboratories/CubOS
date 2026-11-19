@@ -806,7 +806,8 @@ describe("CubOS editor interactions", () => {
     await user.type(blockHeight, "36.25");
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
-    const setOrigin = await screen.findByRole("button", { name: "Set origin and continue" });
+    const setOrigin = await screen.findByRole("button", { name: "Set origin" });
+    await user.click(screen.getByLabelText("Tip attached"));
     expect(setOrigin).toBeInTheDocument();
     await waitFor(() => expect(setOrigin).toBeEnabled());
     expect(screen.queryByRole("button", { name: /Set XY origin/ })).not.toBeInTheDocument();
@@ -880,7 +881,7 @@ describe("CubOS editor interactions", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(await screen.findByText("Enter a calibration reference height before continuing.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Set origin and continue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Set origin" })).not.toBeInTheDocument();
   });
 
   it("shows an error when block height is zero or negative and Continue is clicked", async () => {
@@ -901,7 +902,7 @@ describe("CubOS editor interactions", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
 
     expect(await screen.findByText("Calibration reference height must be greater than 0.")).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Set origin and continue" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Set origin" })).not.toBeInTheDocument();
   });
 
   it("reconnects after saving calibrated output to a different gantry filename", async () => {
@@ -921,7 +922,8 @@ describe("CubOS editor interactions", () => {
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Home gantry" }));
     await user.click(await screen.findByRole("button", { name: "Continue" }));
-    const setOrigin = await screen.findByRole("button", { name: "Set origin and continue" });
+    const setOrigin = await screen.findByRole("button", { name: "Set origin" });
+    await user.click(screen.getByLabelText("Tip attached"));
     await waitFor(() => expect(setOrigin).toBeEnabled());
     await user.click(setOrigin);
     expect(await screen.findByText("Origin set.")).toBeInTheDocument();

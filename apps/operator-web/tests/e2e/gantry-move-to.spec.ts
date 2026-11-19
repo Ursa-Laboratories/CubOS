@@ -22,16 +22,25 @@ test.describe("manual Move To safety", () => {
 
     await page.getByLabel("X (mm)").fill("100");
     await page.getByLabel("Y (mm)").fill("100");
-    await page.getByRole("button", { name: "Go" }).click();
+    await page.getByLabel("Z (mm)").fill("");
+    await expect(page.getByRole("button", { name: "Go" })).toBeDisabled();
+    await page.getByLabel("Z (mm)").press("Enter");
 
     await expect(page.getByText("Enter valid X, Y, and Z coordinates.")).toBeVisible();
     expect(requestsTo(state, "POST", "/gantry/move-to")).toHaveLength(0);
   });
 
-  test("blocks a move when every field is blank", async ({ page }) => {
+  test("starts at zero and blocks a move when every field is cleared", async ({ page }) => {
     const state = await loadConnectedGantry(page);
 
-    await page.getByRole("button", { name: "Go" }).click();
+    for (const axis of ["X", "Y", "Z"]) {
+      const input = page.getByLabel(axis + " (mm)");
+      await expect(input).toHaveValue("0");
+      await expect(input).not.toHaveAttribute("placeholder", /.+/);
+      await input.fill("");
+    }
+    await expect(page.getByText(/^Vol:/)).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Go" })).toBeDisabled();
 
     await expect(page.getByText("Enter valid X, Y, and Z coordinates.")).toBeVisible();
     expect(requestsTo(state, "POST", "/gantry/move-to")).toHaveLength(0);
@@ -59,7 +68,7 @@ test.describe("manual Move To safety", () => {
     await page.getByLabel("X (mm)").fill("301");
     await page.getByLabel("Y (mm)").fill("50");
     await page.getByLabel("Z (mm)").fill("40");
-    await page.getByRole("button", { name: "Go" }).click();
+    await expect(page.getByRole("button", { name: "Go" })).toBeDisabled();
 
     await expect(page.getByText(/Move target outside working volume/)).toBeVisible();
     expect(requestsTo(state, "POST", "/gantry/move-to")).toHaveLength(0);

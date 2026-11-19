@@ -1,8 +1,11 @@
+import type { XYJogStep, ZJogStep } from "./JogStepPresets";
+import JogPanel from "./JogPanel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, TouchEvent } from "react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import { gantryApi } from "../../api/client";
 import * as theme from "../../theme";
 import CameraPreview from "./CameraPreview";
+import CalibrationTipControls from "./CalibrationTipControls";
 import LimitRecoveryControls from "./LimitRecoveryControls";
 import type { FinalizeOriginResponse, GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import {
@@ -16,6 +19,7 @@ import {
 import { createJogPacer, jogPaceMs } from "./jogPacing";
 import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "./gantryAlarm";
 import { useCalibrationAutoRecovery } from "../../hooks/useCalibrationAutoRecovery";
+import { useLimitRecoveryContext } from "../../hooks/useLimitRecoveryContext";
 
 interface Props {
   open: boolean;
@@ -49,7 +53,6 @@ type PendingZReference = {
   lowestInstrument: string;
 };
 
-const MIN_STEP = 0.001;
 const NON_CONTACT_TYPES = new Set(["camera"]);
 const FOLLOW_CAMERA_TYPES = new Set(["lighting"]);
 
@@ -70,11 +73,13 @@ export default function CalibrationWizard({
 }: Props) {
   const autoRecovery = useCalibrationAutoRecovery(open, position?.connected ?? false);
   const [step, setStep] = useState(0);
-  const [xyStep, setXyStep] = useState("0.5");
-  const [zStep, setZStep] = useState("0.5");
+  const [xyStep, setXyStep] = useState<XYJogStep>(0.5);
+  const [zStep, setZStep] = useState<ZJogStep>(0.5);
   const [blockHeight, setBlockHeight] = useState("10");
   const [busy, setBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [jogInFlight, setJogInFlight] = useState(false);
+  const [recoveryHomeAvailable, setRecoveryHomeAvailable] = useState(false);
   const [operation, setOperation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [alarmPrompt, setAlarmPrompt] = useState<string | null>(null);
@@ -95,6 +100,7 @@ export default function CalibrationWizard({
   const jogHeld = useRef<JogDelta | null>(null);
   const jogPumpActive = useRef(false);
   const jogRequestCount = useRef(0);
+  const pendingJog = useRef<{ cancelled: boolean } | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previousOpen = useRef(false);
@@ -106,7 +112,6 @@ export default function CalibrationWizard({
 
   const filename = gantry?.filename ?? "";
   const config = gantry?.config ?? null;
-  const [originPolicy, setOriginPolicy] = useState<"deck_origin" | "home_origin">("deck_origin");
   const instruments = useMemo(() => Object.keys(config?.instruments ?? {}), [config]);
   const followCameraInstruments = useMemo(
     () => instruments.filter((name) => isFollowCameraInstrument(config?.instruments[name]?.type)),
@@ -124,6 +129,9 @@ export default function CalibrationWizard({
     () => calibratableInstruments.filter((name) => !nonContactInstruments.includes(name)),
     [calibratableInstruments, nonContactInstruments],
   );
+  const defaultTipAttached = useMemo(() => Object.fromEntries(
+    instruments.filter((name) => config?.instruments[name]?.type === "pipette").map((name) => [name, true]),
+  ), [config, instruments]);
   const isMulti = calibratableInstruments.length > 1;
   const connected = position?.connected ?? false;
   const status = position?.status ?? "";
@@ -131,10 +139,16 @@ export default function CalibrationWizard({
   const homing = isGantryHoming(status);
   const alarmRecoveryMessage = alarmPrompt ?? (
     isAlarm
-      ? `${status} - controls are locked until limit recovery or manual reset clears the controller.`
+      ? status
       : null
   );
   const homeRequired = /home required/i.test(alarmRecoveryMessage ?? "");
+  const { context: homeRecoveryContext, error: homeRecoveryError } = useLimitRecoveryContext(open && connected && homeRequired);
+  const externallyRecovered = status === "Home required" && !homeRecoveryError
+    && homeRecoveryContext?.active_limit_axes?.length === 0
+    && /^<?Idle(?:\||>|$)/i.test(homeRecoveryContext.raw_status)
+    && !hasGantryAlarm(homeRecoveryContext.raw_status);
+  const canHomeAfterRecovery = externallyRecovered || (recoveryHomeAvailable && !!position && isVerifiedIdle(position));
   const normalizedOutput = outputFile.trim() || defaultOutputFilename(filename);
   const selectedReference = referenceInstrument || contactInstruments[0] || "";
   const selectedLowest = lowestInstrument || contactInstruments[0] || "";
@@ -175,16 +189,16 @@ export default function CalibrationWizard({
   const readyForSave = isMulti
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
-  const controlsLocked = busy || homing || !!alarmRecoveryMessage;
+  const controlsLocked = busy || jogInFlight || homing || !!alarmRecoveryMessage;
 
   useEffect(() => {
     const wasOpen = previousOpen.current;
     previousOpen.current = open;
     if (!open || wasOpen) return;
     setStep(0);
-    setOriginPolicy(config?.origin_policy ?? "deck_origin");
     setBusy(false);
     setRecoveryBusy(false);
+    setRecoveryHomeAvailable(false);
     setOperation(null);
     setError(null);
     setAlarmPrompt(null);
@@ -197,6 +211,8 @@ export default function CalibrationWizard({
     setXyBounds(null);
     setInstrumentPositions({});
     setCameraBlockDistances({});
+    setTipAttached(defaultTipAttached);
+    setTipLengths({});
     setOutputFile(defaultOutputFilename(filename));
     setReferenceInstrument(contactInstruments[0] ?? "");
     setLowestInstrument(contactInstruments[0] ?? "");
@@ -206,7 +222,15 @@ export default function CalibrationWizard({
     pendingZReference.current = null;
     finalizedOrigin.current = null;
     finalizedConfig.current = null;
-  }, [config?.cnc.calibration_block_height_mm, config?.origin_policy, contactInstruments, filename, open]);
+  }, [config?.cnc.calibration_block_height_mm, contactInstruments, defaultTipAttached, filename, open]);
+
+  useEffect(() => {
+    if (!open || statusNote !== "Homed.") return;
+    const timer = window.setTimeout(() => {
+      setStatusNote((current) => current === "Homed." ? null : current);
+    }, 5000);
+    return () => window.clearTimeout(timer);
+  }, [open, statusNote]);
 
   useEffect(() => {
     const priorStep = previousStep.current;
@@ -228,19 +252,42 @@ export default function CalibrationWizard({
     jogPacer.wake();
   }, [jogPacer]);
 
-  const stopJog = useCallback(() => {
-    if (jogHeld.current === null) return;
+  const stopJog = useCallback((force = false) => {
+    if (jogHeld.current === null && !force) return;
     jogHeld.current = null;
-    // A single click lets its full step finish (predictable stepping); a
-    // held jog cancels so motion stops at release instead of running out
-    // whatever GRBL has queued.
-    if (jogRequestCount.current > 1) {
+    if ((force || jogRequestCount.current > 1) && pendingJog.current && !pendingJog.current.cancelled) {
+      pendingJog.current.cancelled = true;
       autoRecovery.cancel();
       gantryApi.jogCancel().catch(() => undefined);
     }
     jogRequestCount.current = 0;
     jogPacer.wake();
   }, [autoRecovery, jogPacer]);
+
+  const releaseJog = useCallback(() => {
+    if (alarmRecoveryMessage) haltJogLocally();
+    else stopJog();
+  }, [alarmRecoveryMessage, haltJogLocally, stopJog]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") releaseJog();
+    };
+    window.addEventListener("mouseup", releaseJog);
+    window.addEventListener("blur", releaseJog);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      window.removeEventListener("mouseup", releaseJog);
+      window.removeEventListener("blur", releaseJog);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [open, releaseJog]);
+
+  useEffect(() => {
+    if (!open) return;
+    return () => stopJog(true);
+  }, [open, stopJog]);
 
   const invalidateCaptures = useCallback(() => {
     setXyOrigin(null);
@@ -262,6 +309,7 @@ export default function CalibrationWizard({
     invalidateCaptures();
     setAlarmPrompt(status);
     setStatusNote(null);
+    if (!/home required/i.test(status)) setRecoveryHomeAvailable(false);
   }, [connected, haltJogLocally, invalidateCaptures, isAlarm, open, status]);
 
   const reportError = useCallback((err: unknown) => {
@@ -270,6 +318,7 @@ export default function CalibrationWizard({
       haltJogLocally();
       invalidateCaptures();
       setStatusNote(null);
+      setRecoveryHomeAvailable(false);
       setAlarmPrompt(
         "The gantry is in an alarm state. Clear it before continuing.",
       );
@@ -287,6 +336,7 @@ export default function CalibrationWizard({
   const resetFlow = () => {
     autoRecovery.begin();
     setRecoveryBusy(false);
+    setRecoveryHomeAvailable(false);
     setStep(0);
     setOperation(null);
     setError(null);
@@ -300,6 +350,8 @@ export default function CalibrationWizard({
     setXyBounds(null);
     setInstrumentPositions({});
     setCameraBlockDistances({});
+    setTipAttached(defaultTipAttached);
+    setTipLengths({});
     setOutputFile(defaultOutputFilename(filename));
     setReferenceInstrument(contactInstruments[0] ?? "");
     setLowestInstrument(contactInstruments[0] ?? "");
@@ -310,7 +362,7 @@ export default function CalibrationWizard({
   const reset = async () => {
     if (busy) return;
     autoRecovery.end();
-    stopJog();
+    stopJog(true);
     let restoreError: string | null = null;
     if (connected) {
       try {
@@ -332,7 +384,7 @@ export default function CalibrationWizard({
 
   const close = async () => {
     autoRecovery.end();
-    stopJog();
+    stopJog(!recoveryBusy);
     if (recoveryBusy) {
       try {
         await gantryApi.jogCancel();
@@ -435,21 +487,12 @@ export default function CalibrationWizard({
     if (!autoRecovery.active || autoRecovery.generation !== generation) throw new Error("Calibration closed.");
   };
 
-  const unlockAlarm = () => runAction("Clearing alarm", async (generation) => {
-    const result = await gantryApi.unlock();
-    assertGeneration(generation);
-    if (/home required/i.test(result.status)) {
-      setAlarmPrompt("Home required. Close calibration, clear the gantry path, then Home before continuing.");
-      return;
-    }
-    if (!isVerifiedIdle(result)) throw new Error(`Controller is still blocked: ${result.status}`);
-    setAlarmPrompt(null);
-    setStatusNote("Alarm cleared.");
-  });
-
   const jogBlocking = async (delta: JogDelta, timeout_s: number, generation: number) => {
     const id = autoRecovery.issueJogId(generation);
     if (!id) throw new Error("Calibration closed.");
+    const request = { cancelled: false };
+    pendingJog.current = request;
+    setJogInFlight(true);
     try {
       await gantryApi.jogBlocking(delta.x, delta.y, delta.z, timeout_s, id);
       assertGeneration(generation);
@@ -459,6 +502,11 @@ export default function CalibrationWizard({
         if (!looksLikeAlarm(errorMessage(failure))) autoRecovery.cancel();
       }
       throw failure;
+    } finally {
+      if (pendingJog.current === request) {
+        pendingJog.current = null;
+        setJogInFlight(false);
+      }
     }
   };
 
@@ -498,6 +546,7 @@ export default function CalibrationWizard({
     if (!isVerifiedIdle(result)) throw new Error(`Homing is unverified: ${result.status}`);
     const homed = requirePosition(result);
     setAlarmPrompt(null);
+    setRecoveryHomeAvailable(false);
     setCalibrationHome(homed);
     setStatusNote("Homed.");
     setStep(2);
@@ -641,6 +690,7 @@ export default function CalibrationWizard({
     if (!config) throw new Error("No gantry config is loaded.");
     if (!readyForSave) throw new Error("Complete the calibration positions before saving.");
     if (!finalizedConfig.current) {
+      const deckConfig: GantryConfig = { ...config, origin_policy: "deck_origin" };
       const initial = isMulti ? requireZCalibration(zCalibration) : null;
       if (!finalizedOrigin.current) {
         finalizedOrigin.current = await gantryApi.finalizeCalibrationOrigin({
@@ -648,16 +698,15 @@ export default function CalibrationWizard({
           block_touch_z: initial?.blockTouchZ ?? requireCaptured(blockTouch, "Block touch position"),
           block_height: initial?.blockHeight ?? parseBlockHeight(blockHeight),
           factory_z_travel: initial?.factoryZTravel ?? getFactoryZTravel(config),
-          origin_policy: originPolicy,
+          origin_policy: deckConfig.origin_policy,
         });
         assertGeneration(generation);
       }
       const finalized = finalizedOrigin.current;
-      const verifiedVolume = validateFinalizedOrigin({ ...config, origin_policy: originPolicy }, finalized);
+      const verifiedVolume = validateFinalizedOrigin(deckConfig, finalized);
       const calibrated = buildCalibratedConfig({
         config: {
-          ...config,
-          origin_policy: originPolicy,
+          ...deckConfig,
           cnc: {
             ...config.cnc,
             calibration_block_height_mm: finalized.z_calibration.block_height,
@@ -693,9 +742,17 @@ export default function CalibrationWizard({
     if (!open || !connected || busy || homing || alarmRecoveryMessage) return false;
     const id = autoRecovery.issueJogId(generation);
     if (!id) return false;
+    const request = { cancelled: false };
+    pendingJog.current = request;
+    setJogInFlight(true);
     jogRequestCount.current += 1;
     try {
-      await gantryApi.jog(x, y, z, id);
+      const configuredRates = (["x", "y", "z"] as const).filter((axis) => ({ x, y, z })[axis] !== 0)
+        .map((axis) => config?.grbl_settings?.[`max_rate_${axis}`])
+        .filter((rate): rate is number => typeof rate === "number" && Number.isFinite(rate) && rate > 0);
+      const rate = Math.min(2000, ...configuredRates);
+      const timeout = Math.max(15, Math.hypot(x, y, z) * 60 / rate + 5);
+      await gantryApi.jogBlocking(x, y, z, timeout, id);
       return autoRecovery.active && autoRecovery.generation === generation;
     } catch (err) {
       if (!autoRecovery.active || autoRecovery.generation !== generation) return false;
@@ -703,8 +760,13 @@ export default function CalibrationWizard({
       if (!looksLikeAlarm(errorMessage(err))) autoRecovery.cancel();
       reportError(err);
       return false;
+    } finally {
+      if (pendingJog.current === request) {
+        pendingJog.current = null;
+        setJogInFlight(false);
+      }
     }
-  }, [alarmRecoveryMessage, autoRecovery, busy, connected, homing, invalidateCaptures, open, reportError]);
+  }, [alarmRecoveryMessage, autoRecovery, busy, config?.grbl_settings, connected, homing, invalidateCaptures, open, reportError]);
 
   // The held-jog pump reads jog through a ref so an in-flight hold always
   // uses the latest guards (alarm/busy state) instead of a stale closure.
@@ -717,8 +779,9 @@ export default function CalibrationWizard({
     if (busy || homing || alarmRecoveryMessage) return;
     const generation = autoRecovery.generation;
     const heldBefore = jogHeld.current !== null;
-    jogHeld.current = { x, y, z };
-    if (heldBefore && jogPumpActive.current) {
+    if (jogPumpActive.current) {
+      if (!heldBefore) return;
+      jogHeld.current = { x, y, z };
       // Direction change mid-hold: hand the new delta to the pump instead
       // of firing immediately — an immediate send would repeat at the
       // previous segment's pace, and with soft limits off during
@@ -728,13 +791,9 @@ export default function CalibrationWizard({
       jogPacer.wake();
       return;
     }
-    if (!jogPumpActive.current) {
-      jogRequestCount.current = 0;
-    }
-    // The first jog of a distinct press always sends immediately — a click
-    // must never wait behind a previous press's pacing.
+    jogHeld.current = { x, y, z };
+    jogRequestCount.current = 0;
     const first = jogRef.current(x, y, z, generation);
-    if (jogPumpActive.current) return;
     jogPumpActive.current = true;
     const pump = async () => {
       try {
@@ -761,54 +820,13 @@ export default function CalibrationWizard({
     void pump();
   };
 
-  const parsedXyStep = parsePositiveStep(xyStep);
-  const parsedZStep = parsePositiveStep(zStep);
-  const xy = parsedXyStep == null ? MIN_STEP : Math.max(MIN_STEP, parsedXyStep);
-  const z = parsedZStep == null ? MIN_STEP : Math.max(MIN_STEP, parsedZStep);
-  const stepInvalid = parsedXyStep == null || parsedZStep == null;
-  const xyBelowMin = parsedXyStep != null && parsedXyStep < MIN_STEP;
-  const zBelowMin = parsedZStep != null && parsedZStep < MIN_STEP;
-
   if (!open) return null;
 
   const referenceTipControls = isMulti && referenceInstrumentIsPipette ? (
-    <div style={{ margin: "12px 0" }}>
-      <p style={instructionStyle}>
-        If the leftmost pipette cannot reach the block bare, attach a tip and align
-        its end with the mark. This step sets X/Y only. The tip length carries
-        forward to this pipette's Z reference or instrument-offset measurement.
-      </p>
-      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-        <input
-          type="checkbox"
-          aria-label="Calibrating with a tip attached"
-          checked={referenceTipAttached}
-          onChange={(event) => setTipAttached((prev) => ({
-            ...prev, [selectedReference]: event.target.checked,
-          }))}
-          disabled={controlsLocked}
-        />
-        <span style={labelStyle}>Calibrating with a tip attached</span>
-      </label>
-      {referenceTipAttached && (
-        <label style={{ ...fieldStyle, marginTop: 8 }}>
-          <span style={labelStyle}>Tip length (mm)</span>
-          <input
-            aria-label="Tip length (mm)"
-            value={tipLengths[selectedReference] ?? ""}
-            onChange={(event) => setTipLengths((prev) => ({
-              ...prev, [selectedReference]: event.target.value,
-            }))}
-            disabled={controlsLocked}
-            inputMode="decimal"
-            style={buttonStateStyle(inputStyle, controlsLocked)}
-          />
-          {referenceTipLengthError && (
-            <span style={{ color: theme.color.danger, fontSize: 12 }}>{referenceTipLengthError}</span>
-          )}
-        </label>
-      )}
-    </div>
+    <CalibrationTipControls attached={referenceTipAttached} length={tipLengths[selectedReference] ?? ""}
+      disabled={controlsLocked} error={referenceTipLengthError}
+      onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [selectedReference]: attached }))}
+      onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [selectedReference]: length }))} />
   ) : null;
 
   return (
@@ -867,31 +885,34 @@ export default function CalibrationWizard({
                 <span style={alarmTitleStyle}>GANTRY ALARM</span>
                 <span>{alarmRecoveryMessage}</span>
                 {(!homeRequired || recoveryBusy) && <LimitRecoveryControls
+                  automaticOnly
                   connected={connected} disabled={busy || homing}
-                  onStart={haltJogLocally}
+                  onStart={() => {
+                    haltJogLocally();
+                    if (pendingJog.current) pendingJog.current.cancelled = true;
+                    setError(null);
+                  }}
                   autoRecovery={autoRecovery}
                   onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value); }}
-                  onRecovered={(result) => {
-                    setAlarmPrompt("Home required. Close calibration, clear the gantry path, then Home before continuing.");
-                    setStatusNote(result.mode === "manual" ? "Manual pull-off complete." : "Pull-off complete.");
+                  onRecovered={() => {
+                    autoRecovery.cancel();
+                    invalidateCaptures();
+                    setError(null);
+                    setRecoveryHomeAvailable(true);
+                    setAlarmPrompt("Home required. Clear the gantry path before homing.");
+                    setStatusNote("Pull-off complete.");
                   }}
-                  onError={setError}
+                  onError={(message) => { autoRecovery.cancel(); setError(message); }}
                 />}
-                {!homeRequired && <button
-                  onClick={unlockAlarm}
-                  disabled={busy}
-                  style={buttonStateStyle(alarmButtonStyle, busy)}
+                {canHomeAfterRecovery && <button
+                  onClick={homeForCalibration}
+                  disabled={busy || homing || !connected || (isAlarm && !/home required/i.test(status))}
+                  style={buttonStateStyle(alarmButtonStyle, busy || homing || !connected || (isAlarm && !/home required/i.test(status)))}
                 >
-                  Unlock alarm
+                  Home and restart calibration
                 </button>}
               </div>
             )}
-            {!alarmRecoveryMessage && connected && (
-              <div style={softLimitNoticeStyle}>
-                Jog in small steps near the edges of travel. Eligible limit faults back off once automatically.
-              </div>
-            )}
-            <div style={noteStyle}>Configured Z travel: {config?.cnc.factory_z_travel_mm ?? "unset"} mm</div>
             {error && <div style={errorStyle}>{error}</div>}
             {operation && <div style={busyStyle}>{operation}… Please wait.</div>}
             {statusNote && <div style={noteStyle}>{statusNote}</div>}
@@ -903,21 +924,6 @@ export default function CalibrationWizard({
                   {isMulti
                     ? "Choose a file name for the calibrated config, pick the leftmost and lowest instruments, then continue."
                     : "Choose a file name for the calibrated config, then continue."}
-                </p>
-                <label style={fieldStyle}>
-                  <span style={labelStyle}>Coordinate origin</span>
-                  <select aria-label="Coordinate origin" value={originPolicy} disabled={controlsLocked}
-                    onChange={event => setOriginPolicy(event.target.value as "deck_origin" | "home_origin")}
-                    style={buttonStateStyle(inputStyle, controlsLocked)}>
-                    <option value="deck_origin">Calibrated deck reference (0, 0)</option>
-                    <option value="home_origin">Home corner (0, 0, 0)</option>
-                  </select>
-                </label>
-                <p style={instructionStyle}>
-                  {originPolicy === "deck_origin"
-                    ? "The calibrated front-left reference stays at X=0, Y=0. Homed coordinates remain positive."
-                    : "The homed back-right-top corner becomes X=0, Y=0, Z=0. Coordinates toward the deck are negative."}
-                  {" Measure from the front-left reference for either choice. The selected origin is applied only when calibration is finalized."}
                 </p>
                 {isMulti && (
                   <p style={instructionStyle}>
@@ -1015,68 +1021,23 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Set Origin</h3>
                 <p style={instructionStyle}>
-                  Put the calibration block at the front-left corner of the deck. Jog the tool until it just touches the top of the block, then continue.
-                  {originPolicy === "home_origin" && " The homed back-right-top corner becomes zero only when you finish and save calibration."}
+                  Place the block at the front-left corner of the deck. Jog {soleTipAttached ? "the tip" : "the tool"} to touch its top, then set origin.
                 </p>
                 {soleInstrumentIsPipette && (
-                  <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
-                    If this pipette can't reach the block bare, attach a tip and touch the block with the tip
-                    instead. Enter the tip length below to save the bare-nozzle offset. Z travel is
-                    measured from the carriage positions.
-                  </p>
-                )}
-                {soleInstrumentIsPipette && (
-                  <div style={{ margin: "12px 0" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        aria-label="Calibrating with a tip attached"
-                        checked={soleTipAttached}
-                        onChange={(event) => setTipAttached((prev) => ({
-                          ...prev,
-                          [soleInstrument]: event.target.checked,
-                        }))}
-                        disabled={controlsLocked}
-                      />
-                      <span style={labelStyle}>Calibrating with a tip attached</span>
-                    </label>
-                    {soleTipAttached && (
-                      <label style={{ ...fieldStyle, marginTop: 8 }}>
-                        <span style={labelStyle}>Tip length (mm)</span>
-                        <input
-                          aria-label="Tip length (mm)"
-                          value={tipLengths[soleInstrument] ?? ""}
-                          onChange={(event) => setTipLengths((prev) => ({
-                            ...prev,
-                            [soleInstrument]: event.target.value,
-                          }))}
-                          disabled={controlsLocked}
-                          inputMode="decimal"
-                          style={buttonStateStyle(inputStyle, controlsLocked)}
-                        />
-                        {soleTipLengthError && (
-                          <span style={{ color: theme.color.danger, fontSize: 12 }}>{soleTipLengthError}</span>
-                        )}
-                      </label>
-                    )}
-                  </div>
+                  <CalibrationTipControls attached={soleTipAttached} length={tipLengths[soleInstrument] ?? ""}
+                    disabled={controlsLocked} error={soleTipLengthError}
+                    onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [soleInstrument]: attached }))}
+                    onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [soleInstrument]: length }))} />
                 )}
                 <JogPanel
                   xyStep={xyStep}
                   zStep={zStep}
                   setXyStep={setXyStep}
                   setZStep={setZStep}
-                  disabled={!connected || controlsLocked}
+                  disabled={!connected || busy || homing || !!alarmRecoveryMessage}
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
-                  onStopJog={stopJog}
-                  xy={xy}
-                  z={z}
-                  stepInvalid={stepInvalid}
-                  xyStepInvalid={parsedXyStep == null}
-                  zStepInvalid={parsedZStep == null}
-                  xyBelowMin={xyBelowMin}
-                  zBelowMin={zBelowMin}
+                  onStopJog={releaseJog}
                 />
                 <div style={actionRowStyle}>
                   <button
@@ -1084,7 +1045,7 @@ export default function CalibrationWizard({
                     disabled={controlsLocked || !connected || !!soleTipLengthError}
                     style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !!soleTipLengthError)}
                   >
-                    Set origin and continue
+                    Set origin
                   </button>
                 </div>
               </div>
@@ -1095,7 +1056,6 @@ export default function CalibrationWizard({
                 <h3 style={sectionTitleStyle}>Set XY Origin</h3>
                 <p style={instructionStyle}>
                   Put the calibration block at the front-left corner of the deck. Jog the selected leftmost instrument until it is directly over the mark on the block, then continue.
-                  {originPolicy === "home_origin" && " The homed back-right-top corner becomes zero only when you finish and save calibration."}
                 </p>
                 {referenceInstrumentIsPipette && (
                   <div style={noteStyle}>
@@ -1109,17 +1069,10 @@ export default function CalibrationWizard({
                   zStep={zStep}
                   setXyStep={setXyStep}
                   setZStep={setZStep}
-                  disabled={!connected || controlsLocked}
+                  disabled={!connected || busy || homing || !!alarmRecoveryMessage}
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
-                  onStopJog={stopJog}
-                  xy={xy}
-                  z={z}
-                  stepInvalid={stepInvalid}
-                  xyStepInvalid={parsedXyStep == null}
-                  zStepInvalid={parsedZStep == null}
-                  xyBelowMin={xyBelowMin}
-                  zBelowMin={zBelowMin}
+                  onStopJog={releaseJog}
                 />
                 <div style={actionRowStyle}>
                   <button onClick={setXY} disabled={controlsLocked || !connected || !!referenceTipLengthError} style={buttonStateStyle(primaryButtonStyle, controlsLocked || !connected || !!referenceTipLengthError)}>Set XY origin and continue</button>
@@ -1158,64 +1111,20 @@ export default function CalibrationWizard({
                   Keep the block where it is. Jog {selectedLowest || "the lowest instrument"} until it just touches the top of the block, then continue.
                 </p>
                 {lowestInstrumentIsPipette && (
-                  <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
-                    If this pipette can't reach the block bare, attach a tip and touch the block with the tip
-                    instead. Enter the tip length below to save the bare-nozzle offset. Z travel is
-                    measured from the carriage positions.
-                  </p>
-                )}
-                {lowestInstrumentIsPipette && (
-                  <div style={{ margin: "12px 0" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                      <input
-                        type="checkbox"
-                        aria-label="Calibrating with a tip attached"
-                        checked={lowestTipAttached}
-                        onChange={(event) => setTipAttached((prev) => ({
-                          ...prev,
-                          [selectedLowest]: event.target.checked,
-                        }))}
-                        disabled={controlsLocked}
-                      />
-                      <span style={labelStyle}>Calibrating with a tip attached</span>
-                    </label>
-                    {lowestTipAttached && (
-                      <label style={{ ...fieldStyle, marginTop: 8 }}>
-                        <span style={labelStyle}>Tip length (mm)</span>
-                        <input
-                          aria-label="Tip length (mm)"
-                          value={tipLengths[selectedLowest] ?? ""}
-                          onChange={(event) => setTipLengths((prev) => ({
-                            ...prev,
-                            [selectedLowest]: event.target.value,
-                          }))}
-                          disabled={controlsLocked}
-                          inputMode="decimal"
-                          style={buttonStateStyle(inputStyle, controlsLocked)}
-                        />
-                        {lowestTipLengthError && (
-                          <span style={{ color: theme.color.danger, fontSize: 12 }}>{lowestTipLengthError}</span>
-                        )}
-                      </label>
-                    )}
-                  </div>
+                  <CalibrationTipControls attached={lowestTipAttached} length={tipLengths[selectedLowest] ?? ""}
+                    disabled={controlsLocked} error={lowestTipLengthError}
+                    onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [selectedLowest]: attached }))}
+                    onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [selectedLowest]: length }))} />
                 )}
                 <JogPanel
                   xyStep={xyStep}
                   zStep={zStep}
                   setXyStep={setXyStep}
                   setZStep={setZStep}
-                  disabled={!connected || controlsLocked}
+                  disabled={!connected || busy || homing || !!alarmRecoveryMessage}
                   alarmed={!!alarmRecoveryMessage}
                   onStartJog={startJog}
-                  onStopJog={stopJog}
-                  xy={xy}
-                  z={z}
-                  stepInvalid={stepInvalid}
-                  xyStepInvalid={parsedXyStep == null}
-                  zStepInvalid={parsedZStep == null}
-                  xyBelowMin={xyBelowMin}
-                  zBelowMin={zBelowMin}
+                  onStopJog={releaseJog}
                 />
                 <div style={actionRowStyle}>
                   <button
@@ -1264,13 +1173,6 @@ export default function CalibrationWizard({
                           Center the camera over the calibration block mark, then enter the distance from the camera to the top of the block.
                         </p>
                       )}
-                      {nextInstrumentIsPipette && (
-                        <p style={{ ...instructionStyle, margin: "8px 0 0" }}>
-                          If this pipette can't reach the block bare, attach a tip and touch the block with the tip
-                          instead. Enter the tip length below and it's subtracted so the saved depth still reflects
-                          the bare-nozzle position.
-                        </p>
-                      )}
                     </div>
                     {nextInstrumentIsCamera && (
                       <CameraPreview key={nextInstrumentToRecord} instrument={nextInstrumentToRecord} />
@@ -1295,57 +1197,20 @@ export default function CalibrationWizard({
                       </label>
                     )}
                     {nextInstrumentIsPipette && (
-                      <div style={{ marginBottom: 12 }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                          <input
-                            type="checkbox"
-                            aria-label="Calibrating with a tip attached"
-                            checked={nextInstrumentTipAttached}
-                            onChange={(event) => setTipAttached((prev) => ({
-                              ...prev,
-                              [nextInstrumentToRecord]: event.target.checked,
-                            }))}
-                            disabled={controlsLocked}
-                          />
-                          <span style={labelStyle}>Calibrating with a tip attached</span>
-                        </label>
-                        {nextInstrumentTipAttached && (
-                          <label style={{ ...fieldStyle, marginTop: 8 }}>
-                            <span style={labelStyle}>Tip length (mm)</span>
-                            <input
-                              aria-label="Tip length (mm)"
-                              value={tipLengths[nextInstrumentToRecord] ?? ""}
-                              onChange={(event) => setTipLengths((prev) => ({
-                                ...prev,
-                                [nextInstrumentToRecord]: event.target.value,
-                              }))}
-                              disabled={controlsLocked}
-                              inputMode="decimal"
-                              style={buttonStateStyle(inputStyle, controlsLocked)}
-                            />
-                            {nextTipLengthError && (
-                              <span style={{ color: theme.color.danger, fontSize: 12 }}>{nextTipLengthError}</span>
-                            )}
-                          </label>
-                        )}
-                      </div>
+                      <CalibrationTipControls attached={nextInstrumentTipAttached} length={tipLengths[nextInstrumentToRecord] ?? ""}
+                        disabled={controlsLocked} error={nextTipLengthError}
+                        onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [nextInstrumentToRecord]: attached }))}
+                        onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [nextInstrumentToRecord]: length }))} />
                     )}
                     <JogPanel
                       xyStep={xyStep}
                       zStep={zStep}
                       setXyStep={setXyStep}
                       setZStep={setZStep}
-                      disabled={!connected || controlsLocked}
+                      disabled={!connected || busy || homing || !!alarmRecoveryMessage}
                       alarmed={!!alarmRecoveryMessage}
                       onStartJog={startJog}
-                      onStopJog={stopJog}
-                      xy={xy}
-                      z={z}
-                      stepInvalid={stepInvalid}
-                      xyStepInvalid={parsedXyStep == null}
-                      zStepInvalid={parsedZStep == null}
-                      xyBelowMin={xyBelowMin}
-                      zBelowMin={zBelowMin}
+                      onStopJog={releaseJog}
                     />
                     <div style={actionRowStyle}>
                       <button
@@ -1378,100 +1243,6 @@ export default function CalibrationWizard({
             )}
           </section>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function JogPanel({
-  xyStep,
-  zStep,
-  setXyStep,
-  setZStep,
-  disabled,
-  alarmed,
-  onStartJog,
-  onStopJog,
-  xy,
-  z,
-  stepInvalid,
-  xyStepInvalid,
-  zStepInvalid,
-  xyBelowMin,
-  zBelowMin,
-}: {
-  xyStep: string;
-  zStep: string;
-  setXyStep: (value: string) => void;
-  setZStep: (value: string) => void;
-  disabled: boolean;
-  alarmed: boolean;
-  onStartJog: (x: number, y: number, z: number) => void;
-  onStopJog: () => void;
-  xy: number;
-  z: number;
-  stepInvalid: boolean;
-  xyStepInvalid: boolean;
-  zStepInvalid: boolean;
-  xyBelowMin: boolean;
-  zBelowMin: boolean;
-}) {
-  const jogLocked = disabled || alarmed || stepInvalid;
-  const props = (x: number, y: number, dz: number) => ({
-    onMouseDown: () => !jogLocked && onStartJog(x, y, dz),
-    onMouseUp: onStopJog,
-    onMouseLeave: onStopJog,
-    onTouchStart: (event: TouchEvent) => {
-      event.preventDefault();
-      if (!jogLocked) onStartJog(x, y, dz);
-    },
-    onTouchEnd: onStopJog,
-  });
-
-  return (
-    <div style={jogPanelStyle}>
-      <div style={dpadStyle}>
-        <div />
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(0, xy, 0)} title="Y+">↑</button>
-        <div />
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(-xy, 0, 0)} title="X-">←</button>
-        <div style={padCenterStyle}>XY</div>
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(xy, 0, 0)} title="X+">→</button>
-        <div />
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(0, -xy, 0)} title="Y-">↓</button>
-        <div />
-      </div>
-      <div style={zPadStyle}>
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(0, 0, z)} title="Z+">Z+</button>
-        <div style={padCenterStyle}>Z</div>
-        <button style={buttonStateStyle(jogButtonStyle, jogLocked)} disabled={jogLocked} {...props(0, 0, -z)} title="Z-">Z-</button>
-      </div>
-      <div style={stepFieldsStyle}>
-        <label style={stepFieldStyle}>
-          <span style={labelStyle}>XY mm</span>
-          <input
-            value={xyStep}
-            onChange={(event) => setXyStep(event.target.value)}
-            disabled={disabled || alarmed}
-            inputMode="decimal"
-            style={buttonStateStyle({ ...smallInputStyle, borderColor: xyStepInvalid || xyBelowMin ? theme.color.danger : undefined }, disabled || alarmed)}
-          />
-        </label>
-        <label style={stepFieldStyle}>
-          <span style={labelStyle}>Z mm</span>
-          <input
-            value={zStep}
-            onChange={(event) => setZStep(event.target.value)}
-            disabled={disabled || alarmed}
-            inputMode="decimal"
-            style={buttonStateStyle({ ...smallInputStyle, borderColor: zStepInvalid || zBelowMin ? theme.color.danger : undefined }, disabled || alarmed)}
-          />
-        </label>
-        {(stepInvalid || xyBelowMin || zBelowMin) && (
-          <div style={stepHintStyle}>
-            {stepInvalid ? "Enter step sizes greater than 0." : `Minimum jog step is ${MIN_STEP} mm.`}
-          </div>
-        )}
       </div>
     </div>
   );
@@ -1518,11 +1289,6 @@ function capturedFromPlain(position: { x: number; y: number; z: number }): Captu
 
 function formatOptionalNumber(value: number | null | undefined): string {
   return value == null ? "" : String(value);
-}
-
-function parsePositiveStep(value: string): number | null {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
 function parseBlockHeight(value: string): number {
@@ -1798,14 +1564,6 @@ const inputStyle: React.CSSProperties = {
   minWidth: 0,
 };
 
-const smallInputStyle: React.CSSProperties = {
-  ...inputStyle,
-  ...theme.mono,
-  width: 58,
-  padding: "4px 6px",
-  fontSize: 12,
-};
-
 const actionRowStyle: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
@@ -1850,12 +1608,6 @@ const alarmStyle: React.CSSProperties = {
   flexWrap: "wrap",
 };
 
-const softLimitNoticeStyle: React.CSSProperties = {
-  ...theme.notice.warning,
-  fontSize: 11,
-  marginBottom: 10,
-};
-
 const alarmTitleStyle: React.CSSProperties = {
   color: theme.color.danger,
   fontWeight: 700,
@@ -1881,70 +1633,6 @@ const noInstrumentsStyle: React.CSSProperties = {
 const busyStyle: React.CSSProperties = {
   ...theme.notice.warning,
   marginBottom: 10,
-};
-
-const jogPanelStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 18,
-  border: `1px solid ${theme.color.border}`,
-  borderRadius: theme.radius.md,
-  padding: 12,
-  width: "fit-content",
-  maxWidth: "100%",
-  flexWrap: "wrap",
-};
-
-const dpadStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(3, 40px)",
-  gridTemplateRows: "repeat(3, 40px)",
-  gap: 2,
-};
-
-const zPadStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 2,
-};
-
-const jogButtonStyle: React.CSSProperties = {
-  width: 40,
-  height: 40,
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  background: theme.color.surface,
-  border: `1px solid ${theme.color.borderStrong}`,
-  borderRadius: theme.radius.md,
-  color: theme.color.text,
-  fontWeight: 600,
-  cursor: "pointer",
-};
-
-const padCenterStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "center",
-  color: theme.color.textFaint,
-  fontSize: 10,
-};
-
-const stepFieldsStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-};
-
-const stepFieldStyle: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 6,
-};
-
-const stepHintStyle: React.CSSProperties = {
-  color: theme.color.danger,
-  fontSize: 11,
 };
 
 const instrumentListStyle: React.CSSProperties = {

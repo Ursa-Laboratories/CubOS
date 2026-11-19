@@ -1,8 +1,9 @@
+import type { XYJogStep, ZJogStep } from "./JogStepPresets";
 import { useEffect, useRef, useState } from "react";
 import { gantryApi } from "../../api/client";
 import type { GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import * as theme from "../../theme";
-import JogPanel, { MIN_JOG_STEP } from "./JogPanel";
+import JogPanel from "./JogPanel";
 import CameraPreview from "./CameraPreview";
 
 type Capture = { x: number; y: number; z: number; tip_length_mm: number; stand_off_mm?: number };
@@ -31,8 +32,8 @@ function OffsetCalibration({ gantry, position, isRunning = false, onClose, onSav
   const [tipAttached, setTipAttached] = useState(false);
   const [tipLength, setTipLength] = useState("");
   const [standOff, setStandOff] = useState("");
-  const [xyStep, setXyStep] = useState("0.5");
-  const [zStep, setZStep] = useState("0.5");
+  const [xyStep, setXyStep] = useState<XYJogStep>(0.5);
+  const [zStep, setZStep] = useState<ZJogStep>(0.5);
   const [output, setOutput] = useState(snapshot.filename.replace(/\.ya?ml$/i, "") + "_offsets.yaml");
   const [preview, setPreview] = useState<GantryConfig | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,9 +45,6 @@ function OffsetCalibration({ gantry, position, isRunning = false, onClose, onSav
   const locked = busy || unavailable;
   const pipette = config.instruments[active]?.type === "pipette";
   const camera = config.instruments[active]?.type === "camera";
-  const xy = Number(xyStep), z = Number(zStep);
-  const xyInvalid = !xyStep.trim() || !Number.isFinite(xy) || xy < MIN_JOG_STEP;
-  const zInvalid = !zStep.trim() || !Number.isFinite(z) || z < MIN_JOG_STEP;
 
   useEffect(() => {
     const priorFocus = document.activeElement as HTMLElement | null;
@@ -90,7 +88,6 @@ function OffsetCalibration({ gantry, position, isRunning = false, onClose, onSav
   });
 
   const jog = (x: number, y: number, z: number) => run(async () => {
-    if (xyInvalid || zInvalid) return;
     await gantryApi.jogBlocking(x, y, z);
   });
 
@@ -137,8 +134,7 @@ function OffsetCalibration({ gantry, position, isRunning = false, onClose, onSav
         </select>
       </label>
       <div style={{ margin: "12px 0" }}><JogPanel xyStep={xyStep} zStep={zStep} setXyStep={setXyStep} setZStep={setZStep}
-        disabled={locked} alarmed={false} onStartJog={jog} onStopJog={() => undefined} xy={xy} z={z}
-        stepInvalid={xyInvalid || zInvalid} xyStepInvalid={xyInvalid} zStepInvalid={zInvalid} xyBelowMin={xy < MIN_JOG_STEP} zBelowMin={z < MIN_JOG_STEP} /></div>
+        disabled={locked} alarmed={false} onStartJog={jog} onStopJog={() => undefined} /></div>
       <button style={theme.btn.secondary} disabled={!position?.connected || isRunning} onClick={() => {
         void gantryApi.jogCancel().catch(err => setError(err instanceof Error ? err.message : String(err)));
       }}>Stop jog</button>

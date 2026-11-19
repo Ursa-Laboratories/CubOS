@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import GantryPositionWidget from "../../../../src/components/gantry/GantryPositionWidget";
@@ -83,7 +83,7 @@ describe("GantryPositionWidget manual move safety", () => {
     vi.unstubAllGlobals();
   });
 
-  it("sends the move when workingVolume is absent (backend is the guard)", async () => {
+  it("blocks a move without a working volume", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () =>
       new Response(JSON.stringify({ x: 0, y: 0, z: 0, status: "Idle", connected: true, calibration_active: false }), {
@@ -103,18 +103,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
-    await user.type(screen.getByLabelText("X (mm)"), "999");
-    await user.type(screen.getByLabelText("Y (mm)"), "999");
-    await user.type(screen.getByLabelText("Z (mm)"), "999");
-    await user.click(screen.getByRole("button", { name: "Go" }));
-
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/v1/gantry/move-to",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ x: 999, y: 999, z: 999 }),
-      }),
-    );
+    const go = screen.getByRole("button", { name: "Go" });
+    expect(go).toBeDisabled();
+    await user.click(go);
+    expect(screen.getByText(/Load a gantry config with a working volume/)).toBeInTheDocument();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("shows connection failures and returns the Connect button to ready state", async () => {
@@ -433,10 +426,10 @@ describe("GantryPositionWidget manual move safety", () => {
         .map(([, init]) => JSON.parse(String(init?.body)));
 
     // Hold Z at the default 0.5 mm step (150 ms pace), then press X with a
-    // 20 mm step (480 ms pace) without releasing. The repeats must follow
-    // the 20 mm segment's pace — 20 mm jogs fired at the 0.5 mm cadence is
+    // 50 mm step (1200 ms pace) without releasing. The repeats must follow
+    // the 50 mm segment's pace — 50 mm jogs fired at the 0.5 mm cadence is
     // exactly the backlog overrun this pacing exists to prevent.
-    fireEvent.change(screen.getByLabelText("XY mm"), { target: { value: "20" } });
+    fireEvent.click(within(screen.getByRole("group", { name: "XY jog step (mm)" })).getByRole("button", { name: "50" }));
     fireEvent.mouseDown(screen.getByTitle("Z+"));
 
     await vi.advanceTimersByTimeAsync(100);
@@ -446,15 +439,15 @@ describe("GantryPositionWidget manual move safety", () => {
     await vi.advanceTimersByTimeAsync(10);
     expect(jogBodies()).toEqual([
       { x: 0, y: 0, z: 0.5 },
-      { x: 20, y: 0, z: 0 },
+      { x: 50, y: 0, z: 0 },
     ]);
 
-    // Well past the old 150 ms cadence but before the 20 mm pace elapses:
+    // Well past the old 150 ms cadence but before the 50 mm pace elapses:
     // no further sends.
-    await vi.advanceTimersByTimeAsync(440);
+    await vi.advanceTimersByTimeAsync(1140);
     expect(jogBodies()).toHaveLength(2);
 
-    // After the 20 mm pace (480 ms from its send) the next repeat fires.
+    // After the 50 mm pace (1200 ms from its send) the next repeat fires.
     await vi.advanceTimersByTimeAsync(100);
     expect(jogBodies()).toHaveLength(3);
 
@@ -489,13 +482,13 @@ describe("GantryPositionWidget manual move safety", () => {
     const jogCalls = () =>
       fetchMock.mock.calls.filter(([input]) => requestPath(input) === "/api/v1/gantry/jog");
 
-    // A 20 mm step at the 2000 mm/min jog feed takes 600 ms to execute, so
-    // held repeats pace to 0.8x that (480 ms), not the 150 ms UI tick —
+    // A 50 mm step at the 2000 mm/min jog feed takes 1500 ms to execute, so
+    // held repeats pace to 0.8x that (1200 ms), not the 150 ms UI tick —
     // otherwise GRBL queues a backlog that keeps moving after release.
-    fireEvent.change(screen.getByLabelText("XY mm"), { target: { value: "20" } });
+    fireEvent.click(within(screen.getByRole("group", { name: "XY jog step (mm)" })).getByRole("button", { name: "50" }));
     fireEvent.mouseDown(screen.getByTitle("X+"));
 
-    await vi.advanceTimersByTimeAsync(400);
+    await vi.advanceTimersByTimeAsync(1100);
     expect(jogCalls()).toHaveLength(1);
 
     await vi.advanceTimersByTimeAsync(200);
@@ -693,8 +686,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "301");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "100");
+    await user.clear(screen.getByLabelText("Z (mm)"));
     await user.type(screen.getByLabelText("Z (mm)"), "40");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -717,8 +713,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "abc");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "10");
+    await user.clear(screen.getByLabelText("Z (mm)"));
     await user.type(screen.getByLabelText("Z (mm)"), "10");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -751,8 +750,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "-200");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "-150");
+    await user.clear(screen.getByLabelText("Z (mm)"));
     await user.type(screen.getByLabelText("Z (mm)"), "-50");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -781,8 +783,11 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "10");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "-150");
+    await user.clear(screen.getByLabelText("Z (mm)"));
     await user.type(screen.getByLabelText("Z (mm)"), "-50");
     await user.click(screen.getByRole("button", { name: "Go" }));
 
@@ -926,7 +931,7 @@ describe("GantryPositionWidget manual move safety", () => {
     ]);
   });
 
-  it("uses typed jog distances", async () => {
+  it("uses independent jog presets without jogging on selection", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn<(input: string | URL | Request, init?: RequestInit) => Promise<Response>>(
       async () => jsonResponse({ status: "ok" }),
@@ -943,13 +948,23 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
-    await user.clear(screen.getByLabelText("XY mm"));
-    await user.type(screen.getByLabelText("XY mm"), "1");
+    const xy = within(screen.getByRole("group", { name: "XY jog step (mm)" }));
+    const z = within(screen.getByRole("group", { name: "Z jog step (mm)" }));
+    expect(xy.getAllByRole("button").map((button) => button.textContent)).toEqual(["0.1", "0.5", "1", "5", "10", "50", "100"]);
+    expect(z.getAllByRole("button").map((button) => button.textContent)).toEqual(["0.1", "0.5", "1", "5", "10", "50"]);
+    expect(xy.getByRole("button", { name: "0.5", pressed: true })).toBeInTheDocument();
+    expect(z.getByRole("button", { name: "0.5", pressed: true })).toBeInTheDocument();
+    await user.click(xy.getByRole("button", { name: "1" }));
+    expect(xy.getByRole("button", { name: "1", pressed: true })).toBeInTheDocument();
+    expect(z.getByRole("button", { name: "0.5", pressed: true })).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([input]) => requestPath(input) === "/api/v1/gantry/jog")).toBe(false);
     fireEvent.mouseDown(screen.getByTitle("X+"));
     fireEvent.mouseUp(screen.getByTitle("X+"));
 
-    await user.clear(screen.getByLabelText("Z mm"));
-    await user.type(screen.getByLabelText("Z mm"), "10");
+    z.getByRole("button", { name: "10" }).focus();
+    await user.keyboard("{Enter}");
+    expect(z.getByRole("button", { name: "10", pressed: true })).toBeInTheDocument();
+    expect(xy.getByRole("button", { name: "1", pressed: true })).toBeInTheDocument();
     fireEvent.mouseDown(screen.getByTitle("Z+"));
     fireEvent.mouseUp(screen.getByTitle("Z+"));
 
@@ -1193,6 +1208,9 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    for (const axis of ["X", "Y", "Z"]) {
+      await user.clear(screen.getByLabelText(axis + " (mm)"));
+    }
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
@@ -1214,15 +1232,18 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
+    await user.clear(screen.getByLabelText("X (mm)"));
     await user.type(screen.getByLabelText("X (mm)"), "100");
+    await user.clear(screen.getByLabelText("Y (mm)"));
     await user.type(screen.getByLabelText("Y (mm)"), "100");
-    await user.click(screen.getByRole("button", { name: "Go" }));
+    await user.clear(screen.getByLabelText("Z (mm)"));
+    await user.keyboard("{Enter}");
 
     expect(await screen.findByText("Enter valid X, Y, and Z coordinates.")).toBeInTheDocument();
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => !String(input).endsWith("/recovery-context"))).toHaveLength(0);
   });
 
-  it("still sends an explicit all-zero move", async () => {
+  it("starts at zero and sends an all-zero move when in bounds", async () => {
     const user = userEvent.setup();
     const fetchMock = vi.fn(async () => jsonResponse({ status: "ok" }));
     vi.stubGlobal("fetch", fetchMock);
@@ -1237,9 +1258,12 @@ describe("GantryPositionWidget manual move safety", () => {
       />,
     );
 
-    await user.type(screen.getByLabelText("X (mm)"), "0");
-    await user.type(screen.getByLabelText("Y (mm)"), "0");
-    await user.type(screen.getByLabelText("Z (mm)"), "0");
+    for (const axis of ["X", "Y", "Z"]) {
+      const input = screen.getByLabelText(axis + " (mm)");
+      expect(input).toHaveValue("0");
+      expect(input).not.toHaveAttribute("placeholder");
+    }
+    expect(screen.queryByText(/^Vol:/)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Go" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -1250,4 +1274,37 @@ describe("GantryPositionWidget manual move safety", () => {
       }),
     ));
   });
+  it("rejects default Z below the calibrated minimum and accepts the boundary on Enter", async () => {
+    const user = userEvent.setup();
+    const fetchMock = vi.fn<typeof fetch>(async () => jsonResponse({ status: "ok" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <GantryPositionWidget
+        position={position()}
+        workingVolume={{ ...workingVolume, z_min: 3.25 }}
+        gantryFile="cubos.yaml"
+        gantry={null}
+        onSaveCalibrated={async () => undefined}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Go" }));
+    expect(screen.getByRole("button", { name: "Go" })).toBeDisabled();
+    expect(screen.getByLabelText("Z (mm)")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.queryByText(/Move target outside working volume/)).not.toBeInTheDocument();
+    expect(fetchMock.mock.calls.filter(([input]) => String(input).endsWith("/move-to"))).toHaveLength(0);
+
+    const z = screen.getByLabelText("Z (mm)");
+    await user.clear(z);
+    await user.type(z, "3.25{Enter}");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/gantry/move-to",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ x: 0, y: 0, z: 3.25 }),
+      }),
+    );
+  });
+
 });

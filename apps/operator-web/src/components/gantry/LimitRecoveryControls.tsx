@@ -12,6 +12,7 @@ type Props = {
   onRecovered: (result: LimitRecoveryResult) => void;
   onError: (message: string) => void;
   autoRecovery?: CalibrationAutoRecovery;
+  automaticOnly?: boolean;
 };
 
 function deltaLabel(delta: RecoveryDelta) {
@@ -19,7 +20,7 @@ function deltaLabel(delta: RecoveryDelta) {
     .map((axis) => `${axis.toUpperCase()}${delta[axis] > 0 ? "+" : "−"} ${Math.abs(delta[axis])} mm`).join(", ");
 }
 
-export default function LimitRecoveryControls({ connected, disabled, onStart, onBusyChange, onRecovered, onError, autoRecovery }: Props) {
+export default function LimitRecoveryControls({ connected, disabled, onStart, onBusyChange, onRecovered, onError, autoRecovery, automaticOnly = false }: Props) {
   const { context, error } = useLimitRecoveryContext(connected);
   const [busy, setBusy] = useState(false);
   const [stopRequested, setStopRequested] = useState(false);
@@ -101,6 +102,8 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
   };
 
   if (busy) return <button style={theme.btn.danger} disabled={stopRequested} onClick={() => void stop()}>{stopRequested ? "Stopping…" : "Stop recovery"}</button>;
+
+  if (automaticOnly) return <span>{error ?? (!context ? "Checking recovery…" : context.blocked_reason ?? "Automatic recovery unavailable.")}</span>;
 
   return <div style={{ display: "grid", gap: 8 }}>
     {error && <span>{error}</span>}

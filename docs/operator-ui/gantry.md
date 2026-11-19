@@ -75,9 +75,9 @@ Raise the tool clear of labware before moving sideways.
    and **ALARM** means the controller is locked.
 5. **Home.** Re-homes all axes; clear the path first.
 6. **Calibrate.** Opens the [calibration wizard](calibrate-gantry.md).
-7. **Move To.** Enter X/Y/Z and click **Go**. Moves the **head**, not a
-   selected instrument tip. Do not copy a well position here when the tool
-   has an offset. Out-of-range targets are refused.
+7. **Move To.** Enter the head’s X, Y, and Z coordinates in millimeters.
+   Each field starts at 0. **Go** is available when all three coordinates
+   are within the configured travel and the gantry is ready.
 8. **Connection.** Shows status and **Disconnect**.
 9. **Advanced.** Controller settings, hold/resume, jog cancel, reset, and
    alarm controls. Use with the [recovery guide](../troubleshooting.md).

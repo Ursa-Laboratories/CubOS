@@ -1291,3 +1291,14 @@ def test_delete_gantry_refused_for_connected_config(monkeypatch, tmp_path):
     assert response.status_code == 409
     assert "disconnect" in response.json()["detail"]
     assert (gantry_dir / "live.yaml").exists()
+
+
+def test_cancelled_correlated_blocking_jog_is_not_http_success(monkeypatch):
+    from cubos.gantry.session import GantryJogCancelledError
+
+    session = FakeSession()
+    session.jog_blocking = MagicMock(side_effect=GantryJogCancelledError("Calibration jog was cancelled before completion."))
+    monkeypatch.setattr(gantry_router, "_session", session)
+    response = api_request(create_app(), "POST", "/api/v1/gantry/jog-blocking", json={"z": 1, "jog_id": "cancelled-step"})
+    assert response.status_code == 409
+    assert "cancelled" in response.json()["detail"]
