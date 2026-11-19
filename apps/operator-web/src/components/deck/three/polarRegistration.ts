@@ -1,12 +1,10 @@
-import type { Coordinate3D, OriginPolicy } from '../../../types';
+import type { Coordinate3D, InstrumentConfig, OriginPolicy } from '../../../types';
 
 // Survey of the CAD assembly in its native frame (metres, Y up, front +Z).
-// The sheet is centred left/right. Its front edge is the visual Y datum.
 const SHEET_CENTER_X = 0.21925;
 const SHEET_FRONT_Z = -0.0007;
 const SHEET_TOP_Y = -0.00365244;
-const NOZZLE_X = 0.226493;
-const NOZZLE_Z = -0.330118;
+export const CAD_NOZZLE = { x: 0.226493, y: 0.116740, z: -0.330118 };
 
 export type Range = [number, number];
 
@@ -19,12 +17,22 @@ export function deckRegistration(x: Range, y: Range, z: Range, policy: OriginPol
   };
 }
 
-export function assemblyDelta(head: Coordinate3D, toolOffset: { x: number; y: number }, origin: Coordinate3D, z: Range) {
-  // Align the CAD nozzle axis with configured XY. The Z slide is visually
-  // centred in its travel at the midpoint of the configured work range.
+export function cadRestPosition(origin: Coordinate3D, z: Range): Coordinate3D {
   return {
-    x: head.x + toolOffset.x + (origin.x - NOZZLE_X) * 1000,
-    y: head.y + toolOffset.y - (origin.z - NOZZLE_Z) * 1000,
-    z: head.z - (z[0] + z[1]) / 2,
+    x: (CAD_NOZZLE.x - origin.x) * 1000,
+    y: (origin.z - CAD_NOZZLE.z) * 1000,
+    z: (z[0] + z[1]) / 2,
+  };
+}
+
+export function instrumentEndpoint(
+  head: Coordinate3D,
+  instrument: Pick<InstrumentConfig, 'offset_x' | 'offset_y' | 'depth'>,
+  origin: Coordinate3D,
+): Coordinate3D {
+  return {
+    x: origin.x + (head.x + instrument.offset_x) / 1000,
+    y: origin.y + (head.z - (instrument.depth ?? 0)) / 1000,
+    z: origin.z - (head.y + instrument.offset_y) / 1000,
   };
 }

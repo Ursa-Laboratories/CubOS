@@ -70,8 +70,10 @@ what each resolution records.
 
 Use **2D** or **3D** in the **Deck Visualization** header. **Visualize** gives the selected view more room and keeps Gantry Control beside it on a wide screen. Both views use the current deck, including previewed edits.
 
-In **3D**, drag to orbit and scroll or pinch to zoom. **Fit** restores the full assembly, **Tool** frames the mount and pipette, and **Top** looks down on the deck. Green markers indicate configured instrument positions when CubOS reports valid work coordinates. A saved 4040-PRO MAX head-moving Sartorius setup also moves the reference carriage. A disconnected station shows the CAD rest pose.
+In **3D**, drag to orbit and scroll or pinch to zoom. **Fit** frames the assembly, **Tools** zooms in on the installed heads, and **Top** looks down on the deck. Each instrument in the selected gantry configuration gets its own visual model, positioned using its configured X/Y offsets and depth. The caption lists the configured instruments. A missing model is identified by name.
 
-The hardware model combines the Polar Bear 4040 gantry, Cubware Rev. 0 mount and Picus 2 5 mL STEP. The model’s registration and finishes are approximate. Use the station’s calibration for physical clearance and tip heights.
+The catalog covers force and optical probes, UV curing, single- and eight-channel pipettes, electrode contacts, cameras, ring lighting and vial cappers. A passive `mounted_tool` with vendor `mount_only` and key `raman_probe` shows the DEN Raman head. Other custom tools use a generic reference shape.
+
+When CubOS reports valid work coordinates, green markers show the configured instrument endpoints. On a saved 4040-PRO MAX head-moving setup, the reference carriage follows the live axes. A disconnected station shows the CAD rest pose. The assembly uses the Polar Bear frame with CAD-derived or photo-estimated heads and illustrative brackets. Physical fit and clearance depend on the station's calibration.
 
 ![The Visualize view, showing the full-size deck map](../images/operator-ui/visualize.webp)
