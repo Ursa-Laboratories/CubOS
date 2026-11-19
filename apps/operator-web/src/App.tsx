@@ -1,4 +1,5 @@
 import React, { useRef, useState, useMemo } from "react";
+import { isDeckOrigin } from "./utils/gantryOrigin";
 import { useQueryClient } from "@tanstack/react-query";
 import AppLayout from "./components/layout/AppLayout";
 import DeckVisualization from "./components/deck/DeckVisualization";
@@ -382,9 +383,10 @@ export default function App() {
 	  }, [localDeck, deckQuery.data, previewWells]);
 
   const displayGantry = localGantry ?? gantryQuery.data ?? null;
+  const coordinateGantry = displayGantry && isDeckOrigin(displayGantry.config) ? displayGantry : null;
   const gantryConnected = gantryPosition.data?.connected ?? false;
-  const workingVolume: WorkingVolume | null = displayGantry?.config.working_volume ?? null;
-  const yAxisMotion = displayGantry?.config.cnc?.y_axis_motion ?? "head";
+  const workingVolume: WorkingVolume | null = coordinateGantry?.config.working_volume ?? null;
+  const yAxisMotion = coordinateGantry?.config.cnc?.y_axis_motion ?? "head";
   const machineXRange: [number, number] = workingVolume
     ? [workingVolume.x_min, workingVolume.x_max]
     : [0, 300];
@@ -993,8 +995,8 @@ export default function App() {
           <div style={{ flex: "1 1 auto", minHeight: 0 }}>
             <DeckVisualization
               deck={displayDeck}
-              instruments={displayGantry?.config.instruments ?? null}
-              gantryPosition={gantryPosition.data ?? null}
+              instruments={coordinateGantry?.config.instruments ?? null}
+              gantryPosition={coordinateGantry ? gantryPosition.data ?? null : null}
               machineXRange={machineXRange}
               machineYRange={machineYRange}
               yAxisMotion={yAxisMotion}
@@ -1020,8 +1022,8 @@ export default function App() {
       <div style={deckVisualizationFrameStyle}>
         <DeckVisualization
           deck={displayDeck}
-          instruments={displayGantry?.config.instruments ?? null}
-          gantryPosition={gantryPosition.data ?? null}
+          instruments={coordinateGantry?.config.instruments ?? null}
+          gantryPosition={coordinateGantry ? gantryPosition.data ?? null : null}
           machineXRange={machineXRange}
           machineYRange={machineYRange}
           yAxisMotion={yAxisMotion}

@@ -1532,7 +1532,7 @@ labware:
 class TestTipRackSignedPickupZ:
 
     def test_signed_pickup_and_drop_z_accepted_by_schema(self):
-        """home_origin decks need negative pickup_z/drop_z; gt=0 was removed."""
+        """Deck parsing preserves signed values for gantry-aware bounds validation."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
             f.write(TIPRACK_WITH_SIGNED_PICKUP_Z)
             path = f.name

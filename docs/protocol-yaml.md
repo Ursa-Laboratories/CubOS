@@ -192,9 +192,7 @@ Commands available in YAML:
 
 ### `home`
 
-Home the gantry without rewriting the calibrated work-coordinate system —
-whichever `origin_policy` the gantry YAML selects (see [Gantry: Origin
-Policy](gantry.md#origin-policy)). No arguments.
+Home the gantry while preserving the [calibrated deck coordinates](gantry.md#coordinate-convention). No arguments.
 
 ### `rinse`
 

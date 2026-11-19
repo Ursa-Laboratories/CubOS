@@ -19,6 +19,7 @@ import {
 import { createJogPacer, jogPaceMs } from "./jogPacing";
 import { hasGantryAlarm, isGantryHoming, isVerifiedIdle } from "./gantryAlarm";
 import { useCalibrationAutoRecovery } from "../../hooks/useCalibrationAutoRecovery";
+import { isDeckOrigin, UNSUPPORTED_GANTRY_ORIGIN } from "../../utils/gantryOrigin";
 import { useLimitRecoveryContext } from "../../hooks/useLimitRecoveryContext";
 
 interface Props {
@@ -112,6 +113,7 @@ export default function CalibrationWizard({
 
   const filename = gantry?.filename ?? "";
   const config = gantry?.config ?? null;
+  const unsupportedOrigin = !!config && !isDeckOrigin(config);
   const instruments = useMemo(() => Object.keys(config?.instruments ?? {}), [config]);
   const followCameraInstruments = useMemo(
     () => instruments.filter((name) => isFollowCameraInstrument(config?.instruments[name]?.type)),
@@ -133,7 +135,7 @@ export default function CalibrationWizard({
     instruments.filter((name) => config?.instruments[name]?.type === "pipette").map((name) => [name, true]),
   ), [config, instruments]);
   const isMulti = calibratableInstruments.length > 1;
-  const connected = position?.connected ?? false;
+  const connected = !unsupportedOrigin && (position?.connected ?? false);
   const status = position?.status ?? "";
   const isAlarm = hasGantryAlarm(status);
   const homing = isGantryHoming(status);
@@ -189,7 +191,7 @@ export default function CalibrationWizard({
   const readyForSave = isMulti
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
-  const controlsLocked = busy || jogInFlight || homing || !!alarmRecoveryMessage;
+  const controlsLocked = unsupportedOrigin || busy || jogInFlight || homing || !!alarmRecoveryMessage;
 
   useEffect(() => {
     const wasOpen = previousOpen.current;
@@ -467,7 +469,7 @@ export default function CalibrationWizard({
   const runAction = async (label: string, action: (generation: number) => Promise<void>) => {
     const generation = autoRecovery.generation;
     const lifetime = autoRecovery.lifetime;
-    if (!autoRecovery.active) return;
+    if (!autoRecovery.active || unsupportedOrigin) return;
     setBusy(true);
     setOperation(label);
     setError(null);
@@ -913,6 +915,7 @@ export default function CalibrationWizard({
                 </button>}
               </div>
             )}
+            {unsupportedOrigin && <div role="alert" style={errorStyle}>{UNSUPPORTED_GANTRY_ORIGIN}</div>}
             {error && <div style={errorStyle}>{error}</div>}
             {operation && <div style={busyStyle}>{operation}… Please wait.</div>}
             {statusNote && <div style={noteStyle}>{statusNote}</div>}

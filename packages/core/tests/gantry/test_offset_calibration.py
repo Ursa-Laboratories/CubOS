@@ -8,9 +8,9 @@ from cubos.gantry.offset_calibration import calibrate_instrument_offsets
 @pytest.fixture
 def config():
     return {
-        "serial_port": "/dev/offline", "gantry_type": "cub_xl", "origin_policy": "home_origin",
-        "cnc": {"factory_z_travel_mm": 110, "safe_z": -5},
-        "working_volume": {"x_min": -300, "x_max": 0, "y_min": -200, "y_max": 0, "z_min": -110, "z_max": 0},
+        "serial_port": "/dev/offline", "gantry_type": "cub_xl", "origin_policy": "deck_origin",
+        "cnc": {"factory_z_travel_mm": 110, "safe_z": 105},
+        "working_volume": {"x_min": 0, "x_max": 300, "y_min": 0, "y_max": 200, "z_min": 0, "z_max": 110},
         "grbl_settings": {"max_travel_z": 111, "homing_pull_off": 1, "soft_limits": True},
         "instruments": {
             "pipette": {"type": "pipette", "vendor": "sartorius", "offset_x": 12, "offset_y": -3, "depth": -8, "model": "picus"},
@@ -24,9 +24,9 @@ def config():
 @pytest.fixture
 def captures():
     return {
-        "pipette": {"x": -100, "y": -50, "z": -20, "tip_length_mm": 40},
-        "probe": {"x": -120, "y": -45, "z": -70},
-        "camera": {"x": -90, "y": -55, "z": -10, "stand_off_mm": 30},
+        "pipette": {"x": 100, "y": 50, "z": 80, "tip_length_mm": 40},
+        "probe": {"x": 80, "y": 55, "z": 30},
+        "camera": {"x": 110, "y": 45, "z": 90, "stand_off_mm": 30},
     }
 
 

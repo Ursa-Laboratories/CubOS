@@ -478,37 +478,10 @@ def test_dry_run_prompts_for_only_operator_choices(tmp_path):
     assert any("Dry run only" in message for message in messages)
 
 
-def test_dry_run_home_origin_prompt_label_matches_preflight_wording(tmp_path):
+def test_dry_run_rejects_legacy_frame_before_connecting(tmp_path):
     path = _write_home_origin_multi_gantry(tmp_path / "gantry.yaml")
-    inputs = iter(["1", "y"])
-    prompts: list[str] = []
-    messages: list[str] = []
-
-    def input_reader(prompt: str) -> str:
-        prompts.append(prompt)
-        return next(inputs)
-
-    result = run_multi_instrument_calibration(
-        path,
-        dry_run=True,
-        output=messages.append,
-        input_reader=input_reader,
-    )
-
-    assert result is None
-    assert prompts == [
-        "Pick the number for the first/left-most tool for back-right-top origin: ",
-        "You selected #1 left_probe. Continue? [y/N]: ",
-    ]
-    assert any(
-        "place the origin block/artifact at the back-right-top corner" in message
-        for message in messages
-    )
-    assert any(
-        "place an origin block/artifact at the back-right-top corner" in message
-        for message in messages
-    )
-    assert not any("front-left" in message for message in messages)
+    with pytest.raises(ValueError, match="origin_policy"):
+        run_multi_instrument_calibration(path, dry_run=True, gantry_factory=lambda **_: pytest.fail("must not connect"))
 
 
 def test_multi_instrument_calibration_reconnects_once_if_serial_drops_during_home(tmp_path):

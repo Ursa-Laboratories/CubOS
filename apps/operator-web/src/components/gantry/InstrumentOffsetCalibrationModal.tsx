@@ -5,6 +5,7 @@ import type { GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import * as theme from "../../theme";
 import JogPanel from "./JogPanel";
 import CameraPreview from "./CameraPreview";
+import { isDeckOrigin, UNSUPPORTED_GANTRY_ORIGIN } from "../../utils/gantryOrigin";
 
 type Capture = { x: number; y: number; z: number; tip_length_mm: number; stand_off_mm?: number };
 interface Props {
@@ -41,7 +42,8 @@ function OffsetCalibration({ gantry, position, isRunning = false, onClose, onSav
   const operationPending = useRef(false);
   const dialog = useRef<HTMLDivElement>(null);
   const stale = JSON.stringify(gantry) !== JSON.stringify(snapshot);
-  const unavailable = !position?.connected || position.status !== "Idle" || position.calibration_active || isRunning || stale;
+  const unsupportedOrigin = !isDeckOrigin(config);
+  const unavailable = unsupportedOrigin || !position?.connected || position.status !== "Idle" || position.calibration_active || isRunning || stale;
   const locked = busy || unavailable;
   const pipette = config.instruments[active]?.type === "pipette";
   const camera = config.instruments[active]?.type === "camera";
@@ -117,7 +119,7 @@ function OffsetCalibration({ gantry, position, isRunning = false, onClose, onSav
       <p style={instructions}>Use one fixed mark on a stable surface. Touch it with each contact instrument; center the camera on the same mark. Your current origin, travel limits, and reference mounting values are preserved.</p>
       <p style={instructions}>Start with an already calibrated contact instrument. If its mounting changed, run full gantry calibration first. Raise tools manually before moving sideways.</p>
       {contacts.length === 0 && <p role="alert" style={theme.notice.warning}>Add and fully calibrate a contact instrument first.</p>}
-      {unavailable && <p role="alert" style={theme.notice.warning}>{stale ? "The selected configuration changed. Close and reopen this calibration." : "Connect the gantry and wait for Idle. Finish or restore any full calibration before continuing."}</p>}
+      {unavailable && <p role="alert" style={theme.notice.warning}>{unsupportedOrigin ? UNSUPPORTED_GANTRY_ORIGIN : stale ? "The selected configuration changed. Close and reopen this calibration." : "Connect the gantry and wait for Idle. Finish or restore any full calibration before continuing."}</p>}
       {error && <p role="alert" style={theme.notice.error}>{error}</p>}
       <label style={field}>Calibrated reference instrument
         <select style={theme.input} value={reference} disabled={busy} onChange={event => {

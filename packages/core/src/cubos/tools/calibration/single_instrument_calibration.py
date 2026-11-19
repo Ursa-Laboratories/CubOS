@@ -32,10 +32,9 @@ from cubos.gantry.limit_recovery import (  # noqa: E402
     probe_for_limit_status_after_jog as _probe_for_limit_status_after_jog,
     recover_from_limit_alarm as _recover_from_limit_alarm,
 )
-from cubos.gantry.gantry_config import OriginPolicy  # noqa: E402
+from cubos.gantry.gantry_config import OriginPolicy, validate_deck_origin_frame  # noqa: E402
 from cubos.gantry.origin import (  # noqa: E402
     DeckOriginCalibrationPlan,
-    _CALIBRATION_COMMAND_SKELETON,
     build_deck_origin_calibration_plan,
     validate_working_volume_origin,
 )
@@ -284,26 +283,17 @@ def _updated_gantry_yaml_text(
     calibration_block_height_mm: float | None = None,
     origin_policy: str = "deck_origin",
 ) -> str:
+    OriginPolicy(origin_policy)
+    validate_deck_origin_frame(raw_config.get("origin_policy", "deck_origin"), raw_config.get("working_volume"))
     updated = copy.deepcopy(raw_config)
-    if origin_policy == OriginPolicy.HOME_ORIGIN.value:
-        updated["origin_policy"] = OriginPolicy.HOME_ORIGIN.value
-        updated["working_volume"] = {
-            "x_min": _round_mm(-measured_coords["x"]),
-            "x_max": 0.0,
-            "y_min": _round_mm(-measured_coords["y"]),
-            "y_max": 0.0,
-            "z_min": _round_mm(z_min_mm - z_max_mm),
-            "z_max": 0.0,
-        }
-    else:
-        updated["working_volume"] = {
-            "x_min": 0.0,
-            "x_max": _round_mm(measured_coords["x"]),
-            "y_min": 0.0,
-            "y_max": _round_mm(measured_coords["y"]),
-            "z_min": _round_mm(z_min_mm),
-            "z_max": _round_mm(z_max_mm),
-        }
+    updated["working_volume"] = {
+        "x_min": 0.0,
+        "x_max": _round_mm(measured_coords["x"]),
+        "y_min": 0.0,
+        "y_max": _round_mm(measured_coords["y"]),
+        "z_min": _round_mm(z_min_mm),
+        "z_max": _round_mm(z_max_mm),
+    }
     if max_travel is not None:
         updated["grbl_settings"] = _build_gantry_grbl_settings(
             gantry_raw=raw_config,
@@ -514,37 +504,24 @@ def _print_config_patch(
     output: Callable[[str], None],
     origin_policy: str = "deck_origin",
 ) -> None:
+    OriginPolicy(origin_policy)
     x_max, y_max, measured_home_z = _coords_tuple(coords)
     output("")
-    if origin_policy == OriginPolicy.HOME_ORIGIN.value:
-        output("Calibrated working volume from calibrated origin (home-origin frame):")
-        output(f"  X: {-x_max:.3f} to 0.000 mm")
-        output(f"  Y: {-y_max:.3f} to 0.000 mm")
-        output(f"  Z: {z_min_mm - z_max_mm:.3f} to 0.000 mm")
-    else:
-        output("Calibrated working volume from calibrated origin:")
-        output(f"  X: 0.000 to {x_max:.3f} mm")
-        output(f"  Y: 0.000 to {y_max:.3f} mm")
-        output(f"  Z: {z_min_mm:.3f} to {z_max_mm:.3f} mm")
+    output("Calibrated working volume from calibrated origin:")
+    output(f"  X: 0.000 to {x_max:.3f} mm")
+    output(f"  Y: 0.000 to {y_max:.3f} mm")
+    output(f"  Z: {z_min_mm:.3f} to {z_max_mm:.3f} mm")
     output(f"  Factory Z travel safety bound: {factory_z_travel_mm:.3f} mm")
     output(f"  Homed Z readback after calibration: {measured_home_z:.3f} mm")
     output("")
     output("Update the gantry YAML working_volume to:")
     output("  working_volume:")
-    if origin_policy == OriginPolicy.HOME_ORIGIN.value:
-        output(f"    x_min: {-x_max:.3f}")
-        output("    x_max: 0.0")
-        output(f"    y_min: {-y_max:.3f}")
-        output("    y_max: 0.0")
-        output(f"    z_min: {z_min_mm - z_max_mm:.3f}")
-        output("    z_max: 0.0")
-    else:
-        output("    x_min: 0.0")
-        output(f"    x_max: {x_max:.3f}")
-        output("    y_min: 0.0")
-        output(f"    y_max: {y_max:.3f}")
-        output(f"    z_min: {z_min_mm:.3f}")
-        output(f"    z_max: {z_max_mm:.3f}")
+    output("    x_min: 0.0")
+    output(f"    x_max: {x_max:.3f}")
+    output("    y_min: 0.0")
+    output(f"    y_max: {y_max:.3f}")
+    output(f"    z_min: {z_min_mm:.3f}")
+    output(f"    z_max: {z_max_mm:.3f}")
     output("")
     output("Keep the out-of-box cnc.factory_z_travel_mm unchanged:")
     output(f"  factory_z_travel_mm: {factory_z_travel_mm:.3f}")
@@ -1062,6 +1039,7 @@ def _interactive_jog_to_xy_origin(
     z_reference_mode: str,
     origin_policy: str = "deck_origin",
 ) -> dict[str, float]:
+    OriginPolicy(origin_policy)
     if z_reference_mode == "block":
         confirmation_description = (
             "Press ENTER only when the current X/Y should become WPos X=0, "
@@ -1074,16 +1052,10 @@ def _interactive_jog_to_xy_origin(
             "Y=0. After confirmation, the script will set Z from either true "
             "deck-bottom contact or a ruler-measured deck-to-TCP gap."
         )
-    if origin_policy == OriginPolicy.HOME_ORIGIN.value:
-        target_description = (
-            "Step 1/1: jog the one reference TCP as far as appropriate toward "
-            "the physical back-right-top XY origin and its lowest safe reachable Z."
-        )
-    else:
-        target_description = (
-            "Step 1/1: jog the one reference TCP as far as appropriate toward "
-            "the physical front-left XY origin and its lowest safe reachable Z."
-        )
+    target_description = (
+        "Step 1/1: jog the one reference TCP as far as appropriate toward "
+        "the physical front-left XY origin and its lowest safe reachable Z."
+    )
     return _interactive_jog_to_reference(
         gantry,
         target_description=target_description,
@@ -1120,12 +1092,7 @@ def run_calibration(
     key_reader: KeyReader = read_keypress_batch,
     stdin_flusher: Callable[[], None] = flush_stdin,
 ) -> DeckOriginCalibrationResult | DeckOriginCalibrationPlan:
-    """Calibrate one reference TCP to the CubOS physical origin corner.
-
-    Supports both ``origin_policy`` values on the loaded gantry config:
-    ``deck_origin`` (default, front-left-bottom) and ``home_origin``
-    (back-right-top, the homed corner).
-    """
+    """Calibrate one reference TCP to the front-left-bottom deck origin."""
     gantry_path = gantry_path.resolve()
     gantry_config = load_gantry_from_yaml(gantry_path)
     validate_working_volume_origin(gantry_config)
@@ -1134,17 +1101,7 @@ def run_calibration(
     factory_z_travel_mm = _factory_z_travel_mm(raw_config)
     if output_gantry_path is not None:
         output_gantry_path = output_gantry_path.resolve()
-    if origin_policy is OriginPolicy.HOME_ORIGIN:
-        # validate_working_volume_origin() above already gated the shape;
-        # build_deck_origin_calibration_plan() is deck-origin-only (it
-        # re-validates deck minima internally), so build the equivalent
-        # plan directly for home_origin instead of calling it.
-        plan = DeckOriginCalibrationPlan(
-            origin_wpos=(0.0, 0.0, 0.0),
-            commands=_CALIBRATION_COMMAND_SKELETON,
-        )
-    else:
-        plan = build_deck_origin_calibration_plan(gantry_config)
+    plan = build_deck_origin_calibration_plan(gantry_config)
     if z_reference_mode not in ("prompt", "bottom", "ruler-gap", "block"):
         raise ValueError("z_reference_mode must be one of: prompt, bottom, ruler-gap, block")
 
@@ -1162,10 +1119,7 @@ def run_calibration(
     output(f"Loaded {origin_policy.value} gantry config: {gantry_path}")
     output("Preflight:")
     output("  - Attach exactly one reference instrument/TCP for this calibration.")
-    if origin_policy is OriginPolicy.HOME_ORIGIN:
-        output("  - Place a calibration reference at the back-right-top origin point:")
-    else:
-        output("  - Place a calibration reference at the front-left origin point:")
+    output("  - Place a calibration reference at the front-left origin point:")
     output("    the calibration block, or a deck feature such as a plate's corner-most well.")
     output("  - Jog the instrument tip/probe to touch the top of the reference at that point.")
     output("  - This will set X=0 and Y=0 at that pose, then set Z from the selected reference mode.")

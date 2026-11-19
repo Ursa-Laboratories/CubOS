@@ -11,6 +11,7 @@ import type {
 import { DirtyMarker, NumberField, SaveButton, SaveTargetHint, SavedStatus, TextField, UnsavedNotice } from "./fields";
 import { useSaveShortcut } from "./saveHelpers";
 import { normalizeYamlFilename } from "./field-utils";
+import { isDeckOrigin } from "../../utils/gantryOrigin";
 import { isFieldEqual } from "./field-utils";
 import ConfigFilePicker from "./ConfigFilePicker";
 import { EMPTY_GANTRY } from "./gantryDefaults";
@@ -682,6 +683,7 @@ export default function GantryEditor({
 // and re-validates on every PUT regardless of what this returns.
 function isValidGantry(config: GantryConfig | null | undefined): boolean {
   if (!config || typeof config !== "object") return false;
+  if (!isDeckOrigin(config)) return false;
   if (typeof config.serial_port !== "string") return false;
   if (!["cub", "cub_xl", "genmitsu_4040_pro_max"].includes(config.gantry_type)) return false;
 

@@ -1,21 +1,21 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import InstrumentOffsetCalibrationModal from "./InstrumentOffsetCalibrationModal";
-import { gantryApi } from "../../api/client";
-import type { GantryConfig, GantryPosition } from "../../types";
+import InstrumentOffsetCalibrationModal from "../../../../src/components/gantry/InstrumentOffsetCalibrationModal";
+import { gantryApi } from "../../../../src/api/client";
+import type { GantryConfig, GantryPosition } from "../../../../src/types";
 
-vi.mock("./CameraPreview", () => ({ default: () => <div>Camera preview</div> }));
+vi.mock("../../../../src/components/gantry/CameraPreview", () => ({ default: () => <div>Camera preview</div> }));
 const config: GantryConfig = {
-  serial_port: "/dev/offline", gantry_type: "cub_xl", origin_policy: "home_origin",
+  serial_port: "/dev/offline", gantry_type: "cub_xl", origin_policy: "deck_origin",
   cnc: { factory_z_travel_mm: 110 },
-  working_volume: { x_min: -300, x_max: 0, y_min: -200, y_max: 0, z_min: -110, z_max: 0 },
+  working_volume: { x_min: 0, x_max: 300, y_min: 0, y_max: 200, z_min: 0, z_max: 110 },
   instruments: {
     pipette: { type: "pipette", vendor: "sartorius", offset_x: 12, offset_y: -3, depth: -8 },
     camera: { type: "camera", vendor: "usb", offset_x: 0, offset_y: 0 },
   },
 };
-const position: GantryPosition = { x: -100, y: -50, z: -20, work_x: -100, work_y: -50, work_z: -20, connected: true, status: "Idle", calibration_active: false };
+const position: GantryPosition = { x: 100, y: 50, z: 20, work_x: 100, work_y: 50, work_z: 20, connected: true, status: "Idle", calibration_active: false };
 function setup(overrides: Partial<GantryPosition> = {}) {
   const save = vi.fn(async () => undefined);
   const close = vi.fn();
@@ -28,6 +28,15 @@ afterEach(() => vi.restoreAllMocks());
 const confirm = () => screen.getByRole("checkbox", { name: /existing offsets and depth are calibrated/ });
 
 describe("offset-only calibration", () => {
+  it("blocks a legacy frame before recording, jogging, or saving offsets", () => {
+    const legacy = Object.assign(structuredClone(config), { origin_policy: "home_origin" }) as unknown as GantryConfig;
+    render(<InstrumentOffsetCalibrationModal open gantry={{ filename: "legacy.yaml", config: legacy }} position={position}
+      onClose={() => undefined} onSaveCalibrated={async () => undefined} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Unsupported coordinate origin");
+    expect(screen.getByRole("button", { name: "Record pipette at fixed mark" })).toBeDisabled();
+    expect(screen.getByTitle("X+")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Review offsets" })).toBeDisabled();
+  });
   it("records tip compensation as a snapshot, preserves it through settings changes, and saves the reviewed config", async () => {
     const { user, live, review, save, close } = setup();
     const home = vi.spyOn(gantryApi, "home");
@@ -44,13 +53,13 @@ describe("offset-only calibration", () => {
     await user.click(screen.getByRole("checkbox", { name: "Tip attached for this capture" }));
     await user.selectOptions(screen.getByLabelText("Instrument to record"), "camera");
     await user.type(screen.getByLabelText("Camera stand-off from fixed mark (mm)"), "30");
-    live.mockResolvedValue({ ...position, work_x: -90, work_y: -55, work_z: -10 });
+    live.mockResolvedValue({ ...position, work_x: 110, work_y: 45, work_z: 30 });
     await user.click(screen.getByRole("button", { name: "Record camera at fixed mark" }));
     await screen.findByText(/camera: recorded/);
     await user.click(screen.getByRole("button", { name: "Review offsets" }));
     expect(review).toHaveBeenCalledWith({ config, reference_instrument: "pipette", captures: {
-      pipette: { x: -100, y: -50, z: -20, tip_length_mm: 40 },
-      camera: { x: -90, y: -55, z: -10, tip_length_mm: 0, stand_off_mm: 30 },
+      pipette: { x: 100, y: 50, z: 20, tip_length_mm: 40 },
+      camera: { x: 110, y: 45, z: 30, tip_length_mm: 0, stand_off_mm: 30 },
     } });
     await user.click(await screen.findByRole("button", { name: "Save instrument offsets" }));
     expect(save).toHaveBeenCalledWith("hein_offsets.yaml", config);

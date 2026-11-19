@@ -17,7 +17,7 @@ import yaml
 from cubos.data import DataStore, create_campaign_for_protocol_run
 from cubos.gantry.gantry import Gantry
 from cubos.gantry.errors import CommandExecutionError, JogAcceptanceUnknownError, MillConnectionError
-from cubos.gantry.gantry_config import OriginPolicy
+from cubos.gantry.gantry_config import OriginPolicy, validate_deck_origin_frame
 from cubos.gantry.origin import translate_calibrated_safe_z
 from cubos.gantry.grbl_settings import normalize_expected_grbl_settings
 from cubos.gantry.limit_recovery import (
@@ -327,6 +327,7 @@ class GantrySession:
         filename: str,
         config: dict[str, Any],
     ) -> None:
+        validate_deck_origin_frame(config.get("origin_policy", "deck_origin"), config.get("working_volume"))
         with self._lock:
             if self._gantry is None or self._connected_gantry_filename != filename:
                 return
@@ -768,7 +769,9 @@ class GantrySession:
     ) -> FinalizeOriginResult:
         with self._locked_gantry() as gantry:
             self._require_verified_calibration_frame_locked()
-            previous_policy = OriginPolicy((self._connected_gantry_config or {}).get("origin_policy", "deck_origin")).value
+            connected_config = self._connected_gantry_config or {}
+            validate_deck_origin_frame(connected_config.get("origin_policy", "deck_origin"), connected_config.get("working_volume"))
+            previous_policy = OriginPolicy(connected_config.get("origin_policy", "deck_origin")).value
             selected_policy = OriginPolicy(previous_policy if origin_policy is None else origin_policy).value
             try:
                 result = gantry.finalize_deck_origin_calibration(

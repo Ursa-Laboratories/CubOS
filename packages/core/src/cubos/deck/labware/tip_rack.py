@@ -80,17 +80,11 @@ class TipRack(HolderLabware):
     columns: int = Field(..., gt=0, description="Number of rack columns.")
     pickup_z: float = Field(
         ...,
-        description=(
-            "Default pickup Z for each tip, in the gantry config's active "
-            "frame (absolute deck-frame or home-frame, signed)."
-        ),
+        description="Default pickup Z for each tip in absolute deck coordinates.",
     )
     drop_z: float | None = Field(
         default=None,
-        description=(
-            "Optional discard/park Z for tips, in the gantry config's active "
-            "frame (absolute deck-frame or home-frame, signed)."
-        ),
+        description="Optional discard/park Z for tips in absolute deck coordinates.",
     )
     tip_length: float = Field(
         ...,

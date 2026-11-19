@@ -11,9 +11,9 @@ from cubos_api.routers import gantry as gantry_router
 def request_body():
     return {
         "config": {
-            "serial_port": "/dev/offline", "gantry_type": "cub_xl", "origin_policy": "home_origin",
+            "serial_port": "/dev/offline", "gantry_type": "cub_xl", "origin_policy": "deck_origin",
             "cnc": {"factory_z_travel_mm": 110},
-            "working_volume": {"x_min": -300, "x_max": 0, "y_min": -200, "y_max": 0, "z_min": -110, "z_max": 0},
+            "working_volume": {"x_min": 0, "x_max": 300, "y_min": 0, "y_max": 200, "z_min": 0, "z_max": 110},
             "instruments": {
                 "pipette": {"type": "pipette", "vendor": "sartorius", "offset_x": 12, "offset_y": -3, "depth": -8},
                 "camera": {"type": "camera", "vendor": "usb", "offset_x": 0, "offset_y": 0},
@@ -21,8 +21,8 @@ def request_body():
         },
         "reference_instrument": "pipette",
         "captures": {
-            "pipette": {"x": -100, "y": -50, "z": -20, "tip_length_mm": 40},
-            "camera": {"x": -90, "y": -55, "z": -10, "stand_off_mm": 30},
+            "pipette": {"x": 100, "y": 50, "z": 80, "tip_length_mm": 40},
+            "camera": {"x": 110, "y": 45, "z": 90, "stand_off_mm": 30},
         },
     }
 
@@ -54,6 +54,18 @@ def test_invalid_config_rejected_before_calculation(request_body):
     response = api_request(create_app(), "POST", "/api/v1/gantry/calibration/instrument-offsets", json=request_body)
     assert response.status_code == 422
     assert "factory_z_travel_mm" in response.json()["detail"]
+
+
+def test_legacy_origin_rejected_before_offset_calculation(monkeypatch, request_body):
+    request_body["config"]["origin_policy"] = "home_origin"
+    calculate = Mock(side_effect=AssertionError("Unsupported frame must not reach calibration"))
+    monkeypatch.setattr(gantry_router, "calibrate_instrument_offsets", calculate)
+
+    response = api_request(create_app(), "POST", "/api/v1/gantry/calibration/instrument-offsets", json=request_body)
+
+    assert response.status_code == 422
+    assert "origin_policy" in response.json()["detail"]
+    calculate.assert_not_called()
 
 
 @pytest.mark.parametrize("capture", [None, 1, "invalid", []])

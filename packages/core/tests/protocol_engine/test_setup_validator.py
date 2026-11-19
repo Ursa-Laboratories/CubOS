@@ -110,8 +110,7 @@ def test_run_setup_validation_reports_named_position_bounds_errors(tmp_path):
     assert "RESULT: FAIL" in result.output
 
 
-def test_run_setup_validation_passes_for_home_origin_negative_fixture(tmp_path):
-    """A home_origin gantry config must validate end-to-end like deck_origin."""
+def test_run_setup_validation_rejects_legacy_home_origin_config(tmp_path):
     gantry = _write(tmp_path / "gantry.yaml", GANTRY_YAML_HOME_ORIGIN)
     deck = _write(tmp_path / "deck.yaml", DECK_YAML)
     protocol = _write(
@@ -129,9 +128,10 @@ def test_run_setup_validation_passes_for_home_origin_negative_fixture(tmp_path):
 
     result = run_setup_validation(gantry, deck, protocol)
 
-    assert result.passed is True
-    assert result.errors == ()
-    assert "RESULT: PASS" in result.output
+    assert result.passed is False
+    assert result.stage == "gantry"
+    assert any("origin_policy" in error for error in result.errors)
+    assert "RESULT: ERROR - could not load gantry config" in result.output
 
 
 @pytest.mark.parametrize("command_yaml", [

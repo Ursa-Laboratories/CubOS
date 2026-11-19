@@ -1,13 +1,7 @@
-"""Coordinate normalization helpers for the gantry boundary.
+"""Normalize gantry values in the front-left-bottom deck frame.
 
-CubOS speaks a signed frame at the high-level gantry boundary, selected per
-gantry config by ``origin_policy``: ``deck_origin`` (default) uses a
-front-left-bottom origin with +X operator-right, +Y back, +Z up and may
-include negative X/Y travel beyond the deck corner; ``home_origin`` uses the homed back-right-top
-corner as WPos zero with the same axis directions and a non-positive
-working volume. Controller configuration is responsible for making raw
-GRBL/WPos reports match the configured frame, so outgoing values are
-normalized without applying hidden sign flips.
++X is operator-right, +Y is back, and +Z is up. Controller settings make
+raw WPos match this frame; normalization applies no hidden sign flips.
 """
 
 from __future__ import annotations

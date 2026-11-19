@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from enum import Enum
 from typing import Any, Dict, Optional
 
@@ -23,18 +24,25 @@ class GantryType(str, Enum):
 
 
 class OriginPolicy(str, Enum):
-    """Which physical corner WPos zero is calibrated to.
-
-    ``DECK_ORIGIN`` (default): WPos zero at the front-left-bottom deck
-    corner. X/Y minima may be negative when the machine has usable travel
-    beyond that deck corner; Z remains non-negative.
-    ``HOME_ORIGIN``: WPos zero at the homed back-right-top corner; the
-    entire reachable working volume is non-positive (mirror-symmetric with
-    ``DECK_ORIGIN``).
-    """
+    """The supported front-left-bottom deck reference frame."""
 
     DECK_ORIGIN = "deck_origin"
-    HOME_ORIGIN = "home_origin"
+
+
+def validate_deck_origin_frame(origin_policy: str, working_volume: Any = None) -> None:
+    """Reject unsupported policies and unmistakable legacy frame bounds."""
+    OriginPolicy(origin_policy)
+    if working_volume is None:
+        return
+    values = [
+        working_volume.get(axis) if isinstance(working_volume, Mapping) else getattr(working_volume, axis, None)
+        for axis in ("x_max", "y_max", "z_min")
+    ]
+    if any(value is None for value in values):
+        return
+    x_max, y_max, z_min = map(float, values)
+    if abs(x_max) <= 1e-9 and abs(y_max) <= 1e-9 and z_min < -1e-9:
+        raise ValueError("Legacy home-frame working_volume is unsupported. Recalibrate in the deck-origin frame; coordinates are not converted automatically.")
 
 
 @dataclass(frozen=True)
@@ -102,6 +110,7 @@ class GantryConfig:
             raise ValueError(
                 f"Unsupported origin_policy {self.origin_policy!r}."
             ) from exc
+        validate_deck_origin_frame(self.origin_policy, self.working_volume)
         if self.factory_z_travel_mm <= 0:
             raise ValueError(
                 f"factory_z_travel_mm ({self.factory_z_travel_mm}) must be > 0"
