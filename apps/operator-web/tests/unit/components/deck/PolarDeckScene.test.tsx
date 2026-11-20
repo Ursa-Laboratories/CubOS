@@ -49,6 +49,9 @@ describe('3D instrument configuration', () => {
     await screen.findByRole('button', { name: 'Fit' });
     expect(screen.queryByRole('button', { name: 'Tools' })).toBeNull();
     expect(mountPolarStudio.mock.lastCall?.[3]).toEqual({ showReferenceTool: false });
+    expect(stage.fit).toHaveBeenCalledExactlyOnceWith('front-elevated');
+    fireEvent.click(screen.getByRole('button', { name: 'Fit' }));
+    expect(stage.fit).toHaveBeenLastCalledWith('iso');
     expect(createInstrumentHead).not.toHaveBeenCalled();
     expect(stage.move).toHaveBeenLastCalledWith(null);
 
