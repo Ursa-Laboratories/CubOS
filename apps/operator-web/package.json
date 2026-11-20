@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.90.21",
-    "@ursa-labs/polar-bear-twin": "file:vendor/ursa-labs-polar-bear-twin-0.2.1.tgz",
+    "@ursa-labs/polar-bear-twin": "file:vendor/ursa-labs-polar-bear-twin-0.2.2.tgz",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "three": "0.178.0",

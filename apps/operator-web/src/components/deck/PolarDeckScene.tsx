@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Group, Mesh, MeshBasicMaterial, SphereGeometry } from 'three';
-import { CAD_REST, createInstrumentHead, instrumentHeadLabel, mountPolarStudio, type Assembly, type PolarStudio } from '@ursa-labs/polar-bear-twin';
+import { CAD_REST, createInstrumentHead, mountPolarStudio, type Assembly, type PolarStudio } from '@ursa-labs/polar-bear-twin';
 import modelUrl from '@ursa-labs/polar-bear-twin/assembly.glb?url';
 import lightUrl from '@ursa-labs/polar-bear-twin/studio.hdr?url';
 import type { Coordinate3D, DeckResponse, GantryConfig, InstrumentConfig, OriginPolicy } from '../../types';
@@ -56,7 +56,6 @@ export default function PolarDeckScene({ deck, instruments, gantryPosition, gant
   const [rig, setRig] = useState<Assembly | null>(null);
   const [error, setError] = useState(false);
   const [loadedTools, setLoadedTools] = useState<{ config: Props['instruments']; group: Group; missing: string[] } | null>(null);
-  const toolLabels = Object.entries(instruments ?? {}).map(([name, config]) => `${name} · ${instrumentHeadLabel(config, name)}`);
   const tools = loadedTools?.config === instruments ? loadedTools : null;
   const status = error ? 'error' : rig ? 'ready' : 'loading';
   const { x, y, z } = deckRegistration(machineXRange, machineYRange, machineZRange, originPolicy);
@@ -165,11 +164,9 @@ export default function PolarDeckScene({ deck, instruments, gantryPosition, gant
           studio.current?.fit('top');
         }}>Top</button>
       </div>
-      <div className="polar-deck-caption">
-        <div>4040 reference · {gantryPosition ? liveAxes ? 'Live axes and targets' : 'Live targets' : 'CAD pose'}</div>
-        {toolLabels.length > 0 && <div>{toolLabels.join(' / ')}</div>}
-        {Boolean(tools?.missing.length) && <div role="status">Model unavailable · {tools?.missing.join(', ')}</div>}
-      </div>
+      {tools && tools.missing.length > 0 && <div className="polar-deck-model-error" role="status">
+        Model unavailable · {tools.missing.join(', ')}
+      </div>}
     </> : <div className="polar-deck-status" role="status">
       {status === 'loading' ? 'Loading 3D…' : <>3D unavailable <button type="button" onClick={onShow2D}>Show 2D</button></>}
     </div>}

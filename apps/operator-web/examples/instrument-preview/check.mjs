@@ -65,14 +65,19 @@ try {
     await page.goto(new URL('?setup=' + oldSetup, base).href);
     await tools.waitFor({ timeout: 30_000 });
     assert.equal(await picker.inputValue(), currentSetup);
+    for (const name of expected[currentSetup]) {
+      assert.ok([...assets].some(asset => asset.startsWith(name + '-') && asset.endsWith('.glb')), name);
+    }
     assert.ok(![...assets].some(asset => asset.startsWith('camera-usb-')));
   }
-  assert.match(await scene.textContent(), /Picus 2 · 1 ch · 300 µL.*Picus 2 · 8 ch · 300 µL/);
   console.log('PASS legacy setup links and dedicated Picus 300 µL comparison');
 
+  assets.clear();
   await Promise.all([page.waitForURL('**/?setup=optics'), picker.selectOption('optics')]);
   await tools.waitFor({ timeout: 30_000 });
-  assert.match(await scene.textContent(), /Filmetrics F20 probe.*Thorlabs CCS probe.*OmniCure light guide/);
+  for (const name of expected.optics) {
+    assert.ok([...assets].some(asset => asset.startsWith(name + '-') && asset.endsWith('.glb')), name);
+  }
   assert.ok(requests.length > 0 && requests.every(method => method === 'GET'));
   assert.deepEqual(errors, []);
   for (const method of ['POST', 'PUT', 'PATCH', 'DELETE']) {

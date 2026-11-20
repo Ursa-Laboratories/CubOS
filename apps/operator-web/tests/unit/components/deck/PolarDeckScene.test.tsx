@@ -2,7 +2,6 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Scene } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import PolarDeckScene from '../../../../src/components/deck/PolarDeckScene';
-import type { InstrumentConfig } from '../../../../src/types';
 
 const { createInstrumentHead, mountPolarStudio } = vi.hoisted(() => ({
   createInstrumentHead: vi.fn(),
@@ -12,7 +11,6 @@ const { createInstrumentHead, mountPolarStudio } = vi.hoisted(() => ({
 vi.mock('@ursa-labs/polar-bear-twin', () => ({
   CAD_REST: { x: 195, y: 195, z: 35 },
   createInstrumentHead,
-  instrumentHeadLabel: (config: InstrumentConfig) => config.pipette_model ?? config.type,
   mountPolarStudio,
 }));
 
@@ -61,6 +59,7 @@ describe('3D instrument configuration', () => {
     expect(rig.carriage.children[0].children.filter(child => child instanceof Group).map(child => child.name))
       .toEqual(['reagent', 'sample', 'probe']);
     expect(stage.fitObject).toHaveBeenCalledWith(rig.carriage.children[0]);
+    expect(screen.getByRole('region', { name: '3D deck visualization' })).toHaveTextContent(/^FitToolsTop$/);
     expect(stage.move.mock.lastCall?.[0]).toMatchObject({ z: 30 });
 
     rerender(<PolarDeckScene {...props} instruments={instruments} gantryPosition={{ x: 93, y: 40, z: 25 }} />);

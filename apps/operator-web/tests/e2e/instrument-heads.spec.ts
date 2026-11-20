@@ -26,8 +26,6 @@ test('draws both configured heads and isolates a missing tool mesh', async ({ pa
   const modes = page.getByRole('group', { name: 'Deck view' });
   await modes.getByRole('button', { name: '3D' }).click();
   await expect(page.getByRole('button', { name: 'Tools', exact: true })).toBeVisible({ timeout: 30000 });
-  await expect(page.locator('.polar-deck-caption')).toContainText('FLIR camera');
-  await expect(page.locator('.polar-deck-caption')).toContainText('Vernier ASMI');
   expect([...models].some(name => name.startsWith('camera-flir'))).toBe(true);
   expect([...models].some(name => name.startsWith('asmi-vernier'))).toBe(true);
   expect([...models].some(name => name.startsWith('pipette'))).toBe(false);
@@ -35,7 +33,7 @@ test('draws both configured heads and isolates a missing tool mesh', async ({ pa
   await modes.getByRole('button', { name: '2D' }).click();
   await page.route(/camera-flir[^/]*\.glb$/, route => route.fulfill({ status: 404 }));
   await modes.getByRole('button', { name: '3D' }).click();
-  await expect(page.locator('.polar-deck')).toContainText(/unavailable.*camera|camera.*unavailable/i);
+  await expect(page.getByRole('status').filter({ hasText: 'Model unavailable · camera' })).toBeVisible();
   await page.getByRole('button', { name: 'Tools', exact: true }).click();
   await expect(page.locator('.polar-deck')).toHaveAttribute('data-state', 'ready');
   expect(api.requests.filter(req => req.method !== 'GET')).toEqual([]);
@@ -67,6 +65,6 @@ test('uses the 300 µL Picus models and keeps unspecified camera mounts position
   expect([...meshes].filter(name => !name.startsWith('assembly')).sort()).toEqual([
     expect.stringMatching(/^pipette-sartorius-300/), expect.stringMatching(/^pipette-sartorius-multi/),
   ]);
-  await expect(page.locator('.polar-deck-caption')).toContainText('position only');
+  await expect(page.getByRole('status').filter({ hasText: 'Model unavailable' })).toHaveCount(0);
   expect(api.requests.filter(req => req.method !== 'GET')).toEqual([]);
 });
