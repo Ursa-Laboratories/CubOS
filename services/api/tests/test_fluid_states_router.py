@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from cubos.data import DataStore
-
-from tests.api_client import api_request
 from cubos_api.app import create_app
 from cubos_api.config import get_settings
 
+from tests.api_client import api_request
 
 DECK_YAML = """\
 labware:
@@ -235,7 +235,85 @@ def test_resolve_reconciliation_records_operator_and_reason(monkeypatch, tmp_pat
     assert reconciliation.json()["items"] == []
 
 
-def test_resolve_reconciliation_requires_operator_and_reason(monkeypatch, tmp_path: Path):
+@pytest.mark.parametrize("domain,operation_type", [
+    ("tip", "pick_up_tip"),
+    ("tip", "drop_tip"),
+    ("cap", "cap"),
+    ("cap", "decap"),
+])
+def test_applied_tip_and_cap_resolution_records_operator_and_reason(
+    monkeypatch, tmp_path: Path, domain, operation_type,
+):
+    path = _write_deck_config(monkeypatch, tmp_path)
+    path.write_text(
+        DECK_YAML.replace("    role: stock", "    capped: true\n    role: stock")
+        .replace("    role: waste", "    capped: false\n    role: waste")
+        + """
+  tip_rack:
+    load_name: ursa_tip_rack
+    name: test_tip_rack
+    tip_length: 59.3
+    pickup_z: 64.7
+    drop_z: 34.0
+    calibration:
+      a1: {x: 210.0, y: 230.0}
+      a2: {x: 218.5, y: 230.0}
+""",
+        encoding="utf-8",
+    )
+    app = create_app()
+    created = api_request(
+        app, "POST", "/api/v1/fluid-states", json={"deck_file": "state-deck.yaml"},
+    )
+    assert created.status_code == 201
+    state_id = created.json()["id"]
+    with _store() as store:
+        campaign_id = store.create_campaign("reconciliation test", fluid_state_id=state_id)
+        if domain == "tip":
+            pick_key = "setup-pick" if operation_type == "drop_tip" else operation_type
+            store.begin_pick_up_tip(
+                state_id, pick_key, "tip_rack", "A1", 59.3, campaign_id=campaign_id,
+            )
+            if operation_type == "drop_tip":
+                store.complete_pick_up_tip(pick_key)
+                store.begin_drop_tip(state_id, operation_type, campaign_id=campaign_id)
+            store.mark_tip_reconciliation_required(operation_type, "connection lost")
+        else:
+            target = "source" if operation_type == "decap" else "waste"
+            store.begin_cap_operation(
+                state_id, operation_type, operation_type, target, "",
+                campaign_id=campaign_id,
+            )
+            store.mark_cap_reconciliation_required(operation_type, "connection lost")
+
+    response = api_request(
+        app, "POST", f"/api/v1/fluid-states/{state_id}/reconciliation/resolve",
+        json={
+            "domain": domain,
+            "operation_key": operation_type,
+            "resolution": "applied",
+            "operator": " reviewer ",
+            "reason": " inspected and confirmed completion ",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "applied"
+    expected_detail = "[reviewer] inspected and confirmed completion"
+    assert response.json()["detail"] == expected_detail
+
+    operations = api_request(
+        app, "GET", f"/api/v1/fluid-states/{state_id}/operations?pending_only=false",
+    )
+    assert operations.status_code == 200
+    resolved = next(
+        op for op in operations.json()["operations"]
+        if op["operation_key"] == operation_type
+    )
+    assert resolved["detail"] == expected_detail
+    assert resolved["status"] == "applied"
+
+
+def test_resolve_reconciliation_accepts_blank_operator_and_reason(monkeypatch, tmp_path: Path):
     _write_deck_config(monkeypatch, tmp_path)
     app = create_app()
     state_id = api_request(
@@ -258,7 +336,7 @@ def test_resolve_reconciliation_requires_operator_and_reason(monkeypatch, tmp_pa
             "reason": "valid reason",
         },
     )
-    assert missing_operator.status_code == 422
+    assert missing_operator.status_code == 200
 
     missing_reason = api_request(
         app,
@@ -272,7 +350,7 @@ def test_resolve_reconciliation_requires_operator_and_reason(monkeypatch, tmp_pa
             "reason": "",
         },
     )
-    assert missing_reason.status_code == 422
+    assert missing_reason.status_code == 200
 
 
 def test_resolve_reconciliation_404_for_unknown_operation(monkeypatch, tmp_path: Path):
@@ -324,3 +402,40 @@ def test_resolve_reconciliation_invalid_resolution_is_400(monkeypatch, tmp_path:
         },
     )
     assert response.status_code == 400
+
+
+def test_correct_volume_and_clear_notes_without_identity(monkeypatch, tmp_path):
+    _write_deck_config(monkeypatch, tmp_path)
+    app = create_app()
+    state = api_request(app, "POST", "/api/v1/fluid-states", json={
+        "deck_file": "state-deck.yaml", "fluids": {"source": {"volume_ul": 100}},
+    }).json()["id"]
+    _seed_reconciliation_required(state)
+    resolved = api_request(app, "POST", f"/api/v1/fluid-states/{state}/reconciliation/resolve", json={
+        "domain": "fluid", "operation_key": "indeterminate", "resolution": "applied",
+    })
+    assert resolved.status_code == 200
+    container = api_request(app, "GET", f"/api/v1/fluid-states/{state}").json()["containers"][0]
+    correction = {"labware_key": container["labware_key"], "location_id": "", "volume_ul": 95,
+                  "expected_version": container["version"]}
+    saved = api_request(app, "PATCH", f"/api/v1/fluid-states/{state}/volume", json=correction)
+    assert saved.status_code == 200
+    stale = api_request(app, "PATCH", f"/api/v1/fluid-states/{state}/volume", json=correction)
+    assert stale.status_code == 409
+    cleared = api_request(app, "DELETE", f"/api/v1/fluid-states/{state}/notes")
+    assert cleared.status_code == 200
+    with _store() as store:
+        assert store.get_fluid_container(state, container["labware_key"], "")["current_volume_ul"] == 95
+        assert store.get_fluid_snapshot(state)["operations"][0]["detail"] is None
+    assert api_request(app, "DELETE", "/api/v1/fluid-states/999/notes").status_code == 404
+
+
+def test_volume_correction_rejected_during_run(monkeypatch, tmp_path):
+    from cubos_api.routers import gantry
+
+    app = create_app()
+    gantry.begin_run()
+    response = api_request(app, "PATCH", "/api/v1/fluid-states/1/volume", json={
+        "labware_key": "source", "volume_ul": 95, "expected_version": 0,
+    })
+    assert response.status_code == 409

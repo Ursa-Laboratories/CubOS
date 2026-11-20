@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fluidStateApi } from "../api/client";
-import type { CreateFluidStateRequest, ResolveReconciliationRequest } from "../types";
+import type { CorrectFluidVolumeRequest, CreateFluidStateRequest, ResolveReconciliationRequest } from "../types";
 
 export function useFluidStates() {
   return useQuery({
@@ -13,6 +13,7 @@ export function useFluidState(fluidStateId: number | null) {
   return useQuery({
     queryKey: ["fluid-states", fluidStateId],
     queryFn: () => fluidStateApi.get(fluidStateId!),
+    refetchInterval: 3000,
     enabled: fluidStateId != null,
   });
 }
@@ -71,5 +72,21 @@ export function useResolveReconciliation(fluidStateId: number | null) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["fluid-states", fluidStateId] });
     },
+  });
+}
+
+export function useClearOperationNotes(fluidStateId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => fluidStateApi.clearNotes(fluidStateId!),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fluid-states", fluidStateId] }),
+  });
+}
+
+export function useCorrectFluidVolume(fluidStateId: number | null) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CorrectFluidVolumeRequest) => fluidStateApi.correctVolume(fluidStateId!, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["fluid-states", fluidStateId] }),
   });
 }
