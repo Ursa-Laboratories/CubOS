@@ -66,6 +66,7 @@ export default function PolarDeckScene({ deck, instruments, gantryPosition, gant
     let disposed = false;
     async function load() {
       const stage = mountPolarStudio(canvas.current!, modelUrl, lightUrl, { showReferenceTool: false });
+      stage.fit('front-elevated');
       studio.current = stage;
       const assembly = await stage.ready;
       if (!disposed) setRig(assembly);
