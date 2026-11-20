@@ -1,7 +1,8 @@
 import React, { useRef, useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import AppLayout from "./components/layout/AppLayout";
-import DeckVisualization from "./components/deck/DeckVisualization";
+import DeckVisualizationCard from "./components/deck/DeckVisualizationCard";
+import type { DeckViewMode } from "./components/deck/DeckVisualizationCard";
 import GantryPositionWidget from "./components/gantry/GantryPositionWidget";
 import EditorTabs from "./components/editor/EditorTabs";
 import DeckEditor from "./components/editor/DeckEditor";
@@ -103,6 +104,7 @@ type SavedMark = { filename: string; at: Date } | null;
 export default function App() {
   const qc = useQueryClient();
   const [activeView, setActiveView] = useState<"Workflow" | "Run" | "Visualize" | "State" | "Results">("Workflow");
+  const [deckViewMode, setDeckViewMode] = useState<DeckViewMode>("2D");
   const [activeTab, setActiveTab] = useState("Gantry");
   const [uiTheme, setUiTheme] = useState<"light" | "dark">(() => (document.documentElement.dataset.theme === "light" ? "light" : "dark"));
   const [configDir, setConfigDir] = useState<string | null>(null);
@@ -385,12 +387,15 @@ export default function App() {
   const gantryConnected = gantryPosition.data?.connected ?? false;
   const workingVolume: WorkingVolume | null = displayGantry?.config.working_volume ?? null;
   const yAxisMotion = displayGantry?.config.cnc?.y_axis_motion ?? "head";
-  const machineXRange: [number, number] = workingVolume
-    ? [workingVolume.x_min, workingVolume.x_max]
-    : [0, 300];
-  const machineYRange: [number, number] = workingVolume
-    ? [workingVolume.y_min, workingVolume.y_max]
-    : [0, 200];
+  const { machineXRange, machineYRange, machineZRange } = useMemo<{
+    machineXRange: [number, number];
+    machineYRange: [number, number];
+    machineZRange?: [number, number];
+  }>(() => ({
+    machineXRange: workingVolume ? [workingVolume.x_min, workingVolume.x_max] : [0, 300],
+    machineYRange: workingVolume ? [workingVolume.y_min, workingVolume.y_max] : [0, 200],
+    machineZRange: workingVolume ? [workingVolume.z_min, workingVolume.z_max] : undefined,
+  }), [workingVolume]);
 
   // Unsaved-edit tracking. Each editor reports edits up into the local
   // working copies above; a non-null/defined working copy means the user
@@ -779,10 +784,27 @@ export default function App() {
     </>
   );
 
+  const deckVisualization = (
+    <DeckVisualizationCard
+      mode={deckViewMode}
+      onModeChange={setDeckViewMode}
+      deck={displayDeck}
+      instruments={displayGantry?.config.instruments ?? null}
+      gantryPosition={gantryPosition.data ?? null}
+      positionQuerySucceeded={gantryPosition.isSuccess && !gantryDirty}
+      machineXRange={machineXRange}
+      machineYRange={machineYRange}
+      machineZRange={machineZRange}
+      yAxisMotion={yAxisMotion}
+      originPolicy={displayGantry?.config.origin_policy}
+      gantryType={displayGantry?.config.gantry_type}
+    />
+  );
+
   const left = (
     <div
       style={
-        activeView === "Run"
+        activeView === "Run" || activeView === "Visualize"
           ? { height: "100%", display: "flex", flexDirection: "column" }
           : undefined
       }
@@ -987,21 +1009,7 @@ export default function App() {
           />
         </div>
       )}
-      {activeView === "Visualize" && (
-        <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-          <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Deck Visualization</h3>
-          <div style={{ flex: "1 1 auto", minHeight: 0 }}>
-            <DeckVisualization
-              deck={displayDeck}
-              instruments={displayGantry?.config.instruments ?? null}
-              gantryPosition={gantryPosition.data ?? null}
-              machineXRange={machineXRange}
-              machineYRange={machineYRange}
-              yAxisMotion={yAxisMotion}
-            />
-          </div>
-        </div>
-      )}
+      {activeView === "Visualize" && deckVisualization}
       {activeView === "State" && <StatePanel />}
       {activeView === "Results" && (
         <DataOutputPanel
@@ -1011,22 +1019,6 @@ export default function App() {
           onRefresh={() => experimentData.refetch()}
         />
       )}
-    </div>
-  );
-
-  const topRight = (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
-      <h3 style={{ ...theme.panelTitle, margin: "0 0 10px", flex: "0 0 auto" }}>Deck Visualization</h3>
-      <div style={deckVisualizationFrameStyle}>
-        <DeckVisualization
-          deck={displayDeck}
-          instruments={displayGantry?.config.instruments ?? null}
-          gantryPosition={gantryPosition.data ?? null}
-          machineXRange={machineXRange}
-          machineYRange={machineYRange}
-          yAxisMotion={yAxisMotion}
-        />
-      </div>
     </div>
   );
 
@@ -1061,7 +1053,7 @@ export default function App() {
         banner={<UpdateBanner requestConfirm={requestConfirm} />}
         header={headerBar}
         left={left}
-        topRight={topRight}
+        topRight={activeView === "Visualize" ? undefined : deckVisualization}
         bottomRight={bottomRight}
       />
       {browseDialog && (
@@ -1222,12 +1214,4 @@ const viewToggleButtonStyle: React.CSSProperties = {
   fontSize: 12.5,
   fontWeight: 600,
   cursor: "pointer",
-};
-
-const deckVisualizationFrameStyle: React.CSSProperties = {
-  flex: "0 1 auto",
-  minHeight: 240,
-  maxHeight: "100%",
-  aspectRatio: "600 / 420",
-  width: "100%",
 };

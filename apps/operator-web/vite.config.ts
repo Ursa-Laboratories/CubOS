@@ -20,6 +20,8 @@ const isDevServerOrigin = (origin?: string, host?: string): boolean => {
 
 export default defineConfig({
   plugins: [react()],
+  // Let Vite resolve the CAD package's local model URLs in development.
+  optimizeDeps: { exclude: ['@ursa-labs/polar-bear-twin'] },
   server: {
     port: DEV_PORT,
     proxy: {

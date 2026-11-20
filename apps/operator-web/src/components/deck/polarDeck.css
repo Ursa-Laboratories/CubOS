@@ -1,0 +1,27 @@
+.polar-deck {
+  height: 100%; width: 100%; min-height: 0; position: relative; overflow: hidden;
+  background: radial-gradient(ellipse at 47% 35%, #fdfdfb, #f0f2f4 72%, #e5e8ec);
+  border: 1px solid var(--border, #dce2e9); border-radius: 8px; box-sizing: border-box;
+}
+.polar-deck-canvas, .polar-deck-canvas canvas { display: block; width: 100%; height: 100%; }
+.polar-deck-canvas:focus-visible { outline: 2px solid #5968cb; outline-offset: -2px; }
+.polar-deck-camera { position: absolute; color: #334155; font-size: 11px; right: 6px; top: 6px; display: flex; }
+.polar-deck-camera button, .polar-deck-status button {
+  padding: 4px 7px; font: inherit; line-height: 1.2; cursor: pointer; color: #334155;
+  border: 1px solid #cbd5e1; border-radius: 4px; background: rgba(255, 255, 255, .94);
+}
+.polar-deck-camera button + button { margin-left: 3px; }
+.polar-deck-model-error {
+  position: absolute; bottom: 4px; left: 6px; max-width: calc(100% - 22px); padding: 2px 5px;
+  background: rgba(250, 251, 252, .86); border-radius: 3px; color: #334155; font-size: 11px;
+  overflow-wrap: anywhere; pointer-events: none;
+}
+.polar-deck-status { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; color: #475569; font-size: 12px; }
+:root[data-theme="dark"] .polar-deck {
+  background: radial-gradient(ellipse at 47% 35%, #454c55, #303840 72%, #252c34);
+  border-color: var(--z-border);
+}
+:root[data-theme="dark"] .polar-deck-camera button, :root[data-theme="dark"] .polar-deck-model-error {
+  background: var(--z-surface); color: var(--z-text); border-color: var(--z-border);
+}
+:root[data-theme="dark"] .polar-deck-status { color: var(--z-text); }

@@ -68,10 +68,14 @@ what each resolution records.
 
 ## Visualize the Deck
 
-The **Visualize** view shows the same deck map as the right-hand panel,
-scaled up to the full left panel. Labware is drawn at its calibrated
-position, instruments are drawn around the head, and the **HEAD** crosshair
-follows the live gantry position. It is useful on a small screen, or when
-you want to watch a run without the editors in the way.
+Use **2D** or **3D** in the **Deck Visualization** header. **Visualize** gives the selected view more room and keeps Gantry Control beside it on a wide screen. Both views use the current deck, including previewed edits.
+
+In **3D**, drag to orbit and scroll or pinch to zoom. **Fit** frames the assembly, **Tools** zooms in on the installed heads, and **Top** looks down on the deck. Each instrument in the selected gantry configuration gets its own visual model, positioned using its configured X/Y offsets and depth. A missing model is identified by name.
+
+The catalog covers force and optical probes, UV curing, single- and eight-channel pipettes, electrode contacts, FLIR and Raspberry Pi cameras, ring lighting and vial cappers. OpenCV and mount-only cameras appear as position markers when live coordinates are available. A passive `mounted_tool` with vendor `mount_only` and key `raman_probe` shows the DEN Raman head. Other custom tools use a generic reference shape.
+
+When CubOS reports valid work coordinates, green markers show the configured instrument endpoints. On a saved 4040-PRO MAX head-moving setup, the reference carriage follows the live axes. A disconnected station shows the CAD rest pose. The assembly uses the Polar Bear frame with CAD-derived or photo-estimated heads and illustrative brackets. Physical fit and clearance depend on the station's calibration.
 
 ![The Visualize view, showing the full-size deck map](../images/operator-ui/visualize.webp)
+
+![Single-channel and eight-channel 300 µL Picus heads in the 3D deck view](../images/operator-ui/deck-3d-picus.webp)

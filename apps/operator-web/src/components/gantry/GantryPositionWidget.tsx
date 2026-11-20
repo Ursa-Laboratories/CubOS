@@ -461,9 +461,11 @@ export default function GantryPositionWidget({
   return (
     <div>
       <div style={controlHeaderStyle}>
-        <div>
+        <div style={{ minWidth: 0 }}>
           <h3 style={theme.panelTitle}>Gantry Control</h3>
-          <div style={{ ...theme.mono, fontSize: 11, color: theme.color.textMuted, marginTop: 2 }}>{gantryFile ?? "No gantry config loaded"}</div>
+          <div title={gantryFile ?? undefined} style={{ ...theme.mono, fontSize: 11, color: theme.color.textMuted, marginTop: 2, overflowWrap: "anywhere" }}>
+            {gantryFile ?? "No gantry config loaded"}
+          </div>
         </div>
         <button
           onClick={() => setAdvancedOpen((open) => !open)}

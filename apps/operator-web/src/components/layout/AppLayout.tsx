@@ -6,7 +6,7 @@ interface Props {
   banner?: ReactNode;
   header: ReactNode;
   left: ReactNode;
-  topRight: ReactNode;
+  topRight?: ReactNode;
   bottomRight: ReactNode;
 }
 
@@ -24,13 +24,15 @@ export default function AppLayout({ banner, header, left, topRight, bottomRight 
       >
         {header}
       </header>
-      <div className="operator-workspace">
+      <div className={topRight ? "operator-workspace" : "operator-workspace operator-workspace--visualize"}>
         <section className="operator-editor" style={card}>
           {left}
         </section>
-        <section className="operator-preview" style={card}>
-          {topRight}
-        </section>
+        {topRight && (
+          <section className="operator-preview" style={card}>
+            {topRight}
+          </section>
+        )}
         <section className="operator-controls" style={card}>
           {bottomRight}
         </section>
