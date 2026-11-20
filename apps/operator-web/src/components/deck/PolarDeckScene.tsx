@@ -102,6 +102,7 @@ export default function PolarDeckScene({ deck, instruments, gantryPosition, gant
     const configs = Object.entries(instruments ?? {});
     Promise.allSettled(configs.map(async ([name, config]) => {
       const head = await createInstrumentHead(config, name);
+      if (!head) return;
       head.name = name;
       if (disposed) {
         disposeInstrumentModel(head);
@@ -155,7 +156,7 @@ export default function PolarDeckScene({ deck, instruments, gantryPosition, gant
           selectedTools.current = null;
           studio.current?.fit('iso');
         }}>Fit</button>
-        {tools && toolLabels.length > tools.missing.length && <button type="button" onClick={() => {
+        {tools && tools.group.children.length > 0 && <button type="button" onClick={() => {
           selectedTools.current = tools.group;
           studio.current?.fitObject(tools.group);
         }}>Tools</button>}

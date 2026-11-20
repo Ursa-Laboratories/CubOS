@@ -11,12 +11,11 @@ python3 examples/instrument-preview/serve.py
 Open [Deck Visualization](http://127.0.0.1:5197/) and choose a configuration in **Preview setup**. Each example has a direct link.
 
 - [Pipettes](http://127.0.0.1:5197/?setup=pipettes)
-- [Multichannel and 300 µL pipettes](http://127.0.0.1:5197/?setup=multichannel)
+- [Picus 2 · 300 µL single- and eight-channel](http://127.0.0.1:5197/?setup=picus-300)
 - [Mechanical tools](http://127.0.0.1:5197/?setup=mechanics)
 - [Capper variants](http://127.0.0.1:5197/?setup=cappers)
 - [Optics and UV curing](http://127.0.0.1:5197/?setup=optics)
 - [Imaging and illumination](http://127.0.0.1:5197/?setup=imaging)
-- [Camera and light variants](http://127.0.0.1:5197/?setup=camera-mounts)
 - [Electrochemistry](http://127.0.0.1:5197/?setup=electrochemistry)
 - [Raman probe](http://127.0.0.1:5197/?setup=raman)
 

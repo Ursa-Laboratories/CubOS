@@ -6,13 +6,12 @@ import { chromium } from 'playwright';
 const output = process.argv[2];
 const base = new URL(process.argv[3] ?? 'http://127.0.0.1:5197/');
 const expected = {
-  pipettes: ['pipette-sartorius-5ml', 'pipette-opentrons-single'],
-  multichannel: ['pipette-sartorius-single', 'pipette-sartorius-multi', 'pipette-opentrons-multi'],
+  pipettes: ['pipette-sartorius-5ml', 'pipette-opentrons-single', 'pipette-opentrons-multi'],
+  'picus-300': ['pipette-sartorius-300', 'pipette-sartorius-multi'],
   mechanics: ['asmi-vernier', 'capper', 'mounted-tool'],
   cappers: ['capper'],
   optics: ['filmetrics-kla', 'uvvis-ccs-thorlabs', 'uv-curing-excelitas'],
   imaging: ['camera-raspberry-pi', 'lighting-ring', 'camera-flir'],
-  'camera-mounts': ['camera-usb', 'lighting-ring'],
   electrochemistry: ['potentiostat-admiral', 'potentiostat-emstat'],
   raman: ['raman-probe'],
 };
@@ -56,6 +55,20 @@ try {
     }
     console.log(`PASS ${setup} (${names.length} distinct instrument assets)`);
   }
+
+  const aliases = {
+    'camera-mounts': 'imaging',
+    multichannel: 'picus-300',
+  };
+  for (const [oldSetup, currentSetup] of Object.entries(aliases)) {
+    assets.clear();
+    await page.goto(new URL('?setup=' + oldSetup, base).href);
+    await tools.waitFor({ timeout: 30_000 });
+    assert.equal(await picker.inputValue(), currentSetup);
+    assert.ok(![...assets].some(asset => asset.startsWith('camera-usb-')));
+  }
+  assert.match(await scene.textContent(), /Picus 2 · 1 ch · 300 µL.*Picus 2 · 8 ch · 300 µL/);
+  console.log('PASS legacy setup links and dedicated Picus 300 µL comparison');
 
   await Promise.all([page.waitForURL('**/?setup=optics'), picker.selectOption('optics')]);
   await tools.waitFor({ timeout: 30_000 });

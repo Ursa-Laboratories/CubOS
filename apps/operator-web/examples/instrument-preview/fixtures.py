@@ -8,13 +8,13 @@ def head(kind, vendor, x=0, **details):
 # Offsets in millimeters illustrate how multiple heads share a carriage.
 SETUPS = {
     "pipettes": ("Pipettes", {
-        "sartorius": head("pipette", "sartorius", -55, pipette_model="picus2_1ch_5000"),
-        "opentrons": head("pipette", "opentrons", 50, pipette_model="p300_single_gen2"),
+        "sartorius": head("pipette", "sartorius", -90, pipette_model="picus2_1ch_5000"),
+        "opentrons_single": head("pipette", "opentrons", 0, pipette_model="p300_single_gen2"),
+        "opentrons_multi": head("pipette", "opentrons", 85, pipette_model="p300_multi_gen2"),
     }),
-    "multichannel": ("Multichannel and 300 µL pipettes", {
-        "sartorius_single": head("pipette", "sartorius", -126, pipette_model="picus2_1ch_300"),
-        "sartorius_multi": head("pipette", "sartorius", -40, pipette_model="picus2_8ch_300"),
-        "opentrons_multi": head("pipette", "opentrons", 78, pipette_model="p300_multi_gen2"),
+    "picus-300": ("Picus 2 · 300 µL", {
+        "sartorius_single": head("pipette", "sartorius", -53, pipette_model="picus2_1ch_300"),
+        "sartorius_multi": head("pipette", "sartorius", 53, pipette_model="picus2_8ch_300"),
     }),
     "mechanics": ("Mechanical tools", {
         "force_probe": head("asmi", "vernier", -100),
@@ -35,11 +35,6 @@ SETUPS = {
         "raspberry_pi": head("camera", "raspberry_pi", -65),
         "ring_light": head("lighting", "pawduino", 0),
         "flir": head("camera", "flir", 75),
-    }),
-    "camera-mounts": ("Camera and light variants", {
-        "opencv": head("camera", "opencv", -105, offset_y=-95),
-        "ring_light": head("lighting", "nano_text", 0),
-        "camera_mount": head("camera", "mount_only", 105, offset_y=-95),
     }),
     "electrochemistry": ("Electrochemistry", {
         "admiral": head("potentiostat", "admiral", -60),

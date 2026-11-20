@@ -13,6 +13,7 @@ from fixtures import GANTRY, SETUPS, sample_deck
 HERE = Path(__file__).resolve().parent
 CONFIG_DIR = "Read-only instrument preview"
 DEFAULT_SETUP = "pipettes"
+SETUP_ALIASES = {"multichannel": "picus-300", "camera-mounts": "imaging"}
 PROTOCOL = "preview.yaml"
 DECK = sample_deck()
 CONFIGS = {f"{slug}.yaml": {**GANTRY, "instruments": instruments}
@@ -83,6 +84,7 @@ class Preview(BaseHTTPRequestHandler):
 
     def index(self, query):
         slug = query.get("setup", [DEFAULT_SETUP])[0]
+        slug = SETUP_ALIASES.get(slug, slug)
         if slug not in SETUPS:
             slug = DEFAULT_SETUP
         fixture = {"configDir": CONFIG_DIR, "gantry": f"{slug}.yaml",

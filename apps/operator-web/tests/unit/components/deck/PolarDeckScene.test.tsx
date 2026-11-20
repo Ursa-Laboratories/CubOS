@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BoxGeometry, Group, Mesh, MeshStandardMaterial, Scene } from 'three';
 import { describe, expect, it, vi } from 'vitest';
 import PolarDeckScene from '../../../../src/components/deck/PolarDeckScene';
@@ -67,6 +67,22 @@ describe('3D instrument configuration', () => {
     expect(stage.move.mock.lastCall?.[0]).toMatchObject({ z: 25 });
     expect(stage.fitObject).toHaveBeenCalledOnce();
     expect(createInstrumentHead).toHaveBeenCalledTimes(3);
+  });
+
+  it('preserves camera positions without attaching a camera mesh or a bracket', async () => {
+    const { rig, stage } = makeStage();
+    createInstrumentHead.mockReset().mockResolvedValue(null);
+    const cameras = {
+      left: { type: 'camera', vendor: 'opencv', offset_x: -20, offset_y: 0 },
+      right: { type: 'camera', vendor: 'mount_only', offset_x: 20, offset_y: 0 },
+    };
+    render(<PolarDeckScene deck={null} instruments={cameras} gantryPosition={{ x: 40, y: 20, z: 30 }} onShow2D={vi.fn()} />);
+    await waitFor(() => expect(createInstrumentHead).toHaveBeenCalledTimes(2));
+    expect(rig.carriage.children[0].children).toHaveLength(0);
+    expect(stage.scene.getObjectByName('left')).toBeDefined();
+    expect(stage.scene.getObjectByName('right')).toBeDefined();
+    expect(screen.queryByRole('button', { name: 'Tools' })).toBeNull();
+    expect(screen.queryByText(/Model unavailable/)).toBeNull();
   });
 
   it('keeps successful heads visible when another model fails and clears feedback on config change', async () => {
