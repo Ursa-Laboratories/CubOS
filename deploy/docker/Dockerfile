@@ -3,6 +3,7 @@
 FROM node:22-bookworm-slim AS web-build
 WORKDIR /build/web
 COPY apps/operator-web/package.json apps/operator-web/package-lock.json ./
+COPY apps/operator-web/vendor/ ./vendor/
 RUN npm ci
 COPY apps/operator-web/ ./
 RUN npm run build
