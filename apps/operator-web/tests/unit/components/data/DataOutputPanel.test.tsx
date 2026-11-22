@@ -1,13 +1,13 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import DataOutputPanel from "./DataOutputPanel";
-import type { CampaignSummary } from "../../types";
+import DataOutputPanel from "../../../../src/components/data/DataOutputPanel";
+import type { CampaignSummary } from "../../../../src/types";
 
 function campaign(overrides: Partial<CampaignSummary> = {}): CampaignSummary {
   return {
     campaign_id: 1,
-    campaign_description: "ASMI sample campaign",
+    campaign_description: "Synthetic campaign",
     created_at: "2026-07-01T12:00:00Z",
     latest_measurement_at: "2026-07-01T12:05:00Z",
     experiment_count: 1,
@@ -43,14 +43,28 @@ describe("DataOutputPanel", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders load errors", () => {
+  it("announces load errors without claiming the campaign list is empty", () => {
     renderPanel({ campaigns: [], error: new Error("db locked") });
-    expect(screen.getByText("Data load failed: db locked")).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Data load failed: db locked");
+    expect(screen.queryByText(/No campaigns yet/)).not.toBeInTheDocument();
+  });
+
+  it("keeps cached campaigns visible when refreshing fails", () => {
+    renderPanel({ error: new Error("db locked") });
+    expect(screen.getByRole("alert")).toHaveTextContent("Data load failed: db locked");
+    expect(screen.getByText("Campaign #1")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Download Data" })).toBeEnabled();
+  });
+
+  it("announces loading without showing an empty result", () => {
+    renderPanel({ campaigns: [], isLoading: true });
+    expect(screen.getByRole("status")).toHaveTextContent("Loading campaigns...");
+    expect(screen.queryByText(/No campaigns yet/)).not.toBeInTheDocument();
   });
 
   it("renders the current empty state when no campaigns exist", () => {
     renderPanel({ campaigns: [] });
-    expect(screen.getByText("No campaigns yet — run a protocol to create one.")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("No campaigns yet — run a protocol to create one.");
   });
 
   it("disables Download Data when a campaign has no measurements", () => {
@@ -76,7 +90,7 @@ describe("DataOutputPanel", () => {
     const exportButton = screen.getByRole("button", { name: "Download Data" });
     await user.click(exportButton);
 
-    expect(await screen.findByText("Export failed: zip writer failed")).toBeInTheDocument();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Export failed: zip writer failed");
     await waitFor(() => expect(exportButton).toBeEnabled());
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/data/campaigns/1/data.zip");
   });

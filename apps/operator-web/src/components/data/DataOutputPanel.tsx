@@ -53,14 +53,14 @@ export default function DataOutputPanel({
       </div>
 
       {Boolean(error) && (
-        <div style={errorStyle}>Data load failed: {error instanceof Error ? error.message : String(error)}</div>
+        <div role="alert" style={errorStyle}>Data load failed: {error instanceof Error ? error.message : String(error)}</div>
       )}
       {exportError && (
-        <div style={errorStyle}>Export failed: {exportError}</div>
+        <div role="alert" style={errorStyle}>Export failed: {exportError}</div>
       )}
-      {isLoading && <div style={emptyStyle}>Loading campaigns...</div>}
-      {!isLoading && campaigns.length === 0 && (
-        <div style={emptyStyle}>No campaigns yet — run a protocol to create one.</div>
+      {isLoading && <div role="status" style={emptyStyle}>Loading campaigns...</div>}
+      {!isLoading && !error && campaigns.length === 0 && (
+        <div role="status" style={emptyStyle}>No campaigns yet — run a protocol to create one.</div>
       )}
       {!isLoading && campaigns.length > 0 && (
         <div style={tableFrameStyle}>
