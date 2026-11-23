@@ -19,7 +19,7 @@ function config(multi = false): GantryResponse {
 }
 function network() {
   const state = { posts: [] as Array<{ path: string; body: Record<string, unknown> }>, trip: false, id: "",
-    homeResult: { ...position(), z: 0, work_z: 0 }, pendingHome: null as Promise<Response> | null };
+    homeResult: { ...position(), z: 0, work_z: 0 } as GantryPosition, pendingHome: null as Promise<Response> | null };
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input), body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {};
     if (init?.method === "POST") state.posts.push({ path, body });
