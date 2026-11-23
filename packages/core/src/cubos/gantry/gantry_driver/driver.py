@@ -830,7 +830,7 @@ class Mill:
                     if (
                         guarded_reset_context is not None
                         and not startup_complete_at_query
-                        and any(notice.lower() == "grbl for arm32" for notice in guarded_reset_context[1])
+                        and any(notice.lower() in ("grbl for arm32", "unqualified reset acknowledgement: ok") for notice in guarded_reset_context[1])
                     ):
                         self._record_guarded_reset_notice(status, *guarded_reset_context)
                         break
@@ -899,6 +899,13 @@ class Mill:
             raise StatusReturnError("Coordinate-frame offsets are incomplete.")
         return {key: reports[key] for key in ("G54", "G92", "TLO")}
 
+    @staticmethod
+    def _guarded_reset_startup_pending(notices: list[str]) -> bool:
+        return (
+            any(notice.lower() in ("grbl for arm32", "unqualified reset acknowledgement: ok") for notice in notices)
+            and not any(notice.lower() == "ok" for notice in notices)
+        )
+
     def _record_guarded_reset_notice(self, line: str, axis: str, notices: list[str]) -> None:
         if not line:
             return
@@ -908,6 +915,12 @@ class Mill:
             and any(notice.lower() == "version:arm32 v3.8" for notice in notices)
         )
         setting_pattern = r"\$\d{1,3}=[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:\s*\([^\r\n]*\))?"
+        if lowered == "ok" and not (arm32_identified and any(re.fullmatch(setting_pattern, notice) for notice in notices)):
+            notice = "Unqualified reset acknowledgement: ok"
+            if notice not in notices:
+                notices.append(notice)
+                self.logger.info("Guarded reset notice: %s", notice)
+            return
         allowed = (
             lowered in ("[msg:check limits]", "[msg:'$h'|'$x' to unlock]", "grbl for arm32")
             or (lowered == "ok" and arm32_identified and any(re.fullmatch(setting_pattern, notice) for notice in notices))
@@ -948,17 +961,14 @@ class Mill:
             consumed = 0
             deadline = time.monotonic() + 2.0
             for _ in range(1024):
-                startup_incomplete = (
-                    any(notice.lower() == "grbl for arm32" for notice in context[1])
-                    and not any(notice.lower() == "ok" for notice in context[1])
-                )
+                startup_incomplete = self._guarded_reset_startup_pending(context[1])
                 if consumed >= waiting and not startup_incomplete:
                     return context
                 if time.monotonic() >= deadline:
                     break
                 raw = self.ser_mill.readline()
                 if not raw and startup_incomplete:
-                    raise CommandExecutionError("ARM32 startup completion was not verified before the recovery query.")
+                    raise CommandExecutionError("Reset startup completion was not verified after an unqualified acknowledgement or incomplete ARM32 boot; no unlock was sent.")
                 consumed += len(raw)
                 if not raw.endswith(b"\n") or consumed > 16384:
                     raise CommandExecutionError("Buffered reset output is incomplete or exceeds the byte limit.")

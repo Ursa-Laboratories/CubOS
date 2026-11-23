@@ -100,6 +100,14 @@ const recoveryFallback = async (mode: Mode) => {
   }
 };
 const recoveries = (state: ReturnType<typeof network>) => state.posts.filter((entry) => entry.path.endsWith("/recover-limit"));
+const waitForRecovery = (mode: Mode) => mode === "gantry"
+  ? screen.findByText("Recovering… Space to cancel.")
+  : screen.findByRole("button", { name: "Stop recovery" });
+async function cancelRecovery(mode: Mode, user: ReturnType<typeof userEvent.setup>) {
+  await waitForRecovery(mode);
+  if (mode === "gantry") fireEvent.keyDown(window, { key: " " });
+  else await user.click(screen.getByRole("button", { name: "Stop recovery" }));
+}
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (mode) => {
@@ -188,7 +196,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     const { rerender } = render(view(mode, "Idle"));
     await enter(mode, user);
     await user.click(screen.getByTitle("Y+"));
-    await user.click(await screen.findByRole("button", { name: "Stop recovery" }));
+    await cancelRecovery(mode, user);
     await act(async () => pending.resolve(json(recoveryResult())));
     await screen.findByText(/Recovery stopped/);
     rerender(view(mode, "ALARM:1; Pn:Y"));
@@ -216,7 +224,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     const { rerender } = render(view(mode, "Idle"));
     await enter(mode, user);
     await user.click(screen.getByTitle("Y+"));
-    await screen.findByRole("button", { name: "Stop recovery" });
+    await waitForRecovery(mode);
     rerender(view(mode, "Idle", false));
     rerender(view(mode, "Idle", true));
     const current = deferred();
@@ -256,7 +264,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     const { rerender } = render(view(mode, "Idle"));
     await enter(mode, user);
     await user.click(screen.getByTitle("Y+"));
-    await user.click(await screen.findByRole("button", { name: "Stop recovery" }));
+    await cancelRecovery(mode, user);
     rerender(view(mode, "Idle", false)); rerender(view(mode, "Idle"));
     const current = deferred();
     if (mode === "gantry") {
@@ -380,6 +388,58 @@ it("invalidates labware captures when its own jog hits a limit", async () => {
 });
 
 describe("full gantry wizard recovery restart", () => {
+  it.each(["Escape", "close", "Space"])("cancels automatic recovery using %s without a transient Stop button", async (method) => {
+    const state = network(); const pending = deferred(); state.pendingRecovery = pending.promise;
+    const user = userEvent.setup(); const onClose = vi.fn();
+    render(<CalibrationWizard open onClose={onClose} gantry={gantry} position={position()} onSaveCalibrated={async () => undefined} />);
+    await enter("gantry", user);
+    await user.click(screen.getByTitle("Y+"));
+    await waitForRecovery("gantry");
+    expect(screen.queryByRole("button", { name: "Stop recovery" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close calibration" })).toBeEnabled();
+    if (method === "close") await user.click(screen.getByRole("button", { name: "Close calibration" }));
+    else {
+      const key = method === "Space" ? " " : "Escape";
+      fireEvent.keyDown(window, { key });
+      fireEvent.keyDown(window, { key, repeat: true });
+    }
+    await waitFor(() => expect(state.posts.filter((entry) => entry.path.endsWith("/jog-cancel"))).toHaveLength(1));
+    if (method === "Space") expect(onClose).not.toHaveBeenCalled();
+    else await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    await act(async () => pending.resolve(json(recoveryResult())));
+    expect(screen.queryByText("Pull-off complete.")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Home and resume" })).not.toBeInTheDocument();
+    expect(recoveries(state)).toHaveLength(1);
+  });
+
+  it("does not turn Escape or Space into cancellation for unrelated busy homing", async () => {
+    const state = network(); const pending = deferred(); state.pendingHome = pending.promise;
+    const user = userEvent.setup(); const onClose = vi.fn();
+    render(<CalibrationWizard open onClose={onClose} gantry={gantry} position={position()} onSaveCalibrated={async () => undefined} />);
+    await user.click(screen.getByRole("button", { name: "Continue" }));
+    await user.click(screen.getByRole("button", { name: "Home gantry" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(window, { key: " " });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(state.posts.some((entry) => entry.path.endsWith("/jog-cancel"))).toBe(false);
+    await act(async () => pending.resolve(json(position())));
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  });
+
+  it("does not describe a consumed recovery candidate as an unknown original direction", async () => {
+    const state = network(); state.recoveryStatus = 409;
+    const user = userEvent.setup();
+    render(view("gantry", "Idle")); await enter("gantry", user);
+    await user.click(screen.getByTitle("Y+"));
+    await screen.findByText("Recovery failed.");
+    state.contextOverrides = { eligible: false, failed_jog_id: null, failed_jog_delta: null, pull_off_delta: null,
+      blocked_reason: "Original jog direction unknown." };
+    await waitFor(() => expect(state.contextReads).toBeGreaterThanOrEqual(2), { timeout: 2000 });
+    expect(screen.queryByText("Original jog direction unknown.")).not.toBeInTheDocument();
+    expect(screen.getByText("Recovery attempt ended. Inspect the gantry before continuing.")).toBeInTheDocument();
+    expect(screen.getByText("Recovery failed.")).toBeInTheDocument();
+  });
+
   it("clears the original jog error and requires explicit Home before restarting captures", async () => {
     const state = network();
     const user = userEvent.setup();
@@ -479,12 +539,13 @@ describe("full gantry wizard recovery restart", () => {
     fireEvent.mouseDown(screen.getByTitle("Y+"));
     await waitFor(() => expect(jogs(state).length).toBeGreaterThanOrEqual(2));
     rerender(view("gantry", "ALARM:1; Pn:Y"));
-    const stop = await screen.findByRole("button", { name: "Stop recovery" });
+    await waitForRecovery("gantry");
+    expect(screen.queryByRole("button", { name: "Stop recovery" })).not.toBeInTheDocument();
     fireEvent.mouseUp(window);
     fireEvent.keyUp(window, { key: "ArrowUp" });
     expect(state.posts.some((entry) => entry.path.endsWith("/jog-cancel"))).toBe(false);
-    stop.focus();
-    await user.keyboard("{Enter}");
+    fireEvent.keyDown(window, { key: " " });
+    await waitFor(() => expect(state.posts.filter((entry) => entry.path.endsWith("/jog-cancel"))).toHaveLength(1));
     expect(state.posts.filter((entry) => entry.path.endsWith("/jog-cancel"))).toHaveLength(1);
     await act(async () => pending.resolve(json(recoveryResult())));
     expect(await screen.findByText(/Recovery stopped/)).toBeInTheDocument();

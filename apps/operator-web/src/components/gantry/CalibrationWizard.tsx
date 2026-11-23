@@ -78,6 +78,7 @@ export default function CalibrationWizard({
   const [blockHeight, setBlockHeight] = useState("10");
   const [busy, setBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryCancelRequest, setRecoveryCancelRequest] = useState(0);
   const [jogInFlight, setJogInFlight] = useState(false);
   const [recoveryHomeAvailable, setRecoveryHomeAvailable] = useState(false);
   const [operation, setOperation] = useState<string | null>(null);
@@ -116,6 +117,7 @@ export default function CalibrationWizard({
   const previousStep = useRef(step);
   const interruptedStep = useRef<number | null>(null);
   const actionPending = useRef<{ lifetime: number } | null>(null);
+  const closePending = useRef<{ lifetime: number } | null>(null);
   const hoverTokenRef = useRef<string | null>(null);
   const hoverSetupRef = useRef("");
   const completedHoverJogIds = useRef<string[]>([]);
@@ -434,19 +436,23 @@ export default function CalibrationWizard({
     }
   };
 
-  const close = async () => {
+  const close = useCallback(async () => {
+    if (closePending.current?.lifetime === autoRecovery.lifetime) return;
     clearHoverRoute();
     autoRecovery.end();
+    const request = { lifetime: autoRecovery.lifetime };
+    closePending.current = request;
     stopJog(!recoveryBusy);
     if (recoveryBusy) {
       try {
         await gantryApi.jogCancel();
       } catch (failure) {
-        setError(errorMessage(failure));
+        if (autoRecovery.lifetime === request.lifetime) setError(errorMessage(failure));
       }
     }
     if (!connected) {
-      onClose();
+      if (autoRecovery.lifetime === request.lifetime) onClose();
+      if (closePending.current === request) closePending.current = null;
       return;
     }
     try {
@@ -457,8 +463,38 @@ export default function CalibrationWizard({
       // the gantry widget's CALIBRATION INTERRUPTED banner takes over
       // until soft limits are actually restored.
     }
-    onClose();
-  };
+    if (autoRecovery.lifetime === request.lifetime) onClose();
+    if (closePending.current === request) closePending.current = null;
+  }, [autoRecovery, clearHoverRoute, connected, onClose, recoveryBusy, stopJog]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (!event.repeat && (!busy || recoveryBusy || jogInFlight)) void close();
+        return;
+      }
+      const target = event.target;
+      if (event.key !== " " || (target instanceof HTMLElement && (target.isContentEditable || target.closest("input:not(:disabled), textarea:not(:disabled), select:not(:disabled)")))) return;
+      if (!recoveryBusy && !jogInFlight) return;
+      event.preventDefault();
+      if (event.repeat || closePending.current) return;
+      if (recoveryBusy) {
+        clearHoverRoute();
+        clearHover();
+        setRecoveryCancelRequest((current) => current + 1);
+      } else {
+        stopJog(true);
+        if (returningToHover) {
+          setHoverStopRequested(true);
+          setStatusNote("Return cancelled. Reapproach manually.");
+        }
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [busy, clearHover, clearHoverRoute, close, jogInFlight, open, recoveryBusy, returningToHover, stopJog]);
 
   useEffect(() => {
     if (!open || step < 2) return;
@@ -486,13 +522,6 @@ export default function CalibrationWizard({
   }, [open]);
 
   const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      if (!busy) {
-        void close();
-      }
-      return;
-    }
     if (event.key !== "Tab") return;
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -1036,6 +1065,7 @@ export default function CalibrationWizard({
                 <span>{alarmRecoveryMessage}</span>
                 {(!homeRequired || recoveryBusy) && <LimitRecoveryControls
                   automaticOnly
+                  cancelRequest={recoveryCancelRequest}
                   connected={connected} disabled={homing || (busy && !jogInFlight)}
                   onStart={() => {
                     haltJogLocally();

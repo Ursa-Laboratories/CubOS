@@ -272,7 +272,8 @@ unlock, and a fresh Idle report of that same pin after the acknowledgement
 before moving. Unexpected reset responses, real errors, or changed pins stop
 the attempt. Notices alone never establish that recovery succeeded.
 
-**Stop** cancels recovery. A failed pull-off, status query, or connection does
+In the full gantry wizard, press **Space** during automatic backoff to cancel it.
+Standalone recovery provides a **Stop recovery** button. A failed pull-off, status query, or connection does
 not trigger another move, reset, or reconnect. Recovery does not disable limits
 or zero coordinates. A successful pull-off still leaves **Home required**
 before normal movement or coordinate capture. If the controller rejects the
