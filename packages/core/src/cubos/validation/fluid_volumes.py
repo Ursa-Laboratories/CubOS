@@ -53,7 +53,7 @@ def _container_key(target: Any) -> _ContainerKey:
     return (target.labware_key, target.location_id or "")
 
 
-def _seed_volumes(
+def seed_volumes(
     deck: Deck,
     initial_fluids: Mapping[str, Any],
 ) -> dict[_ContainerKey, float]:
@@ -437,6 +437,103 @@ def _check_clear_well(
     return violations
 
 
+def project_step_volumes(
+    step: Any,
+    deck: Deck,
+    volumes: dict[_ContainerKey, float],
+    pipette_config: PipetteConfig | None = None,
+) -> list[ProtocolSemanticViolation]:
+    """Advance *volumes* by one protocol step and return its violations.
+
+    ``volumes`` maps ``(labware_key, location_id)`` to microlitres and is
+    updated in place, so a caller can snapshot it between steps.
+    """
+    violations: list[ProtocolSemanticViolation] = []
+    args = step.args
+    if step.command_name == "multi_dispense":
+        violations.append(_violation(
+            step.index, "multi_dispense",
+            "multi_dispense is disabled while durable fluid tracking is active. "
+            "Use transfer or serial_transfer.",
+        ))
+    elif step.command_name == "transfer":
+        volume = args.get("volume_ul")
+        if not isinstance(volume, (int, float)) or isinstance(volume, bool):
+            return violations  # schema-level validation reports the type error
+        violations.extend(_check_transfer(
+            step_index=step.index,
+            command_name="transfer",
+            deck=deck,
+            volumes=volumes,
+            source=args.get("source"),
+            destination=args.get("destination"),
+            volume_ul=float(volume),
+            pipette_config=pipette_config,
+            label=f"transfer {args.get('source')!r} -> "
+                  f"{args.get('destination')!r}",
+        ))
+    elif step.command_name == "serial_transfer":
+        plate_name = args.get("plate")
+        try:
+            plate = deck.resolve_labware(plate_name)
+        except (KeyError, ValueError):
+            return violations  # semantic validator reports the unknown plate
+        well_ids = _wells_for_axis(plate, args.get("axis"))
+        step_volumes = _serial_transfer_volumes(args, len(well_ids))
+        if len(step_volumes) != len(well_ids):
+            return violations  # runtime command validation reports the mismatch
+        for well_id, volume in zip(well_ids, step_volumes):
+            violations.extend(_check_transfer(
+                step_index=step.index,
+                command_name="serial_transfer",
+                deck=deck,
+                volumes=volumes,
+                source=args.get("source"),
+                destination=f"{plate_name}.{well_id}",
+                volume_ul=volume,
+                pipette_config=pipette_config,
+                label=f"serial_transfer {args.get('source')!r} -> "
+                      f"{plate_name}.{well_id}",
+            ))
+    elif step.command_name == "mix":
+        volume = args.get("volume_ul")
+        position = args.get("position")
+        if not isinstance(volume, (int, float)) or isinstance(volume, bool):
+            return violations
+        try:
+            target = _resolve(deck, position)
+        except (KeyError, ValueError):
+            return violations
+        available = volumes.get(_container_key(target), 0.0)
+        if float(volume) > available + 1e-6:
+            violations.append(_violation(
+                step.index, "mix",
+                f"mix {position!r} needs {float(volume):g} uL but only "
+                f"{available:g} uL will be present at this step.",
+            ))
+    elif step.command_name == "rinse_well":
+        violations.extend(_check_rinse_well(
+            step_index=step.index, args=args, deck=deck, volumes=volumes,
+            pipette_config=pipette_config,
+        ))
+    elif step.command_name == "flush_pipette":
+        violations.extend(_check_flush_pipette(
+            step_index=step.index, args=args, deck=deck, volumes=volumes,
+            pipette_config=pipette_config,
+        ))
+    elif step.command_name == "purge_pipette":
+        violations.extend(_check_purge_pipette(
+            step_index=step.index, args=args, deck=deck, volumes=volumes,
+            pipette_config=pipette_config,
+        ))
+    elif step.command_name == "clear_well":
+        violations.extend(_check_clear_well(
+            step_index=step.index, args=args, deck=deck, volumes=volumes,
+            pipette_config=pipette_config,
+        ))
+    return violations
+
+
 def validate_protocol_fluid_volumes(
     protocol: Protocol,
     deck: Deck,
@@ -451,92 +548,10 @@ def validate_protocol_fluid_volumes(
     feasibility) when the configured pipette model is known.
     """
     violations: list[ProtocolSemanticViolation] = []
-    volumes = _seed_volumes(deck, initial_fluids)
-
+    volumes = seed_volumes(deck, initial_fluids)
     for step in protocol.steps:
-        args = step.args
-        if step.command_name == "multi_dispense":
-            violations.append(_violation(
-                step.index, "multi_dispense",
-                "multi_dispense is disabled while durable fluid tracking is active. "
-                "Use transfer or serial_transfer.",
-            ))
-        elif step.command_name == "transfer":
-            volume = args.get("volume_ul")
-            if not isinstance(volume, (int, float)) or isinstance(volume, bool):
-                continue  # schema-level validation reports the type error
-            violations.extend(_check_transfer(
-                step_index=step.index,
-                command_name="transfer",
-                deck=deck,
-                volumes=volumes,
-                source=args.get("source"),
-                destination=args.get("destination"),
-                volume_ul=float(volume),
-                pipette_config=pipette_config,
-                label=f"transfer {args.get('source')!r} -> "
-                      f"{args.get('destination')!r}",
-            ))
-        elif step.command_name == "serial_transfer":
-            plate_name = args.get("plate")
-            try:
-                plate = deck.resolve_labware(plate_name)
-            except (KeyError, ValueError):
-                continue  # semantic validator reports the unknown plate
-            well_ids = _wells_for_axis(plate, args.get("axis"))
-            step_volumes = _serial_transfer_volumes(args, len(well_ids))
-            if len(step_volumes) != len(well_ids):
-                continue  # runtime command validation reports the mismatch
-            for well_id, volume in zip(well_ids, step_volumes):
-                violations.extend(_check_transfer(
-                    step_index=step.index,
-                    command_name="serial_transfer",
-                    deck=deck,
-                    volumes=volumes,
-                    source=args.get("source"),
-                    destination=f"{plate_name}.{well_id}",
-                    volume_ul=volume,
-                    pipette_config=pipette_config,
-                    label=f"serial_transfer {args.get('source')!r} -> "
-                          f"{plate_name}.{well_id}",
-                ))
-        elif step.command_name == "mix":
-            volume = args.get("volume_ul")
-            position = args.get("position")
-            if not isinstance(volume, (int, float)) or isinstance(volume, bool):
-                continue
-            try:
-                target = _resolve(deck, position)
-            except (KeyError, ValueError):
-                continue
-            available = volumes.get(_container_key(target), 0.0)
-            if float(volume) > available + 1e-6:
-                violations.append(_violation(
-                    step.index, "mix",
-                    f"mix {position!r} needs {float(volume):g} uL but only "
-                    f"{available:g} uL will be present at this step.",
-                ))
-        elif step.command_name == "rinse_well":
-            violations.extend(_check_rinse_well(
-                step_index=step.index, args=args, deck=deck, volumes=volumes,
-                pipette_config=pipette_config,
-            ))
-        elif step.command_name == "flush_pipette":
-            violations.extend(_check_flush_pipette(
-                step_index=step.index, args=args, deck=deck, volumes=volumes,
-                pipette_config=pipette_config,
-            ))
-        elif step.command_name == "purge_pipette":
-            violations.extend(_check_purge_pipette(
-                step_index=step.index, args=args, deck=deck, volumes=volumes,
-                pipette_config=pipette_config,
-            ))
-        elif step.command_name == "clear_well":
-            violations.extend(_check_clear_well(
-                step_index=step.index, args=args, deck=deck, volumes=volumes,
-                pipette_config=pipette_config,
-            ))
+        violations.extend(project_step_volumes(step, deck, volumes, pipette_config))
     return violations
 
 
-__all__ = ["validate_protocol_fluid_volumes"]
+__all__ = ["project_step_volumes", "seed_volumes", "validate_protocol_fluid_volumes"]

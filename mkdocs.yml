@@ -21,6 +21,7 @@ nav:
     - Collision-Aware Routing: labware-aware-routing.md
     - Run a Protocol with YAML: protocol-yaml.md
     - Fluid State Tracking: fluid-state.md
+    - Liquid-Handling Parity: liquid-handling-parity.md
     - PANDA-CUB Quickstart: panda-cub-quickstart.md
     - EmStat Cyclic Voltammetry: emstat-cv.md
     - Data: data.md

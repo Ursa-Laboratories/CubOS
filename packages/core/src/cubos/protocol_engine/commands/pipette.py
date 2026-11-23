@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
+import sqlite3
 import time
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any, Iterator, List, Optional
 
 from pydantic import StrictFloat
 
+from cubos.data.fluid_state import FluidStateError
 from cubos.deck.labware.tip_rack import (
     TipRackResolutionError,
     resolve_tip_rack_slot,
@@ -19,11 +21,11 @@ from cubos.deck.labware.well_plate import WellPlate
 from cubos.instruments.pipette.liquid_class import IDENTITY_CORRECTION
 
 from ..errors import ProtocolExecutionError
-from ..registry import protocol_command
 from ..pipette_routing import (
     PipetteTravelClearance,
     validate_pipette_travel_clearance,
 )
+from ..registry import protocol_command
 from . import _summaries
 from ._cap_preflight import require_uncapped as _require_uncapped
 from ._liquid_selection import (
@@ -45,6 +47,8 @@ from ._liquid_transfer import (
 from ._movement import _assert_finite_number, engage_at_labware
 
 logger = logging.getLogger(__name__)
+
+_VOLUME_TOLERANCE_UL = 1e-6
 
 # Reason text for steps the durable fluid/tip journal reports as already
 # applied on a resumed run. Deliberately distinct from "never reached": the
@@ -643,6 +647,17 @@ def pick_up_tip(
         tip_id = resolved_tip_id
         position = f"{rack_key}.{tip_id}"
     else:
+        attached_mm = getattr(pipette, "attached_tip_extension", 0.0)
+        if (
+            isinstance(attached_mm, (int, float))
+            and not isinstance(attached_mm, bool)
+            and attached_mm > 0
+        ):
+            raise ProtocolExecutionError(
+                f"pick_up_tip {position!r} refused: the pipette already has a "
+                f"{attached_mm:g} mm tip attached. Drop it first. No motion "
+                "was attempted."
+            )
         if tip_id is None:
             tip_id = rack.next_available_tip()
             if tip_id is None:
@@ -688,6 +703,55 @@ def pick_up_tip(
                 f"failed for operation {operation_key!r}: "
                 f"{type(exc).__name__}: {exc}. Reconciliation is required."
             ) from exc
+
+
+def _stroke_substep(previous: str | None, index: int, count: int) -> str | None:
+    """Substep naming a stroke; single-stroke transfers keep the bare substep.
+
+    The only producer of stroke operation-key suffixes: executing strokes and
+    detecting applied ones on resume both call it, so the keys cannot drift.
+    """
+    if count <= 1:
+        return previous
+    suffix = f"stroke{index}"
+    return f"{previous}:{suffix}" if previous else suffix
+
+
+def _applied_stroke_volume(
+    context: ProtocolContext, stroke_volumes: list[float],
+) -> float:
+    """Volume of this transfer's strokes already durably applied on a rerun.
+
+    Preflight must size only what is left to move: the container state it reads
+    already includes every applied stroke, which the rerun will skip.
+    """
+    if context.active_step_index is None:
+        return 0.0
+    try:
+        operations = context.data_store.get_fluid_snapshot(
+            context.fluid_state_id,
+        )["operations"]
+        applied = {
+            operation["operation_key"]
+            for operation in operations
+            if operation["status"] == "applied"
+        }
+    except (sqlite3.Error, FluidStateError) as exc:
+        logger.debug(
+            "Could not read applied stroke operations (%s); preflighting the "
+            "full volume.", type(exc).__name__, exc_info=True,
+        )
+        return 0.0
+    previous = context.active_substep
+    total = 0.0
+    try:
+        for index, stroke_volume in enumerate(stroke_volumes):
+            context.active_substep = _stroke_substep(previous, index, len(stroke_volumes))
+            if context.fluid_operation_key("transfer") in applied:
+                total += stroke_volume
+    finally:
+        context.active_substep = previous
+    return total
 
 
 @protocol_command("transfer", summary=_summaries.transfer)
@@ -848,19 +912,25 @@ def transfer(
                 float(getattr(source_vial, "dead_volume_ul", 0.0) or 0.0)
                 if source_vial is not None else 0.0
             )
+            preflight_volume_ul = volume_ul - _applied_stroke_volume(
+                context, stroke_volumes,
+            )
             try:
-                validate_dead_volume(
-                    source_current_volume_ul=source_container["current_volume_ul"],
-                    dead_volume_ul=dead_volume_ul,
-                    requested_volume_ul=volume_ul,
-                    source_label=source,
-                )
-                validate_destination_overflow(
-                    destination_current_volume_ul=destination_container["current_volume_ul"],
-                    working_volume_ul=destination_container["working_volume_ul"],
-                    requested_volume_ul=volume_ul,
-                    destination_label=destination,
-                )
+                if preflight_volume_ul > _VOLUME_TOLERANCE_UL:
+                    validate_dead_volume(
+                        source_current_volume_ul=source_container["current_volume_ul"],
+                        dead_volume_ul=dead_volume_ul,
+                        requested_volume_ul=preflight_volume_ul,
+                        source_label=source,
+                    )
+                    validate_destination_overflow(
+                        destination_current_volume_ul=destination_container[
+                            "current_volume_ul"
+                        ],
+                        working_volume_ul=destination_container["working_volume_ul"],
+                        requested_volume_ul=preflight_volume_ul,
+                        destination_label=destination,
+                    )
             except LiquidTransferPreflightError as exc:
                 raise ProtocolExecutionError(
                     f"transfer preflight failed: {exc}"
@@ -898,15 +968,12 @@ def transfer(
         planned = prepared_step(context, "transfer")
 
     stroke_count = len(stroke_volumes)
-    multi_stroke = stroke_count > 1
     previous_substep = context.active_substep
     try:
         for stroke_index, stroke_volume in enumerate(stroke_volumes):
-            if multi_stroke:
-                suffix = f"stroke{stroke_index}"
-                context.active_substep = (
-                    f"{previous_substep}:{suffix}" if previous_substep else suffix
-                )
+            context.active_substep = _stroke_substep(
+                previous_substep, stroke_index, stroke_count,
+            )
             _execute_transfer_stroke(
                 context,
                 pipette,
