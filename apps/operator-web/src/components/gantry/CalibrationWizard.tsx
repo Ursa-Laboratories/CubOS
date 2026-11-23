@@ -7,6 +7,8 @@ import * as theme from "../../theme";
 import CameraPreview from "./CameraPreview";
 import CalibrationTipControls from "./CalibrationTipControls";
 import LimitRecoveryControls from "./LimitRecoveryControls";
+import CalibrationStatusBanner from "./CalibrationStatusBanner";
+import wizardStyles from "./CalibrationWizard.module.css";
 import type { FinalizeOriginResponse, GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import {
   buildCalibratedConfig,
@@ -53,6 +55,16 @@ type PendingZReference = {
   lowestInstrument: string;
 };
 
+type AutomaticHome = {
+  jogId: string;
+  generation: number;
+  lifetime: number;
+  started: boolean;
+  cancelled: boolean;
+  cancelSent?: boolean;
+  timer?: number;
+};
+
 const NON_CONTACT_TYPES = new Set(["camera"]);
 const FOLLOW_CAMERA_TYPES = new Set(["lighting"]);
 
@@ -78,8 +90,12 @@ export default function CalibrationWizard({
   const [blockHeight, setBlockHeight] = useState("10");
   const [busy, setBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+  const [recoveryContextError, setRecoveryContextError] = useState<string | null>(null);
+  const [recoveryCancelRequest, setRecoveryCancelRequest] = useState(0);
   const [jogInFlight, setJogInFlight] = useState(false);
   const [recoveryHomeAvailable, setRecoveryHomeAvailable] = useState(false);
+  const [automaticHomePhase, setAutomaticHomePhase] = useState<"queued" | "homing" | null>(null);
   const [operation, setOperation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [alarmPrompt, setAlarmPrompt] = useState<string | null>(null);
@@ -98,13 +114,18 @@ export default function CalibrationWizard({
   const [referenceInstrument, setReferenceInstrument] = useState("");
   const [lowestInstrument, setLowestInstrument] = useState("");
   const jogHeld = useRef<JogDelta | null>(null);
-  const jogPumpActive = useRef(false);
+  const jogPumpActive = useRef<object | null>(null);
   const jogRequestCount = useRef(0);
   const pendingJog = useRef<{ cancelled: boolean } | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previousOpen = useRef(false);
   const previousStep = useRef(step);
+  const interruptedStep = useRef<number | null>(null);
+  const actionPending = useRef<{ lifetime: number } | null>(null);
+  const closePending = useRef<{ lifetime: number } | null>(null);
+  const automaticHome = useRef<AutomaticHome | null>(null);
+  const automaticHomeAttempts = useRef(new Set<string>());
   const pendingSingleOrigin = useRef<PendingSingleOrigin | null>(null);
   const pendingZReference = useRef<PendingZReference | null>(null);
   const finalizedOrigin = useRef<FinalizeOriginResponse | null>(null);
@@ -189,7 +210,56 @@ export default function CalibrationWizard({
   const readyForSave = isMulti
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
-  const controlsLocked = busy || jogInFlight || homing || !!alarmRecoveryMessage;
+  const controlsLocked = busy || automaticHomePhase !== null || jogInFlight || homing || !!alarmRecoveryMessage;
+  const operationMessage = operation ? `${operation}… Please wait.` : null;
+  const verifiedHomeMessage = statusNote === "Homed." && alarmPrompt === null && homeRequired && !operation && !error;
+  const liveFaultMessage = isAlarm && !/home required/i.test(status) && !recoveryHomeAvailable ? status : null;
+  const automaticHomeMessage = automaticHomePhase === "queued" ? "Limit cleared. Homing next… Space to cancel."
+    : automaticHomePhase === "homing" ? "Homing… Please wait." : null;
+  const statusMessage = error ?? recoveryContextError ?? (liveFaultMessage && automaticHomePhase ? liveFaultMessage : automaticHomeMessage) ?? (recoveryBusy ? recoveryMessage ?? "Recovering… Space to cancel."
+    : liveFaultMessage ?? operationMessage ?? (verifiedHomeMessage ? statusNote : alarmRecoveryMessage ?? statusNote)
+      ?? (instruments.length === 0 ? "Add and save at least one mounted instrument in the Gantry configuration before calibrating." : null));
+  const statusAlarm = !!alarmRecoveryMessage && !verifiedHomeMessage && !(automaticHomePhase && !liveFaultMessage && !error) && !(homeRequired && !!operation && !error && !recoveryBusy);
+  const statusTone = error || recoveryContextError || statusAlarm ? "error" : operation || automaticHomePhase || recoveryBusy || instruments.length === 0 ? "warning" : statusNote ? "info" : "idle";
+
+  const updateRecoveryMessage = useCallback((message: string | null, failed: boolean) => {
+    setRecoveryMessage(message);
+    setRecoveryContextError(failed ? message : null);
+  }, []);
+
+  const cancelAutomaticHome = useCallback((message?: string) => {
+    const ticket = automaticHome.current;
+    if (!ticket) return false;
+    ticket.cancelled = true;
+    if (ticket.timer != null) window.clearTimeout(ticket.timer);
+    autoRecovery.cancel();
+    if (!ticket.cancelSent) {
+      ticket.cancelSent = true;
+      void gantryApi.cancelHomeAfterCalibrationRecovery(ticket.jogId).catch((failure) => {
+        if (autoRecovery.active && autoRecovery.lifetime === ticket.lifetime) setError(errorMessage(failure));
+      });
+    }
+    if (!ticket.started) {
+      automaticHome.current = null;
+      setAutomaticHomePhase(null);
+      setBusy(false);
+      setOperation(null);
+    }
+    if (message) {
+      setError(message);
+      setRecoveryHomeAvailable(true);
+    }
+    return true;
+  }, [autoRecovery]);
+
+  const automaticHomeSetup = JSON.stringify([filename, config]);
+  useEffect(() => {
+    const lifetime = autoRecovery.lifetime;
+    if (!open || !connected) cancelAutomaticHome();
+    return () => {
+      if (automaticHome.current?.lifetime === lifetime) cancelAutomaticHome();
+    };
+  }, [automaticHomeSetup, autoRecovery, cancelAutomaticHome, connected, open]);
 
   useEffect(() => {
     const wasOpen = previousOpen.current;
@@ -199,6 +269,10 @@ export default function CalibrationWizard({
     setBusy(false);
     setRecoveryBusy(false);
     setRecoveryHomeAvailable(false);
+    automaticHome.current = null;
+    automaticHomeAttempts.current.clear();
+    setAutomaticHomePhase(null);
+    interruptedStep.current = null;
     setOperation(null);
     setError(null);
     setAlarmPrompt(null);
@@ -290,6 +364,7 @@ export default function CalibrationWizard({
   }, [open, stopJog]);
 
   const invalidateCaptures = useCallback(() => {
+    interruptedStep.current ??= previousStep.current;
     setXyOrigin(null);
     setZReference(null);
     setBlockTouch(null);
@@ -307,10 +382,13 @@ export default function CalibrationWizard({
     if (!open || !connected || !isAlarm) return;
     haltJogLocally();
     invalidateCaptures();
+    setError(null);
+    setRecoveryContextError(null);
     setAlarmPrompt(status);
     setStatusNote(null);
     if (!/home required/i.test(status)) setRecoveryHomeAvailable(false);
-  }, [connected, haltJogLocally, invalidateCaptures, isAlarm, open, status]);
+    if (!/home required/i.test(status)) cancelAutomaticHome();
+  }, [cancelAutomaticHome, connected, haltJogLocally, invalidateCaptures, isAlarm, open, status]);
 
   const reportError = useCallback((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
@@ -334,9 +412,14 @@ export default function CalibrationWizard({
   };
 
   const resetFlow = () => {
+    cancelAutomaticHome();
+    automaticHome.current = null;
+    automaticHomeAttempts.current.clear();
+    setAutomaticHomePhase(null);
     autoRecovery.begin();
     setRecoveryBusy(false);
     setRecoveryHomeAvailable(false);
+    interruptedStep.current = null;
     setStep(0);
     setOperation(null);
     setError(null);
@@ -382,18 +465,23 @@ export default function CalibrationWizard({
     }
   };
 
-  const close = async () => {
+  const close = useCallback(async () => {
+    if (closePending.current?.lifetime === autoRecovery.lifetime) return;
+    const cancelledHome = cancelAutomaticHome();
     autoRecovery.end();
+    const request = { lifetime: autoRecovery.lifetime };
+    closePending.current = request;
     stopJog(!recoveryBusy);
-    if (recoveryBusy) {
+    if (recoveryBusy && !cancelledHome) {
       try {
         await gantryApi.jogCancel();
       } catch (failure) {
-        setError(errorMessage(failure));
+        if (autoRecovery.lifetime === request.lifetime) setError(errorMessage(failure));
       }
     }
     if (!connected) {
-      onClose();
+      if (autoRecovery.lifetime === request.lifetime) onClose();
+      if (closePending.current === request) closePending.current = null;
       return;
     }
     try {
@@ -404,8 +492,35 @@ export default function CalibrationWizard({
       // the gantry widget's CALIBRATION INTERRUPTED banner takes over
       // until soft limits are actually restored.
     }
-    onClose();
-  };
+    if (autoRecovery.lifetime === request.lifetime) onClose();
+    if (closePending.current === request) closePending.current = null;
+  }, [autoRecovery, cancelAutomaticHome, connected, onClose, recoveryBusy, stopJog]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        if (!event.repeat && (!busy || recoveryBusy || jogInFlight || automaticHomePhase === "queued")) void close();
+        return;
+      }
+      const target = event.target;
+      if (event.key !== " " || (target instanceof HTMLElement && (target.isContentEditable || target.closest("input:not(:disabled), textarea:not(:disabled), select:not(:disabled)")))) return;
+      if (!recoveryBusy && !jogInFlight && !automaticHome.current) return;
+      event.preventDefault();
+      if (event.repeat || closePending.current) return;
+      const ticket = automaticHome.current;
+      if (ticket) {
+        cancelAutomaticHome(ticket.started ? "Automatic continuation cancelled. Homing may still be active." : "Automatic Home cancelled. Home explicitly before continuing.");
+      } else if (recoveryBusy) {
+        setRecoveryCancelRequest((current) => current + 1);
+      } else {
+        stopJog(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [automaticHomePhase, busy, cancelAutomaticHome, close, jogInFlight, open, recoveryBusy, stopJog]);
 
   useEffect(() => {
     if (!open || step < 2) return;
@@ -433,13 +548,6 @@ export default function CalibrationWizard({
   }, [open]);
 
   const handleDialogKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    if (event.key === "Escape") {
-      event.preventDefault();
-      if (!busy) {
-        void close();
-      }
-      return;
-    }
     if (event.key !== "Tab") return;
     const dialog = dialogRef.current;
     if (!dialog) return;
@@ -467,18 +575,23 @@ export default function CalibrationWizard({
   const runAction = async (label: string, action: (generation: number) => Promise<void>) => {
     const generation = autoRecovery.generation;
     const lifetime = autoRecovery.lifetime;
-    if (!autoRecovery.active) return;
+    if (!autoRecovery.active || actionPending.current?.lifetime === lifetime) return;
+    const request = { lifetime };
+    actionPending.current = request;
     setBusy(true);
     setOperation(label);
     setError(null);
     try {
       await action(generation);
     } catch (err) {
-      if (autoRecovery.active && autoRecovery.lifetime === lifetime) reportError(err);
+      if (actionPending.current === request && autoRecovery.active && autoRecovery.lifetime === lifetime) reportError(err);
     } finally {
-      if (autoRecovery.active && autoRecovery.lifetime === lifetime) {
-        setOperation(null);
-        setBusy(false);
+      if (actionPending.current === request) {
+        actionPending.current = null;
+        if (autoRecovery.active && autoRecovery.lifetime === lifetime) {
+          setOperation(null);
+          setBusy(false);
+        }
       }
     }
   };
@@ -534,8 +647,24 @@ export default function CalibrationWizard({
     setStep(1);
   };
 
+  const completeVerifiedHome = (result: GantryPosition, resumeFrom: number | null) => {
+    if (!isVerifiedIdle(result)) throw new Error(`Homing is unverified: ${result.status}`);
+    const homed = requirePosition(result);
+    pendingJog.current = null;
+    jogPumpActive.current = null;
+    setJogInFlight(false);
+    setAlarmPrompt(null);
+    setRecoveryHomeAvailable(false);
+    setCalibrationHome(homed);
+    setStatusNote("Homed.");
+    interruptedStep.current = null;
+    setStep(!isMulti && resumeFrom != null && resumeFrom >= 3 ? 3 : 2);
+  };
+
   // Step 1: connect (if needed) then home. This is the first hardware action.
-  const homeForCalibration = () => runAction("Homing", async (generation) => {
+  const homeForCalibration = (resume = false) => runAction("Homing", async (generation) => {
+    const resumeFrom = resume ? interruptedStep.current : null;
+    invalidateCaptures();
     if (!filename) throw new Error("Select a gantry config first.");
     if (!connected) {
       await gantryApi.connect(filename);
@@ -543,14 +672,60 @@ export default function CalibrationWizard({
     }
     const result = await gantryApi.prepareCalibrationOrigin();
     assertGeneration(generation);
-    if (!isVerifiedIdle(result)) throw new Error(`Homing is unverified: ${result.status}`);
-    const homed = requirePosition(result);
-    setAlarmPrompt(null);
-    setRecoveryHomeAvailable(false);
-    setCalibrationHome(homed);
-    setStatusNote("Homed.");
-    setStep(2);
+    completeVerifiedHome(result, resumeFrom);
   });
+
+  const queueAutomaticHome = (jogId: string) => {
+    if (!autoRecovery.active || automaticHomeAttempts.current.has(jogId)) return;
+    automaticHomeAttempts.current.add(jogId);
+    const ticket: AutomaticHome = { jogId, generation: autoRecovery.generation,
+      lifetime: autoRecovery.lifetime, started: false, cancelled: false };
+    automaticHome.current = ticket;
+    setAutomaticHomePhase("queued");
+    setBusy(true);
+    setStatusNote(null);
+    ticket.timer = window.setTimeout(() => {
+      ticket.timer = undefined;
+      if (automaticHome.current !== ticket || ticket.cancelled || !autoRecovery.active
+        || autoRecovery.lifetime !== ticket.lifetime || autoRecovery.generation !== ticket.generation) {
+        if (automaticHome.current === ticket) {
+          automaticHome.current = null;
+          setAutomaticHomePhase(null);
+          setBusy(false);
+        }
+        return;
+      }
+      ticket.started = true;
+      setAutomaticHomePhase("homing");
+      const request = { lifetime: ticket.lifetime };
+      actionPending.current = request;
+      setBusy(true);
+      setOperation("Homing");
+      const resumeFrom = interruptedStep.current;
+      invalidateCaptures();
+      void (async () => {
+        try {
+          const result = await gantryApi.homeAfterCalibrationRecovery(ticket.jogId);
+          if (automaticHome.current !== ticket || ticket.cancelled || !autoRecovery.active
+            || autoRecovery.lifetime !== ticket.lifetime || autoRecovery.generation !== ticket.generation) return;
+          completeVerifiedHome(result, resumeFrom);
+        } catch (failure) {
+          if (automaticHome.current === ticket && !ticket.cancelled && autoRecovery.active
+            && autoRecovery.lifetime === ticket.lifetime && autoRecovery.generation === ticket.generation) reportError(failure);
+        } finally {
+          if (automaticHome.current === ticket && autoRecovery.active && autoRecovery.lifetime === ticket.lifetime) {
+            automaticHome.current = null;
+            setAutomaticHomePhase(null);
+            if (actionPending.current === request) {
+              actionPending.current = null;
+              setOperation(null);
+              setBusy(false);
+            }
+          }
+        }
+      })();
+    }, 0);
+  };
 
   const setXY = () => runAction(
     "Setting XY origin",
@@ -794,7 +969,8 @@ export default function CalibrationWizard({
     jogHeld.current = { x, y, z };
     jogRequestCount.current = 0;
     const first = jogRef.current(x, y, z, generation);
-    jogPumpActive.current = true;
+    const pumpToken = {};
+    jogPumpActive.current = pumpToken;
     const pump = async () => {
       try {
         let sent = { x, y, z };
@@ -814,7 +990,7 @@ export default function CalibrationWizard({
           jogHeld.current = null;
         }
       } finally {
-        jogPumpActive.current = false;
+        if (jogPumpActive.current === pumpToken) jogPumpActive.current = null;
       }
     };
     void pump();
@@ -841,7 +1017,7 @@ export default function CalibrationWizard({
     >
       <div style={modalStyle}>
         <div style={headerStyle}>
-          <div>
+          <div style={{ minWidth: 0, flex: "1 1 160px", overflowWrap: "anywhere" }}>
             <h2 style={{ margin: 0, fontSize: 18, color: theme.color.ink, letterSpacing: "-0.01em" }}>Calibrate gantry</h2>
             <div style={{ marginTop: 3, fontSize: 12, color: theme.color.textMuted }}>
               {filename || "No file selected"}
@@ -850,8 +1026,8 @@ export default function CalibrationWizard({
           <div style={headerActionsStyle}>
             <button
               onClick={() => void reset()}
-              disabled={busy}
-              style={buttonStateStyle(buttonStyle, busy)}
+              disabled={busy || automaticHomePhase !== null}
+              style={buttonStateStyle(buttonStyle, busy || automaticHomePhase !== null)}
             >
               Reset wizard
             </button>
@@ -865,8 +1041,8 @@ export default function CalibrationWizard({
           </div>
         </div>
 
-        <div style={bodyStyle}>
-          <aside style={stepsStyle}>
+        <div className={wizardStyles.body} style={bodyStyle}>
+          <aside className={wizardStyles.steps} style={stepsStyle}>
             {stepLabels(isMulti).map((label, index) => (
               <div
                 key={label}
@@ -880,42 +1056,44 @@ export default function CalibrationWizard({
           </aside>
 
           <section style={contentStyle}>
-            {alarmRecoveryMessage && (
-              <div style={alarmStyle}>
-                <span style={alarmTitleStyle}>GANTRY ALARM</span>
-                <span>{alarmRecoveryMessage}</span>
-                {(!homeRequired || recoveryBusy) && <LimitRecoveryControls
-                  automaticOnly
-                  connected={connected} disabled={busy || homing}
+            <CalibrationStatusBanner message={statusMessage} alarm={statusAlarm} tone={statusTone}
+              action={alarmRecoveryMessage && canHomeAfterRecovery && !verifiedHomeMessage && automaticHomePhase === null ? (
+                <button
+                  onClick={() => void homeForCalibration(true)}
+                  disabled={busy || homing || !connected || (isAlarm && !/home required/i.test(status))}
+                  style={{ ...buttonStateStyle(alarmButtonStyle, busy || homing || !connected || (isAlarm && !/home required/i.test(status))), whiteSpace: "normal" }}
+                >
+                  {isMulti ? "Home and restart calibration" : "Home and resume"}
+                </button>
+              ) : null}>
+              {alarmRecoveryMessage && (!homeRequired || recoveryBusy) && <LimitRecoveryControls
+                  automaticOnly hideMessage onMessageChange={updateRecoveryMessage}
+                  cancelRequest={recoveryCancelRequest}
+                  connected={connected} disabled={homing || (busy && !jogInFlight)}
                   onStart={() => {
                     haltJogLocally();
                     if (pendingJog.current) pendingJog.current.cancelled = true;
                     setError(null);
                   }}
                   autoRecovery={autoRecovery}
-                  onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value); }}
-                  onRecovered={() => {
+                  onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value || automaticHome.current !== null); setRecoveryMessage(value ? "Recovering… Space to cancel." : null); }}
+                  onRecovered={(result, ownedJogId) => {
+                    actionPending.current = null;
+                    setOperation(null);
                     autoRecovery.cancel();
+                    pendingJog.current = null;
+                    jogPumpActive.current = null;
+                    setJogInFlight(false);
                     invalidateCaptures();
                     setError(null);
                     setRecoveryHomeAvailable(true);
                     setAlarmPrompt("Home required. Clear the gantry path before homing.");
                     setStatusNote("Pull-off complete.");
+                    if (result.mode === "known_jog" && ownedJogId) queueAutomaticHome(ownedJogId);
                   }}
-                  onError={(message) => { autoRecovery.cancel(); setError(message); }}
+                  onError={(message) => { actionPending.current = null; setOperation(null); autoRecovery.cancel(); setError(message); }}
                 />}
-                {canHomeAfterRecovery && <button
-                  onClick={homeForCalibration}
-                  disabled={busy || homing || !connected || (isAlarm && !/home required/i.test(status))}
-                  style={buttonStateStyle(alarmButtonStyle, busy || homing || !connected || (isAlarm && !/home required/i.test(status)))}
-                >
-                  Home and restart calibration
-                </button>}
-              </div>
-            )}
-            {error && <div style={errorStyle}>{error}</div>}
-            {operation && <div style={busyStyle}>{operation}… Please wait.</div>}
-            {statusNote && <div style={noteStyle}>{statusNote}</div>}
+            </CalibrationStatusBanner>
 
             {step === 0 && (
               <div>
@@ -931,11 +1109,6 @@ export default function CalibrationWizard({
                     the front of the gantry. It defines zero X/Y offset. Choose the
                     lowest instrument separately to define Z; they may be the same tool.
                   </p>
-                )}
-                {instruments.length === 0 && (
-                  <div style={noInstrumentsStyle}>
-                    Add and save at least one mounted instrument in the Gantry configuration before calibrating.
-                  </div>
                 )}
                 <div style={fieldRowStyle}>
                   <label style={fieldStyle}>
@@ -985,10 +1158,10 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Home gantry</h3>
                 <p style={instructionStyle}>
-                  Clear the deck so nothing is in the gantry's path, then home.
+                  After a limit hit the gantry may back off and home automatically. Keep the entire homing path clear.
                 </p>
                 <div style={actionRowStyle}>
-                  <button onClick={homeForCalibration} disabled={controlsLocked} style={buttonStateStyle(primaryButtonStyle, controlsLocked)}>Home gantry</button>
+                  <button onClick={() => void homeForCalibration()} disabled={controlsLocked} style={buttonStateStyle(primaryButtonStyle, controlsLocked)}>Home gantry</button>
                 </div>
               </div>
             )}
@@ -1058,11 +1231,11 @@ export default function CalibrationWizard({
                   Put the calibration block at the front-left corner of the deck. Jog the selected leftmost instrument until it is directly over the mark on the block, then continue.
                 </p>
                 {referenceInstrumentIsPipette && (
-                  <div style={noteStyle}>
+                  <p style={instructionStyle}>
                     {referenceTipAttached
                       ? `Using ${selectedReference} with a ${tipLengths[selectedReference]} mm tip (set in Prepare).`
                       : `Using ${selectedReference} bare nozzle (set in Prepare).`}
-                  </div>
+                  </p>
                 )}
                 <JogPanel
                   xyStep={xyStep}
@@ -1223,7 +1396,7 @@ export default function CalibrationWizard({
                     </div>
                   </div>
                 ) : (
-                  <div style={noteStyle}>All instruments recorded. Continue to save.</div>
+                  <p style={instructionStyle}>All instruments recorded. Continue to save.</p>
                 )}
               </div>
             )}
@@ -1451,6 +1624,7 @@ const modalStyle: React.CSSProperties = {
 
 const headerStyle: React.CSSProperties = {
   display: "flex",
+  flexWrap: "wrap",
   justifyContent: "space-between",
   alignItems: "flex-start",
   gap: 12,
@@ -1467,7 +1641,6 @@ const headerActionsStyle: React.CSSProperties = {
 
 const bodyStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(140px, 170px) minmax(0, 1fr)",
   minHeight: 0,
   overflow: "hidden",
 };
@@ -1477,11 +1650,11 @@ const stepsStyle: React.CSSProperties = {
   borderRight: `1px solid ${theme.color.border}`,
   background: theme.color.surfaceMuted,
   display: "flex",
-  flexDirection: "column",
   gap: 6,
 };
 
 const contentStyle: React.CSSProperties = {
+  minWidth: 0,
   padding: 18,
   overflow: "auto",
 };
@@ -1593,26 +1766,11 @@ const closeButtonStyle: React.CSSProperties = {
   height: 28,
 };
 
-const errorStyle: React.CSSProperties = {
-  ...theme.notice.error,
-  marginBottom: 10,
-};
 
-const alarmStyle: React.CSSProperties = {
-  ...theme.notice.error,
-  border: `1px solid ${theme.color.danger}`,
-  marginBottom: 10,
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  flexWrap: "wrap",
-};
 
-const alarmTitleStyle: React.CSSProperties = {
-  color: theme.color.danger,
-  fontWeight: 700,
-  letterSpacing: "0.04em",
-};
+
+
+
 
 const alarmButtonStyle: React.CSSProperties = {
   ...theme.btn.danger,
@@ -1620,20 +1778,11 @@ const alarmButtonStyle: React.CSSProperties = {
   marginLeft: "auto",
 };
 
-const noteStyle: React.CSSProperties = {
-  ...theme.notice.info,
-  marginBottom: 10,
-};
 
-const noInstrumentsStyle: React.CSSProperties = {
-  ...theme.notice.warning,
-  marginBottom: 10,
-};
 
-const busyStyle: React.CSSProperties = {
-  ...theme.notice.warning,
-  marginBottom: 10,
-};
+
+
+
 
 const instrumentListStyle: React.CSSProperties = {
   display: "grid",

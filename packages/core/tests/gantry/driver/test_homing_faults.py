@@ -885,8 +885,11 @@ def test_unvalidated_buffered_reset_tail_blocks_status_query_before_unlock(monke
 @pytest.mark.parametrize("notices", [[], ["Grbl for ARM32"], ["Grbl for ARM32", "Version:ARM32 V3.8"], ["Grbl for ARM32", "Version:ARM32 V3.8", "$20=nan"]])
 def test_boot_ok_requires_identified_arm32_and_valid_numeric_startup_data(notices):
     mill = Mill()
-    with pytest.raises(CommandExecutionError, match="Unexpected guarded reset response: ok"):
-        mill._record_guarded_reset_notice("ok", "y", list(notices))
+    notices = list(notices)
+    mill._record_guarded_reset_notice("ok", "y", notices)
+    assert "ok" not in notices
+    assert "Unqualified reset acknowledgement: ok" in notices
+    assert mill._guarded_reset_startup_pending(notices)
 
 
 def test_missing_boot_completion_blocks_query_even_if_frame_would_precede_boot_ok(monkeypatch):
@@ -1199,4 +1202,136 @@ def test_recovery_jog_cancel_is_rechecked_after_prewrite_logging():
     mill.logger.debug = MagicMock(side_effect=stop_while_logging)
     with pytest.raises(CommandExecutionError, match="Stopped before command write"):
         mill.jog(y=-1, feed_rate=100, recovery_axis="y", check_cancelled=check_cancelled)
+    mill.ser_mill.write.assert_not_called()
+
+
+@pytest.mark.parametrize("mode", ["complete_boot", "deferred_boot", "early_frame", "query_ok_before_frame", "query_frame_before_ok", "missing_boot", "missing_boot_ok", "missing_unlock_ack", "wrong_fresh_pin", "wrong_after_unlock_pin", "terminal_error", "terminal_alarm", "unknown_output", "error_past_reset_line_budget"])
+def test_observed_x_reset_stray_ok_never_completes_boot_or_acknowledges_unlock(monkeypatch, mode):
+    from cubos.gantry.gantry import Gantry
+    from cubos.gantry.session import GantrySession
+
+    class ObservedXReset(HomingStatusSerial):
+        reset_started = False
+        unlocked = False
+        moved = False
+        boot_supplied = False
+        arm_seen = False
+        settings_seen = False
+        boot_completed = False
+        early_ok_read = False
+        queries_before_boot = 0
+
+        @property
+        def in_waiting(self):
+            return sum(len(line) for line in self.lines)
+
+        def supply_boot(self):
+            self.boot_supplied = True
+            lines = COMPLETE_ARM32_BOOT_LINES[:-1] if mode == "missing_boot_ok" else COMPLETE_ARM32_BOOT_LINES
+            self.lines.extend((line + "\n").encode() for line in lines)
+
+        def write(self, data):
+            self.writes.append(data)
+            if data == b"\x18":
+                self.reset_started = True
+                if mode.startswith("query_"):
+                    return len(data)
+                self.lines.extend([b"[MSG:Check Limits]\n", b"ok\n"])
+                if mode == "error_past_reset_line_budget":
+                    self.lines.extend([b"[MSG:Check Limits]\n"] * 30 + [b"error:9\n"])
+                if mode == "early_frame":
+                    self.lines.append(b"<Alarm|WPos:0,200,50,0|Pn:X>\n")
+                terminal = {"terminal_error": b"error:9\n", "terminal_alarm": b"ALARM:8\n", "unknown_output": b"unexpected reset output\n"}.get(mode)
+                if terminal:
+                    self.lines.append(terminal)
+                if mode not in ("deferred_boot", "missing_boot"):
+                    self.supply_boot()
+            elif data == b"?":
+                if self.reset_started and mode.startswith("query_") and not self.boot_supplied:
+                    self.boot_supplied = True
+                    self.queries_before_boot += 1
+                    self.lines.extend([b"[MSG:Check Limits]\n", b"ok\n", b"Grbl for ARM32\n", b"Version:ARM32 V3.8\n", b"$20=1\n"])
+                    frame = b"<Alarm|WPos:0,200,50,0|Pn:X>\n"
+                    self.lines.extend([b"ok\n", frame] if mode == "query_ok_before_frame" else [frame, b"ok\n"])
+                    return len(data)
+                if self.reset_started:
+                    self.queries_before_boot += int(not self.boot_completed)
+                    assert self.boot_completed, "No fresh gate may use the stray ok as boot completion"
+                if self.moved:
+                    status = "<Idle|WPos:5,200,50,0>"
+                elif self.unlocked:
+                    status = "<Idle|WPos:0,200,50,0|Pn:Y>" if mode == "wrong_after_unlock_pin" else "<Idle|WPos:0,200,50,0|Pn:X>"
+                else:
+                    pin = "Y" if self.reset_started and mode == "wrong_fresh_pin" else "X"
+                    status = f"<Alarm|WPos:0,200,50,0|Pn:{pin}>"
+                self.lines.append((status + "\n").encode())
+            elif data == b"$X\n":
+                assert self.boot_completed
+                self.unlocked = True
+                self.lines.append(b"[MSG:Check Limits]\n")
+                if mode != "missing_unlock_ack":
+                    self.lines.append(b"ok\n")
+            elif data.startswith(b"$J="):
+                assert self.unlocked and self.boot_completed
+                self.moved = True
+                self.lines.extend([b"[MSG:Check Limits]\n", b"ok\n"])
+            elif data != b"\x85":
+                raise AssertionError(f"Unexpected command: {data!r}")
+            return len(data)
+
+        def readline(self):
+            if self.reset_started and mode == "deferred_boot" and not self.lines and not self.boot_supplied:
+                self.supply_boot()
+            line = super().readline()
+            if line == b"Grbl for ARM32\n": self.arm_seen = True
+            if line.startswith(b"$20=") and self.arm_seen: self.settings_seen = True
+            if line == b"ok\n":
+                if self.arm_seen and self.settings_seen: self.boot_completed = True
+                else: self.early_ok_read = True
+            return line
+
+    monkeypatch.setattr("cubos.gantry.gantry_driver.driver.time.sleep", lambda _: None)
+    gantry = Gantry()
+    serial = ObservedXReset([])
+    gantry._mill.ser_mill = serial
+    gantry._mill.config = {"$20": "0", "$21": "1"}
+    session = GantrySession()
+    session._gantry = gantry
+    session._last_jog_delta = {"x": -5.0, "y": 0.0, "z": 0.0}
+    session._last_jog_id = "observed-x-step"
+    session._latch_alarm_locked("ALARM:3")
+
+    if mode in ("complete_boot", "deferred_boot", "early_frame", "query_ok_before_frame", "query_frame_before_ok"):
+        result, messages = session.recover_calibration_limit(x=-5, jog_id="observed-x-step")
+        assert result.commanded_delta == {"x": 5, "y": 0, "z": 0}
+        if mode.startswith("query_"):
+            assert any("Unqualified reset acknowledgement: ok" in str(call) for call in gantry._mill.logger.info.call_args_list)
+        else:
+            assert any("Unqualified reset acknowledgement: ok" in message for message in messages)
+        assert session.position().status == "Home required"
+        assert serial.writes.count(b"$X\n") == 1
+        assert [line for line in serial.writes if line.startswith(b"$J=")] == [b"$J=G91 X5.000 F100.0\n"]
+    else:
+        with pytest.raises((CommandExecutionError, StatusReturnError)) as raised:
+            session.recover_calibration_limit(x=-5, jog_id="observed-x-step")
+        assert not any(line.startswith(b"$J=") for line in serial.writes)
+        if mode in ("missing_boot", "missing_boot_ok"):
+            assert "startup completion was not verified" in str(raised.value)
+        assert serial.writes.count(b"$X\n") == int(mode in ("missing_unlock_ack", "wrong_after_unlock_pin"))
+    assert serial.early_ok_read
+    assert serial.queries_before_boot == int(mode.startswith("query_"))
+    assert serial.writes.count(b"\x18") == 1
+    assert gantry._mill.config == {"$20": "0", "$21": "1"}
+
+
+def test_continuous_unqualified_reset_acks_are_bounded_and_never_authorize_query_or_unlock(monkeypatch):
+    mill = Mill()
+    mill.ser_mill = MagicMock(is_open=True)
+    mill.ser_mill.in_waiting = 3
+    mill.ser_mill.readline.return_value = b"ok\n"
+    mill._guarded_reset_tail = ("x", ["Unqualified reset acknowledgement: ok"])
+    monkeypatch.setattr("cubos.gantry.gantry_driver.driver.time.monotonic", lambda: 0)
+    with pytest.raises(CommandExecutionError, match="within the response limits"):
+        mill.current_status(recovery=True)
+    assert mill.ser_mill.readline.call_count == 1024
     mill.ser_mill.write.assert_not_called()

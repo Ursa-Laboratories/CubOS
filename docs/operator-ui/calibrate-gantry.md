@@ -29,7 +29,7 @@ height ready. The wizard connects and homes the gantry in its **Home** step.
 
 ![Calibration wizard: Home gantry](../images/operator-ui/wizard-2-home.webp)
 
-Clear the deck, then click **Home gantry**. Wait for the next step.
+Clear the full homing path, then click **Home gantry**. Keep it clear during calibration: a verified automatic pull-off is followed by one automatic Home.
 
 ## One Instrument
 

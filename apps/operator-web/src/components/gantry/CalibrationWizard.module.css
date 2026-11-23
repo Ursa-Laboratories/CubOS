@@ -1,0 +1,66 @@
+.body {
+  grid-template-columns: minmax(140px, 170px) minmax(0, 1fr);
+}
+
+.steps {
+  flex-direction: column;
+}
+
+.statusSlot {
+  box-sizing: border-box;
+  height: 72px;
+  min-height: 72px;
+  max-height: 72px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  overflow: hidden;
+}
+
+.statusMessage {
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.statusAction {
+  min-width: 0;
+}
+
+.statusAction button {
+  max-width: 100%;
+  white-space: normal;
+}
+
+@media (max-width: 640px) {
+  .body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .steps {
+    flex-direction: row;
+    overflow-x: auto;
+  }
+
+  .steps > div {
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
+
+  .statusSlot {
+    height: 84px;
+    min-height: 84px;
+    max-height: 84px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-items: start;
+  }
+}

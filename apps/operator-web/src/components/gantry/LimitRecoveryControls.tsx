@@ -9,10 +9,13 @@ type Props = {
   disabled: boolean;
   onStart: () => void;
   onBusyChange: (busy: boolean) => void;
-  onRecovered: (result: LimitRecoveryResult) => void;
+  onRecovered: (result: LimitRecoveryResult, ownedJogId?: string) => void;
   onError: (message: string) => void;
   autoRecovery?: CalibrationAutoRecovery;
   automaticOnly?: boolean;
+  cancelRequest?: number;
+  onMessageChange?: (message: string | null, error: boolean) => void;
+  hideMessage?: boolean;
 };
 
 function deltaLabel(delta: RecoveryDelta) {
@@ -20,22 +23,24 @@ function deltaLabel(delta: RecoveryDelta) {
     .map((axis) => `${axis.toUpperCase()}${delta[axis] > 0 ? "+" : "−"} ${Math.abs(delta[axis])} mm`).join(", ");
 }
 
-export default function LimitRecoveryControls({ connected, disabled, onStart, onBusyChange, onRecovered, onError, autoRecovery, automaticOnly = false }: Props) {
+export default function LimitRecoveryControls({ connected, disabled, onStart, onBusyChange, onRecovered, onError, autoRecovery, automaticOnly = false, cancelRequest, onMessageChange, hideMessage = false }: Props) {
   const { context, error } = useLimitRecoveryContext(connected);
   const [busy, setBusy] = useState(false);
   const [stopRequested, setStopRequested] = useState(false);
   const [direction, setDirection] = useState<"" | "-1" | "1">("");
   const [pathClear, setPathClear] = useState(false);
+  const [attempted, setAttempted] = useState(false);
   const active = useRef(false);
   const cancelled = useRef(false);
   const mounted = useRef(true);
+  const seenCancelRequest = useRef(cancelRequest);
   const axis = context?.active_limit_axes?.length === 1 ? context.active_limit_axes[0] : null;
 
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
-      if (active.current) {
+      if (active.current && !cancelled.current) {
         cancelled.current = true;
         autoRecovery?.cancel();
         void gantryApi.jogCancel().catch(() => undefined);
@@ -52,11 +57,12 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
     if (error || !connected) autoRecovery?.cancel();
   }, [autoRecovery, connected, error]);
 
-  const execute = useCallback(async (action: () => Promise<LimitRecoveryResult>, automatic = false) => {
+  const execute = useCallback(async (action: () => Promise<LimitRecoveryResult>, automatic = false, ownedJogId?: string) => {
     if (!connected || disabled || active.current) return;
     if (!automatic) autoRecovery?.cancel();
     const lifetime = autoRecovery?.lifetime;
     active.current = true;
+    setAttempted(true);
     cancelled.current = false;
     setStopRequested(false);
     setBusy(true);
@@ -70,7 +76,8 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
       } else if (result.status !== "recovered") {
         onError(`Recovery did not finish: ${result.status}`);
       } else {
-        onRecovered(result);
+        if (automatic && ownedJogId) onRecovered(result, ownedJogId);
+        else onRecovered(result);
       }
     } catch (failure) {
       if (mounted.current && (!autoRecovery || autoRecovery.lifetime === lifetime)) onError(failure instanceof Error ? failure.message : String(failure));
@@ -87,23 +94,43 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
     const id = context?.failed_jog_id;
     if (!connected || error || disabled || busy || !id || !context.eligible || !context.failed_jog_delta || !context.pull_off_delta || !autoRecovery?.claimFault(id)) return;
     const delta = context.failed_jog_delta;
-    void execute(() => gantryApi.recoverCalibrationLimit({ ...delta, jog_id: id }), true);
+    void execute(() => gantryApi.recoverCalibrationLimit({ ...delta, jog_id: id }), true, id);
   }, [autoRecovery, busy, connected, context, disabled, error, execute]);
 
-  const stop = async () => {
+  const stop = useCallback(async () => {
+    const lifetime = autoRecovery?.lifetime;
     cancelled.current = true;
     autoRecovery?.cancel();
     setStopRequested(true);
     try {
       await gantryApi.jogCancel();
     } catch (failure) {
-      onError(failure instanceof Error ? failure.message : String(failure));
+      if (mounted.current && (!autoRecovery || autoRecovery.lifetime === lifetime)) {
+        onError(failure instanceof Error ? failure.message : String(failure));
+      }
     }
-  };
+  }, [autoRecovery, onError]);
 
-  if (busy) return <button style={theme.btn.danger} disabled={stopRequested} onClick={() => void stop()}>{stopRequested ? "Stopping…" : "Stop recovery"}</button>;
+  useEffect(() => {
+    if (seenCancelRequest.current === cancelRequest) return;
+    seenCancelRequest.current = cancelRequest;
+    if (active.current && !cancelled.current) void stop();
+  }, [cancelRequest, stop]);
 
-  if (automaticOnly) return <span>{error ?? (!context ? "Checking recovery…" : context.blocked_reason ?? "Automatic recovery unavailable.")}</span>;
+  const automaticMessage = busy ? stopRequested ? "Stopping recovery…" : "Recovering… Space to cancel."
+    : error ?? (attempted ? "Recovery attempt ended. Inspect the gantry before continuing." : !context ? "Checking recovery…" : context.blocked_reason ?? "Automatic recovery unavailable.");
+  useEffect(() => {
+    if (automaticOnly) onMessageChange?.(automaticMessage, !!error && !busy);
+  }, [automaticMessage, automaticOnly, busy, error, onMessageChange]);
+  useEffect(() => () => onMessageChange?.(null, false), [onMessageChange]);
+
+  if (automaticOnly && hideMessage) return null;
+
+  if (busy) return automaticOnly
+    ? <span role="status">{stopRequested ? "Stopping recovery…" : "Recovering… Space to cancel."}</span>
+    : <button style={theme.btn.danger} disabled={stopRequested} onClick={() => void stop()}>{stopRequested ? "Stopping…" : "Stop recovery"}</button>;
+
+  if (automaticOnly) return <span>{automaticMessage}</span>;
 
   return <div style={{ display: "grid", gap: 8 }}>
     {error && <span>{error}</span>}

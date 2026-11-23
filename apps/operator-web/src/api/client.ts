@@ -77,10 +77,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 let homingEpoch = 0;
 
-async function homingRequest<T>(path: string): Promise<T> {
+async function homingRequest<T>(path: string, body?: unknown): Promise<T> {
   homingEpoch += 1;
   try {
-    return await request<T>(path, { method: "POST" });
+    return await request<T>(path, { method: "POST", ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   } finally {
     homingEpoch += 1;
   }
@@ -192,6 +192,10 @@ export const gantryApi = {
   }),
   prepareCalibrationOrigin: () =>
     homingRequest<import("../types").GantryPosition>("/gantry/calibration/prepare-origin"),
+  homeAfterCalibrationRecovery: (jog_id: string) =>
+    homingRequest<import("../types").GantryPosition>("/gantry/calibration/home-after-recovery", { jog_id }),
+  cancelHomeAfterCalibrationRecovery: (jog_id: string) =>
+    request<{ status: string }>("/gantry/calibration/home-after-recovery/cancel", { method: "POST", body: JSON.stringify({ jog_id }) }),
   homeAndCenterForCalibration: () =>
     homingRequest<{
       xy_bounds: { x: number; y: number; z: number };
