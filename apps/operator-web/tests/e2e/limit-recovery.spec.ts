@@ -46,11 +46,18 @@ test("manual Y recovery requires direction and clearance and keeps Stop availabl
   ]);
 });
 
-test("a Z limit during Set Origin backs off once and waits for a new Home", async ({ page }, testInfo) => {
+test("a Z limit backs off once and Home resumes Set Origin without another move", async ({ page }, testInfo) => {
   await installApiMocks(page, { connected: true });
   let status = "Idle";
   let homes = 0;
   let backoffs = 0;
+  let finishBackoff!: () => void;
+  const backoffGate = new Promise<void>(resolve => { finishBackoff = resolve; });
+  const writes: string[] = [];
+  page.on("request", request => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === "POST" && path.startsWith("/api/v1/gantry/")) writes.push(path);
+  });
   let jog: { x: number; y: number; z: number; jog_id: string } | undefined;
   const position = () => ({
     status, connected: true, calibration_active: true, x: 100, y: 90, z: 30,
@@ -74,11 +81,12 @@ test("a Z limit during Set Origin backs off once and waits for a new Home", asyn
     failed_jog_delta: jog, failed_jog_id: jog?.jog_id, eligible: status.startsWith("ALARM"),
     pull_off_delta: { x: 0, y: 0, z: 5 }, manual_available: status.startsWith("ALARM"),
   } }));
-  await page.route("**/api/v1/gantry/calibration/recover-limit", route => {
+  await page.route("**/api/v1/gantry/calibration/recover-limit", async route => {
     expect(jog?.z).toBeLessThan(0);
     expect(jog?.jog_id).toBeTruthy();
     expect(route.request().postDataJSON()).toMatchObject({ z: jog?.z, jog_id: jog?.jog_id });
     backoffs++;
+    await backoffGate;
     status = "Home required";
     return route.fulfill({ json: {
       status: "recovered", mode: "known_jog", attempts: 1, failed_delta: jog,
@@ -96,13 +104,19 @@ test("a Z limit during Set Origin backs off once and waits for a new Home", asyn
   await wizard.getByRole("button", { name: "Continue", exact: true }).click();
   await wizard.getByTitle("Z-", { exact: true }).click();
   await expect.poll(() => backoffs).toBe(1);
-  const home = wizard.getByRole("button", { name: "Home and restart calibration", exact: true });
+  await expect(wizard.getByRole("status").filter({ hasText: /recovering/i })).toBeVisible();
+  await expect(wizard.getByRole("button", { name: "Stop recovery" })).toHaveCount(0);
+  finishBackoff();
+  const home = wizard.getByRole("button", { name: "Home and resume", exact: true });
   await expect(home).toBeEnabled();
   await expect(wizard.getByText("Manual recovery", { exact: true })).toHaveCount(0);
   expect(homes).toBe(1);
   await page.screenshot({ path: testInfo.outputPath("z-limit-home-required.png") });
+  const beforeHome = writes.length;
   await home.click();
   await expect(wizard.getByText("Homed.", { exact: true })).toBeVisible();
+  await expect(wizard.getByRole("heading", { name: "Set Origin", exact: true })).toBeVisible();
+  expect(writes.slice(beforeHome)).toEqual(["/api/v1/gantry/calibration/prepare-origin"]);
   expect(homes).toBe(2);
   expect(backoffs).toBe(1);
 });

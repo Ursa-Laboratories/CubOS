@@ -220,9 +220,11 @@ and missing or conflicting pin reports leave the gantry stopped. Check the
 machine if CubOS cannot verify which direction will release the switch.
 Stopping recovery or closing calibration cancels the attempt.
 
-In full gantry calibration, CubOS discards the interrupted captures. After it
-verifies that the switch has released, clear the motion path and select
-**Home and restart calibration** in the wizard. Record the references again after homing.
+A hard limit invalidates the captured positions. After the switch releases,
+clear the path. For a single tool interrupted at **Set Origin** or **Save**,
+choose **Home and resume** to return directly to **Set Origin** after verified homing
+with the entered measurements intact. Jog back to the block and make a fresh
+touch. For multiple tools, start again at the XY reference.
 
 When reconnecting with a switch pressed, CubOS can stay connected in a faulted
 recovery-only state if it verifies a controller fault report. Work coordinates
@@ -261,7 +263,9 @@ unlock, and a fresh Idle report of that same pin after the acknowledgement
 before moving. Unexpected reset responses, real errors, or changed pins stop
 the attempt. Notices alone never establish that recovery succeeded.
 
-**Stop** cancels recovery. A failed pull-off, status query, or connection does
+Press **Space** to cancel automatic backoff in the full gantry wizard.
+Standalone recovery has a **Stop recovery** button. A failed pull-off,
+status query, or connection does
 not trigger another move, reset, or reconnect. Recovery does not disable limits
 or zero coordinates. A successful pull-off still leaves **Home required**
 before normal movement or coordinate capture. If the controller rejects the
