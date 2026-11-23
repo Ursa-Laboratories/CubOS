@@ -54,6 +54,19 @@ Place the block at the front-left deck reference.
 3. **Set origin.** Records the position and continues to
    [Save](#save).
 
+### Resume after a limit
+
+When the wizard reports **Home required**, clear the travel path and choose
+**Home and resume**. If you were setting the origin with one tool, the wizard
+reopens **Set Origin** with your measurements. Approach the mark and touch it
+again before saving.
+
+To teach an optional return, use **Record block hover** while the tool is
+stationary above the mark and the route you jogged from Home is clear. After
+re-homing, select **Return above block** only if the block, tool, tip, and
+clearance are unchanged. Wait for the tool to stop before the final manual
+touch. You can always approach manually.
+
 ## Multiple Instruments
 
 ### Set the XY origin

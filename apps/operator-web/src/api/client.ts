@@ -22,6 +22,22 @@ export type LimitRecoveryResult = {
   failed_delta: RecoveryDelta | null;
 };
 
+export type CalibrationHoverSetup = {
+  instrument: string;
+  tip_attached: boolean;
+  tip_length_mm: number;
+  block_height_mm: number;
+};
+export type CalibrationHoverCheckpoint = {
+  token: string;
+  position: import("../types").GantryPosition;
+};
+export type CalibrationHomeResume = {
+  position: import("../types").GantryPosition;
+  hover_available: boolean;
+  blocked_reason: string | null;
+};
+
 export type SettingsResponse = {
   config_dir: string;
 };
@@ -77,10 +93,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 let homingEpoch = 0;
 
-async function homingRequest<T>(path: string): Promise<T> {
+async function homingRequest<T>(path: string, body?: unknown): Promise<T> {
   homingEpoch += 1;
   try {
-    return await request<T>(path, { method: "POST" });
+    return await request<T>(path, { method: "POST", ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   } finally {
     homingEpoch += 1;
   }
@@ -192,6 +208,14 @@ export const gantryApi = {
   }),
   prepareCalibrationOrigin: () =>
     homingRequest<import("../types").GantryPosition>("/gantry/calibration/prepare-origin"),
+  recordCalibrationHover: (body: CalibrationHoverSetup & { jog_ids: string[]; fixture_confirmed: true; clearance_confirmed: true; path_clear: true }) =>
+    request<CalibrationHoverCheckpoint>("/gantry/calibration/hover", { method: "POST", body: JSON.stringify(body) }),
+  homeAndResumeCalibration: (body: { token?: string } = {}) =>
+    homingRequest<CalibrationHomeResume>("/gantry/calibration/home-resume", body),
+  returnToCalibrationHover: (body: CalibrationHoverSetup & { token: string; setup_unchanged: true; path_clear: true }) =>
+    request<{ position: import("../types").GantryPosition }>("/gantry/calibration/return-hover", { method: "POST", body: JSON.stringify(body) }),
+  cancelCalibrationHover: (token: string) =>
+    request<{ status: string }>("/gantry/calibration/hover/cancel", { method: "POST", body: JSON.stringify({ token }) }),
   homeAndCenterForCalibration: () =>
     homingRequest<{
       xy_bounds: { x: number; y: number; z: number };

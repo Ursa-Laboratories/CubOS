@@ -830,7 +830,7 @@ class Mill:
                     if (
                         guarded_reset_context is not None
                         and not startup_complete_at_query
-                        and any(notice.lower() == "grbl for arm32" for notice in guarded_reset_context[1])
+                        and any(notice.lower() in ("grbl for arm32", "unqualified reset acknowledgement: ok") for notice in guarded_reset_context[1])
                     ):
                         self._record_guarded_reset_notice(status, *guarded_reset_context)
                         break
@@ -844,6 +844,68 @@ class Mill:
         self.logger.error("Failed to get status from the mill")
         raise StatusResponseTimeoutError("Failed to get status from the mill")
 
+    def read_calibration_frame(self) -> dict:
+        """Read modal state and coordinate offsets with their own bounded ACKs."""
+        reports = {}
+        dimensions = None
+        for command in ("$G", "$#"):
+            self._drain_calibration_jog_input()
+            self._write_serial((command + "\n").encode("ascii"))
+            deadline = time.monotonic() + 2.0
+            received = False
+            acknowledged = False
+            for _ in range(32):
+                if time.monotonic() >= deadline:
+                    break
+                line = self._read_serial().strip()
+                if not line:
+                    continue
+                if line == "ok":
+                    if not received:
+                        raise StatusReturnError("Coordinate-frame ACK arrived without its requested report.")
+                    acknowledged = True
+                    break
+                if command == "$G" and line.startswith("[GC:") and line.endswith("]"):
+                    tokens = line[4:-1].split()
+                    if "GC" in reports or any(set(tokens).intersection(group) != {expected} for group, expected in (({"G54", "G55", "G56", "G57", "G58", "G59"}, "G54"), ({"G20", "G21"}, "G21"), ({"G90", "G91"}, "G90"))):
+                        raise StatusReturnError(f"Calibration requires verified G54, G21 and G90: {line}")
+                    reports["GC"] = tokens
+                elif command == "$#":
+                    match = re.fullmatch(r"\[(G5[4-9]|G28|G30|G92|TLO|PRB):([^]]+)\]", line)
+                    if not match:
+                        raise StatusReturnError(f"Unexpected coordinate-frame response: {line}")
+                    key, text = match.groups()
+                    if key in reports:
+                        raise StatusReturnError(f"Duplicate coordinate-frame report: {key}")
+                    if (key == "PRB" and re.fullmatch(r"[^:]+:[01]", text) is None) or (key != "PRB" and ":" in text):
+                        raise StatusReturnError(f"Invalid coordinate-frame report: {line}")
+                    try:
+                        values = [float(value) for value in text.split(":")[0].split(",")]
+                    except ValueError as exc:
+                        raise StatusReturnError(f"Invalid coordinate-frame report: {line}") from exc
+                    if key != "TLO" and dimensions is None:
+                        dimensions = len(values)
+                    if (key == "TLO" and len(values) != 1) or (key != "TLO" and (dimensions not in (3, 4) or len(values) != dimensions)) or not all(math.isfinite(value) for value in values):
+                        raise StatusReturnError(f"Invalid coordinate-frame report: {line}")
+                    reports[key] = values
+                else:
+                    raise StatusReturnError(f"Unexpected coordinate-frame response: {line}")
+                received = True
+            else:
+                raise StatusReturnError("Coordinate-frame response exceeded its line limit.")
+            if not acknowledged:
+                raise StatusReturnError("Coordinate-frame response did not receive its own ACK.")
+        if not all(key in reports for key in ("GC", "G54", "G92", "TLO")):
+            raise StatusReturnError("Coordinate-frame offsets are incomplete.")
+        return {key: reports[key] for key in ("G54", "G92", "TLO")}
+
+    @staticmethod
+    def _guarded_reset_startup_pending(notices: list[str]) -> bool:
+        return (
+            any(notice.lower() in ("grbl for arm32", "unqualified reset acknowledgement: ok") for notice in notices)
+            and not any(notice.lower() == "ok" for notice in notices)
+        )
+
     def _record_guarded_reset_notice(self, line: str, axis: str, notices: list[str]) -> None:
         if not line:
             return
@@ -853,6 +915,12 @@ class Mill:
             and any(notice.lower() == "version:arm32 v3.8" for notice in notices)
         )
         setting_pattern = r"\$\d{1,3}=[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:\s*\([^\r\n]*\))?"
+        if lowered == "ok" and not (arm32_identified and any(re.fullmatch(setting_pattern, notice) for notice in notices)):
+            notice = "Unqualified reset acknowledgement: ok"
+            if notice not in notices:
+                notices.append(notice)
+                self.logger.info("Guarded reset notice: %s", notice)
+            return
         allowed = (
             lowered in ("[msg:check limits]", "[msg:'$h'|'$x' to unlock]", "grbl for arm32")
             or (lowered == "ok" and arm32_identified and any(re.fullmatch(setting_pattern, notice) for notice in notices))
@@ -893,17 +961,14 @@ class Mill:
             consumed = 0
             deadline = time.monotonic() + 2.0
             for _ in range(1024):
-                startup_incomplete = (
-                    any(notice.lower() == "grbl for arm32" for notice in context[1])
-                    and not any(notice.lower() == "ok" for notice in context[1])
-                )
+                startup_incomplete = self._guarded_reset_startup_pending(context[1])
                 if consumed >= waiting and not startup_incomplete:
                     return context
                 if time.monotonic() >= deadline:
                     break
                 raw = self.ser_mill.readline()
                 if not raw and startup_incomplete:
-                    raise CommandExecutionError("ARM32 startup completion was not verified before the recovery query.")
+                    raise CommandExecutionError("Reset startup completion was not verified after an unqualified acknowledgement or incomplete ARM32 boot; no unlock was sent.")
                 consumed += len(raw)
                 if not raw.endswith(b"\n") or consumed > 16384:
                     raise CommandExecutionError("Buffered reset output is incomplete or exceeds the byte limit.")

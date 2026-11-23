@@ -220,9 +220,20 @@ and missing or conflicting pin reports leave the gantry stopped. Check the
 machine if CubOS cannot verify which direction will release the switch.
 Stopping recovery or closing calibration cancels the attempt.
 
-In full gantry calibration, CubOS discards the interrupted captures. After it
-verifies that the switch has released, clear the motion path and select
-**Home and restart calibration** in the wizard. Record the references again after homing.
+In full gantry calibration, a hard limit invalidates captured positions. After
+backoff, clear the path and use the wizard’s Home button. If a single-tool
+calibration was interrupted at **Set Origin**, verified homing returns you to
+that step. Your filename, block height and tip settings are retained. Touch the
+block again to record the origin. A multi-tool calibration must reacquire its
+XY and tool contacts after homing.
+
+For single-tool setup, you can optionally record a **block hover** before
+contact. Jog the fitted tool above the block mark, check its clearance, and
+record the position while the gantry is idle. Keep the tool, tip and block
+setup fixed from Home through recording. After recovery and verified homing,
+confirm the recorded approach from Home is still clear before returning. The return ends at the recorded hover; jog down
+manually for the final touch. If CubOS cannot verify the checkpoint or you
+moved the block, approach manually.
 
 When reconnecting with a switch pressed, CubOS can stay connected in a faulted
 recovery-only state if it verifies a controller fault report. Work coordinates
@@ -261,7 +272,8 @@ unlock, and a fresh Idle report of that same pin after the acknowledgement
 before moving. Unexpected reset responses, real errors, or changed pins stop
 the attempt. Notices alone never establish that recovery succeeded.
 
-**Stop** cancels recovery. A failed pull-off, status query, or connection does
+In the full gantry wizard, press **Space** during automatic backoff to cancel it.
+Standalone recovery provides a **Stop recovery** button. A failed pull-off, status query, or connection does
 not trigger another move, reset, or reconnect. Recovery does not disable limits
 or zero coordinates. A successful pull-off still leaves **Home required**
 before normal movement or coordinate capture. If the controller rejects the
