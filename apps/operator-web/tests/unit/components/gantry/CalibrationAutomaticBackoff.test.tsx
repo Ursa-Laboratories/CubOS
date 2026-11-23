@@ -91,8 +91,11 @@ async function enter(mode: Mode, user: ReturnType<typeof userEvent.setup>) {
   }
 }
 const jogs = (state: ReturnType<typeof network>) => state.posts.filter((entry) => /\/jog(?:-blocking)?$/.test(entry.path));
-const recoveryFallback = async (mode: Mode) => {
-  await screen.findByText(mode === "gantry" ? "Automatic recovery unavailable." : "Manual recovery", {}, { timeout: 2000 });
+const recoveryFallback = async (mode: Mode, state: ReturnType<typeof network>, reads = 1) => {
+  if (mode === "gantry") {
+    await waitFor(() => expect(state.contextReads).toBeGreaterThanOrEqual(reads), { timeout: 2000 });
+    await act(async () => undefined);
+  } else await screen.findByText("Manual recovery", {}, { timeout: 2000 });
   if (mode === "gantry") {
     expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Pull off|Unlock alarm|Home and resume/ })).not.toBeInTheDocument();
@@ -172,7 +175,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
   it("does not recover an alarm already present when opening", async () => {
     const state = network(); state.idOverride = "old-wizard-jog";
     render(view(mode, "ALARM:1; Pn:Y"));
-    await recoveryFallback(mode);
+    await recoveryFallback(mode, state);
     expect(recoveries(state)).toHaveLength(0);
   });
 
@@ -185,7 +188,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     await screen.findByText("Recovery failed.");
     rerender(view(mode, "Home required"));
     rerender(view(mode, "ALARM:1; Pn:Y"));
-    await recoveryFallback(mode);
+    await recoveryFallback(mode, state);
     expect(recoveries(state)).toHaveLength(1);
   });
 
@@ -213,7 +216,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     expect(state.id).toBeTruthy();
     rerender(view(mode, "Idle", false));
     rerender(view(mode, "ALARM:1; Pn:Y", true));
-    await recoveryFallback(mode);
+    await recoveryFallback(mode, state);
     expect(recoveries(state)).toHaveLength(0);
   });
 
@@ -291,7 +294,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     await enter(mode, user);
     await user.click(screen.getByTitle("Y+"));
     rerender(view(mode, "ALARM:1; Pn:Y"));
-    await recoveryFallback(mode);
+    await recoveryFallback(mode, state);
     expect(recoveries(state)).toHaveLength(0);
   });
 
@@ -303,7 +306,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     await user.click(screen.getByTitle("Y+"));
     rerender(view(mode, "ALARM:1; Pn:Y"));
     await screen.findByText("context unavailable");
-    await recoveryFallback(mode);
+    await recoveryFallback(mode, state, 2);
     expect(recoveries(state)).toHaveLength(0);
   });
 
@@ -315,7 +318,7 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     await user.click(screen.getByTitle("Y+"));
     rerender(view(mode, "Not connected", true, gantry, false));
     rerender(view(mode, "ALARM:1; Pn:Y"));
-    await recoveryFallback(mode);
+    await recoveryFallback(mode, state);
     expect(recoveries(state)).toHaveLength(0);
   });
 });
@@ -362,7 +365,7 @@ describe("blocking calibration lift correlation", () => {
     const { rerender } = render(view("gantry", "Idle", true, multi));
     await reachBlockingLift(user);
     rerender(view("gantry", "ALARM:1; Pn:Z", true, multi));
-    await screen.findByText("Pull-off complete.");
+    await screen.findByText("Home required. Clear the gantry path before homing.");
     state.contextOverrides = { raw_status: "Idle", active_limit_axes: [], eligible: false, pull_off_delta: null };
     rerender(view("gantry", "Home required", true, multi));
     await user.click(await screen.findByRole("button", { name: "Home and restart calibration" }, { timeout: 2000 }));
@@ -435,7 +438,8 @@ describe("full gantry wizard recovery restart", () => {
       blocked_reason: "Original jog direction unknown." };
     await waitFor(() => expect(state.contextReads).toBeGreaterThanOrEqual(2), { timeout: 2000 });
     expect(screen.queryByText("Original jog direction unknown.")).not.toBeInTheDocument();
-    expect(screen.getByText("Recovery attempt ended. Inspect the gantry before continuing.")).toBeInTheDocument();
+    expect(screen.queryByText("Recovery attempt ended. Inspect the gantry before continuing.")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("calibration-status-slot")).toHaveLength(1);
     expect(screen.getByText("Recovery failed.")).toBeInTheDocument();
   });
 
@@ -466,7 +470,7 @@ describe("full gantry wizard recovery restart", () => {
     await enter("gantry", user);
     await user.click(screen.getByTitle("Y+"));
     rerender(view("gantry", "ALARM:1; Pn:Y"));
-    await screen.findByText("Pull-off complete.");
+    await screen.findByText("Home required. Clear the gantry path before homing.");
     await act(async () => pending.resolve(json({ detail: "Old jog fault." }, 409)));
     state.contextOverrides = { raw_status: "Idle", active_limit_axes: [], eligible: false, pull_off_delta: null };
     rerender(view("gantry", "Home required"));

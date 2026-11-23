@@ -14,6 +14,8 @@ type Props = {
   autoRecovery?: CalibrationAutoRecovery;
   automaticOnly?: boolean;
   cancelRequest?: number;
+  onMessageChange?: (message: string | null, error: boolean) => void;
+  hideMessage?: boolean;
 };
 
 function deltaLabel(delta: RecoveryDelta) {
@@ -21,7 +23,7 @@ function deltaLabel(delta: RecoveryDelta) {
     .map((axis) => `${axis.toUpperCase()}${delta[axis] > 0 ? "+" : "−"} ${Math.abs(delta[axis])} mm`).join(", ");
 }
 
-export default function LimitRecoveryControls({ connected, disabled, onStart, onBusyChange, onRecovered, onError, autoRecovery, automaticOnly = false, cancelRequest }: Props) {
+export default function LimitRecoveryControls({ connected, disabled, onStart, onBusyChange, onRecovered, onError, autoRecovery, automaticOnly = false, cancelRequest, onMessageChange, hideMessage = false }: Props) {
   const { context, error } = useLimitRecoveryContext(connected);
   const [busy, setBusy] = useState(false);
   const [stopRequested, setStopRequested] = useState(false);
@@ -114,11 +116,20 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
     if (active.current && !cancelled.current) void stop();
   }, [cancelRequest, stop]);
 
+  const automaticMessage = busy ? stopRequested ? "Stopping recovery…" : "Recovering… Space to cancel."
+    : error ?? (attempted ? "Recovery attempt ended. Inspect the gantry before continuing." : !context ? "Checking recovery…" : context.blocked_reason ?? "Automatic recovery unavailable.");
+  useEffect(() => {
+    if (automaticOnly) onMessageChange?.(automaticMessage, !!error && !busy);
+  }, [automaticMessage, automaticOnly, busy, error, onMessageChange]);
+  useEffect(() => () => onMessageChange?.(null, false), [onMessageChange]);
+
+  if (automaticOnly && hideMessage) return null;
+
   if (busy) return automaticOnly
     ? <span role="status">{stopRequested ? "Stopping recovery…" : "Recovering… Space to cancel."}</span>
     : <button style={theme.btn.danger} disabled={stopRequested} onClick={() => void stop()}>{stopRequested ? "Stopping…" : "Stop recovery"}</button>;
 
-  if (automaticOnly) return <span>{error ?? (attempted ? "Recovery attempt ended. Inspect the gantry before continuing." : !context ? "Checking recovery…" : context.blocked_reason ?? "Automatic recovery unavailable.")}</span>;
+  if (automaticOnly) return <span>{automaticMessage}</span>;
 
   return <div style={{ display: "grid", gap: 8 }}>
     {error && <span>{error}</span>}

@@ -7,6 +7,8 @@ import * as theme from "../../theme";
 import CameraPreview from "./CameraPreview";
 import CalibrationTipControls from "./CalibrationTipControls";
 import LimitRecoveryControls from "./LimitRecoveryControls";
+import CalibrationStatusBanner from "./CalibrationStatusBanner";
+import wizardStyles from "./CalibrationWizard.module.css";
 import type { FinalizeOriginResponse, GantryConfig, GantryPosition, GantryResponse } from "../../types";
 import {
   buildCalibratedConfig,
@@ -78,6 +80,8 @@ export default function CalibrationWizard({
   const [blockHeight, setBlockHeight] = useState("10");
   const [busy, setBusy] = useState(false);
   const [recoveryBusy, setRecoveryBusy] = useState(false);
+  const [recoveryMessage, setRecoveryMessage] = useState<string | null>(null);
+  const [recoveryContextError, setRecoveryContextError] = useState<string | null>(null);
   const [recoveryCancelRequest, setRecoveryCancelRequest] = useState(0);
   const [jogInFlight, setJogInFlight] = useState(false);
   const [recoveryHomeAvailable, setRecoveryHomeAvailable] = useState(false);
@@ -194,6 +198,19 @@ export default function CalibrationWizard({
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
   const controlsLocked = busy || jogInFlight || homing || !!alarmRecoveryMessage;
+  const operationMessage = operation ? `${operation}… Please wait.` : null;
+  const verifiedHomeMessage = statusNote === "Homed." && alarmPrompt === null && homeRequired && !operation && !error;
+  const liveFaultMessage = isAlarm && !/home required/i.test(status) && !recoveryHomeAvailable ? status : null;
+  const statusMessage = error ?? recoveryContextError ?? (recoveryBusy ? recoveryMessage ?? "Recovering… Space to cancel."
+    : liveFaultMessage ?? operationMessage ?? (verifiedHomeMessage ? statusNote : alarmRecoveryMessage ?? statusNote)
+      ?? (instruments.length === 0 ? "Add and save at least one mounted instrument in the Gantry configuration before calibrating." : null));
+  const statusAlarm = !!alarmRecoveryMessage && !verifiedHomeMessage && !(homeRequired && !!operation && !error && !recoveryBusy);
+  const statusTone = error || recoveryContextError || statusAlarm ? "error" : operation || recoveryBusy || instruments.length === 0 ? "warning" : statusNote ? "info" : "idle";
+
+  const updateRecoveryMessage = useCallback((message: string | null, failed: boolean) => {
+    setRecoveryMessage(message);
+    setRecoveryContextError(failed ? message : null);
+  }, []);
 
   useEffect(() => {
     const wasOpen = previousOpen.current;
@@ -313,6 +330,8 @@ export default function CalibrationWizard({
     if (!open || !connected || !isAlarm) return;
     haltJogLocally();
     invalidateCaptures();
+    setError(null);
+    setRecoveryContextError(null);
     setAlarmPrompt(status);
     setStatusNote(null);
     if (!/home required/i.test(status)) setRecoveryHomeAvailable(false);
@@ -881,7 +900,7 @@ export default function CalibrationWizard({
     >
       <div style={modalStyle}>
         <div style={headerStyle}>
-          <div>
+          <div style={{ minWidth: 0, flex: "1 1 160px", overflowWrap: "anywhere" }}>
             <h2 style={{ margin: 0, fontSize: 18, color: theme.color.ink, letterSpacing: "-0.01em" }}>Calibrate gantry</h2>
             <div style={{ marginTop: 3, fontSize: 12, color: theme.color.textMuted }}>
               {filename || "No file selected"}
@@ -905,8 +924,8 @@ export default function CalibrationWizard({
           </div>
         </div>
 
-        <div style={bodyStyle}>
-          <aside style={stepsStyle}>
+        <div className={wizardStyles.body} style={bodyStyle}>
+          <aside className={wizardStyles.steps} style={stepsStyle}>
             {stepLabels(isMulti).map((label, index) => (
               <div
                 key={label}
@@ -920,12 +939,18 @@ export default function CalibrationWizard({
           </aside>
 
           <section style={contentStyle}>
-            {alarmRecoveryMessage && (
-              <div style={alarmStyle}>
-                <span style={alarmTitleStyle}>GANTRY ALARM</span>
-                <span>{alarmRecoveryMessage}</span>
-                {(!homeRequired || recoveryBusy) && <LimitRecoveryControls
-                  automaticOnly
+            <CalibrationStatusBanner message={statusMessage} alarm={statusAlarm} tone={statusTone}
+              action={alarmRecoveryMessage && canHomeAfterRecovery && !verifiedHomeMessage ? (
+                <button
+                  onClick={() => void homeForCalibration(true)}
+                  disabled={busy || homing || !connected || (isAlarm && !/home required/i.test(status))}
+                  style={{ ...buttonStateStyle(alarmButtonStyle, busy || homing || !connected || (isAlarm && !/home required/i.test(status))), whiteSpace: "normal" }}
+                >
+                  {isMulti ? "Home and restart calibration" : "Home and resume"}
+                </button>
+              ) : null}>
+              {alarmRecoveryMessage && (!homeRequired || recoveryBusy) && <LimitRecoveryControls
+                  automaticOnly hideMessage onMessageChange={updateRecoveryMessage}
                   cancelRequest={recoveryCancelRequest}
                   connected={connected} disabled={homing || (busy && !jogInFlight)}
                   onStart={() => {
@@ -934,9 +959,10 @@ export default function CalibrationWizard({
                     setError(null);
                   }}
                   autoRecovery={autoRecovery}
-                  onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value); }}
+                  onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value); setRecoveryMessage(value ? "Recovering… Space to cancel." : null); }}
                   onRecovered={() => {
                     actionPending.current = null;
+                    setOperation(null);
                     autoRecovery.cancel();
                     pendingJog.current = null;
                     jogPumpActive.current = null;
@@ -947,20 +973,9 @@ export default function CalibrationWizard({
                     setAlarmPrompt("Home required. Clear the gantry path before homing.");
                     setStatusNote("Pull-off complete.");
                   }}
-                  onError={(message) => { actionPending.current = null; autoRecovery.cancel(); setError(message); }}
+                  onError={(message) => { actionPending.current = null; setOperation(null); autoRecovery.cancel(); setError(message); }}
                 />}
-                {canHomeAfterRecovery && <button
-                  onClick={() => void homeForCalibration(true)}
-                  disabled={busy || homing || !connected || (isAlarm && !/home required/i.test(status))}
-                  style={buttonStateStyle(alarmButtonStyle, busy || homing || !connected || (isAlarm && !/home required/i.test(status)))}
-                >
-                  {isMulti ? "Home and restart calibration" : "Home and resume"}
-                </button>}
-              </div>
-            )}
-            {error && <div style={errorStyle}>{error}</div>}
-            {operation && <div style={busyStyle}>{operation}… Please wait.</div>}
-            {statusNote && <div style={noteStyle}>{statusNote}</div>}
+            </CalibrationStatusBanner>
 
             {step === 0 && (
               <div>
@@ -976,11 +991,6 @@ export default function CalibrationWizard({
                     the front of the gantry. It defines zero X/Y offset. Choose the
                     lowest instrument separately to define Z; they may be the same tool.
                   </p>
-                )}
-                {instruments.length === 0 && (
-                  <div style={noInstrumentsStyle}>
-                    Add and save at least one mounted instrument in the Gantry configuration before calibrating.
-                  </div>
                 )}
                 <div style={fieldRowStyle}>
                   <label style={fieldStyle}>
@@ -1103,11 +1113,11 @@ export default function CalibrationWizard({
                   Put the calibration block at the front-left corner of the deck. Jog the selected leftmost instrument until it is directly over the mark on the block, then continue.
                 </p>
                 {referenceInstrumentIsPipette && (
-                  <div style={noteStyle}>
+                  <p style={instructionStyle}>
                     {referenceTipAttached
                       ? `Using ${selectedReference} with a ${tipLengths[selectedReference]} mm tip (set in Prepare).`
                       : `Using ${selectedReference} bare nozzle (set in Prepare).`}
-                  </div>
+                  </p>
                 )}
                 <JogPanel
                   xyStep={xyStep}
@@ -1268,7 +1278,7 @@ export default function CalibrationWizard({
                     </div>
                   </div>
                 ) : (
-                  <div style={noteStyle}>All instruments recorded. Continue to save.</div>
+                  <p style={instructionStyle}>All instruments recorded. Continue to save.</p>
                 )}
               </div>
             )}
@@ -1496,6 +1506,7 @@ const modalStyle: React.CSSProperties = {
 
 const headerStyle: React.CSSProperties = {
   display: "flex",
+  flexWrap: "wrap",
   justifyContent: "space-between",
   alignItems: "flex-start",
   gap: 12,
@@ -1512,7 +1523,6 @@ const headerActionsStyle: React.CSSProperties = {
 
 const bodyStyle: React.CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(140px, 170px) minmax(0, 1fr)",
   minHeight: 0,
   overflow: "hidden",
 };
@@ -1522,11 +1532,11 @@ const stepsStyle: React.CSSProperties = {
   borderRight: `1px solid ${theme.color.border}`,
   background: theme.color.surfaceMuted,
   display: "flex",
-  flexDirection: "column",
   gap: 6,
 };
 
 const contentStyle: React.CSSProperties = {
+  minWidth: 0,
   padding: 18,
   overflow: "auto",
 };
@@ -1638,26 +1648,11 @@ const closeButtonStyle: React.CSSProperties = {
   height: 28,
 };
 
-const errorStyle: React.CSSProperties = {
-  ...theme.notice.error,
-  marginBottom: 10,
-};
 
-const alarmStyle: React.CSSProperties = {
-  ...theme.notice.error,
-  border: `1px solid ${theme.color.danger}`,
-  marginBottom: 10,
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  flexWrap: "wrap",
-};
 
-const alarmTitleStyle: React.CSSProperties = {
-  color: theme.color.danger,
-  fontWeight: 700,
-  letterSpacing: "0.04em",
-};
+
+
+
 
 const alarmButtonStyle: React.CSSProperties = {
   ...theme.btn.danger,
@@ -1665,20 +1660,11 @@ const alarmButtonStyle: React.CSSProperties = {
   marginLeft: "auto",
 };
 
-const noteStyle: React.CSSProperties = {
-  ...theme.notice.info,
-  marginBottom: 10,
-};
 
-const noInstrumentsStyle: React.CSSProperties = {
-  ...theme.notice.warning,
-  marginBottom: 10,
-};
 
-const busyStyle: React.CSSProperties = {
-  ...theme.notice.warning,
-  marginBottom: 10,
-};
+
+
+
 
 const instrumentListStyle: React.CSSProperties = {
   display: "grid",

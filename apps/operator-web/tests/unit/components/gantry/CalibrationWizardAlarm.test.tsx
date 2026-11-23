@@ -77,16 +77,24 @@ describe("CalibrationWizard alarm recovery", () => {
       gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position(status)}
       onSaveCalibrated={async () => undefined} />;
     const { rerender } = render(wizard("Idle"));
+    const slot = screen.getByTestId("calibration-status-slot");
+    expect(slot.textContent).toBe("");
     await user.click(screen.getByRole("button", { name: "Continue" }));
     await user.click(screen.getByRole("button", { name: "Home gantry" }));
+    expect(screen.getByTestId("calibration-status-slot")).toBe(slot);
+    expect(slot).toHaveTextContent("Homing… Please wait.");
     rerender(wizard("Home required"));
     finishHome(jsonResponse(position()));
     await screen.findByText("Homed.");
+    expect(slot).not.toHaveTextContent("Home required");
+    expect(screen.getAllByTestId("calibration-status-slot")).toHaveLength(1);
     rerender(wizard("Idle"));
     expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
     rerender(wizard("ALARM:3; Pn:Y"));
     expect(await screen.findByText("GANTRY ALARM")).toBeInTheDocument();
+    expect(slot).toHaveTextContent("ALARM:3; Pn:Y");
+    expect(slot).not.toHaveTextContent("Homed.");
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
   });
 
@@ -119,7 +127,7 @@ describe("CalibrationWizard alarm recovery", () => {
       gantry={{ filename: "cubos.yaml", config: gantryConfig() }} position={position()}
       onSaveCalibrated={async () => undefined} />);
     await user.click(await advanceToOriginJog(user));
-    expect(await screen.findByText("Original jog unknown.")).toBeInTheDocument();
+    expect(await screen.findByText("ALARM:1")).toBeInTheDocument();
     expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Unlock alarm" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
