@@ -963,6 +963,7 @@ class GantrySession:
                     raise GantryJogCancelledError("Return to recorded hover was cancelled.")
                 self._hover_checkpoint = None
                 self._hover_active_token = token
+            actuation_started = False
             try:
                 for entry in waypoints:
                     if generation != self._hover_generation or jog_generation != self._jog_cancel_generation:
@@ -974,16 +975,36 @@ class GantrySession:
                         raise CalibrationBlockedError("The recorded path start no longer matches; approach manually.")
                     delta = entry["delta"]
                     distance = math.sqrt(sum(value * value for value in delta.values()))
+                    actuation_started = True
                     self._calibration_jog_blocking_locked(**delta, feed_rate=entry["return_feed"], timeout_s=10 + distance * 60 / entry["return_feed"], jog_id=f"hover-{token}", generation=jog_generation, reject_active_inputs=True)
                     _, actual = self._fresh_hover_position_locked()
                     if any(abs(actual[axis] - entry["end"][axis]) > 0.002 for axis in "xyz"):
                         raise CalibrationBlockedError("The recorded path endpoint did not verify; approach manually.")
                 if generation != self._hover_generation:
                     raise GantryJogCancelledError("Return to recorded hover was cancelled.")
-                info, _ = self._fresh_hover_position_locked()
+                info, final_pose = self._fresh_hover_position_locked()
+                if any(abs(final_pose[axis] - checkpoint["pose"][axis]) > 0.002 for axis in "xyz"):
+                    raise CalibrationBlockedError("The final recorded-hover readback did not verify; Home required.")
                 if generation != self._hover_generation or jog_generation != self._jog_cancel_generation:
                     raise GantryJogCancelledError("Return to recorded hover was cancelled.")
                 return {"position": self._read_position_locked(info=info)}
+            except Exception as exc:
+                if actuation_started:
+                    cancelled_idle_verified = False
+                    if isinstance(exc, GantryJogCancelledError):
+                        try:
+                            self._fresh_hover_position_locked()
+                            cancelled_idle_verified = True
+                        except MillConnectionError:
+                            self._invalidate_jog_reference_locked()
+                            raise
+                        except Exception:
+                            self.logger.debug("Cancelled hover return readback is unverified", exc_info=True)
+                    if not cancelled_idle_verified:
+                        self._invalidate_jog_reference_locked()
+                        if not isinstance(exc, MillConnectionError) and not self._looks_like_alarm_error(exc):
+                            gantry.jog_cancel()
+                raise
             finally:
                 with self._jog_history_lock:
                     self._hover_active_token = None

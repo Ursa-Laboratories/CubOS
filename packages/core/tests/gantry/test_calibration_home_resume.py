@@ -411,3 +411,48 @@ def test_direct_missing_confirmation_never_reads_pose_or_sends_motion(runtime):
     with pytest.raises(ValueError, match="Confirm"):
         session.record_calibration_hover(**SETUP, **(CONFIRMED | {"path_clear": False}), jog_ids=["owned"])
     assert not gantry.calls
+
+
+def test_post_motion_endpoint_drift_requires_home_and_cancels_remainder(runtime):
+    session, gantry = runtime
+    token = teach(session)
+    session.home_and_resume_calibration(token=token)
+    original = session._calibration_jog_blocking_locked
+
+    def drift_after_step(**kwargs):
+        result = original(**kwargs)
+        gantry.coords["x"] += 0.1
+        return result
+
+    session._calibration_jog_blocking_locked = drift_after_step
+    gantry.calls.clear()
+    with pytest.raises(CalibrationBlockedError, match="endpoint did not verify"):
+        session.return_to_calibration_hover(token=token, **SETUP, **RETURN)
+    assert session.position().status == "Home required"
+    assert sum(name == "jog" for name, _ in gantry.calls) == 1
+    assert sum(name == "jog_cancel" for name, _ in gantry.calls) == 1
+    with pytest.raises(CalibrationBlockedError): session.jog(z=1)
+
+
+@pytest.mark.parametrize("readback", ["missing", "shifted"])
+def test_unverified_final_readback_after_replay_requires_home(runtime, readback):
+    session, gantry = runtime
+    token = teach(session, [{"x": -10}])
+    session.home_and_resume_calibration(token=token)
+    original = gantry.get_calibration_position_info
+    count = 0
+
+    def final_readback_missing():
+        nonlocal count
+        count += 1
+        if count == 6:
+            if readback == "missing":
+                return {"status": "Unknown", "raw_status": "Unknown", "work_pos": None}
+            gantry.coords["x"] += 0.1
+        return original()
+
+    gantry.get_calibration_position_info = final_readback_missing
+    with pytest.raises(CalibrationBlockedError):
+        session.return_to_calibration_hover(token=token, **SETUP, **RETURN)
+    assert session.position().status == "Home required"
+    assert session._hover_checkpoint is None
