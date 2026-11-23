@@ -304,3 +304,7 @@ input:focus-visible, select:focus-visible, textarea:focus-visible {
     animation-duration: 0.01ms !important;
   }
 }
+
+body:has([role="dialog"][aria-label="Gantry calibration"]) .config-notice {
+  visibility: hidden;
+}

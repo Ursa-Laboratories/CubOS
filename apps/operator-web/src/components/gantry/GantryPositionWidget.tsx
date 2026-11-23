@@ -483,107 +483,111 @@ export default function GantryPositionWidget({
         </button>
       </div>
 
-      {/* Alarm banner */}
-      {isAlarm && connected && (
-        <div style={{
-          ...theme.notice.error,
-          marginBottom: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}>
-          <span style={{ color: theme.color.danger, fontWeight: 700, fontSize: 13 }}>{homeRequired ? "HOME REQUIRED" : "ALARM"}</span>
-          <span style={{ color: theme.color.dangerText, fontSize: 11 }}>
-            {status}{homeRequired && " — Clear the gantry path, then Home before moving or recording positions."}
-          </span>
-          {(!homeRequired || pullOffBusy) && <LimitRecoveryControls
-            connected={connected}
-            disabled={jogBusy || pullOffBusy || isRunning || homeBusy || homing}
-            onStart={stopJog}
-            onBusyChange={setPullOffBusy}
-            onRecovered={() => setLastCommandError(null)}
-            onError={setLastCommandError}
-          />}
-          {!homeRequired && <button
-            onClick={handleUnlock}
-            disabled={jogBusy || pullOffBusy || isRunning}
-            style={{
-              ...theme.btn.danger,
-              ...theme.btnSmall,
-              marginLeft: "auto",
-            }}
-          >
-            Unlock ($X)
-          </button>}
+      {!calibrationOpen && (
+        <div data-testid="gantry-control-notices">
+          {/* Alarm banner */}
+          {isAlarm && connected && (
+            <div style={{
+              ...theme.notice.error,
+              marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}>
+              <span style={{ color: theme.color.danger, fontWeight: 700, fontSize: 13 }}>{homeRequired ? "HOME REQUIRED" : "ALARM"}</span>
+              <span style={{ color: theme.color.dangerText, fontSize: 11 }}>
+                {status}{homeRequired && " — Clear the gantry path, then Home before moving or recording positions."}
+              </span>
+              {(!homeRequired || pullOffBusy) && <LimitRecoveryControls
+                connected={connected}
+                disabled={jogBusy || pullOffBusy || isRunning || homeBusy || homing}
+                onStart={stopJog}
+                onBusyChange={setPullOffBusy}
+                onRecovered={() => setLastCommandError(null)}
+                onError={setLastCommandError}
+              />}
+              {!homeRequired && <button
+                onClick={handleUnlock}
+                disabled={jogBusy || pullOffBusy || isRunning}
+                style={{
+                  ...theme.btn.danger,
+                  ...theme.btnSmall,
+                  marginLeft: "auto",
+                }}
+              >
+                Unlock ($X)
+              </button>}
+            </div>
+          )}
+
+          {isHold && connected && (
+            <div style={{
+              ...theme.notice.warning,
+              marginBottom: 12,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+            }}>
+              <span style={{ color: theme.color.warningText, fontWeight: 700, fontSize: 13 }}>HOLD</span>
+              <span style={{ color: theme.color.warningText, fontSize: 11 }}>
+                Feed hold is active — Home and manual motion are blocked. Resume only when the motion path is clear.
+              </span>
+              <button
+                onClick={resume}
+                disabled={advancedDisabled}
+                style={{
+                  ...theme.btn.secondary,
+                  ...theme.btnSmall,
+                  marginLeft: "auto",
+                }}
+              >
+                Resume
+              </button>
+            </div>
+          )}
+
+
+          {calibrationInterrupted && (
+            <div style={interruptedCalibrationStyle}>
+              <span style={{ color: theme.color.danger, fontWeight: 700, fontSize: 13 }}>CALIBRATION INTERRUPTED</span>
+              <span style={{ color: theme.color.dangerText, fontSize: 11 }}>
+                Calibration interrupted — soft limits are disabled
+              </span>
+              <button
+                onClick={restoreInterruptedCalibration}
+                disabled={restoreBusy || isRunning}
+                style={buttonStateStyle(interruptedCalibrationButtonStyle, restoreBusy || isRunning)}
+              >
+                {restoreBusy ? "Restoring..." : "Restore soft limits"}
+              </button>
+            </div>
+          )}
+
+          {isRunning && (
+            <div style={runLockStyle}>Protocol running — manual control locked</div>
+          )}
+
+          {savedCalibrationMessage && (
+            <div style={successStyle}>{savedCalibrationMessage}</div>
+          )}
+
+          {lastCommandError && (
+            <div role="alert" style={commandErrorStyle}>
+              <span>{lastCommandError}</span>
+              <button
+                type="button"
+                aria-label="Dismiss command error"
+                onClick={() => setLastCommandError(null)}
+                style={dismissErrorButtonStyle}
+              >
+                ×
+              </button>
+            </div>
+          )}
+
+          {limitHint && <div style={limitHintStyle}>{limitHint}</div>}
         </div>
       )}
-
-      {isHold && connected && (
-        <div style={{
-          ...theme.notice.warning,
-          marginBottom: 12,
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-        }}>
-          <span style={{ color: theme.color.warningText, fontWeight: 700, fontSize: 13 }}>HOLD</span>
-          <span style={{ color: theme.color.warningText, fontSize: 11 }}>
-            Feed hold is active — Home and manual motion are blocked. Resume only when the motion path is clear.
-          </span>
-          <button
-            onClick={resume}
-            disabled={advancedDisabled}
-            style={{
-              ...theme.btn.secondary,
-              ...theme.btnSmall,
-              marginLeft: "auto",
-            }}
-          >
-            Resume
-          </button>
-        </div>
-      )}
-
-
-      {calibrationInterrupted && (
-        <div style={interruptedCalibrationStyle}>
-          <span style={{ color: theme.color.danger, fontWeight: 700, fontSize: 13 }}>CALIBRATION INTERRUPTED</span>
-          <span style={{ color: theme.color.dangerText, fontSize: 11 }}>
-            Calibration interrupted — soft limits are disabled
-          </span>
-          <button
-            onClick={restoreInterruptedCalibration}
-            disabled={restoreBusy || isRunning}
-            style={buttonStateStyle(interruptedCalibrationButtonStyle, restoreBusy || isRunning)}
-          >
-            {restoreBusy ? "Restoring..." : "Restore soft limits"}
-          </button>
-        </div>
-      )}
-
-      {isRunning && (
-        <div style={runLockStyle}>Protocol running — manual control locked</div>
-      )}
-
-      {savedCalibrationMessage && (
-        <div style={successStyle}>{savedCalibrationMessage}</div>
-      )}
-
-      {lastCommandError && (
-        <div role="alert" style={commandErrorStyle}>
-          <span>{lastCommandError}</span>
-          <button
-            type="button"
-            aria-label="Dismiss command error"
-            onClick={() => setLastCommandError(null)}
-            style={dismissErrorButtonStyle}
-          >
-            ×
-          </button>
-        </div>
-      )}
-
-      {limitHint && <div style={limitHintStyle}>{limitHint}</div>}
 
       {/* Top row: D-pad + Z on left, XYZ readout on right */}
       <div style={{ display: "flex", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
@@ -731,7 +735,7 @@ export default function GantryPositionWidget({
               {isMoving ? "Moving..." : "Go"}
             </button>
           </div>
-          {moveError && (moveEdited || !workingVolume) && <div role="status" style={moveErrorStyle}>{moveError}</div>}
+          {!calibrationOpen && moveError && (moveEdited || !workingVolume) && <div role="status" style={moveErrorStyle}>{moveError}</div>}
         </form>
       )}
 
@@ -755,7 +759,7 @@ export default function GantryPositionWidget({
             {loading ? "Disconnecting..." : "Disconnect"}
           </button>
         )}
-        {connectionError && (
+        {!calibrationOpen && connectionError && (
           <span style={{ color: theme.color.dangerText, fontSize: 11, marginLeft: 8 }}>{connectionError}</span>
         )}
       </div>
@@ -807,8 +811,8 @@ export default function GantryPositionWidget({
               Send Setting
             </button>
           </div>
-          {advancedMessage && <div style={advancedMessageStyle}>{advancedMessage}</div>}
-          {advancedError && <div style={advancedErrorStyle}>{advancedError}</div>}
+          {!calibrationOpen && advancedMessage && <div style={advancedMessageStyle}>{advancedMessage}</div>}
+          {!calibrationOpen && advancedError && <div style={advancedErrorStyle}>{advancedError}</div>}
           {grblSettings && (
             <div style={settingsTableStyle}>
               {Object.entries(grblSettings)

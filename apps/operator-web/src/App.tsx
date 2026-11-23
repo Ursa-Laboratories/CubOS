@@ -1073,7 +1073,7 @@ export default function App() {
 function ConfigNotice({ message, onDismiss }: { message: string; onDismiss: () => void }) {
   const isError = message.startsWith("Delete failed");
   return (
-    <div role="status" style={{ ...(isError ? theme.notice.error : theme.notice.info), ...configNoticeStyle }}>
+    <div className="config-notice" role="status" style={{ ...(isError ? theme.notice.error : theme.notice.info), ...configNoticeStyle }}>
       <span>{message}</span>
       <button type="button" onClick={onDismiss} aria-label="Dismiss notice" style={dismissBtnStyle}>×</button>
     </div>

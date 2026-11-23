@@ -9,7 +9,7 @@ type Props = {
   disabled: boolean;
   onStart: () => void;
   onBusyChange: (busy: boolean) => void;
-  onRecovered: (result: LimitRecoveryResult) => void;
+  onRecovered: (result: LimitRecoveryResult, ownedJogId?: string) => void;
   onError: (message: string) => void;
   autoRecovery?: CalibrationAutoRecovery;
   automaticOnly?: boolean;
@@ -57,7 +57,7 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
     if (error || !connected) autoRecovery?.cancel();
   }, [autoRecovery, connected, error]);
 
-  const execute = useCallback(async (action: () => Promise<LimitRecoveryResult>, automatic = false) => {
+  const execute = useCallback(async (action: () => Promise<LimitRecoveryResult>, automatic = false, ownedJogId?: string) => {
     if (!connected || disabled || active.current) return;
     if (!automatic) autoRecovery?.cancel();
     const lifetime = autoRecovery?.lifetime;
@@ -76,7 +76,8 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
       } else if (result.status !== "recovered") {
         onError(`Recovery did not finish: ${result.status}`);
       } else {
-        onRecovered(result);
+        if (automatic && ownedJogId) onRecovered(result, ownedJogId);
+        else onRecovered(result);
       }
     } catch (failure) {
       if (mounted.current && (!autoRecovery || autoRecovery.lifetime === lifetime)) onError(failure instanceof Error ? failure.message : String(failure));
@@ -93,7 +94,7 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
     const id = context?.failed_jog_id;
     if (!connected || error || disabled || busy || !id || !context.eligible || !context.failed_jog_delta || !context.pull_off_delta || !autoRecovery?.claimFault(id)) return;
     const delta = context.failed_jog_delta;
-    void execute(() => gantryApi.recoverCalibrationLimit({ ...delta, jog_id: id }), true);
+    void execute(() => gantryApi.recoverCalibrationLimit({ ...delta, jog_id: id }), true, id);
   }, [autoRecovery, busy, connected, context, disabled, error, execute]);
 
   const stop = useCallback(async () => {

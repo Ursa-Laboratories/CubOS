@@ -95,7 +95,7 @@ class Mill:
         self.ser_mill: serial.Serial = None
         self._write_lock = threading.Lock()
 
-    def _write_serial(self, data: bytes) -> None:
+    def _write_serial(self, data: bytes, *, check_cancelled: Callable[[], None] | None = None) -> None:
         """Write bytes to the controller under the write lock.
 
         Realtime characters (``?``, ``!``, ``~``, jog cancel ``0x85``, soft
@@ -109,6 +109,8 @@ class Mill:
         still bypass waiting on in-flight commands.
         """
         with self._write_lock:
+            if check_cancelled is not None:
+                check_cancelled()
             self.ser_mill.write(data)
 
     def _init_state(self):
@@ -420,7 +422,7 @@ class Mill:
                 continue
         return settings_dict
 
-    def execute_command(self, command: str, suppress_errors: bool = False):
+    def execute_command(self, command: str, suppress_errors: bool = False, *, check_cancelled: Callable[[], None] | None = None):
         """Encodes and sends commands to the mill and returns the response.
 
         Errors are always logged — ``suppress_errors=True`` only demotes the
@@ -439,8 +441,14 @@ class Mill:
                 self._write_serial(str(command).encode(encoding="ascii") + b"\n")
                 return self._collect_grbl_settings_response()
 
-            for attempt in range(ERROR_22_MAX_RETRIES + 1):
-                self._write_serial(str(command).encode(encoding="ascii") + b"\n")
+            retries = 0 if command == "$H" and check_cancelled is not None else ERROR_22_MAX_RETRIES
+            for attempt in range(retries + 1):
+                if check_cancelled is not None:
+                    check_cancelled()
+                if command == "$H" and check_cancelled is not None:
+                    self._write_serial(str(command).encode(encoding="ascii") + b"\n", check_cancelled=check_cancelled)
+                else:
+                    self._write_serial(str(command).encode(encoding="ascii") + b"\n")
                 mill_response = self._read_serial().lower()
                 if not command.startswith("$"):
                     mill_response = self._wait_until_idle(
@@ -451,7 +459,7 @@ class Mill:
                 if not re.search(r"(error|alarm|\[msg:check limits\])", mill_response):
                     break
 
-                if re.search(r"error:22", mill_response) and attempt < ERROR_22_MAX_RETRIES:
+                if re.search(r"error:22", mill_response) and attempt < retries:
                     self.logger.warning(
                         "error:22 from GRBL (attempt %d/%d); restoring feed rate and retrying: %s",
                         attempt + 1,
@@ -468,6 +476,8 @@ class Mill:
                 raise StatusReturnError(f"Error in status: {mill_response}")
 
         except Exception as exep:
+            if command == "$H" and check_cancelled is not None:
+                raise
             level = logging.WARNING if suppress_errors else logging.ERROR
             self.logger.log(
                 level, "Error executing command %s: %s", command, str(exep)
@@ -729,10 +739,13 @@ class Mill:
         self.soft_reset()
         self.unlock()
 
-    def home(self, timeout=HOMING_TIMEOUT):
+    def home(self, timeout=HOMING_TIMEOUT, *, check_cancelled: Callable[[], None] | None = None):
         """Run one homing cycle and verify completion within its deadline."""
         self.homed = False
-        self.execute_command("$H")
+        if check_cancelled is None:
+            self.execute_command("$H")
+        else:
+            self.execute_command("$H", check_cancelled=check_cancelled)
         time.sleep(1)
         start_time = time.time()
 

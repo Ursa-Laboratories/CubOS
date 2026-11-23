@@ -218,13 +218,17 @@ one automatic backoff. CubOS verifies the wizard's jog ID and fresh matching
 limit pin before moving. Old alarms, other-client jogs, uncertain acceptance,
 and missing or conflicting pin reports leave the gantry stopped. Check the
 machine if CubOS cannot verify which direction will release the switch.
-Stopping recovery or closing calibration cancels the attempt.
+Stopping recovery or closing calibration cancels a pending automatic Home.
+Once the controller has started homing, keep the path clear until it stops.
 
-A hard limit invalidates the captured positions. After the switch releases,
-clear the path. For a single tool interrupted at **Set Origin** or **Save**,
-choose **Home and resume** to return directly to **Set Origin** after verified homing
-with the entered measurements intact. Jog back to the block and make a fresh
-touch. For multiple tools, start again at the XY reference.
+In full gantry calibration, keep the homing path clear throughout the wizard.
+After its own jog trips a hard limit and automatic backoff verifies release,
+the wizard homes once automatically. It discards captured positions. For a
+single tool interrupted at **Set Origin** or **Save**, a verified Home returns
+to **Set Origin** with the entered measurements intact. Approach the block
+manually and make a fresh touch. For multiple tools, reacquire the XY reference
+and subsequent tool contacts. A fault inherited from another session or an
+unverified recovery does not start an automatic Home.
 
 When reconnecting with a switch pressed, CubOS can stay connected in a faulted
 recovery-only state if it verifies a controller fault report. Work coordinates
@@ -316,7 +320,7 @@ During calibration:
 
 If a CLI jog trips a hard limit, CubOS attempts one directed pull-off. Operator
 calibration wizards automatically attempt one eligible, correlated backoff;
-they never retry a failed backoff or home automatically. If recovery fails, stop and follow
+the full gantry wizard follows a verified backoff with one Home. If recovery fails, stop and follow
 [Stuck on a Limit Switch](troubleshooting.md#stuck-on-a-limit-switch).
 
 ## Single-Instrument Calibration

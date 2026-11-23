@@ -155,13 +155,18 @@ class Gantry:
             self.logger.warning("Health check failed: %s", exc)
             return False
 
-    def home(self) -> None:
+    def home(self, *, check_cancelled: Callable[[], None] | None = None) -> None:
         """Home the gantry with GRBL's standard homing command."""
         if self._offline:
+            if check_cancelled is not None:
+                check_cancelled()
             return
         assert self._mill is not None
         try:
-            self._mill.home()
+            if check_cancelled is None:
+                self._mill.home()
+            else:
+                self._mill.home(check_cancelled=check_cancelled)
         except (MillConnectionError, StatusReturnError) as exc:
             self.logger.error("Error homing gantry: %s", exc)
             raise

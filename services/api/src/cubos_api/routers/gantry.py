@@ -146,6 +146,11 @@ class JogBlockingRequest(BaseModel):
         return str(value) if isinstance(value, float) and not math.isfinite(value) else value
 
 
+class HomeAfterRecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    jog_id: str = Field(min_length=1, max_length=128, strict=True, pattern=r"\S")
+
+
 class LimitRecoveryRequest(BaseModel):
     jog_id: Optional[str] = Field(default=None, min_length=1, max_length=128, strict=True, pattern=r"\S")
     x: float = 0.0
@@ -541,6 +546,22 @@ def prepare_calibration_origin() -> GantryPosition:
         raise _session_http_exception(
             exc, default_action="Calibration preparation"
         ) from exc
+
+
+@router.post("/calibration/home-after-recovery")
+def home_after_calibration_recovery(req: HomeAfterRecoveryRequest) -> GantryPosition:
+    _reject_if_run_active()
+    session = _require_session()
+    try:
+        return _position_response(session.home_after_calibration_recovery(jog_id=req.jog_id), session=session)
+    except Exception as exc:
+        raise _session_http_exception(exc, default_action="Automatic calibration Home") from exc
+
+
+@router.post("/calibration/home-after-recovery/cancel")
+def cancel_home_after_calibration_recovery(req: HomeAfterRecoveryRequest) -> dict:
+    _require_session().cancel_home_after_calibration_recovery(jog_id=req.jog_id)
+    return {"status": "revoked"}
 
 
 @router.post("/calibration/home-and-center")

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page, type TestInfo } from "@playwright/test";
 import { installApiMocks } from "./apiMocks";
 
 test("manual Y recovery requires direction and clearance and keeps Stop available", async ({ page }, testInfo) => {
@@ -46,11 +46,15 @@ test("manual Y recovery requires direction and clearance and keeps Stop availabl
   ]);
 });
 
-test("a Z limit backs off once and Home resumes Set Origin without another move", async ({ page }, testInfo) => {
+async function checkAutomaticHome(page: Page, testInfo: TestInfo, homeVerified: boolean) {
   await installApiMocks(page, { connected: true });
+  await page.setViewportSize({ width: 1440, height: 1000 });
   let status = "Idle";
   let homes = 0;
   let backoffs = 0;
+  let alarmPolls = 0;
+  let finishHome!: () => void;
+  const homeGate = new Promise<void>(resolve => { finishHome = resolve; });
   let finishBackoff!: () => void;
   const backoffGate = new Promise<void>(resolve => { finishBackoff = resolve; });
   const writes: string[] = [];
@@ -64,9 +68,21 @@ test("a Z limit backs off once and Home resumes Set Origin without another move"
     work_x: status === "Idle" ? 100 : null, work_y: status === "Idle" ? 90 : null,
     work_z: status === "Idle" ? 30 : null,
   });
-  await page.route("**/api/v1/gantry/position", route => route.fulfill({ json: position() }));
+  await page.route("**/api/v1/gantry/position", route => {
+    if (status.startsWith("ALARM")) alarmPolls++;
+    return route.fulfill({ json: position() });
+  });
   await page.route("**/api/v1/gantry/calibration/prepare-origin", route => {
     homes++;
+    status = "Idle";
+    return route.fulfill({ json: position() });
+  });
+  await page.route("**/api/v1/gantry/calibration/home-after-recovery", async route => {
+    expect(status).toBe("Home required");
+    expect(route.request().postDataJSON()).toEqual({ jog_id: jog?.jog_id });
+    homes++;
+    await homeGate;
+    if (!homeVerified) return route.fulfill({ status: 409, json: { detail: "Automatic homing could not verify the position." } });
     status = "Idle";
     return route.fulfill({ json: position() });
   });
@@ -103,6 +119,8 @@ test("a Z limit backs off once and Home resumes Set Origin without another move"
   await wizard.getByRole("button", { name: "Home gantry", exact: true }).click();
   await wizard.getByRole("button", { name: "Continue", exact: true }).click();
   const slot = wizard.getByTestId("calibration-status-slot");
+  const outsideNotices = page.getByTestId("gantry-control-notices");
+  await expect(outsideNotices).toHaveCount(0);
   await expect(slot).toHaveCount(1);
   const slotSize = () => slot.evaluate(el => [el.clientWidth, el.clientHeight]);
   const restingSize = await slotSize();
@@ -110,21 +128,48 @@ test("a Z limit backs off once and Home resumes Set Origin without another move"
   await wizard.getByTitle("Z-", { exact: true }).click();
   await expect.poll(() => backoffs).toBe(1);
   await expect(slot).toContainText(/Recovering… Space to cancel/);
+  await expect.poll(() => alarmPolls).toBeGreaterThan(0);
+  await expect(page.getByText("ALARM", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("CALIBRATION INTERRUPTED", { exact: true })).toHaveCount(0);
   await expect(wizard.getByRole("button", { name: "Stop recovery" })).toHaveCount(0);
   expect(await slotSize()).toEqual(restingSize);
-  finishBackoff();
-  const home = wizard.getByRole("button", { name: "Home and resume", exact: true });
-  await expect(home).toBeEnabled();
-  expect(await slotSize()).toEqual(restingSize);
+  const home = wizard.getByRole("button", { name: /Home and (resume|restart calibration)/ });
+  await expect(home).toHaveCount(0);
   await expect(wizard.getByText("Manual recovery", { exact: true })).toHaveCount(0);
   expect(homes).toBe(1);
-  await page.screenshot({ path: testInfo.outputPath("z-limit-home-required.png") });
   const beforeHome = writes.length;
-  await home.click();
-  await expect(wizard.getByText("Homed.", { exact: true })).toBeVisible();
-  await expect(wizard.getByRole("heading", { name: "Set Origin", exact: true })).toBeVisible();
+  finishBackoff();
+
+  await expect.poll(() => homes).toBe(2);
+  await expect(slot).toContainText(/Homing/i);
+  await expect(page.getByText("HOME REQUIRED", { exact: true })).toHaveCount(0);
+  await expect(outsideNotices).toHaveCount(0);
+  await expect(home).toHaveCount(0);
+  await expect(wizard.getByRole("button", { name: "Set origin", exact: true })).toBeDisabled();
   expect(await slotSize()).toEqual(restingSize);
-  expect(writes.slice(beforeHome)).toEqual(["/api/v1/gantry/calibration/prepare-origin"]);
+  if (homeVerified) await page.screenshot({ path: testInfo.outputPath("z-limit-automatic-home.png") });
+  finishHome();
+
+  if (homeVerified) {
+    await expect(wizard.getByText("Homed.", { exact: true })).toBeVisible();
+    await expect(wizard.getByRole("button", { name: "Set origin", exact: true })).toBeEnabled();
+    await expect(home).toHaveCount(0);
+  } else {
+    await expect(slot).toContainText(/could not verify the position/i);
+    await expect(wizard.getByRole("button", { name: "Set origin", exact: true })).toBeDisabled();
+  }
+  await expect(wizard.getByRole("heading", { name: "Set Origin", exact: true })).toBeVisible();
+  await expect(wizard.getByText(/recorded block hover|return above block/i)).toHaveCount(0);
+  expect(await slotSize()).toEqual(restingSize);
+  expect(writes.slice(beforeHome)).toEqual(["/api/v1/gantry/calibration/home-after-recovery"]);
   expect(homes).toBe(2);
   expect(backoffs).toBe(1);
+}
+
+test("a Z limit backs off once, homes once automatically, and resumes Set Origin", async ({ page }, testInfo) => {
+  await checkAutomaticHome(page, testInfo, true);
+});
+
+test("an unverified automatic Home leaves Set Origin locked without retrying motion", async ({ page }, testInfo) => {
+  await checkAutomaticHome(page, testInfo, false);
 });

@@ -55,6 +55,16 @@ type PendingZReference = {
   lowestInstrument: string;
 };
 
+type AutomaticHome = {
+  jogId: string;
+  generation: number;
+  lifetime: number;
+  started: boolean;
+  cancelled: boolean;
+  cancelSent?: boolean;
+  timer?: number;
+};
+
 const NON_CONTACT_TYPES = new Set(["camera"]);
 const FOLLOW_CAMERA_TYPES = new Set(["lighting"]);
 
@@ -85,6 +95,7 @@ export default function CalibrationWizard({
   const [recoveryCancelRequest, setRecoveryCancelRequest] = useState(0);
   const [jogInFlight, setJogInFlight] = useState(false);
   const [recoveryHomeAvailable, setRecoveryHomeAvailable] = useState(false);
+  const [automaticHomePhase, setAutomaticHomePhase] = useState<"queued" | "homing" | null>(null);
   const [operation, setOperation] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [alarmPrompt, setAlarmPrompt] = useState<string | null>(null);
@@ -113,6 +124,8 @@ export default function CalibrationWizard({
   const interruptedStep = useRef<number | null>(null);
   const actionPending = useRef<{ lifetime: number } | null>(null);
   const closePending = useRef<{ lifetime: number } | null>(null);
+  const automaticHome = useRef<AutomaticHome | null>(null);
+  const automaticHomeAttempts = useRef(new Set<string>());
   const pendingSingleOrigin = useRef<PendingSingleOrigin | null>(null);
   const pendingZReference = useRef<PendingZReference | null>(null);
   const finalizedOrigin = useRef<FinalizeOriginResponse | null>(null);
@@ -197,20 +210,56 @@ export default function CalibrationWizard({
   const readyForSave = isMulti
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
-  const controlsLocked = busy || jogInFlight || homing || !!alarmRecoveryMessage;
+  const controlsLocked = busy || automaticHomePhase !== null || jogInFlight || homing || !!alarmRecoveryMessage;
   const operationMessage = operation ? `${operation}… Please wait.` : null;
   const verifiedHomeMessage = statusNote === "Homed." && alarmPrompt === null && homeRequired && !operation && !error;
   const liveFaultMessage = isAlarm && !/home required/i.test(status) && !recoveryHomeAvailable ? status : null;
-  const statusMessage = error ?? recoveryContextError ?? (recoveryBusy ? recoveryMessage ?? "Recovering… Space to cancel."
+  const automaticHomeMessage = automaticHomePhase === "queued" ? "Limit cleared. Homing next… Space to cancel."
+    : automaticHomePhase === "homing" ? "Homing… Please wait." : null;
+  const statusMessage = error ?? recoveryContextError ?? (liveFaultMessage && automaticHomePhase ? liveFaultMessage : automaticHomeMessage) ?? (recoveryBusy ? recoveryMessage ?? "Recovering… Space to cancel."
     : liveFaultMessage ?? operationMessage ?? (verifiedHomeMessage ? statusNote : alarmRecoveryMessage ?? statusNote)
       ?? (instruments.length === 0 ? "Add and save at least one mounted instrument in the Gantry configuration before calibrating." : null));
-  const statusAlarm = !!alarmRecoveryMessage && !verifiedHomeMessage && !(homeRequired && !!operation && !error && !recoveryBusy);
-  const statusTone = error || recoveryContextError || statusAlarm ? "error" : operation || recoveryBusy || instruments.length === 0 ? "warning" : statusNote ? "info" : "idle";
+  const statusAlarm = !!alarmRecoveryMessage && !verifiedHomeMessage && !(automaticHomePhase && !liveFaultMessage && !error) && !(homeRequired && !!operation && !error && !recoveryBusy);
+  const statusTone = error || recoveryContextError || statusAlarm ? "error" : operation || automaticHomePhase || recoveryBusy || instruments.length === 0 ? "warning" : statusNote ? "info" : "idle";
 
   const updateRecoveryMessage = useCallback((message: string | null, failed: boolean) => {
     setRecoveryMessage(message);
     setRecoveryContextError(failed ? message : null);
   }, []);
+
+  const cancelAutomaticHome = useCallback((message?: string) => {
+    const ticket = automaticHome.current;
+    if (!ticket) return false;
+    ticket.cancelled = true;
+    if (ticket.timer != null) window.clearTimeout(ticket.timer);
+    autoRecovery.cancel();
+    if (!ticket.cancelSent) {
+      ticket.cancelSent = true;
+      void gantryApi.cancelHomeAfterCalibrationRecovery(ticket.jogId).catch((failure) => {
+        if (autoRecovery.active && autoRecovery.lifetime === ticket.lifetime) setError(errorMessage(failure));
+      });
+    }
+    if (!ticket.started) {
+      automaticHome.current = null;
+      setAutomaticHomePhase(null);
+      setBusy(false);
+      setOperation(null);
+    }
+    if (message) {
+      setError(message);
+      setRecoveryHomeAvailable(true);
+    }
+    return true;
+  }, [autoRecovery]);
+
+  const automaticHomeSetup = JSON.stringify([filename, config]);
+  useEffect(() => {
+    const lifetime = autoRecovery.lifetime;
+    if (!open || !connected) cancelAutomaticHome();
+    return () => {
+      if (automaticHome.current?.lifetime === lifetime) cancelAutomaticHome();
+    };
+  }, [automaticHomeSetup, autoRecovery, cancelAutomaticHome, connected, open]);
 
   useEffect(() => {
     const wasOpen = previousOpen.current;
@@ -220,6 +269,9 @@ export default function CalibrationWizard({
     setBusy(false);
     setRecoveryBusy(false);
     setRecoveryHomeAvailable(false);
+    automaticHome.current = null;
+    automaticHomeAttempts.current.clear();
+    setAutomaticHomePhase(null);
     interruptedStep.current = null;
     setOperation(null);
     setError(null);
@@ -335,7 +387,8 @@ export default function CalibrationWizard({
     setAlarmPrompt(status);
     setStatusNote(null);
     if (!/home required/i.test(status)) setRecoveryHomeAvailable(false);
-  }, [connected, haltJogLocally, invalidateCaptures, isAlarm, open, status]);
+    if (!/home required/i.test(status)) cancelAutomaticHome();
+  }, [cancelAutomaticHome, connected, haltJogLocally, invalidateCaptures, isAlarm, open, status]);
 
   const reportError = useCallback((err: unknown) => {
     const message = err instanceof Error ? err.message : String(err);
@@ -359,6 +412,10 @@ export default function CalibrationWizard({
   };
 
   const resetFlow = () => {
+    cancelAutomaticHome();
+    automaticHome.current = null;
+    automaticHomeAttempts.current.clear();
+    setAutomaticHomePhase(null);
     autoRecovery.begin();
     setRecoveryBusy(false);
     setRecoveryHomeAvailable(false);
@@ -410,11 +467,12 @@ export default function CalibrationWizard({
 
   const close = useCallback(async () => {
     if (closePending.current?.lifetime === autoRecovery.lifetime) return;
+    const cancelledHome = cancelAutomaticHome();
     autoRecovery.end();
     const request = { lifetime: autoRecovery.lifetime };
     closePending.current = request;
     stopJog(!recoveryBusy);
-    if (recoveryBusy) {
+    if (recoveryBusy && !cancelledHome) {
       try {
         await gantryApi.jogCancel();
       } catch (failure) {
@@ -436,30 +494,33 @@ export default function CalibrationWizard({
     }
     if (autoRecovery.lifetime === request.lifetime) onClose();
     if (closePending.current === request) closePending.current = null;
-  }, [autoRecovery, connected, onClose, recoveryBusy, stopJog]);
+  }, [autoRecovery, cancelAutomaticHome, connected, onClose, recoveryBusy, stopJog]);
 
   useEffect(() => {
     if (!open) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        if (!event.repeat && (!busy || recoveryBusy || jogInFlight)) void close();
+        if (!event.repeat && (!busy || recoveryBusy || jogInFlight || automaticHomePhase === "queued")) void close();
         return;
       }
       const target = event.target;
       if (event.key !== " " || (target instanceof HTMLElement && (target.isContentEditable || target.closest("input:not(:disabled), textarea:not(:disabled), select:not(:disabled)")))) return;
-      if (!recoveryBusy && !jogInFlight) return;
+      if (!recoveryBusy && !jogInFlight && !automaticHome.current) return;
       event.preventDefault();
       if (event.repeat || closePending.current) return;
-      if (recoveryBusy) {
-            setRecoveryCancelRequest((current) => current + 1);
+      const ticket = automaticHome.current;
+      if (ticket) {
+        cancelAutomaticHome(ticket.started ? "Automatic continuation cancelled. Homing may still be active." : "Automatic Home cancelled. Home explicitly before continuing.");
+      } else if (recoveryBusy) {
+        setRecoveryCancelRequest((current) => current + 1);
       } else {
         stopJog(true);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [busy, close, jogInFlight, open, recoveryBusy, stopJog]);
+  }, [automaticHomePhase, busy, cancelAutomaticHome, close, jogInFlight, open, recoveryBusy, stopJog]);
 
   useEffect(() => {
     if (!open || step < 2) return;
@@ -586,17 +647,7 @@ export default function CalibrationWizard({
     setStep(1);
   };
 
-  // Step 1: connect (if needed) then home. This is the first hardware action.
-  const homeForCalibration = (resume = false) => runAction("Homing", async (generation) => {
-    const resumeFrom = resume ? interruptedStep.current : null;
-    invalidateCaptures();
-    if (!filename) throw new Error("Select a gantry config first.");
-    if (!connected) {
-      await gantryApi.connect(filename);
-      assertGeneration(generation);
-    }
-    const result = await gantryApi.prepareCalibrationOrigin();
-    assertGeneration(generation);
+  const completeVerifiedHome = (result: GantryPosition, resumeFrom: number | null) => {
     if (!isVerifiedIdle(result)) throw new Error(`Homing is unverified: ${result.status}`);
     const homed = requirePosition(result);
     pendingJog.current = null;
@@ -608,7 +659,73 @@ export default function CalibrationWizard({
     setStatusNote("Homed.");
     interruptedStep.current = null;
     setStep(!isMulti && resumeFrom != null && resumeFrom >= 3 ? 3 : 2);
+  };
+
+  // Step 1: connect (if needed) then home. This is the first hardware action.
+  const homeForCalibration = (resume = false) => runAction("Homing", async (generation) => {
+    const resumeFrom = resume ? interruptedStep.current : null;
+    invalidateCaptures();
+    if (!filename) throw new Error("Select a gantry config first.");
+    if (!connected) {
+      await gantryApi.connect(filename);
+      assertGeneration(generation);
+    }
+    const result = await gantryApi.prepareCalibrationOrigin();
+    assertGeneration(generation);
+    completeVerifiedHome(result, resumeFrom);
   });
+
+  const queueAutomaticHome = (jogId: string) => {
+    if (!autoRecovery.active || automaticHomeAttempts.current.has(jogId)) return;
+    automaticHomeAttempts.current.add(jogId);
+    const ticket: AutomaticHome = { jogId, generation: autoRecovery.generation,
+      lifetime: autoRecovery.lifetime, started: false, cancelled: false };
+    automaticHome.current = ticket;
+    setAutomaticHomePhase("queued");
+    setBusy(true);
+    setStatusNote(null);
+    ticket.timer = window.setTimeout(() => {
+      ticket.timer = undefined;
+      if (automaticHome.current !== ticket || ticket.cancelled || !autoRecovery.active
+        || autoRecovery.lifetime !== ticket.lifetime || autoRecovery.generation !== ticket.generation) {
+        if (automaticHome.current === ticket) {
+          automaticHome.current = null;
+          setAutomaticHomePhase(null);
+          setBusy(false);
+        }
+        return;
+      }
+      ticket.started = true;
+      setAutomaticHomePhase("homing");
+      const request = { lifetime: ticket.lifetime };
+      actionPending.current = request;
+      setBusy(true);
+      setOperation("Homing");
+      const resumeFrom = interruptedStep.current;
+      invalidateCaptures();
+      void (async () => {
+        try {
+          const result = await gantryApi.homeAfterCalibrationRecovery(ticket.jogId);
+          if (automaticHome.current !== ticket || ticket.cancelled || !autoRecovery.active
+            || autoRecovery.lifetime !== ticket.lifetime || autoRecovery.generation !== ticket.generation) return;
+          completeVerifiedHome(result, resumeFrom);
+        } catch (failure) {
+          if (automaticHome.current === ticket && !ticket.cancelled && autoRecovery.active
+            && autoRecovery.lifetime === ticket.lifetime && autoRecovery.generation === ticket.generation) reportError(failure);
+        } finally {
+          if (automaticHome.current === ticket && autoRecovery.active && autoRecovery.lifetime === ticket.lifetime) {
+            automaticHome.current = null;
+            setAutomaticHomePhase(null);
+            if (actionPending.current === request) {
+              actionPending.current = null;
+              setOperation(null);
+              setBusy(false);
+            }
+          }
+        }
+      })();
+    }, 0);
+  };
 
   const setXY = () => runAction(
     "Setting XY origin",
@@ -909,8 +1026,8 @@ export default function CalibrationWizard({
           <div style={headerActionsStyle}>
             <button
               onClick={() => void reset()}
-              disabled={busy}
-              style={buttonStateStyle(buttonStyle, busy)}
+              disabled={busy || automaticHomePhase !== null}
+              style={buttonStateStyle(buttonStyle, busy || automaticHomePhase !== null)}
             >
               Reset wizard
             </button>
@@ -940,7 +1057,7 @@ export default function CalibrationWizard({
 
           <section style={contentStyle}>
             <CalibrationStatusBanner message={statusMessage} alarm={statusAlarm} tone={statusTone}
-              action={alarmRecoveryMessage && canHomeAfterRecovery && !verifiedHomeMessage ? (
+              action={alarmRecoveryMessage && canHomeAfterRecovery && !verifiedHomeMessage && automaticHomePhase === null ? (
                 <button
                   onClick={() => void homeForCalibration(true)}
                   disabled={busy || homing || !connected || (isAlarm && !/home required/i.test(status))}
@@ -959,8 +1076,8 @@ export default function CalibrationWizard({
                     setError(null);
                   }}
                   autoRecovery={autoRecovery}
-                  onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value); setRecoveryMessage(value ? "Recovering… Space to cancel." : null); }}
-                  onRecovered={() => {
+                  onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value || automaticHome.current !== null); setRecoveryMessage(value ? "Recovering… Space to cancel." : null); }}
+                  onRecovered={(result, ownedJogId) => {
                     actionPending.current = null;
                     setOperation(null);
                     autoRecovery.cancel();
@@ -972,6 +1089,7 @@ export default function CalibrationWizard({
                     setRecoveryHomeAvailable(true);
                     setAlarmPrompt("Home required. Clear the gantry path before homing.");
                     setStatusNote("Pull-off complete.");
+                    if (result.mode === "known_jog" && ownedJogId) queueAutomaticHome(ownedJogId);
                   }}
                   onError={(message) => { actionPending.current = null; setOperation(null); autoRecovery.cancel(); setError(message); }}
                 />}
@@ -1040,7 +1158,7 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Home gantry</h3>
                 <p style={instructionStyle}>
-                  Clear the deck so nothing is in the gantry's path, then home.
+                  After a limit hit the gantry may back off and home automatically. Keep the entire homing path clear.
                 </p>
                 <div style={actionRowStyle}>
                   <button onClick={() => void homeForCalibration()} disabled={controlsLocked} style={buttonStateStyle(primaryButtonStyle, controlsLocked)}>Home gantry</button>
