@@ -388,8 +388,8 @@ def _result_dir_name(campaign: sqlite3.Row) -> str:
 
 
 def _csv_data_row_count(csv_text: str) -> int:
-    lines = [line for line in csv_text.splitlines() if line.strip()]
-    return max(0, len(lines) - 1)
+    rows = csv.reader(io.StringIO(csv_text))
+    return max(0, sum(1 for _ in rows) - 1)
 
 
 def _result_manifest_csv(rows: list[dict[str, Any]]) -> str:
