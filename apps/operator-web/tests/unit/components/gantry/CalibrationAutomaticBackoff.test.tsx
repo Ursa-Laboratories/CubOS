@@ -38,6 +38,7 @@ function network() {
     pendingHome: null as Promise<Response> | null,
     pendingPosition: null as Promise<Response> | null,
     pendingJog: null as Promise<Response> | null,
+    pendingCancel: null as Promise<Response> | null,
     readPosition: position(),
     contextOverrides: {} as Partial<LimitRecoveryContext>,
     contextReads: 0,
@@ -55,7 +56,9 @@ function network() {
         return state.jogStatus === 200 ? json(position()) : json({ detail: state.jogMessage }, state.jogStatus);
       }
       if (path.endsWith("/recover-limit")) return state.pendingRecovery ?? json(state.recoveryStatus === 200 ? recoveryResult() : { detail: "Recovery failed." }, state.recoveryStatus);
+      if (path.endsWith("/jog-cancel") && state.pendingCancel) return state.pendingCancel;
       if (path.endsWith("/prepare-origin") && state.pendingHome) return state.pendingHome;
+      if (path.endsWith("/home-resume")) return json({ position: position(), hover_available: false, blocked_reason: null });
     }
     if (path.endsWith("/position")) return state.pendingPosition ?? json(state.readPosition);
     if (path.endsWith("/home-and-center")) return json({ xy_bounds: { x: 100, y: 100, z: 20 }, position: { x: 50, y: 50, z: 20 } });
@@ -93,7 +96,7 @@ const recoveryFallback = async (mode: Mode) => {
   await screen.findByText(mode === "gantry" ? "Automatic recovery unavailable." : "Manual recovery", {}, { timeout: 2000 });
   if (mode === "gantry") {
     expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: /Pull off|Unlock alarm|Home and restart/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Pull off|Unlock alarm|Home and resume/ })).not.toBeInTheDocument();
   }
 };
 const recoveries = (state: ReturnType<typeof network>) => state.posts.filter((entry) => entry.path.endsWith("/recover-limit"));
@@ -246,6 +249,34 @@ describe.each<Mode>(["gantry", "labware"])("%s automatic calibration backoff", (
     expect(recoveries(state)).toHaveLength(0);
   });
 
+  it("ignores a late old Stop failure after reopening while a new action is pending", async () => {
+    const state = network(); const recovery = deferred(); const cancel = deferred();
+    state.pendingRecovery = recovery.promise; state.pendingCancel = cancel.promise;
+    const user = userEvent.setup();
+    const { rerender } = render(view(mode, "Idle"));
+    await enter(mode, user);
+    await user.click(screen.getByTitle("Y+"));
+    await user.click(await screen.findByRole("button", { name: "Stop recovery" }));
+    rerender(view(mode, "Idle", false)); rerender(view(mode, "Idle"));
+    const current = deferred();
+    if (mode === "gantry") {
+      state.pendingHome = current.promise;
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      await user.click(screen.getByRole("button", { name: "Home gantry" }));
+    } else {
+      state.pendingPosition = current.promise;
+      await enter(mode, user);
+      await user.click(screen.getByRole("button", { name: "Record A1" }));
+    }
+    await act(async () => {
+      cancel.resolve(json({ detail: "Old Stop failed." }, 503));
+      recovery.resolve(json(recoveryResult()));
+    });
+    expect(screen.queryByText("Old Stop failed.")).not.toBeInTheDocument();
+    await act(async () => current.resolve(json(position())));
+    expect(screen.getByRole("button", { name: mode === "gantry" ? "Continue" : "Record A2" })).toBeEnabled();
+  });
+
   it("does not recover after an uncertain transport rejection even if a matching context arrives", async () => {
     const state = network(); state.jogStatus = 503; state.jogMessage = "Connection lost before acceptance could verify.";
     const user = userEvent.setup();
@@ -315,6 +346,25 @@ describe("blocking calibration lift correlation", () => {
     expect(await screen.findByText("Connection lost during blocking lift.")).toBeInTheDocument();
     expect(recoveries(state)).toHaveLength(0);
   });
+
+  it("allows verified recovery Home and ignores a late response from the interrupted lift", async () => {
+    const state = network(); const lift = deferred(); state.pendingJog = lift.promise;
+    state.readPosition = { ...position(), z: -50, work_z: -50 };
+    state.contextOverrides = { active_limit_axes: ["z"], failed_jog_delta: { x: 0, y: 0, z: 15 }, pull_off_delta: { x: 0, y: 0, z: -5 } };
+    const user = userEvent.setup();
+    const { rerender } = render(view("gantry", "Idle", true, multi));
+    await reachBlockingLift(user);
+    rerender(view("gantry", "ALARM:1; Pn:Z", true, multi));
+    await screen.findByText("Pull-off complete.");
+    state.contextOverrides = { raw_status: "Idle", active_limit_axes: [], eligible: false, pull_off_delta: null };
+    rerender(view("gantry", "Home required", true, multi));
+    await user.click(await screen.findByRole("button", { name: "Home and resume" }, { timeout: 2000 }));
+    await act(async () => lift.resolve(json({ detail: "Old lift fault." }, 409)));
+    rerender(view("gantry", "Idle", true, multi));
+    expect(await screen.findByRole("heading", { name: "Set XY Origin" })).toBeInTheDocument();
+    expect(screen.queryByText("Old lift fault.")).not.toBeInTheDocument();
+    expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument();
+  });
 });
 
 it("invalidates labware captures when its own jog hits a limit", async () => {
@@ -336,7 +386,7 @@ describe("full gantry wizard recovery restart", () => {
     render(view("gantry", "Idle"));
     await enter("gantry", user);
     await user.click(screen.getByTitle("Y+"));
-    const home = await screen.findByRole("button", { name: "Home and restart calibration" });
+    const home = await screen.findByRole("button", { name: "Home and resume" });
     expect(screen.queryByText("ALARM:1 hard limit")).not.toBeInTheDocument();
     expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Unlock alarm" })).not.toBeInTheDocument();
@@ -344,9 +394,10 @@ describe("full gantry wizard recovery restart", () => {
     expect(state.posts.filter((entry) => entry.path.endsWith("/prepare-origin"))).toHaveLength(1);
     await user.click(home);
     expect(await screen.findByText("Homed.")).toBeInTheDocument();
-    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Reference height");
+    expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Set origin");
     expect(screen.queryByText("GANTRY ALARM")).not.toBeInTheDocument();
-    expect(state.posts.filter((entry) => entry.path.endsWith("/prepare-origin"))).toHaveLength(2);
+    expect(state.posts.filter((entry) => entry.path.endsWith("/prepare-origin"))).toHaveLength(1);
+    expect(state.posts.filter((entry) => entry.path.endsWith("/home-resume"))).toHaveLength(1);
   });
 
   it("ignores a late failed jog response after verified pull-off", async () => {
@@ -362,7 +413,7 @@ describe("full gantry wizard recovery restart", () => {
     state.contextOverrides = { raw_status: "Idle", active_limit_axes: [], eligible: false, pull_off_delta: null };
     rerender(view("gantry", "Home required"));
     expect(screen.queryByText("Old jog fault.")).not.toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: "Home and restart calibration" }, { timeout: 2000 })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Home and resume" }, { timeout: 2000 })).toBeEnabled();
     expect(recoveries(state)).toHaveLength(1);
   });
 
@@ -372,14 +423,14 @@ describe("full gantry wizard recovery restart", () => {
     const { rerender } = render(view("gantry", "Idle"));
     await enter("gantry", user);
     await user.click(screen.getByTitle("Y+"));
-    expect(await screen.findByRole("button", { name: "Home and restart calibration" })).toBeEnabled();
+    expect(await screen.findByRole("button", { name: "Home and resume" })).toBeEnabled();
     for (const status of ["Query failed", "Unknown", "Run"]) {
       rerender(view("gantry", status));
-      expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Home and resume" })).not.toBeInTheDocument();
     }
     rerender(<CalibrationWizard open onClose={() => undefined} gantry={gantry}
       position={{ ...position(), work_z: null }} onSaveCalibrated={async () => undefined} />);
-    expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Home and resume" })).not.toBeInTheDocument();
   });
 
   it("keeps rapid presses single-flight and budgets time for a configured slow axis", async () => {
@@ -437,7 +488,7 @@ describe("full gantry wizard recovery restart", () => {
     expect(state.posts.filter((entry) => entry.path.endsWith("/jog-cancel"))).toHaveLength(1);
     await act(async () => pending.resolve(json(recoveryResult())));
     expect(await screen.findByText(/Recovery stopped/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Home and resume" })).not.toBeInTheDocument();
   });
 
   it("offers Home for standalone Home required only after fresh clear-pin Idle verification", async () => {
@@ -445,7 +496,7 @@ describe("full gantry wizard recovery restart", () => {
     state.contextOverrides = { raw_status: "<Idle|WPos:0,0,20>", active_limit_axes: [], eligible: false, failed_jog_delta: null, pull_off_delta: null };
     const user = userEvent.setup();
     render(view("gantry", "Home required"));
-    await user.click(await screen.findByRole("button", { name: "Home and restart calibration" }));
+    await user.click(await screen.findByRole("button", { name: "Home and resume" }));
     expect(await screen.findByText("Homed.")).toBeInTheDocument();
     expect(document.querySelector('[aria-current="step"]')?.textContent).toContain("Reference height");
     expect(recoveries(state)).toHaveLength(0);
@@ -457,7 +508,7 @@ describe("full gantry wizard recovery restart", () => {
     render(view("gantry", "Home required"));
     await waitFor(() => expect(state.contextReads).toBe(1));
     await act(async () => undefined);
-    expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Home and resume" })).not.toBeInTheDocument();
     expect(state.posts).toHaveLength(0);
   });
 });

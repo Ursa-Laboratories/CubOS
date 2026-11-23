@@ -2,7 +2,7 @@ import type { XYJogStep, ZJogStep } from "./JogStepPresets";
 import JogPanel from "./JogPanel";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent as ReactKeyboardEvent } from "react";
-import { gantryApi } from "../../api/client";
+import { gantryApi, type CalibrationHoverSetup } from "../../api/client";
 import * as theme from "../../theme";
 import CameraPreview from "./CameraPreview";
 import CalibrationTipControls from "./CalibrationTipControls";
@@ -94,17 +94,31 @@ export default function CalibrationWizard({
   const [cameraBlockDistances, setCameraBlockDistances] = useState<Record<string, string>>({});
   const [tipAttached, setTipAttached] = useState<Record<string, boolean>>({});
   const [tipLengths, setTipLengths] = useState<Record<string, string>>({});
+  const [hoverToken, setHoverToken] = useState<string | null>(null);
+  const [hoverAvailable, setHoverAvailable] = useState(false);
+  const [hoverBlockedReason, setHoverBlockedReason] = useState<string | null>(null);
+  const [hoverFixtureConfirmed, setHoverFixtureConfirmed] = useState(false);
+  const [hoverClearanceConfirmed, setHoverClearanceConfirmed] = useState(false);
+  const [hoverReturnConfirmed, setHoverReturnConfirmed] = useState(false);
+  const [returningToHover, setReturningToHover] = useState(false);
+  const [hoverStopRequested, setHoverStopRequested] = useState(false);
+  const [hoverRouteCount, setHoverRouteCount] = useState(0);
   const [outputFile, setOutputFile] = useState("");
   const [referenceInstrument, setReferenceInstrument] = useState("");
   const [lowestInstrument, setLowestInstrument] = useState("");
   const jogHeld = useRef<JogDelta | null>(null);
-  const jogPumpActive = useRef(false);
+  const jogPumpActive = useRef<object | null>(null);
   const jogRequestCount = useRef(0);
   const pendingJog = useRef<{ cancelled: boolean } | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const previousOpen = useRef(false);
   const previousStep = useRef(step);
+  const interruptedStep = useRef<number | null>(null);
+  const actionPending = useRef<{ lifetime: number } | null>(null);
+  const hoverTokenRef = useRef<string | null>(null);
+  const hoverSetupRef = useRef("");
+  const completedHoverJogIds = useRef<string[]>([]);
   const pendingSingleOrigin = useRef<PendingSingleOrigin | null>(null);
   const pendingZReference = useRef<PendingZReference | null>(null);
   const finalizedOrigin = useRef<FinalizeOriginResponse | null>(null);
@@ -180,7 +194,7 @@ export default function CalibrationWizard({
     : false;
   const lowestTipAttached = lowestInstrumentIsPipette && !!tipAttached[selectedLowest];
   const lowestTipLengthError = lowestTipAttached ? validateTipLength(tipLengths[selectedLowest]) : null;
-  const soleInstrument = !isMulti ? (instruments[0] ?? "") : "";
+  const soleInstrument = !isMulti ? (calibratableInstruments[0] ?? "") : "";
   const soleInstrumentIsPipette = soleInstrument
     ? config?.instruments[soleInstrument]?.type === "pipette"
     : false;
@@ -190,6 +204,30 @@ export default function CalibrationWizard({
     ? !!zReference && !!zCalibration && allInstrumentPositionsReady(calibratableInstruments, instrumentPositions, selectedReference, selectedLowest)
     : !!zReference && !!blockTouch && !!calibrationHome;
   const controlsLocked = busy || jogInFlight || homing || !!alarmRecoveryMessage;
+  const hoverSetupKey = JSON.stringify([filename, config, soleInstrument, soleTipAttached, tipLengths[soleInstrument] ?? "", blockHeight]);
+
+  const clearHover = useCallback(() => {
+    const token = hoverTokenRef.current;
+    hoverTokenRef.current = null;
+    setHoverToken(null);
+    setHoverAvailable(false);
+    setHoverBlockedReason(null);
+    setHoverFixtureConfirmed(false);
+    setHoverClearanceConfirmed(false);
+    setHoverReturnConfirmed(false);
+    if (token) void gantryApi.cancelCalibrationHover(token).catch(() => undefined);
+  }, []);
+
+  const clearHoverRoute = useCallback(() => {
+    completedHoverJogIds.current = [];
+    setHoverRouteCount(0);
+  }, []);
+
+  useEffect(() => {
+    hoverSetupRef.current = hoverSetupKey;
+    clearHover();
+    return clearHover;
+  }, [clearHover, hoverSetupKey, open]);
 
   useEffect(() => {
     const wasOpen = previousOpen.current;
@@ -199,6 +237,9 @@ export default function CalibrationWizard({
     setBusy(false);
     setRecoveryBusy(false);
     setRecoveryHomeAvailable(false);
+    setReturningToHover(false);
+    interruptedStep.current = null;
+    clearHoverRoute();
     setOperation(null);
     setError(null);
     setAlarmPrompt(null);
@@ -222,7 +263,7 @@ export default function CalibrationWizard({
     pendingZReference.current = null;
     finalizedOrigin.current = null;
     finalizedConfig.current = null;
-  }, [config?.cnc.calibration_block_height_mm, contactInstruments, defaultTipAttached, filename, open]);
+  }, [clearHoverRoute, config?.cnc.calibration_block_height_mm, contactInstruments, defaultTipAttached, filename, open]);
 
   useEffect(() => {
     if (!open || statusNote !== "Homed.") return;
@@ -258,11 +299,13 @@ export default function CalibrationWizard({
     if ((force || jogRequestCount.current > 1) && pendingJog.current && !pendingJog.current.cancelled) {
       pendingJog.current.cancelled = true;
       autoRecovery.cancel();
+      clearHoverRoute();
+      clearHover();
       gantryApi.jogCancel().catch(() => undefined);
     }
     jogRequestCount.current = 0;
     jogPacer.wake();
-  }, [autoRecovery, jogPacer]);
+  }, [autoRecovery, clearHover, clearHoverRoute, jogPacer]);
 
   const releaseJog = useCallback(() => {
     if (alarmRecoveryMessage) haltJogLocally();
@@ -290,6 +333,11 @@ export default function CalibrationWizard({
   }, [open, stopJog]);
 
   const invalidateCaptures = useCallback(() => {
+    interruptedStep.current ??= previousStep.current;
+    clearHoverRoute();
+    setHoverClearanceConfirmed(false);
+    setHoverReturnConfirmed(false);
+    setHoverAvailable(false);
     setXyOrigin(null);
     setZReference(null);
     setBlockTouch(null);
@@ -301,7 +349,7 @@ export default function CalibrationWizard({
     pendingZReference.current = null;
     finalizedOrigin.current = null;
     finalizedConfig.current = null;
-  }, []);
+  }, [clearHoverRoute]);
 
   useEffect(() => {
     if (!open || !connected || !isAlarm) return;
@@ -337,6 +385,10 @@ export default function CalibrationWizard({
     autoRecovery.begin();
     setRecoveryBusy(false);
     setRecoveryHomeAvailable(false);
+    setReturningToHover(false);
+    interruptedStep.current = null;
+    clearHover();
+    clearHoverRoute();
     setStep(0);
     setOperation(null);
     setError(null);
@@ -383,6 +435,7 @@ export default function CalibrationWizard({
   };
 
   const close = async () => {
+    clearHoverRoute();
     autoRecovery.end();
     stopJog(!recoveryBusy);
     if (recoveryBusy) {
@@ -467,18 +520,23 @@ export default function CalibrationWizard({
   const runAction = async (label: string, action: (generation: number) => Promise<void>) => {
     const generation = autoRecovery.generation;
     const lifetime = autoRecovery.lifetime;
-    if (!autoRecovery.active) return;
+    if (!autoRecovery.active || actionPending.current?.lifetime === lifetime) return;
+    const request = { lifetime };
+    actionPending.current = request;
     setBusy(true);
     setOperation(label);
     setError(null);
     try {
       await action(generation);
     } catch (err) {
-      if (autoRecovery.active && autoRecovery.lifetime === lifetime) reportError(err);
+      if (actionPending.current === request && autoRecovery.active && autoRecovery.lifetime === lifetime) reportError(err);
     } finally {
-      if (autoRecovery.active && autoRecovery.lifetime === lifetime) {
-        setOperation(null);
-        setBusy(false);
+      if (actionPending.current === request) {
+        actionPending.current = null;
+        if (autoRecovery.active && autoRecovery.lifetime === lifetime) {
+          setOperation(null);
+          setBusy(false);
+        }
       }
     }
   };
@@ -545,11 +603,95 @@ export default function CalibrationWizard({
     assertGeneration(generation);
     if (!isVerifiedIdle(result)) throw new Error(`Homing is unverified: ${result.status}`);
     const homed = requirePosition(result);
+    pendingJog.current = null;
+    jogPumpActive.current = null;
+    setJogInFlight(false);
     setAlarmPrompt(null);
     setRecoveryHomeAvailable(false);
     setCalibrationHome(homed);
     setStatusNote("Homed.");
+    clearHoverRoute();
     setStep(2);
+  });
+
+  const homeAfterRecovery = () => runAction("Homing", async (generation) => {
+    const resumeFrom = interruptedStep.current;
+    const token = hoverTokenRef.current;
+    invalidateCaptures();
+    setHoverAvailable(false);
+    setHoverReturnConfirmed(false);
+    const result = await gantryApi.homeAndResumeCalibration(token ? { token } : {});
+    assertGeneration(generation);
+    if (!isVerifiedIdle(result.position)) throw new Error(`Homing is unverified: ${result.position.status}`);
+    const homed = requirePosition(result.position);
+    pendingJog.current = null;
+    jogPumpActive.current = null;
+    setJogInFlight(false);
+    setAlarmPrompt(null);
+    setRecoveryHomeAvailable(false);
+    setCalibrationHome(homed);
+    setStatusNote("Homed.");
+    setHoverAvailable(!!token && hoverTokenRef.current === token && result.hover_available);
+    setHoverBlockedReason(token ? result.blocked_reason : null);
+    interruptedStep.current = null;
+    setStep(!isMulti && resumeFrom != null && resumeFrom >= 3 ? 3 : 2);
+  });
+
+  const currentHoverSetup = (): CalibrationHoverSetup => {
+    if (isMulti || !contactInstruments.includes(soleInstrument)) throw new Error("A block hover requires a single contact tool.");
+    return { instrument: soleInstrument, tip_attached: soleTipAttached,
+      tip_length_mm: soleTipAttached ? parseTipLength(tipLengths[soleInstrument] ?? "") : 0,
+      block_height_mm: parseBlockHeight(blockHeight) };
+  };
+
+  const recordHover = () => runAction("Recording block hover", async (generation) => {
+    if (!hoverFixtureConfirmed || !hoverClearanceConfirmed || completedHoverJogIds.current.length === 0) return;
+    const setupKey = hoverSetupKey;
+    const lifetime = autoRecovery.lifetime;
+    const result = await gantryApi.recordCalibrationHover({ ...currentHoverSetup(), jog_ids: [...completedHoverJogIds.current],
+      fixture_confirmed: true, clearance_confirmed: true, path_clear: true });
+    if (!autoRecovery.active || autoRecovery.lifetime !== lifetime || autoRecovery.generation !== generation || hoverSetupRef.current !== setupKey) {
+      void gantryApi.cancelCalibrationHover(result.token).catch(() => undefined);
+      return;
+    }
+    if (!isVerifiedIdle(result.position) || !result.token) {
+      if (result.token) void gantryApi.cancelCalibrationHover(result.token).catch(() => undefined);
+      throw new Error("Block hover was not verified.");
+    }
+    hoverTokenRef.current = result.token;
+    setHoverToken(result.token);
+    setHoverAvailable(false);
+    setHoverBlockedReason(null);
+    setHoverFixtureConfirmed(false);
+    setHoverClearanceConfirmed(false);
+    setStatusNote("Block hover recorded.");
+  });
+
+  const returnToHover = () => runAction("Returning above block", async (generation) => {
+    const token = hoverTokenRef.current;
+    if (!token || !hoverAvailable || !hoverReturnConfirmed) return;
+    const request = { cancelled: false };
+    pendingJog.current = request;
+    setJogInFlight(true);
+    setReturningToHover(true);
+    setHoverStopRequested(false);
+    setHoverAvailable(false);
+    setHoverReturnConfirmed(false);
+    try {
+      const result = await gantryApi.returnToCalibrationHover({ ...currentHoverSetup(), token, setup_unchanged: true, path_clear: true });
+      if (!autoRecovery.active || autoRecovery.generation !== generation) return;
+      if (!isVerifiedIdle(result.position)) throw new Error(`Hover return is unverified: ${result.position.status}`);
+      setStatusNote("Above block. Make the final touch manually.");
+    } catch (failure) {
+      if (autoRecovery.active && autoRecovery.generation === generation) throw failure;
+    } finally {
+      if (pendingJog.current === request) {
+        pendingJog.current = null;
+        setJogInFlight(false);
+        setReturningToHover(false);
+      }
+      if (hoverTokenRef.current === token) clearHover();
+    }
   });
 
   const setXY = () => runAction(
@@ -746,14 +888,21 @@ export default function CalibrationWizard({
     pendingJog.current = request;
     setJogInFlight(true);
     jogRequestCount.current += 1;
+    setHoverClearanceConfirmed(false);
+    setHoverReturnConfirmed(false);
+    setHoverAvailable(false);
     try {
       const configuredRates = (["x", "y", "z"] as const).filter((axis) => ({ x, y, z })[axis] !== 0)
         .map((axis) => config?.grbl_settings?.[`max_rate_${axis}`])
         .filter((rate): rate is number => typeof rate === "number" && Number.isFinite(rate) && rate > 0);
       const rate = Math.min(2000, ...configuredRates);
       const timeout = Math.max(15, Math.hypot(x, y, z) * 60 / rate + 5);
-      await gantryApi.jogBlocking(x, y, z, timeout, id);
-      return autoRecovery.active && autoRecovery.generation === generation;
+      const result = await gantryApi.jogBlocking(x, y, z, timeout, id);
+      if (!autoRecovery.active || autoRecovery.generation !== generation) return false;
+      if (!isVerifiedIdle(result)) throw new Error(`Jog completion is unverified: ${result.status}`);
+      completedHoverJogIds.current.push(id);
+      setHoverRouteCount(completedHoverJogIds.current.length);
+      return true;
     } catch (err) {
       if (!autoRecovery.active || autoRecovery.generation !== generation) return false;
       invalidateCaptures();
@@ -794,7 +943,8 @@ export default function CalibrationWizard({
     jogHeld.current = { x, y, z };
     jogRequestCount.current = 0;
     const first = jogRef.current(x, y, z, generation);
-    jogPumpActive.current = true;
+    const pumpToken = {};
+    jogPumpActive.current = pumpToken;
     const pump = async () => {
       try {
         let sent = { x, y, z };
@@ -814,7 +964,7 @@ export default function CalibrationWizard({
           jogHeld.current = null;
         }
       } finally {
-        jogPumpActive.current = false;
+        if (jogPumpActive.current === pumpToken) jogPumpActive.current = null;
       }
     };
     void pump();
@@ -886,7 +1036,7 @@ export default function CalibrationWizard({
                 <span>{alarmRecoveryMessage}</span>
                 {(!homeRequired || recoveryBusy) && <LimitRecoveryControls
                   automaticOnly
-                  connected={connected} disabled={busy || homing}
+                  connected={connected} disabled={homing || (busy && !jogInFlight)}
                   onStart={() => {
                     haltJogLocally();
                     if (pendingJog.current) pendingJog.current.cancelled = true;
@@ -895,21 +1045,25 @@ export default function CalibrationWizard({
                   autoRecovery={autoRecovery}
                   onBusyChange={(value) => { setRecoveryBusy(value); setBusy(value); }}
                   onRecovered={() => {
+                    actionPending.current = null;
                     autoRecovery.cancel();
+                    pendingJog.current = null;
+                    jogPumpActive.current = null;
+                    setJogInFlight(false);
                     invalidateCaptures();
                     setError(null);
                     setRecoveryHomeAvailable(true);
                     setAlarmPrompt("Home required. Clear the gantry path before homing.");
                     setStatusNote("Pull-off complete.");
                   }}
-                  onError={(message) => { autoRecovery.cancel(); setError(message); }}
+                  onError={(message) => { actionPending.current = null; autoRecovery.cancel(); setError(message); }}
                 />}
                 {canHomeAfterRecovery && <button
-                  onClick={homeForCalibration}
+                  onClick={homeAfterRecovery}
                   disabled={busy || homing || !connected || (isAlarm && !/home required/i.test(status))}
                   style={buttonStateStyle(alarmButtonStyle, busy || homing || !connected || (isAlarm && !/home required/i.test(status)))}
                 >
-                  Home and restart calibration
+                  Home and resume
                 </button>}
               </div>
             )}
@@ -1029,6 +1183,32 @@ export default function CalibrationWizard({
                     onAttachedChange={(attached) => setTipAttached((prev) => ({ ...prev, [soleInstrument]: attached }))}
                     onLengthChange={(length) => setTipLengths((prev) => ({ ...prev, [soleInstrument]: length }))} />
                 )}
+                {contactInstruments.includes(soleInstrument) && <details style={{ margin: "12px 0" }}>
+                  <summary>Recorded block hover</summary>
+                  <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                    <label><input type="checkbox" checked={hoverFixtureConfirmed} disabled={controlsLocked}
+                      onChange={(event) => setHoverFixtureConfirmed(event.target.checked)} /> Same tool, tip, block and fixtures since Home.</label>
+                    <label><input type="checkbox" checked={hoverClearanceConfirmed} disabled={controlsLocked}
+                      onChange={(event) => setHoverClearanceConfirmed(event.target.checked)} /> Current hover and recorded path from Home are clear.</label>
+                    {hoverRouteCount === 0 && <span>Jog from Home to a clear hover above the block.</span>}
+                    <button style={buttonStateStyle(buttonStyle, controlsLocked || !!soleTipLengthError || !hoverFixtureConfirmed || !hoverClearanceConfirmed || hoverRouteCount === 0 || !position || !isVerifiedIdle(position))}
+                      disabled={controlsLocked || !!soleTipLengthError || !hoverFixtureConfirmed || !hoverClearanceConfirmed || hoverRouteCount === 0 || !position || !isVerifiedIdle(position)}
+                      onClick={recordHover}>Record block hover</button>
+                    {hoverBlockedReason && <span>{hoverBlockedReason} Reapproach manually.</span>}
+                    {hoverToken && hoverAvailable && <>
+                      <label><input type="checkbox" checked={hoverReturnConfirmed} disabled={controlsLocked}
+                        onChange={(event) => setHoverReturnConfirmed(event.target.checked)} /> Same tool, tip, block and fixtures; recorded path from Home is still clear.</label>
+                      <button style={buttonStateStyle(buttonStyle, controlsLocked || !hoverReturnConfirmed)} disabled={controlsLocked || !hoverReturnConfirmed}
+                        onClick={returnToHover}>Return above block</button>
+                    </>}
+                    {returningToHover && <button style={theme.btn.danger} disabled={hoverStopRequested} onClick={() => {
+                      setHoverStopRequested(true);
+                      stopJog(true);
+                      clearHover();
+                      setStatusNote("Return cancelled. Reapproach manually.");
+                    }}>Stop return</button>}
+                  </div>
+                </details>}
                 <JogPanel
                   xyStep={xyStep}
                   zStep={zStep}
@@ -1084,7 +1264,7 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Calibration Block Height</h3>
                 <p style={instructionStyle}>
-                  Enter the height of the calibration block above the deck.
+                  Place the calibration block at the center mark. Enter its height above the deck.
                 </p>
                 <div style={fieldRowStyle}>
                   <label style={fieldStyle}>
@@ -1108,7 +1288,7 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Set Z Reference</h3>
                 <p style={instructionStyle}>
-                  Keep the block where it is. Jog {selectedLowest || "the lowest instrument"} until it just touches the top of the block, then continue.
+                  Keep the block on the center mark. Jog {selectedLowest || "the lowest instrument"} until it just touches the top of the block, then continue.
                 </p>
                 {lowestInstrumentIsPipette && (
                   <CalibrationTipControls attached={lowestTipAttached} length={tipLengths[selectedLowest] ?? ""}
@@ -1142,7 +1322,7 @@ export default function CalibrationWizard({
               <div>
                 <h3 style={sectionTitleStyle}>Record Instruments</h3>
                 <p style={instructionStyle}>
-                  Keep the block where it is. Jog each instrument until it just touches the top of the block, then record it.
+                  Keep the block on the center mark. Jog each instrument until it just touches the top of the block, then record it.
                 </p>
                 <div style={instrumentListStyle}>
                   {calibratableInstruments.map((name) => (

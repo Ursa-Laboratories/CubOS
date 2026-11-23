@@ -146,6 +146,59 @@ class JogBlockingRequest(BaseModel):
         return str(value) if isinstance(value, float) and not math.isfinite(value) else value
 
 
+class HoverSetupRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    instrument: str = Field(min_length=1, max_length=128, strict=True)
+    tip_attached: StrictBool
+    tip_length_mm: float = Field(default=0, ge=0, le=500, allow_inf_nan=False)
+    block_height_mm: float = Field(gt=0, le=1000, allow_inf_nan=False)
+
+
+class RecordHoverRequest(HoverSetupRequest):
+    jog_ids: List[str] = Field(min_length=1, max_length=1024)
+    fixture_confirmed: StrictBool
+    clearance_confirmed: StrictBool
+    path_clear: StrictBool
+    jog_ids: List[str] = Field(min_length=1, max_length=1024)
+
+    @field_validator("jog_ids")
+    @classmethod
+    def _bounded_jog_ids(cls, values):
+        if any(not value.strip() or len(value) > 128 for value in values):
+            raise ValueError("Jog IDs must be nonempty and at most 128 characters.")
+        return values
+
+    @field_validator("fixture_confirmed", "clearance_confirmed", "path_clear")
+    @classmethod
+    def _confirmed(cls, value):
+        if value is not True:
+            raise ValueError("Explicit confirmation is required.")
+        return value
+
+
+class HoverTokenRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: str = Field(min_length=1, max_length=128, strict=True)
+
+
+class CalibrationHomeResumeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    token: Optional[str] = Field(default=None, min_length=1, max_length=128, strict=True)
+
+
+class ReturnHoverRequest(HoverSetupRequest):
+    token: str = Field(min_length=1, max_length=128, strict=True)
+    setup_unchanged: StrictBool
+    path_clear: StrictBool
+
+    @field_validator("setup_unchanged", "path_clear")
+    @classmethod
+    def _confirmed(cls, value):
+        if value is not True:
+            raise ValueError("Explicit confirmation is required.")
+        return value
+
+
 class LimitRecoveryRequest(BaseModel):
     jog_id: Optional[str] = Field(default=None, min_length=1, max_length=128, strict=True, pattern=r"\S")
     x: float = 0.0
@@ -541,6 +594,45 @@ def prepare_calibration_origin() -> GantryPosition:
         raise _session_http_exception(
             exc, default_action="Calibration preparation"
         ) from exc
+
+
+@router.post("/calibration/hover")
+def record_calibration_hover(req: RecordHoverRequest) -> dict:
+    _reject_if_run_active()
+    session = _require_session()
+    try:
+        result = session.record_calibration_hover(**req.model_dump())
+        return {"token": result["token"], "position": _position_response(result["position"], session=session)}
+    except Exception as exc:
+        raise _session_http_exception(exc, default_action="Record calibration hover") from exc
+
+
+@router.post("/calibration/home-resume")
+def home_and_resume_calibration(req: CalibrationHomeResumeRequest) -> dict:
+    _reject_if_run_active()
+    session = _require_session()
+    try:
+        result = session.home_and_resume_calibration(token=req.token)
+        return {**result, "position": _position_response(result["position"], session=session)}
+    except Exception as exc:
+        raise _session_http_exception(exc, default_action="Calibration Home") from exc
+
+
+@router.post("/calibration/return-hover")
+def return_to_calibration_hover(req: ReturnHoverRequest) -> dict:
+    _reject_if_run_active()
+    session = _require_session()
+    try:
+        result = session.return_to_calibration_hover(**req.model_dump())
+        return {"position": _position_response(result["position"], session=session)}
+    except Exception as exc:
+        raise _session_http_exception(exc, default_action="Return to calibration hover") from exc
+
+
+@router.post("/calibration/hover/cancel")
+def cancel_calibration_hover(req: HoverTokenRequest) -> dict:
+    _require_session().cancel_calibration_hover(req.token)
+    return {"status": "revoked"}
 
 
 @router.post("/calibration/home-and-center")

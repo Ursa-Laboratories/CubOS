@@ -12,6 +12,7 @@ describe("position polling across homing", () => {
     ["home", () => gantryApi.home()],
     ["prepare-origin", () => gantryApi.prepareCalibrationOrigin()],
     ["home-and-center", () => gantryApi.homeAndCenterForCalibration()],
+    ["home-resume", () => gantryApi.homeAndResumeCalibration()],
   ] as const)("re-reads a stale Home required response after %s succeeds", async (_name, home) => {
     let finishPoll!: (response: Response) => void;
     const pending = new Promise<Response>((resolve) => { finishPoll = resolve; });

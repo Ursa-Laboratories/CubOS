@@ -424,6 +424,13 @@ class Gantry:
         assert self._mill is not None
         return translate_status_string(self._mill.current_status(recovery=True))
 
+    def read_calibration_frame(self) -> Dict[str, Any]:
+        """Return verified G54/G92/tool-length offsets without changing them."""
+        if self._offline:
+            return {"G54": [0.0, 0.0, 0.0], "G92": [0.0, 0.0, 0.0], "TLO": [0.0]}
+        assert self._mill is not None
+        return self._mill.read_calibration_frame()
+
     def get_recovery_position_info(self) -> Dict[str, Any]:
         """Read fresh recovery coordinates without hiding controller faults."""
         return self.get_position_info(recovery=True)

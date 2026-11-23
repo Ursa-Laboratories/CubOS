@@ -91,13 +91,16 @@ export default function LimitRecoveryControls({ connected, disabled, onStart, on
   }, [autoRecovery, busy, connected, context, disabled, error, execute]);
 
   const stop = async () => {
+    const lifetime = autoRecovery?.lifetime;
     cancelled.current = true;
     autoRecovery?.cancel();
     setStopRequested(true);
     try {
       await gantryApi.jogCancel();
     } catch (failure) {
-      onError(failure instanceof Error ? failure.message : String(failure));
+      if (mounted.current && (!autoRecovery || autoRecovery.lifetime === lifetime)) {
+        onError(failure instanceof Error ? failure.message : String(failure));
+      }
     }
   };
 

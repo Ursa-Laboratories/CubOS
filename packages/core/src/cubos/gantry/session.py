@@ -6,6 +6,7 @@ import copy
 import logging
 import math
 import re
+import secrets
 import threading
 import time
 from dataclasses import dataclass
@@ -151,6 +152,12 @@ class GantrySession:
         self._last_jog_id: str | None = None
         self._failed_jog_id: str | None = None
         self._jog_cancel_generation = 0
+        self._hover_checkpoint: dict[str, Any] | None = None
+        self._hover_active_token: str | None = None
+        self._hover_generation = 0
+        self._calibration_prepared_home: dict[str, float] | None = None
+        self._calibration_registration: dict[str, Any] | None = None
+        self._calibration_taught_path: list[dict[str, Any]] | None = None
         self.logger = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
 
     @property
@@ -206,6 +213,8 @@ class GantrySession:
     ) -> GantryPositionSnapshot:
         """Connect a verified gantry or publish a faulted recovery-only session."""
         with self._lock:
+            self._revoke_calibration_hover_locked()
+            self._calibration_prepared_home = None
             config = self._load_config_from_yaml(config_path) if config_path is not None else {}
             if self._calibration_pending_config is not None and not self._matches_pending_calibration_locked(config):
                 raise CalibrationBlockedError("Save the finalized calibration and reconnect with that saved configuration.")
@@ -334,6 +343,8 @@ class GantrySession:
                 if not self._matches_pending_calibration_locked(config):
                     return
                 self._calibration_pending_config = None
+            self._revoke_calibration_hover_locked()
+            self._calibration_prepared_home = None
             self._connected_gantry_config = copy.deepcopy(config)
             self._gantry.config = self._runtime_connect_config(config)
 
@@ -347,6 +358,8 @@ class GantrySession:
             return self._read_position_locked()
         except Exception as exc:
             self._position_query_failed = True
+            if isinstance(exc, MillConnectionError):
+                self._revoke_calibration_hover_locked()
             if self._looks_like_alarm_error(exc):
                 self._latch_alarm_locked(self._alarm_status_from_error(exc))
             return self._position_from_cache_with_status("Query failed")
@@ -355,6 +368,8 @@ class GantrySession:
 
     def home(self) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
+            self._revoke_calibration_hover_locked()
+            self._calibration_prepared_home = None
             try:
                 return self._home_and_verify_locked(gantry)
             except Exception as exc:
@@ -374,6 +389,7 @@ class GantrySession:
 
     def reset_and_unlock(self) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
+            self._revoke_calibration_hover_locked()
             try:
                 self._clear_jog_history_locked()
                 gantry.reset_and_unlock()
@@ -431,12 +447,14 @@ class GantrySession:
         code = self._normalize_grbl_setting_code(setting)
         parsed = self._parse_grbl_setting_value(value)
         with self._locked_gantry() as gantry:
+            self._revoke_calibration_hover_locked()
             gantry.set_grbl_setting(code, parsed)
             return {str(key): str(value) for key, value in gantry.read_grbl_settings().items()}
 
     def move_to(self, *, x: float, y: float, z: float) -> None:
         self._require_connected()
         with self._lock:
+            self._revoke_calibration_hover_locked()
             self._validate_manual_move_target_locked(x=x, y=y, z=z)
         thread = threading.Thread(
             target=self._move_worker,
@@ -447,6 +465,7 @@ class GantrySession:
 
     def move_to_blocking(self, *, x: float, y: float, z: float) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
+            self._revoke_calibration_hover_locked()
             self._validate_manual_move_target_locked(x=x, y=y, z=z)
             self._clear_jog_history_locked()
             gantry.move_to(x=float(x), y=float(y), z=float(z))
@@ -472,6 +491,9 @@ class GantrySession:
                 # operation lock. Sending the jog now would restart motion
                 # the operator just stopped, so drop it.
                 return
+            self._calibration_taught_path = None
+            self._revoke_calibration_hover_locked()
+            self._mark_hover_departed_locked()
             self._validate_jog_target_locked(x=x, y=y, z=z)
             accepted = False
             try:
@@ -517,6 +539,9 @@ class GantrySession:
                     x=x, y=y, z=z, feed_rate=feed_rate, timeout_s=timeout_s,
                     jog_id=jog_id, generation=generation,
                 )
+            self._calibration_taught_path = None
+            self._revoke_calibration_hover_locked()
+            self._mark_hover_departed_locked()
             self._validate_jog_target_locked(x=x, y=y, z=z)
             accepted = False
             try:
@@ -545,8 +570,9 @@ class GantrySession:
 
     def _calibration_jog_blocking_locked(
         self, *, x: float, y: float, z: float, feed_rate: float,
-        timeout_s: float, jog_id: str, generation: int,
+        timeout_s: float, jog_id: str, generation: int, reject_active_inputs: bool = False,
     ) -> GantryPositionSnapshot:
+        self._mark_hover_departed_locked()
         self._validate_jog_target_locked(x=x, y=y, z=z)
         if not math.isfinite(timeout_s) or timeout_s <= 0:
             raise ValueError("Calibration jog timeout must be finite and positive.")
@@ -567,7 +593,7 @@ class GantrySession:
             check_cancelled()
             info = gantry.get_calibration_position_info()
             status = str(info.get("raw_status", info.get("status", "Unknown")))
-            if looks_like_limit_alarm(status):
+            if looks_like_limit_alarm(status) or (reject_active_inputs and re.search(r"Pn:[^|>\s]+", status, re.IGNORECASE)):
                 raise GantryAlarmError(f"Calibration jog controller fault: {status}")
             check_cancelled()
             work_pos = info.get("work_pos")
@@ -607,12 +633,22 @@ class GantrySession:
                     for axis in delta if delta[axis]
                 )
                 if re.match(r"^<?idle(?:[|>]|$)", status, re.IGNORECASE) and endpoint_reached:
+                    with self._jog_history_lock:
+                        if generation != self._jog_cancel_generation:
+                            raise GantryJogCancelledError("Calibration jog was cancelled before completion.")
+                        if self._calibration_registration is not None and self._calibration_taught_path is not None and self._hover_active_token is None:
+                            previous = self._calibration_taught_path[-1]["end"] if self._calibration_taught_path else self._calibration_prepared_home
+                            if previous is None or any(abs(start[axis] - previous[axis]) > 0.002 for axis in "xyz") or len(self._calibration_taught_path) >= 1024:
+                                self._calibration_taught_path = None
+                            else:
+                                self._calibration_taught_path.append({"id": jog_id, "start": dict(start), "end": dict(work_pos), "delta": dict(delta), "feed_rate": feed_rate})
                     return self._read_position_locked(info=info)
                 if not re.match(r"^<?(?:idle|jog|run)(?:[|>]|$)", status, re.IGNORECASE):
                     raise GantrySessionError(f"Calibration jog completion is unverified: {status}")
                 self._sleep(0.1)
             raise GantrySessionError("Timed out verifying calibration jog completion; Home required.")
         except Exception as exc:
+            self._calibration_taught_path = None
             if generation != self._jog_cancel_generation and not self._looks_like_alarm_error(exc):
                 try:
                     info = gantry.get_calibration_position_info()
@@ -653,6 +689,8 @@ class GantrySession:
     ) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
             self._require_verified_calibration_frame_locked()
+            self._revoke_calibration_hover_locked()
+            self._calibration_prepared_home = None
             gantry.set_work_coordinates(x=x, y=y, z=z)
         return self.position()
 
@@ -668,6 +706,7 @@ class GantrySession:
         tolerance_mm: float = 0.25,
     ) -> None:
         with self._locked_gantry() as gantry:
+            self._revoke_calibration_hover_locked()
             configured_hard_limits = (
                 hard_limits
                 if hard_limits is not None
@@ -712,33 +751,246 @@ class GantrySession:
 
     def prepare_calibration_origin(self) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
-            self._apply_calibration_grbl_baseline_locked()
-            # Hard limits ($21) are the only motion backstop while soft
-            # limits are disabled below, and hobby controllers ship with
-            # them off — without this, a jog past a travel end grinds and
-            # silently skips steps, corrupting the calibration being taken.
-            # Enforced for the calibration window only; finalize/abort
-            # restore the prior value (finalize keeps $21=1 when the gantry
-            # YAML configures hard_limits).
-            if gantry.hard_limits_enabled() is False:
-                gantry.set_hard_limits_enabled(True)
-                self._calibration_restore_hard_limits = True
-            self._home_and_verify_locked(gantry)
-            gantry.enforce_work_position_reporting()
-            gantry.activate_work_coordinate_system("G54")
-            gantry.clear_g92_offsets()
-            enabled = gantry.soft_limits_enabled()
-            if enabled is True:
-                gantry.set_soft_limits_enabled(False)
-                self._calibration_restore_soft_limits = True
-            self._calibration_jog_bypass_working_volume = True
-            self._calibration_frame_unverified = False
-            self._calibration_pending_config = None
-            self._calibration_warning = self._calibration_mismatch_warning(gantry, self._connected_gantry_config or {})
-        return self.position()
+            self._revoke_calibration_hover_locked()
+            return self._prepare_calibration_origin_locked(gantry)
+
+    def _prepare_calibration_origin_locked(self, gantry: Gantry) -> GantryPositionSnapshot:
+        self._apply_calibration_grbl_baseline_locked()
+        # Hard limits ($21) are the only motion backstop while soft
+        # limits are disabled below, and hobby controllers ship with
+        # them off — without this, a jog past a travel end grinds and
+        # silently skips steps, corrupting the calibration being taken.
+        # Enforced for the calibration window only; finalize/abort
+        # restore the prior value (finalize keeps $21=1 when the gantry
+        # YAML configures hard_limits).
+        if gantry.hard_limits_enabled() is False:
+            gantry.set_hard_limits_enabled(True)
+            self._calibration_restore_hard_limits = True
+        self._home_and_verify_locked(gantry)
+        gantry.enforce_work_position_reporting()
+        gantry.activate_work_coordinate_system("G54")
+        gantry.clear_g92_offsets()
+        enabled = gantry.soft_limits_enabled()
+        if enabled is True:
+            gantry.set_soft_limits_enabled(False)
+            self._calibration_restore_soft_limits = True
+        self._calibration_jog_bypass_working_volume = True
+        self._calibration_frame_unverified = False
+        self._calibration_pending_config = None
+        self._calibration_warning = self._calibration_mismatch_warning(gantry, self._connected_gantry_config or {})
+        info = gantry.get_position_info()
+        position = self._read_position_locked(info=info)
+        if position.status.lower() != "idle" or any(value is None or not math.isfinite(value) for value in (position.work_x, position.work_y, position.work_z)):
+            raise CalibrationBlockedError("Calibration preparation needs verified Idle and current coordinates.")
+        self._calibration_prepared_home = {"x": position.work_x, "y": position.work_y, "z": position.work_z}
+        self._calibration_registration = None
+        self._calibration_taught_path = None
+        generation = self._hover_generation
+        if callable(getattr(gantry, "read_calibration_frame", None)):
+            try:
+                registration = {"frame": gantry.read_calibration_frame(), "settings": self._hover_settings_locked(), "config": copy.deepcopy(self._connected_gantry_config)}
+                with self._jog_history_lock:
+                    if generation == self._hover_generation:
+                        self._calibration_registration = registration
+                        self._calibration_taught_path = []
+            except MillConnectionError:
+                raise
+            except Exception as exc:
+                if self._looks_like_alarm_error(exc):
+                    self._latch_alarm_locked(self._alarm_status_from_error(exc))
+                    raise
+                self.logger.info("Recorded hover unavailable: %s: %s", type(exc).__name__, exc)
+        return position
+
+    def _revoke_calibration_hover_locked(self) -> None:
+        with self._jog_history_lock:
+            self._hover_generation += 1
+            self._hover_checkpoint = None
+            self._calibration_taught_path = None
+            self._calibration_registration = None
+
+    def _mark_hover_departed_locked(self) -> None:
+        if self._hover_checkpoint is not None:
+            self._hover_checkpoint["ready"] = False
+
+    def cancel_calibration_hover(self, token: str) -> None:
+        with self._jog_history_lock:
+            active = self._hover_active_token == token
+            if active or (self._hover_checkpoint and self._hover_checkpoint["token"] == token):
+                self._hover_generation += 1
+                self._hover_checkpoint = None
+                self._calibration_taught_path = None
+                if active:
+                    self._jog_cancel_generation += 1
+                    self._last_jog_id = self._failed_jog_id = None
+                    self._require_connected().jog_cancel()
+
+    def _hover_setup_locked(self, instrument: str, tip_attached: bool, tip_length_mm: float, block_height_mm: float) -> dict[str, Any]:
+        config = self._connected_gantry_config or {}
+        tools = {name: entry for name, entry in config.get("instruments", {}).items() if entry.get("type") != "lighting"}
+        if config.get("origin_policy", "deck_origin") != "deck_origin" or list(tools) != [instrument]:
+            raise CalibrationBlockedError("Recorded hover requires one deck-frame tool; approach manually.")
+        if type(tip_attached) is not bool or not math.isfinite(tip_length_mm) or not math.isfinite(block_height_mm) or block_height_mm <= 0:
+            raise ValueError("Tip state and reference height must be valid.")
+        if (tip_attached and (tools[instrument].get("type") != "pipette" or tip_length_mm <= 0)) or (not tip_attached and tip_length_mm != 0):
+            raise ValueError("Confirm the attached tip and measured length.")
+        return dict(instrument=instrument, tip_attached=tip_attached, tip_length_mm=float(tip_length_mm), block_height_mm=float(block_height_mm))
+
+    def _fresh_hover_position_locked(self) -> tuple[dict[str, Any], dict[str, float]]:
+        info = self._require_connected().get_calibration_position_info()
+        raw = str(info.get("raw_status", info.get("status", "Unknown")))
+        if looks_like_limit_alarm(raw) or re.search(r"Pn:[^|>\s]+", raw, re.IGNORECASE):
+            self._latch_alarm_locked(raw)
+            raise GantryAlarmError(f"Controller fault prevents hover verification: {raw}")
+        pos = info.get("work_pos")
+        if not re.match(r"^<?idle(?:[|>]|$)", raw, re.IGNORECASE) or not isinstance(pos, dict) or not all(axis in pos and math.isfinite(float(pos[axis])) for axis in ("x", "y", "z")):
+            raise CalibrationBlockedError("Hover needs fresh Idle and current work coordinates; approach manually.")
+        return info, {axis: float(pos[axis]) for axis in ("x", "y", "z")}
+
+    def _hover_settings_locked(self) -> dict[str, float]:
+        settings = {str(key): float(value) for key, value in self._require_connected().read_grbl_settings().items()}
+        required = {"$3", "$13", "$20", "$21", "$22", "$23", "$27", "$100", "$101", "$102", "$130", "$131", "$132", "$110", "$111", "$112"}
+        if not required.issubset(settings) or not all(math.isfinite(value) for value in settings.values()) or settings["$13"] != 0 or settings["$21"] != 1 or settings["$22"] != 1:
+            raise CalibrationBlockedError("Controller settings cannot prove the recorded frame; approach manually.")
+        return settings
+
+    def _hover_path_locked(self, start: dict[str, float], end: dict[str, float], path: list[dict[str, Any]] | None, settings: dict[str, float]) -> list[dict[str, Any]]:
+        if not path or len(path) > 1024:
+            raise CalibrationBlockedError("No bounded verified path from Home is recorded; approach manually.")
+        previous = start
+        totals = dict.fromkeys("xyz", 0.0)
+        minima, maxima = dict(start), dict(start)
+        duration = 0.0
+        result = []
+        for entry in path:
+            if any(abs(entry["start"][axis] - previous[axis]) > 0.002 for axis in "xyz"):
+                raise CalibrationBlockedError("The demonstrated path is discontinuous; approach manually.")
+            active = [axis for axis in "xyz" if entry["delta"][axis]]
+            rates = [settings[f"${110 + 'xyz'.index(axis)}"] for axis in active]
+            feed = min([entry["feed_rate"], 500 if "z" in active else 1000, *rates])
+            if not active or not math.isfinite(feed) or feed <= 0:
+                raise CalibrationBlockedError("The demonstrated path has no verified motion rate.")
+            for axis in "xyz":
+                totals[axis] += abs(entry["delta"][axis])
+                minima[axis] = min(minima[axis], entry["end"][axis])
+                maxima[axis] = max(maxima[axis], entry["end"][axis])
+                usable_span = settings[f"${130 + 'xyz'.index(axis)}"] - settings["$27"]
+                if usable_span <= 0 or entry["end"][axis] > start[axis] + 0.002 or entry["end"][axis] < start[axis] - usable_span - 0.002 or maxima[axis] - minima[axis] > usable_span + 0.002 or totals[axis] > 2 * usable_span + 10:
+                    raise CalibrationBlockedError("The demonstrated path exceeds verified usable travel; approach manually.")
+            distance = math.sqrt(sum(value * value for value in entry["delta"].values()))
+            duration += distance * 60 / feed
+            result.append({**copy.deepcopy(entry), "return_feed": feed})
+            previous = entry["end"]
+        if duration > 1800 or any(abs(previous[axis] - end[axis]) > 0.002 for axis in "xyz"):
+            raise CalibrationBlockedError("The demonstrated path cannot verify this hover; approach manually.")
+        return result
+
+    def record_calibration_hover(self, *, instrument: str, tip_attached: bool, tip_length_mm: float, block_height_mm: float, fixture_confirmed: bool, clearance_confirmed: bool, path_clear: bool, jog_ids: list[str]) -> dict[str, Any]:
+        with self._locked_gantry() as gantry:
+            self._require_verified_calibration_frame_locked()
+            if not self._calibration_jog_bypass_working_volume or self._calibration_prepared_home is None:
+                raise CalibrationBlockedError("Prepare full calibration before recording a hover.")
+            if fixture_confirmed is not True or clearance_confirmed is not True or path_clear is not True:
+                raise ValueError("Confirm the fixed reference, hover clearance and clear return path.")
+            setup = self._hover_setup_locked(instrument, tip_attached, tip_length_mm, block_height_mm)
+            generation = self._hover_generation
+            info, pose = self._fresh_hover_position_locked()
+            frame, settings = gantry.read_calibration_frame(), self._hover_settings_locked()
+            registration = self._calibration_registration
+            path = self._calibration_taught_path
+            if not registration or registration != {"frame": frame, "settings": settings, "config": self._connected_gantry_config} or not path or [entry["id"] for entry in path] != jog_ids:
+                raise CalibrationBlockedError("The owned path or registered Home frame changed; approach manually.")
+            self._hover_path_locked(self._calibration_prepared_home, pose, path, settings)
+            token = secrets.token_urlsafe(24)
+            with self._jog_history_lock:
+                if generation != self._hover_generation:
+                    raise GantryJogCancelledError("Hover recording was cancelled.")
+                self._hover_checkpoint = dict(token=token, setup=setup, pose=pose, frame=frame, settings=settings, config=copy.deepcopy(self._connected_gantry_config), home=dict(self._calibration_prepared_home), path=copy.deepcopy(path), ready=False)
+            return {"token": token, "position": self._read_position_locked(info=info)}
+
+    def home_and_resume_calibration(self, *, token: str | None = None) -> dict[str, Any]:
+        generation = self._hover_generation
+        with self._locked_gantry() as gantry:
+            if generation != self._hover_generation:
+                raise GantryJogCancelledError("Calibration Home was cancelled before starting.")
+            checkpoint = self._hover_checkpoint if self._hover_checkpoint and self._hover_checkpoint["token"] == token else None
+            self._fresh_hover_position_locked()
+            position = self._prepare_calibration_origin_locked(gantry)
+            if generation != self._hover_generation:
+                self._position_reference_untrusted = True
+                raise GantryJogCancelledError("Calibration Home was cancelled; verify reference before continuing.")
+            reason = "No verified hover is recorded; approach manually."
+            if not checkpoint:
+                self._hover_checkpoint = None
+            if checkpoint:
+                try:
+                    if checkpoint["config"] != self._connected_gantry_config or checkpoint["frame"] != gantry.read_calibration_frame() or checkpoint["settings"] != self._hover_settings_locked() or any(abs(checkpoint["home"][axis] - self._calibration_prepared_home[axis]) > 0.002 for axis in "xyz"):
+                        raise CalibrationBlockedError("The recorded coordinate frame changed; approach manually.")
+                    self._hover_path_locked(self._calibration_prepared_home, checkpoint["pose"], checkpoint["path"], checkpoint["settings"])
+                    if generation != self._hover_generation:
+                        raise GantryJogCancelledError("Calibration Home resume was cancelled.")
+                    checkpoint["ready"] = True
+                    reason = None
+                except (MillConnectionError, GantryJogCancelledError):
+                    self._revoke_calibration_hover_locked()
+                    raise
+                except Exception as exc:
+                    if self._looks_like_alarm_error(exc):
+                        self._latch_alarm_locked(self._alarm_status_from_error(exc))
+                        raise
+                    reason = f"{type(exc).__name__}: {exc}"
+                    self._hover_checkpoint = None
+            if generation != self._hover_generation:
+                raise GantryJogCancelledError("Calibration Home resume was cancelled.")
+            return {"position": position, "hover_available": reason is None, "blocked_reason": reason}
+
+    def return_to_calibration_hover(self, *, token: str, instrument: str, tip_attached: bool, tip_length_mm: float, block_height_mm: float, setup_unchanged: bool, path_clear: bool) -> dict[str, Any]:
+        generation = self._hover_generation
+        jog_generation = self._jog_cancel_generation
+        with self._locked_gantry() as gantry:
+            self._require_verified_calibration_frame_locked()
+            checkpoint = self._hover_checkpoint
+            if generation != self._hover_generation or not checkpoint or checkpoint["token"] != token or not checkpoint["ready"]:
+                raise CalibrationBlockedError("Recorded hover is expired or unverified; approach manually.")
+            if setup_unchanged is not True or path_clear is not True or self._hover_setup_locked(instrument, tip_attached, tip_length_mm, block_height_mm) != checkpoint["setup"]:
+                raise CalibrationBlockedError("Tool, tip or reference changed; approach manually.")
+            _, current = self._fresh_hover_position_locked()
+            if checkpoint["config"] != self._connected_gantry_config or checkpoint["frame"] != gantry.read_calibration_frame() or checkpoint["settings"] != self._hover_settings_locked() or any(abs(current[axis] - checkpoint["home"][axis]) > 0.002 for axis in "xyz"):
+                raise CalibrationBlockedError("Home or coordinate frame is no longer verified; approach manually.")
+            waypoints = self._hover_path_locked(current, checkpoint["pose"], checkpoint["path"], checkpoint["settings"])
+            with self._jog_history_lock:
+                if generation != self._hover_generation or jog_generation != self._jog_cancel_generation:
+                    raise GantryJogCancelledError("Return to recorded hover was cancelled.")
+                self._hover_checkpoint = None
+                self._hover_active_token = token
+            try:
+                for entry in waypoints:
+                    if generation != self._hover_generation or jog_generation != self._jog_cancel_generation:
+                        raise GantryJogCancelledError("Return to recorded hover was cancelled.")
+                    _, current = self._fresh_hover_position_locked()
+                    if generation != self._hover_generation or jog_generation != self._jog_cancel_generation:
+                        raise GantryJogCancelledError("Return to recorded hover was cancelled.")
+                    if any(abs(current[axis] - entry["start"][axis]) > 0.002 for axis in "xyz"):
+                        raise CalibrationBlockedError("The recorded path start no longer matches; approach manually.")
+                    delta = entry["delta"]
+                    distance = math.sqrt(sum(value * value for value in delta.values()))
+                    self._calibration_jog_blocking_locked(**delta, feed_rate=entry["return_feed"], timeout_s=10 + distance * 60 / entry["return_feed"], jog_id=f"hover-{token}", generation=jog_generation, reject_active_inputs=True)
+                    _, actual = self._fresh_hover_position_locked()
+                    if any(abs(actual[axis] - entry["end"][axis]) > 0.002 for axis in "xyz"):
+                        raise CalibrationBlockedError("The recorded path endpoint did not verify; approach manually.")
+                if generation != self._hover_generation:
+                    raise GantryJogCancelledError("Return to recorded hover was cancelled.")
+                info, _ = self._fresh_hover_position_locked()
+                if generation != self._hover_generation or jog_generation != self._jog_cancel_generation:
+                    raise GantryJogCancelledError("Return to recorded hover was cancelled.")
+                return {"position": self._read_position_locked(info=info)}
+            finally:
+                with self._jog_history_lock:
+                    self._hover_active_token = None
 
     def calibration_home_and_center(self) -> CalibrationCenterResult:
         with self._locked_gantry() as gantry:
+            self._revoke_calibration_hover_locked()
             self._home_and_verify_locked(gantry)
             bounds = {axis: float(value) for axis, value in dict(gantry.get_coordinates()).items()}
             center_x = round(float(bounds["x"]) / 2.0, 3)
@@ -749,6 +1001,8 @@ class GantrySession:
 
     def restore_calibration_soft_limits(self) -> GantryPositionSnapshot:
         with self._locked_gantry() as gantry:
+            self._revoke_calibration_hover_locked()
+            self._calibration_prepared_home = None
             self._restore_calibration_soft_limits_if_needed_locked()
             self._restore_calibration_hard_limits_if_needed_locked()
             self._calibration_jog_bypass_working_volume = False
@@ -768,6 +1022,7 @@ class GantrySession:
     ) -> FinalizeOriginResult:
         with self._locked_gantry() as gantry:
             self._require_verified_calibration_frame_locked()
+            self._revoke_calibration_hover_locked()
             previous_policy = OriginPolicy((self._connected_gantry_config or {}).get("origin_policy", "deck_origin")).value
             selected_policy = OriginPolicy(previous_policy if origin_policy is None else origin_policy).value
             try:
@@ -1029,6 +1284,7 @@ class GantrySession:
         with self._lock:
             gantry = self._require_connected()
             self._require_verified_calibration_frame_locked()
+            self._revoke_calibration_hover_locked()
             # A GRBL-settings mismatch (self._calibration_warning) is advisory,
             # not blocking: commissioning machines legitimately differ from the
             # selected gantry YAML, and the operator owns that decision. The
@@ -1095,6 +1351,7 @@ class GantrySession:
             with self._lock:
                 if generation is not None and generation != self._jog_cancel_generation:
                     return
+                self._revoke_calibration_hover_locked()
                 self._validate_manual_move_target_locked(x=x, y=y, z=z)
                 self._clear_jog_history_locked()
                 self._require_connected().move_to(x=x, y=y, z=z)
@@ -1111,6 +1368,8 @@ class GantrySession:
         return schema.model_dump(mode="json", exclude_none=True)
 
     def _clear_connected_state_locked(self) -> None:
+        self._revoke_calibration_hover_locked()
+        self._calibration_prepared_home = None
         self._gantry = None
         self._last_position = None
         if not self._calibration_frame_unverified:
@@ -1150,6 +1409,9 @@ class GantrySession:
     def _cancel_jog_ownership(self) -> None:
         with self._jog_history_lock:
             self._jog_cancel_generation += 1
+            self._hover_generation += 1
+            self._hover_checkpoint = None
+            self._calibration_taught_path = None
             self._last_jog_id = self._failed_jog_id = None
 
     def _retire_jog_ownership_after_idle_locked(self, status: str) -> None:
@@ -1169,11 +1431,14 @@ class GantrySession:
             raise GantryAlarmError("Limit recovery jog_id does not match the authoritative failed jog.")
 
     def _invalidate_jog_reference_locked(self) -> None:
+        self._revoke_calibration_hover_locked()
         self._clear_jog_history_locked(cancel=True)
         self._position_reference_untrusted = True
 
     def _latch_alarm_locked(self, status: str) -> None:
         with self._jog_history_lock:
+            self._calibration_taught_path = None
+            self._calibration_taught_path = None
             self._position_reference_untrusted = True
             if self._alarm_status is None:
                 self._jog_cancel_generation += 1
@@ -1647,4 +1912,6 @@ class _LockedGantry:
             raise
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any) -> None:
+        if isinstance(exc_val, MillConnectionError):
+            self._session._revoke_calibration_hover_locked()
         self._session._lock.release()

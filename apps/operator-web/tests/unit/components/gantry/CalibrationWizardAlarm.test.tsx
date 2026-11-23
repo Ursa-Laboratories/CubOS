@@ -122,7 +122,7 @@ describe("CalibrationWizard alarm recovery", () => {
     expect(await screen.findByText("Original jog unknown.")).toBeInTheDocument();
     expect(screen.queryByText("Manual recovery")).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Unlock alarm" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Home and restart calibration" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Home and resume" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Set origin" })).toBeDisabled();
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/recover-limit"))).toBe(false);
   });
