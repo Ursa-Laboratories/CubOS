@@ -240,7 +240,7 @@ class TestRinseAndFlushTrace:
 
 class TestResumeMidWorkflow:
 
-    def test_failure_mid_rinse_marks_exactly_the_failed_substep(self, tracked_env):
+    def test_failure_mid_rinse_assumes_only_the_failed_substep(self, tracked_env):
         deck, store, state_id, campaign_id = tracked_env
         # fail on the 4th aspirate/dispense call: cycle0 fill (2 calls) +
         # cycle0 remove aspirate (call 3) succeed, cycle0 remove dispense
@@ -252,10 +252,13 @@ class TestResumeMidWorkflow:
             rinse_well(context, well="plate.A1", volume_ul=50.0, cycles=3, solution="water")
 
         operations = _operations(store, state_id)
-        assert len(operations) == 2  # cycle0 fill applied, cycle0 remove reconciliation_required
+        assert len(operations) == 2
         assert operations[0]["status"] == "applied"
         assert "rinse:cycle0:fill" in operations[0]["operation_key"]
-        assert operations[1]["status"] == "reconciliation_required"
+        assert operations[1]["status"] == "applied"
+        assert operations[1]["assumed_action"] == "dispense"
+        assert _volumes(store, state_id)["waste"] == 50
+        assert _volumes(store, state_id)["plate.A1"] == 0
         assert "rinse:cycle0:remove" in operations[1]["operation_key"]
 
     def test_replay_skips_applied_substeps_and_finishes(self, tracked_env):
@@ -264,10 +267,6 @@ class TestResumeMidWorkflow:
         context = _make_context(deck, store, state_id, campaign_id, pipette)
         with pytest.raises(RuntimeError):
             rinse_well(context, well="plate.A1", volume_ul=50.0, cycles=3, solution="water")
-
-        # Operator confirms the uncertain remove did complete physically.
-        uncertain_key = _operations(store, state_id)[1]["operation_key"]
-        store.resolve_fluid_operation(uncertain_key, "applied", detail="operator confirmed")
 
         replay_pipette = RecordingPipette()
         replay_context = _make_context(
@@ -289,9 +288,9 @@ class TestResumeMidWorkflow:
         assert volumes["waste"] == pytest.approx(3 * 50.0)
         assert volumes["plate.A1"] == pytest.approx(0.0)
 
-    def test_replay_without_resolution_blocks_all_further_liquid_handling(self, tracked_env):
+    def test_replay_of_partial_transfer_does_not_repeat_aspiration(self, tracked_env):
         deck, store, state_id, campaign_id = tracked_env
-        pipette = RecordingPipette(fail_on_call=4)
+        pipette = RecordingPipette(fail_on_call=3)
         context = _make_context(deck, store, state_id, campaign_id, pipette)
         with pytest.raises(RuntimeError):
             rinse_well(context, well="plate.A1", volume_ul=50.0, cycles=3, solution="water")
@@ -300,7 +299,7 @@ class TestResumeMidWorkflow:
         replay_context = _make_context(
             deck, store, state_id, campaign_id, replay_pipette, step_index=1,
         )
-        with pytest.raises(ProtocolExecutionError, match="reconcil"):
+        with pytest.raises(ProtocolExecutionError, match="only 0 uL"):
             rinse_well(
                 replay_context, well="plate.A1", volume_ul=50.0, cycles=3, solution="water",
             )
@@ -336,12 +335,17 @@ class TestResumeMidWorkflow:
             rinse_well(context, well="plate.A1", volume_ul=50.0, cycles=1, solution="water")
 
         operations = _operations(store, state_id)
-        # Exactly one operation is left non-terminal (started -> marked
-        # reconciliation_required); everything before it applied cleanly.
         statuses = [op["status"] for op in operations]
-        assert statuses.count("reconciliation_required") == 1
         assert statuses[:-1] == ["applied"] * (len(statuses) - 1)
-        assert statuses[-1] == "reconciliation_required"
+        assert statuses[-1] == ("reconciled" if fail_on_call % 2 else "applied")
+        assert operations[-1]["assumed_action"] == (
+            "aspirate" if fail_on_call % 2 else "dispense"
+        )
+        assert len(operations) == (1 if fail_on_call <= 2 else 2)
+        volumes = _volumes(store, state_id)
+        assert volumes["stock"] == 3950
+        assert volumes["plate.A1"] == (50 if fail_on_call == 2 else 0)
+        assert volumes["waste"] == (50 if fail_on_call == 4 else 0)
 
 
 # ─── Mix substep ────────────────────────────────────────────────────────────

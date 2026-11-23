@@ -306,8 +306,8 @@ class StationClient:
         domain: str,
         operation_key: str,
         resolution: str,
-        operator: str,
-        reason: str,
+        operator: str = "",
+        reason: str = "",
         source_volume_ul: float | None = None,
         source_composition: dict[str, float] | None = None,
         destination_volume_ul: float | None = None,
@@ -316,9 +316,7 @@ class StationClient:
         final_status: str | None = None,
         timeout: float = 15.0,
     ) -> dict[str, Any]:
-        """Resolve a pending reconciliation with an auditable operator
-        decision. ``operator``/``reason`` are recorded into the journal's
-        ``detail`` field — this is the "who/what/why" audit trail."""
+        """Resolve a pending operation, optionally attaching an operator note."""
         payload: dict[str, Any] = {
             "domain": domain,
             "operation_key": operation_key,
@@ -339,6 +337,23 @@ class StationClient:
             payload=payload,
             timeout=timeout,
             headers=self.headers,
+        )
+
+    def clear_operation_notes(self, fluid_state_id: int, *, timeout: float = 15.0) -> dict[str, Any]:
+        return request_json(
+            self.session, "DELETE", f"{self.base_url}/api/v1/fluid-states/{fluid_state_id}/notes",
+            timeout=timeout, headers=self.headers,
+        )
+
+    def correct_fluid_volume(
+        self, fluid_state_id: int, *, labware_key: str, location_id: str = "",
+        volume_ul: float, expected_version: int, timeout: float = 15.0,
+    ) -> dict[str, Any]:
+        return request_json(
+            self.session, "PATCH", f"{self.base_url}/api/v1/fluid-states/{fluid_state_id}/volume",
+            payload={"labware_key": labware_key, "location_id": location_id,
+                     "volume_ul": volume_ul, "expected_version": expected_version},
+            timeout=timeout, headers=self.headers,
         )
 
 

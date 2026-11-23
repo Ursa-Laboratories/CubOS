@@ -90,10 +90,43 @@ journaled but does not change the tracked total volume or composition.
 
 ## Interrupted operations
 
-If a pipette action fails after its journal entry starts, CubOS blocks resume
-until the physical result is reconciled through the core `DataStore` fluid
-state API. CubOS does not guess whether liquid moved after an interrupted
-hardware action.
+During a tracked transfer, CubOS estimates the effect of the last dispatched
+liquid action if execution is interrupted (for example by a feed hold):
+
+- Before aspiration is dispatched, neither container changes.
+- Once aspiration is dispatched, the source decreases by the requested volume.
+- Once dispense is dispatched, the destination also increases by that volume.
+- Later strokes and protocol steps are not counted or executed after the error.
+
+For example, a 10 µL aspiration interrupted before dispensing leaves a source
+that started at 100 µL estimated at 90 µL. Its destination is unchanged. The
+error still stops execution. These are assumed amounts, not measured amounts.
+The operation history exposes the assumed action. A partial transfer is never
+replayed automatically; start a new run after inspecting the pipette and
+correcting any discrepancy. A completed or assumed dispense is skipped when
+that exact campaign operation is explicitly rerun.
+
+In **State**, use **Correct volume** beside a container to enter its actual
+volume. No operator name or reason is required. Corrections preserve mixture
+proportions; adding volume to an empty container records an unknown composition.
+The API rejects stale edits, invalid volumes, and corrections during a run or
+while another operation is pending.
+
+**Clear all notes** removes saved free-text notes for the selected state across
+liquid, tip, and cap operations. It preserves operation outcomes and quantities.
+Reconciliation also works without notes. Existing API clients may still supply
+optional operator/reason text.
+
+These estimates cover caught interruptions in tracked transfers and commands
+that compose them. Standalone aspirate/dispense and multi-dispense still have
+their existing tracking restrictions. Process loss, bookkeeping-write failures,
+and unresolved tip/cap operations still require manual reconciliation, without
+mandatory operator notes.
+
+HTTP clients can use `PATCH /api/v1/fluid-states/{id}/volume` with
+`labware_key`, `location_id`, `volume_ul`, and the container's `expected_version`,
+and `DELETE /api/v1/fluid-states/{id}/notes`. The Python client exposes
+`correct_fluid_volume` and `clear_operation_notes`.
 
 The repository's fluid-state YAML files under
 `tests/fixtures/configs/fluid_state_resume/` contain fake coordinates and an

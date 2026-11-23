@@ -1056,7 +1056,7 @@ class TestTransferCommand:
         ctx.gantry.move_to_labware.assert_not_called()
         _get_pipette(ctx).aspirate.assert_not_called()
 
-    def test_tracked_transfer_failure_marks_reconciliation_required(self):
+    def test_tracked_transfer_failure_assumes_dispatched_dispense(self):
         from cubos.protocol_engine.commands.pipette import transfer
 
         ctx = _mock_context_multi_resolve()
@@ -1076,7 +1076,10 @@ class TestTransferCommand:
                 ctx, source="source", destination="plate.A1", volume_ul=25.0,
             )
 
-        ctx.data_store.mark_fluid_reconciliation_required.assert_called_once()
+        ctx.data_store.finish_interrupted_transfer.assert_called_once_with(
+            ctx.data_store.begin_fluid_transfer.call_args.args[1], "dispense",
+        )
+        ctx.data_store.mark_fluid_reconciliation_required.assert_not_called()
         ctx.data_store.complete_fluid_transfer.assert_not_called()
 
     def test_tracked_transfer_commit_failure_is_not_silently_ignored(self):

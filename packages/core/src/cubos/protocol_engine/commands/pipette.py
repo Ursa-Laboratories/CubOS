@@ -733,13 +733,12 @@ def transfer(
     begin/complete journal (one ``operation_key`` per stroke, scoped via
     ``context.active_substep``): this makes a multi-stroke transfer a
     logically-one action whose per-stroke sub-state is independently
-    recoverable -- a crash after stroke *N* leaves strokes ``< N`` applied
-    and terminal, stroke *N* itself ``reconciliation_required`` (with a
-    stroke-numbered detail message), and strokes ``> N`` never started; a
-    rerun skips every already-applied stroke via the existing idempotent
-    ``begin_fluid_transfer`` check and only executes what's left. No new
-    schema/journal was needed for this -- it composes entirely from the
-    tip_state/fluid_state two-phase begin/complete primitives.
+    recoverable. A caught interruption assumes the last dispatched aspiration
+    or dispense completed, commits that estimated balance, and propagates the
+    error. Later strokes remain unstarted. An aspiration without a dispatched
+    dispense is terminal as a partial transfer; it must not replay. An assumed
+    dispense is idempotent like an ordinarily completed stroke. A process loss
+    or a failed journal write still leaves a pending operation for review.
 
     ``source_height``/``destination_height`` keep the existing
     labware-relative sign convention (0 = labware reference Z, negative =
@@ -766,7 +765,7 @@ def transfer(
     every stroke of a multi-stroke transfer. It does not change the
     tracked dispense volume. Instruments requiring a piston reset retract
     to ``safe_z`` first, then home. Blow-out, retract, and home failures
-    require reconciliation before the final stroke can be considered complete.
+    preserve the estimated completed dispense while propagating the failure.
     """
     try:
         validate_pipette_travel_clearance(travel_clearance)
@@ -998,6 +997,7 @@ def _execute_transfer_stroke(
             return
 
     commanded_volume_ul = correction.apply(stroke_volume_ul)
+    interrupted_action = None
     try:
         if planned_source is None:
             _engage(
@@ -1007,6 +1007,7 @@ def _execute_transfer_stroke(
             )
         else:
             context.routing_session.execute(planned_source)
+        interrupted_action = "aspirate"
         pipette.aspirate(commanded_volume_ul, speed)
         if planned_destination is None:
             destination_tip = _engage(
@@ -1017,6 +1018,7 @@ def _execute_transfer_stroke(
         else:
             context.routing_session.execute(planned_destination)
             destination_tip = _planned_tip_position(context, planned_destination)
+        interrupted_action = "dispense"
         pipette.dispense(commanded_volume_ul, speed)
         if blow_out:
             _blowout_and_retract(
@@ -1025,10 +1027,14 @@ def _execute_transfer_stroke(
             )
     except BaseException as exc:
         if operation_key is not None:
-            _mark_transfer_stroke_uncertain(
-                context, operation_key,
-                stroke_index=stroke_index, stroke_count=stroke_count, exc=exc,
-            )
+            try:
+                context.data_store.finish_interrupted_transfer(operation_key, interrupted_action)
+            except Exception:
+                logger.exception("Failed to save estimated transfer outcome %s", operation_key)
+                _mark_transfer_stroke_uncertain(
+                    context, operation_key,
+                    stroke_index=stroke_index, stroke_count=stroke_count, exc=exc,
+                )
         raise
 
     if operation_key is not None:

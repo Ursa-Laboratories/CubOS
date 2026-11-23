@@ -565,7 +565,7 @@ def resolve_tip_operation(
     operation_key: str,
     resolution: str,
     *,
-    detail: str,
+    detail: str | None = None,
     final_slot_status: str | None = None,
 ) -> None:
     """Resolve an uncertain tip operation with an auditable operator decision.
@@ -576,8 +576,8 @@ def resolve_tip_operation(
     mirroring ``fluid_state.resolve_fluid_operation``'s exact-replacement
     contract.
     """
-    if not isinstance(detail, str) or not detail.strip():
-        raise TipStateError("Operator resolution detail must be a non-empty string.")
+    if detail is not None and not isinstance(detail, str):
+        raise TipStateError("Operator resolution detail must be text or null.")
     normalized = {
         "applied": "applied",
         "not_applied": "cancelled",
@@ -612,7 +612,9 @@ def resolve_tip_operation(
                 raise TipStateError(
                     "Applied resolution does not accept final_slot_status."
                 )
-            _apply_tip_operation(connection, operation, allowed_statuses=_PENDING_STATUSES)
+            _apply_tip_operation(
+                connection, operation, allowed_statuses=_PENDING_STATUSES, detail=detail,
+            )
             return
 
         if normalized == "cancelled":
@@ -678,11 +680,16 @@ def _apply_tip_operation(
     operation: dict[str, Any],
     *,
     allowed_statuses: tuple[str, ...],
+    detail: str | None = None,
 ) -> None:
     if operation["operation_type"] == "pick_up_tip":
-        _apply_pick_up(connection, operation, allowed_statuses=allowed_statuses)
+        _apply_pick_up(
+            connection, operation, allowed_statuses=allowed_statuses, detail=detail,
+        )
     elif operation["operation_type"] == "drop_tip":
-        _apply_drop(connection, operation, allowed_statuses=allowed_statuses)
+        _apply_drop(
+            connection, operation, allowed_statuses=allowed_statuses, detail=detail,
+        )
     else:  # pragma: no cover - guarded by schema CHECK constraint
         raise TipStateError(
             f"Unsupported tip operation type {operation['operation_type']!r}."
@@ -694,6 +701,7 @@ def _apply_pick_up(
     operation: dict[str, Any],
     *,
     allowed_statuses: tuple[str, ...],
+    detail: str | None = None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     slot = _tip_container_row(
@@ -725,7 +733,7 @@ def _apply_pick_up(
         attachment_uncertain=False,
     )
     _set_tip_operation_terminal(
-        connection, operation, status="applied", detail=None,
+        connection, operation, status="applied", detail=detail,
         allowed_statuses=allowed_statuses,
     )
 
@@ -735,6 +743,7 @@ def _apply_drop(
     operation: dict[str, Any],
     *,
     allowed_statuses: tuple[str, ...],
+    detail: str | None = None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     slot = _tip_container_row(
@@ -766,7 +775,7 @@ def _apply_drop(
         attachment_uncertain=False,
     )
     _set_tip_operation_terminal(
-        connection, operation, status="applied", detail=None,
+        connection, operation, status="applied", detail=detail,
         allowed_statuses=allowed_statuses,
     )
 
@@ -775,7 +784,7 @@ def _revert_tip_operation(
     connection: sqlite3.Connection,
     operation: dict[str, Any],
     *,
-    detail: str,
+    detail: str | None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     slot = _tip_container_row(
@@ -808,7 +817,7 @@ def _reconcile_tip_operation(
     operation: dict[str, Any],
     *,
     final_slot_status: str,
-    detail: str,
+    detail: str | None,
 ) -> None:
     fluid_state_id = int(operation["fluid_state_id"])
     slot = _tip_container_row(

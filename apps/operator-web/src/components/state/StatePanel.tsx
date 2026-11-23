@@ -8,8 +8,10 @@ import {
   useCapState,
   useReconciliation,
   useResolveReconciliation,
+  useClearOperationNotes,
+  useCorrectFluidVolume,
 } from "../../hooks/useFluidState";
-import type { OperationView } from "../../types";
+import type { ContainerView, OperationView } from "../../types";
 
 const RESOLUTIONS: { value: string; label: string }[] = [
   { value: "applied", label: "Applied — confirmed it happened as journaled" },
@@ -29,8 +31,6 @@ function formatVolume(value: number): string {
 interface ResolveFormState {
   operation: OperationView;
   resolution: string;
-  operator: string;
-  reason: string;
 }
 
 export default function StatePanel() {
@@ -48,6 +48,10 @@ export default function StatePanel() {
   const caps = useCapState(selectedId);
   const reconciliation = useReconciliation(selectedId);
   const resolveMutation = useResolveReconciliation(selectedId);
+  const clearNotes = useClearOperationNotes(selectedId);
+  const correctVolume = useCorrectFluidVolume(selectedId);
+  const [volumeForm, setVolumeForm] = useState<{ container: ContainerView; value: string } | null>(null);
+  const busy = resolveMutation.isPending || clearNotes.isPending || correctVolume.isPending;
 
   const [resolveForm, setResolveForm] = useState<ResolveFormState | null>(null);
   const [resolveError, setResolveError] = useState<string | null>(null);
@@ -59,26 +63,41 @@ export default function StatePanel() {
 
   const openResolveForm = (operation: OperationView) => {
     setResolveError(null);
-    setResolveForm({ operation, resolution: "applied", operator: "", reason: "" });
+    setResolveForm({ operation, resolution: "applied" });
   };
 
   const submitResolve = async () => {
     if (!resolveForm) return;
-    if (!resolveForm.operator.trim() || !resolveForm.reason.trim()) {
-      setResolveError("Operator and reason are both required.");
-      return;
-    }
     setResolveError(null);
     try {
       await resolveMutation.mutateAsync({
         domain: resolveForm.operation.domain,
         operation_key: resolveForm.operation.operation_key,
         resolution: resolveForm.resolution,
-        operator: resolveForm.operator.trim(),
-        reason: resolveForm.reason.trim(),
       });
       setResolveForm(null);
       reconciliation.refetch();
+    } catch (err) {
+      setResolveError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const submitVolume = async () => {
+    if (!volumeForm || !volumeForm.value.trim()) return;
+    const volume = Number(volumeForm.value);
+    if (!Number.isFinite(volume) || volume < 0) {
+      setResolveError("Enter a finite volume of zero or more.");
+      return;
+    }
+    setResolveError(null);
+    try {
+      await correctVolume.mutateAsync({
+        labware_key: volumeForm.container.labware_key,
+        location_id: volumeForm.container.location_id,
+        expected_version: volumeForm.container.version,
+        volume_ul: volume,
+      });
+      setVolumeForm(null);
     } catch (err) {
       setResolveError(err instanceof Error ? err.message : String(err));
     }
@@ -95,7 +114,13 @@ export default function StatePanel() {
           <select
             aria-label="Fluid state"
             value={selectedId ?? ""}
-            onChange={(event) => setExplicitSelectedId(event.target.value ? Number(event.target.value) : null)}
+            disabled={busy}
+            onChange={(event) => {
+              setExplicitSelectedId(event.target.value ? Number(event.target.value) : null);
+              setResolveForm(null);
+              setVolumeForm(null);
+              setResolveError(null);
+            }}
             style={selectStyle}
           >
             <option value="">Select a fluid state…</option>
@@ -105,8 +130,28 @@ export default function StatePanel() {
               </option>
             ))}
           </select>
-          <button onClick={() => fluidStates.refetch()} style={secondaryButtonStyle}>
+          <button onClick={() => {
+            void fluidStates.refetch();
+            if (selectedId !== null) {
+              void detail.refetch();
+              void tips.refetch();
+              void caps.refetch();
+              void reconciliation.refetch();
+            }
+          }} style={secondaryButtonStyle}>
             Refresh
+          </button>
+          <button
+            style={secondaryButtonStyle}
+            disabled={selectedId === null || busy}
+            onClick={() => {
+              setResolveError(null);
+              clearNotes.mutate(undefined, {
+                onError: (err) => setResolveError(err.message),
+              });
+            }}
+          >
+            Clear all notes
           </button>
         </div>
       </div>
@@ -125,6 +170,7 @@ export default function StatePanel() {
 
       {selectedId !== null && (
         <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 16 }}>
+          {resolveError && <div role="alert" style={errorStyle}>{resolveError}</div>}
           {reconciliationItems.length > 0 && (
             <div style={reconciliationBannerStyle} role="alert">
               <strong>
@@ -169,29 +215,10 @@ export default function StatePanel() {
                   ))}
                 </select>
               </label>
-              <label style={fieldRowStyle}>
-                <span style={theme.fieldLabel}>Operator</span>
-                <input
-                  style={theme.input}
-                  value={resolveForm.operator}
-                  onChange={(event) => setResolveForm({ ...resolveForm, operator: event.target.value })}
-                  placeholder="Your name or initials"
-                />
-              </label>
-              <label style={fieldRowStyle}>
-                <span style={theme.fieldLabel}>Reason</span>
-                <textarea
-                  style={{ ...theme.input, minHeight: 60, resize: "vertical" }}
-                  value={resolveForm.reason}
-                  onChange={(event) => setResolveForm({ ...resolveForm, reason: event.target.value })}
-                  placeholder="What did you observe, and why does this resolution match reality?"
-                />
-              </label>
-              {resolveError && <div style={errorStyle}>{resolveError}</div>}
               <div style={{ display: "flex", gap: 8 }}>
                 <button
                   style={primaryButtonStyle}
-                  disabled={resolveMutation.isPending}
+                  disabled={busy}
                   onClick={() => void submitResolve()}
                 >
                   {resolveMutation.isPending ? "Submitting…" : "Submit resolution"}
@@ -205,6 +232,22 @@ export default function StatePanel() {
 
           <div>
             <div style={theme.sectionLabel}>Containers</div>
+            <p style={metaTextStyle}>Volumes are estimates. After an interruption, check the amounts and correct any discrepancy.</p>
+            {volumeForm && (
+              <form style={resolveFormStyle} onSubmit={(event) => { event.preventDefault(); void submitVolume(); }}>
+                <label style={fieldRowStyle}>
+                  <span style={theme.fieldLabel}>Correct volume (µL)</span>
+                  <input
+                    type="number" min="0" step="any" required style={theme.input}
+                    value={volumeForm.value}
+                    onChange={(event) => setVolumeForm({ ...volumeForm, value: event.target.value })}
+                  />
+                </label>
+                <span style={metaTextStyle}>Existing mixture proportions are preserved.</span>
+                <button type="submit" disabled={busy} style={primaryButtonStyle}>Save volume</button>
+                <button type="button" onClick={() => setVolumeForm(null)} style={secondaryButtonStyle}>Cancel</button>
+              </form>
+            )}
             {detail.isLoading && <div style={emptyStyle}>Loading…</div>}
             {detail.data && (
               <div style={tableFrameStyle}>
@@ -215,6 +258,7 @@ export default function StatePanel() {
                       <th style={thStyle}>Role</th>
                       <th style={thStyle}>Volume (µL)</th>
                       <th style={thStyle}>Composition</th>
+                      <th style={thStyle}>Correction</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -231,6 +275,16 @@ export default function StatePanel() {
                           {formatVolume(container.current_volume_ul)} / {formatVolume(container.working_volume_ul)}
                         </td>
                         <td style={tdStyle}>{formatComposition(container.composition)}</td>
+                        <td style={tdStyle}>
+                          <button
+                            style={secondaryButtonStyle} disabled={busy}
+                            aria-label={`Correct volume for ${container.labware_key}${container.location_id ? `.${container.location_id}` : ""}`}
+                            onClick={() => {
+                              setResolveError(null);
+                              setVolumeForm({ container, value: String(container.current_volume_ul) });
+                            }}
+                          >Correct volume</button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>

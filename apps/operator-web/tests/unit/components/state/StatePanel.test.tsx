@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import StatePanel from "./StatePanel";
+import StatePanel from "../../../../src/components/state/StatePanel";
 import type {
   CapStateResponse,
   ContainerView,
@@ -11,7 +11,7 @@ import type {
   OperationView,
   ReconciliationResponse,
   TipStateResponse,
-} from "../../types";
+} from "../../../../src/types";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -116,7 +116,7 @@ const RECONCILIATION: ReconciliationResponse = {
   items: [RECONCILIATION_ITEM],
 };
 
-function installFetchMock(overrides: { reconciliation?: ReconciliationResponse } = {}) {
+function installFetchMock(overrides: { reconciliation?: ReconciliationResponse; correctionError?: string } = {}) {
   const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(
       typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url,
@@ -137,9 +137,15 @@ function installFetchMock(overrides: { reconciliation?: ReconciliationResponse }
         domain: "fluid",
         operation_key: "indeterminate",
         status: "applied",
-        detail: "[alexc] confirmed via camera review",
+        detail: null,
       });
     }
+    if (path === "/api/v1/fluid-states/1/volume" && method === "PATCH") {
+      return overrides.correctionError
+        ? jsonResponse({ detail: overrides.correctionError }, 409)
+        : jsonResponse({ status: "updated" });
+    }
+    if (path === "/api/v1/fluid-states/1/notes" && method === "DELETE") return jsonResponse({ status: "cleared" });
     return new Response("Not found", { status: 404 });
   });
   vi.stubGlobal("fetch", fetchMock);
@@ -198,19 +204,7 @@ describe("StatePanel", () => {
     await user.click(screen.getByRole("button", { name: "Resolve" }));
     expect(screen.getByText(/Resolve fluid operation indeterminate/)).toBeInTheDocument();
 
-    // Submitting without operator/reason is blocked client-side.
-    await user.click(screen.getByRole("button", { name: "Submit resolution" }));
-    expect(await screen.findByText(/Operator and reason are both required/)).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalledWith(
-      "/api/v1/fluid-states/1/reconciliation/resolve",
-      expect.anything(),
-    );
-
-    await user.type(screen.getByPlaceholderText("Your name or initials"), "alexc");
-    await user.type(
-      screen.getByPlaceholderText(/What did you observe/),
-      "confirmed via camera review",
-    );
+    expect(screen.queryByPlaceholderText("Your name or initials")).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Submit resolution" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
@@ -220,12 +214,10 @@ describe("StatePanel", () => {
     const [, init] = fetchMock.mock.calls.find(
       ([input]) => input === "/api/v1/fluid-states/1/reconciliation/resolve",
     )!;
-    expect(JSON.parse(String(init?.body))).toMatchObject({
+    expect(JSON.parse(String(init?.body))).toEqual({
       domain: "fluid",
       operation_key: "indeterminate",
       resolution: "applied",
-      operator: "alexc",
-      reason: "confirmed via camera review",
     });
   });
 
@@ -255,4 +247,65 @@ describe("StatePanel", () => {
     expect(await screen.findByText(/No fluid state selected/)).toBeInTheDocument();
     expect(select.value).toBe("");
   });
+});
+
+describe("state corrections", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("saves a volume with its version and no operator note", async () => {
+    const fetchMock = installFetchMock({ reconciliation: { fluid_state_id: 1, items: [] } });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Correct volume for source" }));
+    const input = screen.getByLabelText("Correct volume (µL)");
+    await user.clear(input);
+    await user.type(input, "95");
+    await user.click(screen.getByRole("button", { name: "Save volume" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/fluid-states/1/volume", expect.objectContaining({ method: "PATCH" }),
+    ));
+    const [, init] = fetchMock.mock.calls.find(([input]) => input === "/api/v1/fluid-states/1/volume")!;
+    expect(JSON.parse(String(init?.body))).toEqual({
+      labware_key: "source", location_id: "", volume_ul: 95, expected_version: 1,
+    });
+    await waitFor(() => expect(screen.queryByLabelText("Correct volume (µL)")).not.toBeInTheDocument());
+  });
+
+  it("clears all notes in the selected state", async () => {
+    const fetchMock = installFetchMock();
+    const user = userEvent.setup();
+    renderPanel();
+    await screen.findAllByText("source");
+    await user.click(screen.getByRole("button", { name: "Clear all notes" }));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/fluid-states/1/notes", expect.objectContaining({ method: "DELETE" }),
+    ));
+  });
+
+  it("retains an unsaved correction when a stale edit is rejected", async () => {
+    installFetchMock({
+      reconciliation: { fluid_state_id: 1, items: [] },
+      correctionError: "Container changed; refresh before saving the volume.",
+    });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Correct volume for source" }));
+    const input = screen.getByLabelText("Correct volume (µL)");
+    await user.clear(input);
+    await user.type(input, "95");
+    await user.click(screen.getByRole("button", { name: "Save volume" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Container changed");
+    expect(input).toHaveValue(95);
+  });
+
+  it("discards the previous state's correction form when selection changes", async () => {
+    installFetchMock({ reconciliation: { fluid_state_id: 1, items: [] } });
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(await screen.findByRole("button", { name: "Correct volume for source" }));
+    await user.selectOptions(screen.getByLabelText("Fluid state"), "");
+    await user.selectOptions(screen.getByLabelText("Fluid state"), "1");
+    expect(screen.queryByLabelText("Correct volume (µL)")).not.toBeInTheDocument();
+  });
+
 });
