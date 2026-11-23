@@ -456,3 +456,24 @@ def test_unverified_final_readback_after_replay_requires_home(runtime, readback)
         session.return_to_calibration_hover(token=token, **SETUP, **RETURN)
     assert session.position().status == "Home required"
     assert session._hover_checkpoint is None
+
+
+@pytest.mark.parametrize("failure_type", [MillConnectionError, CalibrationBlockedError])
+def test_cancelled_return_with_failed_idle_proof_stays_untrusted(runtime, failure_type):
+    session, gantry = runtime
+    token = teach(session)
+    session.home_and_resume_calibration(token=token)
+    failure = failure_type("Stopped position could not be read")
+
+    def interrupted_segment(**kwargs):
+        gantry.coords["x"] -= 5
+        gantry.get_calibration_position_info = Mock(side_effect=failure)
+        raise GantryJogCancelledError("Segment was interrupted")
+
+    session._calibration_jog_blocking_locked = interrupted_segment
+    with pytest.raises(MillConnectionError if failure_type is MillConnectionError else GantryJogCancelledError) as caught:
+        session.return_to_calibration_hover(token=token, **SETUP, **RETURN)
+    if failure_type is MillConnectionError:
+        assert caught.value is failure
+    assert session._position_reference_untrusted
+    assert session._hover_checkpoint is None
