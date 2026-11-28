@@ -77,6 +77,18 @@ pull-off automatically. Check controller power, the USB cable, and its strain
 relief. Reconnect only after inspecting the machine. The position reference
 remains unverified until you explicitly home successfully.
 
+## Protocol Failure Cleanup
+
+For a deck without motion planning enabled, a failed CLI or Python protocol
+attempts to retract the active instrument at its last commanded XY to
+`cnc.safe_z` before disconnecting. The recorded instrument uses its gantry
+configuration key, so a different display name does not prevent cleanup.
+Planning-enabled runs skip this fallback movement.
+
+This is a best-effort command, not confirmation of the actual position.
+Check the failure and cleanup logs and inspect the setup before resuming.
+An interrupted tracked transfer still requires fluid-state reconciliation.
+
 ## After a Physical Crash
 
 1. **Stop.** Release the jog control immediately (or send `Q`/abort in the
