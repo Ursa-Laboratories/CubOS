@@ -123,7 +123,7 @@ class InstrumentedGantry:
         instrument_position = None
         instrument_name = None
         if resolved_instrument is not None:
-            instrument_name = resolved_instrument.name
+            instrument_name = self._registered_name(resolved_instrument)
             instrument_position = (
                 end_xyz[0] + resolved_instrument.offset_x,
                 end_xyz[1] + resolved_instrument.offset_y,
@@ -180,7 +180,7 @@ class InstrumentedGantry:
             instr.name, x, y, z, gantry_x, gantry_y, gantry_z,
         )
         self.last_commanded_pose = {
-            "instrument": instr.name,
+            "instrument": self._registered_name(instr),
             "instrument_position": (x, y, z),
             "gantry_position": (gantry_x, gantry_y, gantry_z),
             "travel_z": gantry_travel_z,
@@ -337,6 +337,12 @@ class InstrumentedGantry:
                 self.logger.exception(
                     "Failed to disconnect instrument '%s'", name,
                 )
+
+    def _registered_name(self, instrument: BaseInstrument) -> str:
+        return next(
+            (name for name, mounted in self.instruments.items() if mounted is instrument),
+            instrument.name,
+        )
 
     def _resolve_instrument(
         self, instrument: str | BaseInstrument,
