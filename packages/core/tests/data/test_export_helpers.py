@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -205,6 +206,37 @@ class TestExperimentAllSubcommand:
 
 
 class TestExperimentInstrumentSubcommand:
+
+    @pytest.mark.parametrize("experiment_id, expected_rows", [(1, 1), (2, 0), (999, 0)])
+    def test_instrument_csv_retains_schema(self, tmp_path, experiment_id, expected_rows):
+        import pandas as pd
+
+        db = tmp_path / "test.db"
+        output = tmp_path / "measurements.csv"
+        _seed_db(str(db))
+        with DataStore(db_path=db) as store:
+            assert store.create_experiment(1, "plate_1", "A2") == 2
+
+        result = subprocess.run(
+            [
+                sys.executable, "-m", "cubos.data.export_helpers",
+                "--db-path", str(db), "experiment-instrument", str(experiment_id),
+                "uvvis", "--csv", str(output),
+            ],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
+
+        assert f"Wrote CSV: {output}" in result.stdout
+        exported = pd.read_csv(output)
+        assert len(exported) == expected_rows
+        assert list(exported.columns) == [
+            "id", "experiment_id", "wavelengths", "intensities",
+            "integration_time_s", "timestamp",
+        ]
+        assert exported["experiment_id"].tolist() == [1] * expected_rows
+        assert exported["wavelengths"].tolist() == ["[400.0, 500.0]"] * expected_rows
+        assert exported["intensities"].tolist() == ["[0.1, 0.5]"] * expected_rows
+        assert exported["integration_time_s"].tolist() == [0.24] * expected_rows
 
     def test_prints_uvvis_measurements(self, tmp_path, capsys, monkeypatch):
         pytest.importorskip("pandas")

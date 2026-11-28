@@ -268,6 +268,8 @@ class DataReader:
     ) -> Any:
         """Return measurements for one experiment filtered by instrument.
 
+        Empty results retain the measurement table's columns.
+
         Args:
             experiment_id: Experiment identifier.
             instrument: One of `uvvis`, `filmetrics`, `uv_curing`, `camera`,
@@ -281,11 +283,12 @@ class DataReader:
             raise ValueError(
                 f"Unsupported instrument '{instrument}'. Supported: {supported}"
             )
-        rows = self._conn.execute(
+        cursor = self._conn.execute(
             f"SELECT * FROM {table} WHERE experiment_id = ? ORDER BY id",
             (experiment_id,),
-        ).fetchall()
-        return pd.DataFrame([dict(r) for r in rows])
+        )
+        columns = [column[0] for column in cursor.description]
+        return pd.DataFrame([dict(r) for r in cursor.fetchall()], columns=columns)
 
     def export_dataframe_to_csv(
         self,

@@ -291,6 +291,36 @@ class TestGetMeasurementsByCampaign:
 
 class TestDataFrameHelpers:
 
+    @pytest.mark.parametrize("instrument, measurement_columns", [
+        ("uvvis", ["wavelengths", "intensities", "integration_time_s"]),
+        ("filmetrics", ["thickness_nm", "goodness_of_fit"]),
+        ("uv_curing", ["intensity_percent", "exposure_time_s", "cure_timestamp_s"]),
+        ("camera", ["image_path"]),
+        ("asmi", [
+            "sample_timestamps", "z_positions", "raw_forces", "corrected_forces",
+            "directions", "baseline_avg", "baseline_std", "force_exceeded",
+            "data_points", "step_size_mm", "z_target_mm", "force_limit_n",
+        ]),
+        ("potentiostat", [
+            "technique", "time_s", "voltage_v", "current_a", "sample_period_s",
+            "duration_s", "step_potential_v", "step_current_a", "scan_rate_v_s",
+            "step_size_v", "cycles", "vendor", "device_id", "channel",
+            "started_at", "stopped_at", "aborted", "stop_reason",
+        ]),
+    ])
+    def test_empty_instrument_dataframe_preserves_columns(
+        self, seeded_reader, instrument, measurement_columns,
+    ):
+        df = seeded_reader.get_experiment_measurements_by_instrument_dataframe(
+            experiment_id=999, instrument=instrument,
+        )
+
+        assert df.empty
+        assert list(df.columns) == [
+            "id", "experiment_id", *measurement_columns, "timestamp",
+        ]
+        assert df["timestamp"].tolist() == []
+
     @pytest.mark.parametrize("text", [
         "123", "1e6", "true", "null", '"serial-123"', "[123]", '{"code": 1}',
     ])
